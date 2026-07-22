@@ -9,4 +9,4 @@ Issues and pull requests are tracked in **GitHub Issues** on this repository, dr
   gated by review.
 - **One PR per change.** Keep the diff scoped to a single issue or feature.
 
-There is no external tracker — GitHub Issues is the single source of truth for planned work.
+There is no external tracker; GitHub Issues is the single source of truth for planned work.

@@ -1,6 +1,6 @@
-# AGENTS.md — Agent Configuration for django-controlled-vocabularies
+# AGENTS.md: agent configuration for django-controlled-vocabularies
 
-<!-- Thin index only — bloat here = ignored instructions. Details live in the pointed-to
+<!-- Thin index only; bloat here = ignored instructions. Details live in the pointed-to
      files: CONTEXT.md, docs/brainstorm.md, docs/agents/. -->
 
 django-controlled-vocabularies is a Django app for **managing, publishing, and consuming SKOS
@@ -33,7 +33,7 @@ Canonical five-label vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`
 
 ### Domain docs
 
-Single-context layout — `CONTEXT.md` at the root, `docs/brainstorm.md` for early design notes. See
+Single-context layout: `CONTEXT.md` at the root, `docs/brainstorm.md` for early design notes. See
 [`docs/agents/domain.md`](docs/agents/domain.md).
 
 ### CI checks

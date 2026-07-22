@@ -1,4 +1,4 @@
-# GOALS — django-controlled-vocabularies
+# GOALS: django-controlled-vocabularies
 
 Enduring goals this project pursues. Identity lives in the README; when work happens and which
 release delivers it lives in the roadmap — this file names no versions. A goal is a capability
