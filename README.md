@@ -32,6 +32,10 @@ thousands of concepts and evolve as data rather than code.
 - A triplestore or SPARQL endpoint — the relational database is the store.
 - A replacement for rdflib — rdflib is used only to parse and serialize at the boundary.
 - A reasoner — no OWL inference.
+- An editor for external vocabularies — imported external vocabularies are read-only references.
+- A way to extend a published vocabulary with your own terms — that is out of scope.
+- A faithful mirror of imported external vocabularies — imports are normalised to what the app
+  supports (e.g. its configured languages); unsupported languages and constructs are not stored.
 
 **Tie-breaks, when principles collide:** the database is the source of truth over RDF fidelity in
 memory · lossless round-tripping over schema neatness · stable concept URIs over convenient

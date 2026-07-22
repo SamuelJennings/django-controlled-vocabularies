@@ -33,6 +33,10 @@ for autocomplete, ordering, and `__str__`.
 - parler's shared-model/translated-model split reinforces RDF semantics instead of fighting them.
 - UI language (Django i18n) and data language (parler) stay separate — a German-UI curator can edit
   English concepts.
-- Residual cost: parler's editable language set is deploy-time config (`PARLER_LANGUAGES`).
-  Importing a 24-language thesaurus into a 2-language deployment stores all languages, but *editing*
-  the extra ones needs a settings change. Acceptable friction for FairDM deployments.
+- The app's language set is deploy-time config (`PARLER_LANGUAGES`). Importing a language-rich
+  external vocabulary keeps only the app's supported languages and **drops the rest** — the app does
+  not store languages it cannot use. This is a deliberate normalisation on external import, surfaced
+  to the user (constitution Article XI), not a parler limitation.
+- **Re-import is additive:** when a deployment later adds a language to `PARLER_LANGUAGES` and
+  re-imports the external vocabulary, the newly-supported language is populated from the source.
+  Self-authored (managed) vocabularies round-trip losslessly within the app's configured languages.
