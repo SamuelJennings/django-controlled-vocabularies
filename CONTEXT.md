@@ -9,7 +9,7 @@ This is a seed — it grows as the code does.
 | Term | Definition | Notes / synonyms to avoid |
 |---|---|---|
 | **SKOS** | W3C [Simple Knowledge Organization System](https://www.w3.org/TR/skos-reference/) — the RDF vocabulary this package targets exclusively. | Not "ontology" (that implies OWL). |
-| **Triple** | The atom of RDF: **subject** (the thing described) — **predicate** (a property) — **object** (the value). | In this package: subject = a Concept/Scheme, predicate = a JSON key, object = a JSON value. |
+| **Triple** | The atom of RDF: **subject** (the thing described), **predicate** (a property), **object** (the value). | In this package: subject = a Concept/Scheme, predicate = a JSON key, object = a JSON value. |
 | **URI** | The globally stable identifier of a scheme or concept. **Identity lives here, never in the database PK.** | Immutable after publish (`docs/brainstorm.md`). |
 | **CURIE** | Compact URI, `prefix:name` (e.g. `skos:prefLabel`), expanded against known namespaces. | The shorthand form, not a full URI. |
 | **Turtle / TTL / RDF-XML / JSON-LD** | Serialization formats produced on export and accepted on import (via rdflib). | Formats, not the data model. |

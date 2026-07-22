@@ -6,8 +6,9 @@ attach concepts to their own models and serve standards-compliant RDF at stable 
 RDF, no code releases to add a term, no triplestore to operate.
 
 > **Status:** early development (pre-`0.1`). The data model and design are sketched out (see
-> [`docs/brainstorm.md`](docs/brainstorm.md)); the first release targets **consumption** — import, models, a concept
-> relationship field, and RDF export — ahead of the editing interface. See [`GOALS.md`](GOALS.md).
+> [`docs/brainstorm.md`](docs/brainstorm.md)); the first release targets **consumption** (import,
+> models, a concept relationship field, and RDF export) ahead of the editing interface. See
+> [`GOALS.md`](GOALS.md).
 
 ## Scope & philosophy
 
@@ -15,8 +16,8 @@ Research data infrastructure runs on controlled vocabularies, but Django has no 
 or consume them, and the existing editors are foreign stacks, unmaintained, or deployment-heavy.
 This app closes that gap by treating a vocabulary as **relational data, not a document**: concepts
 are Django models, the database is the source of truth, and RDF is a projection produced only at the
-import/export boundary. That turns everything Django already does well — forms, permissions, indexed
-search, referential integrity — onto vocabulary management, and lets vocabularies scale to tens of
+import/export boundary. That turns everything Django already does well (forms, permissions, indexed
+search, referential integrity) onto vocabulary management, and lets vocabularies scale to tens of
 thousands of concepts and evolve as data rather than code.
 
 **It deliberately is:**

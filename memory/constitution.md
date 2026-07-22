@@ -53,8 +53,8 @@ This package exposes **two** public contracts, versioned differently:
    *independent of the package version*. A package change may never silently alter a published
    concept's URI or the shape of its serialized RDF.
 
-**Pre-1.0 latitude:** before `1.0.0`, both contracts may change to correct genuine mistakes —
-including the data contract — but every such change is deliberate and recorded in the CHANGELOG,
+**Pre-1.0 latitude:** before `1.0.0`, both contracts may change to correct genuine mistakes
+(including the data contract), but every such change is deliberate and recorded in the CHANGELOG,
 never silent. **At `1.0.0` the data contract becomes sacred:** published URIs and serialized forms
 do not change thereafter. The Python API may continue to evolve under semver.
 
@@ -84,7 +84,7 @@ regardless, to keep a single deployment's data self-consistent.)
   unknown predicate tail is preserved verbatim as escrow and re-emitted on export — nothing the
   system holds is lost (within the app's configured languages).
 - **Imported external vocabularies are normalised, not mirrored:** an import keeps only what the app
-  supports — notably its configured languages (`PARLER_LANGUAGES`) — and does not store languages or
+  supports (notably its configured languages, `PARLER_LANGUAGES`) and does not store languages or
   constructs it cannot use. This normalisation is **surfaced to the user, never silent**.
 - **Re-import is additive:** re-importing an external vocabulary after the app's supported languages
   are expanded populates the newly-supported languages from the source. Import is re-runnable and
