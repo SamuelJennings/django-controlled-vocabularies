@@ -1,4 +1,4 @@
-# AGENTS.md — Agent Configuration for django-controlled-vocabularies
+# AGENTS.md — Agent configuration for django-controlled-vocabularies
 
 <!-- Thin index only — bloat here = ignored instructions. Details live in the pointed-to
      files: CONTEXT.md, docs/brainstorm.md, docs/agents/. -->
