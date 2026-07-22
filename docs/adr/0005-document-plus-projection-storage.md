@@ -34,7 +34,9 @@ Boundaries:
 ## Consequences
 
 - One editable representation → no drift between "the document" and "the columns".
-- The document doubles as the lossless round-trip escrow (`0001`): nothing imported is dropped.
+- The document doubles as the round-trip escrow (`0001`) for **managed** vocabularies: unknown
+  predicates are preserved verbatim. Imported external vocabularies are instead normalised to what
+  the app supports (see `0006`), so external imports are deliberately lossy, not escrowed.
 - **Writes must go through the sync path.** Bulk operations (`QuerySet.update`, `bulk_create`,
   `bulk_update`) bypass `save()`; all write paths — including the importer — must call an explicit
   `sync_from_json()`, and a `CheckConstraint` (non-empty `pref_label`) is the database backstop.

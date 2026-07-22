@@ -79,9 +79,16 @@ regardless, to keep a single deployment's data self-consistent.)
   boundary. The app is not a triplestore and exposes no SPARQL endpoint (ADR 0002).
 - **SKOS-only** (ADR 0001). Non-SKOS predicates round-trip as escrow but are not modelled.
 
-### Article XI — RDF round-trip fidelity
-- Import **never silently drops** predicates: the unknown tail is preserved verbatim as escrow and
-  re-emitted on export.
+### Article XI — RDF fidelity
+- **Managed vocabularies round-trip losslessly:** for vocabularies authored and managed here, the
+  unknown predicate tail is preserved verbatim as escrow and re-emitted on export — nothing the
+  system holds is lost (within the app's configured languages).
+- **Imported external vocabularies are normalised, not mirrored:** an import keeps only what the app
+  supports — notably its configured languages (`PARLER_LANGUAGES`) — and does not store languages or
+  constructs it cannot use. This normalisation is **surfaced to the user, never silent**.
+- **Re-import is additive:** re-importing an external vocabulary after the app's supported languages
+  are expanded populates the newly-supported languages from the source. Import is re-runnable and
+  upserts by URI (Article IX), never delete-and-recreate.
 - Export emits correct RDF types (`URIRef` vs `Literal` vs typed literal) via the predicate
   registry — types are declared, never guessed from string shape.
 - Schema normalisation (e.g. `dcterms:description` → the `definition` predicate) is surfaced to the
