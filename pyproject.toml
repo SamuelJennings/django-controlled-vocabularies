@@ -1,0 +1,133 @@
+[tool.poetry]
+name = "django-controlled-vocabularies"
+version = "0.1.0"
+description = "Manage, publish, and consume SKOS controlled vocabularies in Django"
+authors = ["Sam Jennings"]
+license = "MIT"
+readme = "README.md"
+packages = [{include = "controlled_vocabularies"}]
+homepage = "https://github.com/SamuelJennings/django-controlled-vocabularies"
+keywords = ["django", "SKOS", "RDF", "controlled vocabulary", "thesaurus", "research", "FAIR", "metadata"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Framework :: Django :: 5.2",
+    "Framework :: Django :: 6.0",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<4.0"
+# Only actively supported Django releases (family standard). 5.2 LTS + current
+# stable; dropping a version is a constitution-level change.
+django = ">=5.2"
+# Runtime deps that carry the vocabulary model (rdflib for the import/export
+# boundary, django-parler for translations) are declared alongside the v0.1 code
+# that imports them — deptry fails a declared-but-unused dependency, so the
+# born-green scaffold stays lean.
+
+[tool.poetry.group.dev.dependencies]
+# Family toolchain bundle; the pin tag is the family-standard version. Ships
+# ruff, mypy, deptry, pre-commit, pytest, pytest-django, coverage, django-stubs.
+# python marker: the bundle needs >=3.12; the package floor stays 3.11 for
+# consumers — dev tooling never ships to them.
+mvp-shared = { git = "https://github.com/django-mvp/shared.git", tag = "v0.2.0", extras = ["dev", "test"], python = ">=3.12" }
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+
+[tool.mypy]
+files = ["controlled_vocabularies"]
+disallow_untyped_defs = "False"
+disallow_any_unimported = "False"
+ignore_missing_imports = "True"
+no_implicit_optional = "True"
+check_untyped_defs = "False"
+warn_return_any = "True"
+warn_unused_ignores = "True"
+show_error_codes = "True"
+exclude = ["docs/", "migrations/", "tests/settings.py"]
+mypy_path = "controlled_vocabularies/"
+plugins = ["mypy_django_plugin.main"]
+
+[tool.django-stubs]
+django_settings_module = "tests.settings"
+ignore_missing_model_attributes = "True"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+fix = true
+# migrations are generated code — never linted or reformatted
+exclude = ['docs/', '**/migrations/**']
+
+[tool.ruff.lint]
+select = [
+    "YTT", "S", "B", "A", "C4", "T10", "SIM", "I", "C90",
+    "E", "W", "F", "PGH", "UP", "RUF", "TRY",
+]
+ignore = [
+    "E501",
+    "E731",
+    "RUF012",
+    "TRY003",
+    "S308",
+    "S311",
+    "A003",
+    "F403",
+    "F405",
+    "C901",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S105", "B017", "A001", "RUF059"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "tests.settings"
+pythonpath = [".", "tests"]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py", "tests.py", "*_tests.py"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--verbose",
+    "--tb=short",
+    "--cov=controlled_vocabularies",
+    "--cov-report=html",
+    "-ra",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]
+filterwarnings = [
+    "ignore",
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+[tool.coverage.report]
+skip_empty = true
+show_missing = true
+
+[tool.coverage.run]
+branch = "true"
+source = ["controlled_vocabularies"]
+
+[tool.deptry]
+extend_exclude = [
+    "tests/",
+    "docs/",
+]
+
+[tool.deptry.per_rule_ignores]
+DEP003 = ["controlled_vocabularies"]

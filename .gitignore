@@ -1,0 +1,39 @@
+# Temporary and binary files
+*~
+*.py[cod]
+*.so
+*.orig
+*.log
+*.pot
+**/__pycache__
+.cache/*
+.*.swp
+.DS_Store
+
+# Tooling caches
+.ruff_cache
+.mypy_cache
+.pytest_cache
+htmlcov
+.coverage
+.coverage.*
+coverage.xml
+
+# Environments
+.venv
+venv
+.env
+
+# Build artifacts
+build
+dist
+*.egg-info
+
+# Editors / IDEs
+.idea
+.vscode
+tags
+
+# Django
+*.sqlite3
+db.sqlite3
