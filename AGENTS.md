@@ -1,13 +1,13 @@
 # AGENTS.md — Agent Configuration for django-controlled-vocabularies
 
 <!-- Thin index only — bloat here = ignored instructions. Details live in the pointed-to
-     files: CONTEXT.md, docs/adr/, docs/agents/. -->
+     files: CONTEXT.md, docs/brainstorm.md, docs/agents/. -->
 
 django-controlled-vocabularies is a Django app for **managing, publishing, and consuming SKOS
 controlled vocabularies** in research infrastructure. Relational models are the source of truth;
-RDF is a projection produced only at the import/export boundary. See [`CONTEXT.md`](CONTEXT.md)
-for the ubiquitous language, [`GOALS.md`](GOALS.md) for scope, and [`docs/adr/`](docs/adr/) for the
-standing design decisions.
+RDF is a projection produced only at the import/export boundary. See the [`README`](README.md) for
+scope, [`CONTEXT.md`](CONTEXT.md) for the ubiquitous language, and
+[`docs/brainstorm.md`](docs/brainstorm.md) for early design notes.
 
 ## Stack & commands
 
@@ -33,7 +33,7 @@ Canonical five-label vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`
 
 ### Domain docs
 
-Single-context layout — `CONTEXT.md` at the root, `docs/adr/` for decisions. See
+Single-context layout — `CONTEXT.md` at the root, `docs/brainstorm.md` for early design notes. See
 [`docs/agents/domain.md`](docs/agents/domain.md).
 
 ### CI checks

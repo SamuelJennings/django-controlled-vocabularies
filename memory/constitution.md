@@ -76,8 +76,8 @@ regardless, to keep a single deployment's data self-consistent.)
 - **Django** 5.2 LTS + current stable (6.0); **Python** floor 3.11; Poetry-managed; dev toolchain
   from `mvp-shared[dev,test]`; ruff owns lint **and** format (no black/isort/pyupgrade).
 - **Models are the source of truth; RDF is a projection** produced only at the import/export
-  boundary. The app is not a triplestore and exposes no SPARQL endpoint (ADR 0002).
-- **SKOS-only** (ADR 0001). Non-SKOS predicates round-trip as escrow but are not modelled.
+  boundary. The app is not a triplestore and exposes no SPARQL endpoint.
+- **SKOS-only**. Non-SKOS predicates round-trip as escrow but are not modelled.
 
 ### Article XI — RDF fidelity
 - **Managed vocabularies round-trip losslessly:** for vocabularies authored and managed here, the

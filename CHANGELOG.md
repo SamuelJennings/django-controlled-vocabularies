@@ -6,4 +6,4 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
-- Initial project scaffold: package metadata, CI, and the settled design (see `docs/adr/`).
+- Initial project scaffold: package metadata, CI, and early design notes (see `docs/brainstorm.md`).

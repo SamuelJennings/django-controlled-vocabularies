@@ -5,8 +5,8 @@ research organisations. Curators create and edit vocabularies through a web inte
 attach concepts to their own models and serve standards-compliant RDF at stable URIs. No hand-edited
 RDF, no code releases to add a term, no triplestore to operate.
 
-> **Status:** early development (pre-`0.1`). The data model and design are settled (see
-> [`docs/adr/`](docs/adr/)); the first release targets **consumption** — import, models, a concept
+> **Status:** early development (pre-`0.1`). The data model and design are sketched out (see
+> [`docs/brainstorm.md`](docs/brainstorm.md)); the first release targets **consumption** — import, models, a concept
 > relationship field, and RDF export — ahead of the editing interface. See [`GOALS.md`](GOALS.md).
 
 ## Scope & philosophy
