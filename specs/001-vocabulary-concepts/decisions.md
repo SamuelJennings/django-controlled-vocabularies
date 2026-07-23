@@ -87,18 +87,3 @@ Full rationale in `research.md` (R1–R8). Headlines:
    name-based match on a settings module is a known false positive; noting as a candidate
    kit papercut (scope the tamper matcher to `test_*.py`/`*_test.py`, not any path containing
    "test").
-
-## Standards applied at the merge gate (Sam, 2026-07-23)
-
-9. **i18n + `help_text` on all model fields (non-negotiable, all Django packages).** Every field on
-   `ConceptScheme` and `Concept` declares `verbose_name` and `help_text`, and all user-facing strings
-   (field labels, help text, `Meta.verbose_name`/plural, `ValidationError` messages) are wrapped in
-   `gettext_lazy`. Validation messages use named `%(slug)s` placeholders so the msgids stay static and
-   translatable. The `DoesNotExist` diagnostics in `get_by_uri` are left unwrapped — developer-facing
-   exceptions, not end-user UI. Migration `0003` records the metadata change.
-
-10. **Indexing review (deliberate, because consumers of a 3rd-party package cannot add their own).**
-    Query-critical fields are already indexed: `ConceptScheme.slug` (`unique=True`), `Concept.scheme`
-    (FK auto-index), and `Concept(scheme, slug)` (the `UniqueConstraint` composite, which serves the
-    `get_by_uri` lookup). `name` and `label` have no query path in this models-only slice; label search
-    and its indexing are issue #16's charter (it owns label storage), so no speculative index is added.
