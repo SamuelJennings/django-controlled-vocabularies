@@ -2,7 +2,7 @@
   "feature": "001-vocabulary-concepts",
   "branch": "001-vocabulary-concepts",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "REVIEW",
+  "state": "GATE_MERGE",
   "state_history": [
     {
       "state": "INTAKE",
@@ -63,6 +63,11 @@
       "state": "REVIEW",
       "at": "2026-07-23T21:10:00Z",
       "note": "ephemeral reviewer over the US-5 amendment diff"
+    },
+    {
+      "state": "GATE_MERGE",
+      "at": "2026-07-23T23:40:00Z",
+      "note": "amendment review approved; one low finding closed test-first (AppConfig verbose_name lazily translated, 14dfc48); 53 tests green; PR #24 back at Sam's merge gate"
     }
   ],
   "gates": {
@@ -254,19 +259,19 @@
           "id": "T014",
           "status": "done",
           "attempts": 1,
-          "evidence": "tests/test_standards.py 11 cases; RED verified independently at 2b4d026 (8 failed, 3 passed — metadata/i18n assertions drove the RED; indexing guards already held)"
+          "evidence": "tests/test_standards.py 11 cases; RED verified independently at 2b4d026 (8 failed, 3 passed \u2014 metadata/i18n assertions drove the RED; indexing guards already held)"
         },
         {
           "id": "T015",
           "status": "done",
           "attempts": 1,
-          "evidence": "efa29c3 — verbose_name+help_text on all six editable fields, Meta verbose_name(_plural), gettext_lazy validation messages via nested ValidationError(params=...) keeping msgids lazy (decisions.md #9); 52 passed"
+          "evidence": "efa29c3 \u2014 verbose_name+help_text on all six editable fields, Meta verbose_name(_plural), gettext_lazy validation messages via nested ValidationError(params=...) keeping msgids lazy (decisions.md #9); 52 passed"
         },
         {
           "id": "T016",
           "status": "done",
           "attempts": 1,
-          "evidence": "61103e0 — metadata-only 0003 migration (AlterModelOptions+AlterField); makemigrations --check clean"
+          "evidence": "61103e0 \u2014 metadata-only 0003 migration (AlterModelOptions+AlterField); makemigrations --check clean"
         }
       ]
     }
@@ -277,7 +282,7 @@
       "max": 2
     },
     "review_cycles": {
-      "used": 0,
+      "used": 1,
       "max": 2
     },
     "tokens": {
