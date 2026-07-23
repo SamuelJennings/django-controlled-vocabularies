@@ -22,9 +22,7 @@ def _editable_fields(model: type[Model]):
     return [
         field
         for field in model._meta.get_fields()
-        if getattr(field, "concrete", False)
-        and getattr(field, "editable", False)
-        and not field.auto_created
+        if getattr(field, "concrete", False) and getattr(field, "editable", False) and not field.auto_created
     ]
 
 
