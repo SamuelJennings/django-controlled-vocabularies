@@ -87,3 +87,28 @@ Full rationale in `research.md` (R1–R8). Headlines:
    name-based match on a settings module is a known false positive; noting as a candidate
    kit papercut (scope the tamper matcher to `test_*.py`/`*_test.py`, not any path containing
    "test").
+
+## US-5 — Field metadata i18n + deliberate indexing
+
+9. **Lazy validation messages via `ValidationError(msgid, params=…)`, not `_(msgid) % {…}`.**
+   Article XII wants validation messages translatable with named `%(slug)s` placeholders and the
+   msgid static. The obvious `_("… '%(slug)s' …") % {"slug": self.slug}` does *not* work: Django's
+   lazy proxy `__mod__` evaluates eagerly (verified — `isinstance(_(...) % {...}, Promise)` is
+   `False`), so the message would be a plain, already-interpolated `str` — no longer translatable at
+   catalog-load time. Instead the collision errors raise the nested form
+   `ValidationError({"slug": ValidationError(_("… '%(slug)s' …"), params={"slug": self.slug})})`,
+   which keeps `.message` a lazy `Promise` (the static msgid) and holds the value in `.params`,
+   interpolated only at render. `test_standards.py` asserts the msgid is a `Promise`, contains the
+   named placeholder, carries the value in `params`, and renders with the real slug — meaningful,
+   not tautological. Empty-name/label messages have no placeholder, so a bare `_( … )` string
+   suffices. `DoesNotExist` diagnostics in `get_by_uri` stay unwrapped (Article XII developer-facing
+   exemption).
+
+10. **Metadata standard enforced by iterating `_meta`, not a hand-listed field set.**
+    `test_standards.py` walks `Model._meta.get_fields()` filtered to concrete, editable, non-auto
+    fields (`concrete and editable and not auto_created`), so any field added by a later story is
+    automatically held to the `verbose_name` + non-empty `help_text` lazy-translatable standard
+    without touching the test. Indexing assertions are guards that already held at baseline
+    (`slug.unique`, FK `db_index`, the `(scheme, slug)` `UniqueConstraint`); `name`/`label` stay
+    deliberately unindexed this slice (no query path — label search belongs to #16), per Article XIII
+    and the data-model indexing record.
