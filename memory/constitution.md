@@ -94,6 +94,24 @@ regardless, to keep a single deployment's data self-consistent.)
 - Schema normalisation (e.g. `dcterms:description` → the `definition` predicate) is surfaced to the
   user, never applied silently.
 
+### Article XII — Internationalization
+User-facing strings are translatable. In Python (models, forms, views, admin, validators) they are
+wrapped with `gettext_lazy` (imported as `_`): model `verbose_name` / `verbose_name_plural`, field
+`help_text` / `error_messages`, and form `label` / `help_text` / `error_messages` all use it, and
+validation messages use named placeholders (`%(slug)s`) so the msgids stay static. Templates load
+`{% load i18n %}` and wrap strings with `{% trans %}` / `{% blocktranslate %}`. Developer-facing
+diagnostics (`DoesNotExist`, logging) and pure acronyms are exempt. **`help_text` is mandatory on
+every model field.** A hard-coded user-visible string is a blocking review comment. (Materialises the
+family i18n standard — constitution-template Article VIII; this repo predates it. Follow-up: ship a
+base `en` catalog under `locale/` and add a `makemessages`-clean CI gate.)
+
+### Article XIII — Data-model conventions
+Every model field is a deliberate indexing decision. Because consumers of this package cannot add
+their own indexes, any field with a plausible lookup / filter / ordering path is indexed at its
+definition (`db_index`, `unique`, an FK's automatic index, or a composite `Meta.constraints` /
+`Meta.indexes`); a field with no query path stays unindexed to avoid write cost. The choice —
+indexed or not, and why — is recorded (`data-model.md` or `decisions.md`).
+
 ## Quality bar
 
 Read at plan and review; applies to every change.
