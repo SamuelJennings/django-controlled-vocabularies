@@ -10,7 +10,7 @@ Two Django models — `ConceptScheme` (a vocabulary) and `Concept` (a term withi
 
 ## Technical Context
 
-**Language/Version**: Python 3.11+ (package floor); tested on 3.12 and 3.13
+**Language/Version**: package runtime floor Python 3.11 (constitution Art. X; `pyproject` `>=3.11`). The dev/test toolchain (`mvp-shared[test]`) requires 3.12+, so the suite and CI exercise 3.12 and 3.13 — 3.11 is supported for consumers but not CI-exercised (the test bundle won't install under it)
 **Primary Dependencies**: Django 5.2 LTS + 6.0 (no new runtime dependency — `rdflib`/`django-parler` are not needed until import/multilingual features)
 **Storage**: the host project's relational database via the Django ORM; migrations shipped with the app
 **Testing**: `pytest` + `pytest-django` (from `mvp-shared[test]`); `factory_boy` for factories
