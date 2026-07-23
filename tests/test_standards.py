@@ -56,6 +56,13 @@ def test_meta_verbose_names_are_lazy(model):
     )
 
 
+def test_app_config_verbose_name_is_lazy():
+    from django.apps import apps
+
+    verbose_name = apps.get_app_config("controlled_vocabularies").verbose_name
+    assert isinstance(verbose_name, Promise), "AppConfig.verbose_name is not lazily translatable"
+
+
 # --- FR-010: validation messages are translatable, with named placeholders ---
 
 
