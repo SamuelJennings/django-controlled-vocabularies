@@ -2,14 +2,15 @@
   "feature": "001-vocabulary-concepts",
   "branch": "001-vocabulary-concepts",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "GATE_PLAN",
+  "state": "IMPLEMENT",
   "state_history": [
     { "state": "INTAKE", "at": "2026-07-23T14:30:00Z" },
     { "state": "SPECIFY", "at": "2026-07-23T14:50:00Z" },
     { "state": "SETUP", "at": "2026-07-23T14:52:00Z" },
     { "state": "GATE_SPEC", "at": "2026-07-23T15:00:00Z", "note": "approved by Sam" },
     { "state": "PLAN", "at": "2026-07-23T15:20:00Z" },
-    { "state": "GATE_PLAN", "at": "2026-07-23T15:30:22Z" }
+    { "state": "GATE_PLAN", "at": "2026-07-23T15:55:00Z", "note": "approved by Sam after the plan.md python-floor review comment was addressed" },
+    { "state": "IMPLEMENT", "at": "2026-07-23T16:00:00Z" }
   ],
   "gates": {
     "spec": { "approved_by": "Sam", "at": "2026-07-23T15:00:00Z", "self_resolved": [
@@ -17,7 +18,7 @@
       "notation deferred", "URI base is deployment config; mechanism a planning decision",
       "slug collisions refused not auto-suffixed", "scheme delete cascades concepts"
     ] },
-    "plan": { "approved_by": null, "at": null },
+    "plan": { "approved_by": "Sam", "at": "2026-07-23T15:55:00Z" },
     "merge": { "approved_by": null, "at": null }
   },
   "stories": [

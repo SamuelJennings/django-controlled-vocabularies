@@ -87,9 +87,8 @@ sub-factories a scheme when none is given), built on `factory_boy` + `factory.dj
 **Rationale**: `factory_boy` is the standard Django factory library and gives US-4's "vocabulary in a few
 lines" directly. Factories live in `tests/` because US-4 scopes them to this repo's later-feature tests.
 
-**Open item (Constitution VII)**: confirm `factory_boy` is provided by `mvp-shared[test]`. If it is not,
-add it as a **test-only** dependency, justified by US-4 (a shipped requirement, not speculation). Either
-way `deptry` must stay green. The Implementer verifies this before writing the factories.
+**Resolved (Constitution VII)**: `factory_boy` is already provided by `mvp-shared[test]` (confirmed by
+Sam). No dependency work is needed; `deptry` stays green because it is a test-only import.
 
 ## R8 — Concept's preferred label is a single field this slice; #16 grows it
 

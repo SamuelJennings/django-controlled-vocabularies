@@ -8,7 +8,7 @@ Format: `[ID] [P?] [Story] Description`. `[P]` = different files, no dependency.
 
 ## Phase 1: Setup
 
-- [ ] T001 Add `CONTROLLED_VOCABULARIES_BASE_URI = "https://example.org/vocabularies"` to `tests/settings.py`; confirm `factory_boy` resolves via `mvp-shared[test]` (`poetry run python -c "import factory"`) and, if absent, add it as a test-only dependency justified by US-4, keeping `deptry` green.
+- [ ] T001 Add `CONTROLLED_VOCABULARIES_BASE_URI = "https://example.org/vocabularies"` to `tests/settings.py`. (`factory_boy` is already provided by `mvp-shared[test]` — no dependency work needed.)
 
 ## Phase 2: Foundational (blocks all stories)
 
