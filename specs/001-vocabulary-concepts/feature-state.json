@@ -41,10 +41,10 @@
         { "id": "T007", "status": "done", "attempts": 1 },
         { "id": "T008", "status": "done", "attempts": 1 }
       ] },
-    { "id": "US3", "priority": "P1", "issue": 22, "worktree": null, "status": "todo", "replans": 0,
+    { "id": "US3", "priority": "P1", "issue": 22, "worktree": "merged:001-vocab-us3@f4ddc28", "status": "done", "replans": 0,
       "tasks": [
-        { "id": "T009", "status": "todo", "attempts": 0 },
-        { "id": "T010", "status": "todo", "attempts": 0 }
+        { "id": "T009", "status": "done", "attempts": 1 },
+        { "id": "T010", "status": "done", "attempts": 1 }
       ] },
     { "id": "US4", "priority": "P2", "issue": 23, "worktree": "merged:001-vocab-us4@6c77e66", "status": "done", "replans": 0,
       "tasks": [
