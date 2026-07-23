@@ -2,7 +2,7 @@
   "feature": "001-vocabulary-concepts",
   "branch": "001-vocabulary-concepts",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "IMPLEMENT",
+  "state": "REVIEW",
   "state_history": [
     { "state": "INTAKE", "at": "2026-07-23T14:30:00Z" },
     { "state": "SPECIFY", "at": "2026-07-23T14:50:00Z" },
@@ -10,7 +10,9 @@
     { "state": "GATE_SPEC", "at": "2026-07-23T15:00:00Z", "note": "approved by Sam" },
     { "state": "PLAN", "at": "2026-07-23T15:20:00Z" },
     { "state": "GATE_PLAN", "at": "2026-07-23T15:55:00Z", "note": "approved by Sam after the plan.md python-floor review comment was addressed" },
-    { "state": "IMPLEMENT", "at": "2026-07-23T16:00:00Z" }
+    { "state": "IMPLEMENT", "at": "2026-07-23T16:00:00Z" },
+    { "state": "CONVERGE", "at": "2026-07-23T16:40:00Z", "note": "all 13 tasks done; verify green; tamper flag on tests/settings.py triaged+approved (decisions.md #8); 0 gaps" },
+    { "state": "REVIEW", "at": "2026-07-23T16:45:00Z", "note": "ephemeral reviewer dispatched, correctness+spec lens on feature diff" }
   ],
   "gates": {
     "spec": { "approved_by": "Sam", "at": "2026-07-23T15:00:00Z", "self_resolved": [

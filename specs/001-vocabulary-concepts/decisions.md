@@ -74,3 +74,16 @@ Full rationale in `research.md` (R1–R8). Headlines:
    check in `save()` that raises `ValidationError` before hitting the DB, keeping `unique=True` as the
    integrity backstop. Honest, minimal, and matches R4's stated behaviour. The same pattern will
    apply per-scheme for `Concept` in US2.
+
+## S5 CONVERGE — tamper-check triage
+
+8. **tamper-check flag on `tests/settings.py` — reviewed, approved (not a test weakening).**
+   The convergence exit gate's `tamper-check.sh` flagged `tests/settings.py` as a
+   `modified_preexisting_test` because the filename contains "test". It is a Django settings
+   module, not a test-suite file. The only change vs `origin/main` appends
+   `CONTROLLED_VOCABULARIES_BASE_URI = "https://example.org/vocabularies"` (US-1, needed for
+   deterministic URI-composition assertions). No test assertion was modified, deleted, or
+   weakened. Approved by Forge per policy D4 (legitimate change recorded here). The heuristic's
+   name-based match on a settings module is a known false positive; noting as a candidate
+   kit papercut (scope the tamper matcher to `test_*.py`/`*_test.py`, not any path containing
+   "test").
