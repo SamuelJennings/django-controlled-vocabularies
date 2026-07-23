@@ -4,7 +4,9 @@
 
 **Created**: 2026-07-23
 
-**Status**: Draft
+**Status**: Refined
+
+**Refined**: 2026-07-23 — Added US-5 (translatable, self-documenting field metadata + deliberate indexing) after the maintainer set these as family-wide Django standards at the merge gate; FR-009–011 and SC-006 added.
 
 **Input**: Issue [#15](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/15) — "A curator needs to define a controlled vocabulary and the concepts inside it, and to create and query both through Django's ORM and admin. Every concept must carry a stable, permanent identifier that stays fixed even as its wording or its database row changes."
 
@@ -80,6 +82,33 @@ A contributor building a later feature can construct populated test vocabularies
 
 ---
 
+### User Story 5 - Translatable, self-documenting field metadata (Priority: P2)
+
+A developer integrating the package — or a curator seeing its fields in a form — always gets a
+human-readable label and help text for every field, in their own language once translations exist.
+Nothing user-facing is hard-coded English-only, and the package's fields carry deliberate database
+indexes, because a consumer of a third-party package cannot add either themselves.
+
+**Why this priority**: a family-wide standard for every Django package this maintainer publishes
+(non-negotiable at review); it gates the merge even though it adds no new capability.
+
+**Independent Test**: a metadata test suite walks every field on both models and asserts the
+standard holds — no UI needed.
+
+**Acceptance Scenarios**:
+
+1. **Given** any field on a vocabulary or concept, **When** its metadata is inspected, **Then** it
+   declares a non-empty help text and a human-readable label, and both are lazily translatable.
+2. **Given** a user-facing validation failure (empty name/label, slug collision), **When** the error
+   is raised, **Then** its message is translatable and uses named placeholders rather than baked-in
+   values.
+3. **Given** the database table definitions, **When** their indexes are inspected, **Then** the
+   vocabulary slug is uniquely indexed, the concept's vocabulary reference carries its index, and
+   the vocabulary-plus-slug pair is enforced by the composite constraint — and any field left
+   unindexed is a recorded decision, not an omission.
+
+---
+
 ### Edge Cases
 
 - A concept label or vocabulary name in a non-Latin script (for example "Wärmefluss" or Cyrillic text) must still produce a usable, URL-safe slug.
@@ -99,6 +128,9 @@ A contributor building a later feature can construct populated test vocabularies
 - **FR-006**: A concept MUST be retrievable by its URI, by its vocabulary-plus-slug pair, and as part of a listing of its vocabulary's concepts.
 - **FR-007**: Slug derivation MUST handle non-ASCII input, and slug collisions MUST be refused at the uniqueness scope of the entity (system-wide for vocabularies, per-vocabulary for concepts).
 - **FR-008**: The test suite MUST ship factories (or equivalent fixtures) for vocabularies and concepts, usable by this and later features' tests.
+- **FR-009**: Every model field MUST declare a human-readable label (`verbose_name`) and a non-empty `help_text`, both lazily translatable.
+- **FR-010**: Every user-facing string — field labels, help text, model verbose names, and validation messages — MUST be translatable; validation messages use named placeholders so their translatable form is static. Developer-facing diagnostics are exempt.
+- **FR-011**: Field indexing MUST be deliberate: fields with a lookup path are indexed at definition (unique, foreign-key, or composite constraint), and any queryable-but-unindexed field is a recorded decision.
 
 ### Key Entities
 
@@ -114,6 +146,7 @@ A contributor building a later feature can construct populated test vocabularies
 - **SC-003**: Renaming a vocabulary or relabelling a concept is reflected in composed URIs immediately, with no manual step.
 - **SC-004**: Every functional requirement above is exercised by at least one automated test, and the suite passes across the supported Python/Django matrix.
 - **SC-005**: A test for a later feature can obtain a populated vocabulary from the factories in three lines or fewer.
+- **SC-006**: Every field on both models exposes translatable, non-empty metadata (label + help text), every user-facing message is translatable, and the indexing of every field is either present or recorded as a decision — all verified by automated tests.
 
 ## Assumptions
 

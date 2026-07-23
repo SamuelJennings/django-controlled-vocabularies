@@ -35,6 +35,10 @@ Two Django models — `ConceptScheme` (a vocabulary) and `Concept` (a term withi
 - **IX URI identity & data-safety** — honoured now: identity is the URI, never the PK; lookups resolve by URI. **Deferred by design (Sam's grilling ruling, in `decisions.md`):** the lifecycle/deprecation/`PROTECT`/upsert-by-URI mechanisms — those belong to sibling #19 and the import feature, which are the first features with references to protect. No import and no external references exist in this slice, so the invariants have no surface here yet. Not an unjustified violation.
 - **X Stack & architecture** — Django 5.2+/Py 3.11 floor, Poetry, ruff; models are the source of truth; SKOS-only, no non-SKOS modelling. Pass.
 - **XI RDF fidelity** — no import/export in this slice; deferred to the boundary features. N/A.
+- **XII Internationalization** *(added by the 2026-07-23 refinement)* — US-5/FR-009/FR-010: every field carries translatable `verbose_name` + `help_text`; user-facing strings `gettext_lazy`-wrapped with named placeholders; asserted by `tests/test_standards.py`. The `locale/` catalog + `makemessages` CI gate are a recorded follow-up, not this feature. Pass.
+- **XIII Data-model conventions** *(added by the 2026-07-23 refinement)* — FR-011: indexing deliberate — `slug` unique, FK auto-index, `(scheme, slug)` composite; `name`/`label` unindexed by decision (no query path this slice; label search is #16's). Asserted by tests and recorded. Pass.
+
+**Propagated**: 2026-07-23 — Updated from the spec refinement (US-5 added).
 
 No violations require Complexity Tracking.
 
@@ -72,7 +76,8 @@ tests/
 ├── factories.py         # SchemeFactory, ConceptFactory (new — US-4)
 ├── test_scheme.py       # US-1
 ├── test_concept.py      # US-2
-└── test_identity.py     # US-3
+├── test_identity.py     # US-3
+└── test_standards.py    # US-5 (refinement: metadata i18n + indexing assertions)
 ```
 
 **Structure Decision**: single reusable-app layout, matching the existing `controlled_vocabularies/` package and root `tests/`. Models live in one `models.py` (two small models don't warrant a `models/` package — Anti-Abstraction). A thin `conf.py` reads the base-URI setting with a default, so the composition rule has one home without a settings framework.

@@ -58,6 +58,21 @@ Format: `[ID] [P?] [Story] Description`. `[P]` = different files, no dependency.
 
 - [ ] T011 [P] [US4] Add `tests/factories.py` (`ConceptSchemeFactory`; `ConceptFactory` with a `SubFactory` scheme) and `tests/test_factories.py` asserting both produce valid saved objects and `ConceptFactory()` auto-creates its scheme.
 
+## Phase 8: User Story 5 — Translatable, self-documenting field metadata (P2)
+
+**Propagated**: 2026-07-23 — Added from the spec refinement (US-5, FR-009–011, SC-006).
+
+**Goal**: every field carries translatable `verbose_name` + non-empty `help_text`; all user-facing
+strings wrapped in `gettext_lazy` with named placeholders; indexing deliberate and asserted.
+**Independent test**: `tests/test_standards.py` green in isolation.
+**Depends on**: US1, US2 (the fields must exist).
+
+- [ ] T014 [P] [US5] Write failing `tests/test_standards.py`: walk every field on `ConceptScheme` and `Concept` asserting non-empty `help_text` and `verbose_name` that are lazy translation proxies; assert `Meta.verbose_name`/`verbose_name_plural` are lazy; assert the empty-name, empty-label, and both slug-collision `ValidationError` messages are translatable (lazy-backed, named placeholders); assert indexes — `ConceptScheme.slug` unique, `Concept.scheme` FK-indexed, `(scheme, slug)` composite constraint present.
+- [ ] T015 [US5] Apply the metadata to `controlled_vocabularies/models.py`: `verbose_name` + `help_text` on all six fields, `Meta.verbose_name`(+plural) on both models, `gettext_lazy as _` wrapping for all user-facing strings, validation messages via named `%(slug)s` placeholders. Developer-facing `DoesNotExist` diagnostics stay unwrapped.
+- [ ] T016 [US5] `makemigrations` → `0003_*` (metadata-only); full suite + all gates green.
+
+---
+
 ## Phase 7: Polish & cross-cutting
 
 - [ ] T012 [P] Docstrings on `ConceptScheme`, `Concept`, the manager, and `conf.get_base_uri`; add the `CONTROLLED_VOCABULARIES_BASE_URI` note to `README.md`; add a `CHANGELOG.md` entry (Article VI).
@@ -65,7 +80,7 @@ Format: `[ID] [P?] [Story] Description`. `[P]` = different files, no dependency.
 
 ## Dependencies & order
 
-- Setup (T001) → Foundational (T002) → US1 (T003-T005) → US2 (T006-T008) → US3 (T009-T010) and US4 (T011, parallelisable with US3) → Polish (T012-T013).
+- Setup (T001) → Foundational (T002) → US1 (T003-T005) → US2 (T006-T008) → US3 (T009-T010) and US4 (T011, parallelisable with US3) → US5 (T014-T016, added by refinement; depends on US1+US2) → Polish (T012-T013, re-run final verify after US5).
 - Within each story: the test task precedes and must FAIL before its implementation task.
 - US2 depends on US1 (FK); US3 and US4 depend on US1+US2. Stories are otherwise independently testable.
 

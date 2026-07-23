@@ -3,6 +3,13 @@
 Two models in `controlled_vocabularies/models.py`. Field types are the intended shape; the Implementer
 owns exact declarations.
 
+**Propagated**: 2026-07-23 — Refinement (US-5): every field additionally declares a translatable
+`verbose_name` + non-empty `help_text` (`gettext_lazy`); both models declare translated
+`Meta.verbose_name`/`_plural`; validation messages are translatable with named placeholders.
+Indexing record: `ConceptScheme.slug` unique-indexed, `Concept.scheme` FK-indexed, `(scheme, slug)`
+composite-constrained; `name` and `label` deliberately unindexed this slice (no query path — label
+search belongs to #16).
+
 ## ConceptScheme (a vocabulary)
 
 | Field | Type | Rules |
