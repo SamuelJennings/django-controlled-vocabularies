@@ -32,7 +32,7 @@ way off.
 
 Everything needed to reach a minimum usable release.
 
-### 1. Core domain foundation
+### R1 — Core domain foundation
 
 *Large, expect several stories · advances the foundation, and G6 directly.*
 
@@ -49,7 +49,7 @@ this goes first.
 Serves the foundation and G6. Out of scope: RDF import and export, the consumption field, the
 served URLs, and the editing interface.
 
-### 2. RDF import
+### R2 — RDF import
 
 *Full feature · advances G4, and G8, G6.*
 
@@ -68,12 +68,12 @@ nothing downstream can be tested against real data.
 Serves G4, G8, and G6. Out of scope: export and serving, the consumption field, the editing
 interface.
 
-### 3. Concept consumption field
+### R3 — Concept consumption field
 
 *Full feature · advances G2.*
 
 This is what the whole package was built for: letting a Django project attach controlled-vocabulary
-concepts to its own models as first-class data. It depends on item 1.
+concepts to its own models as first-class data. It depends on R1.
 
 **Deliverables:**
 
@@ -85,7 +85,7 @@ concepts to its own models as first-class data. It depends on item 1.
 
 Serves G2. Out of scope: import, export and serving, the editing interface.
 
-### 4. RDF publishing and stable URIs
+### R4 — RDF publishing and stable URIs
 
 *Full feature · advances G3, and G4.*
 
@@ -101,7 +101,7 @@ resolve to standards-compliant RDF. The details belong in this feature's own spe
 
 Serves G3 and G4. Out of scope: the editing interface, browsing external sources.
 
-### 5. Vocabulary management interface
+### R5 — Vocabulary management interface
 
 *Large, multi-feature · advances G1.*
 
@@ -121,23 +121,23 @@ A fuller brief gets written when it reaches the front of the queue.
 
 Anything that advances toward the v1.0.0 release.
 
-### 6. Vocabulary browsing
+### R6 — Vocabulary browsing
 
 *Full feature · advances G7.* A read-only way for people to search and move around concepts, across
 both local vocabularies and imported external ones, so a stable URI leads somewhere a person can
 use.
 
-### 7. Scale hardening
+### R7 — Scale hardening
 
 *Full feature · advances G5.* Keep search, browse, and autocomplete responsive at tens of thousands
 of concepts, and support navigation over deep hierarchies.
 
-### 8. Embeddable and standalone modes
+### R8 — Embeddable and standalone modes
 
 *Full feature · advances G9.* Make the app a good guest inside a host Django project, and, with a
 thin wrapper, a system that runs on its own.
 
-### 9. Adopt the heat-flow vocabularies as first real content
+### R9 — Adopt the heat-flow vocabularies as first real content
 
 *Small to medium · advances G10.* Move the existing heat-flow vocabularies onto this app as the
 first production content, exercising the manage, consume, and publish loop on a real dataset.
@@ -146,12 +146,12 @@ first production content, exercising the manage, consume, and publish loop on a 
 
 Bigger bets, taken on once the 1.x line is stable.
 
-### 10. Collaborative curation
+### R10 — Collaborative curation
 
 *Draft · large · advances G11.* Several curators working the same vocabularies under object-level
 permissions.
 
-### 11. Vocabulary versioning
+### R11 — Vocabulary versioning
 
 *Draft · large · advances G12.* Track versions of a vocabulary as it changes so a consumer can cite
 the version it used.
