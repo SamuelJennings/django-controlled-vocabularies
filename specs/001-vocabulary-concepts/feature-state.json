@@ -2,7 +2,7 @@
   "feature": "001-vocabulary-concepts",
   "branch": "001-vocabulary-concepts",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "REVIEW",
+  "state": "GATE_MERGE",
   "state_history": [
     { "state": "INTAKE", "at": "2026-07-23T14:30:00Z" },
     { "state": "SPECIFY", "at": "2026-07-23T14:50:00Z" },
@@ -12,7 +12,8 @@
     { "state": "GATE_PLAN", "at": "2026-07-23T15:55:00Z", "note": "approved by Sam after the plan.md python-floor review comment was addressed" },
     { "state": "IMPLEMENT", "at": "2026-07-23T16:00:00Z" },
     { "state": "CONVERGE", "at": "2026-07-23T16:40:00Z", "note": "all 13 tasks done; verify green; tamper flag on tests/settings.py triaged+approved (decisions.md #8); 0 gaps" },
-    { "state": "REVIEW", "at": "2026-07-23T16:45:00Z", "note": "ephemeral reviewer dispatched, correctness+spec lens on feature diff" }
+    { "state": "REVIEW", "at": "2026-07-23T16:45:00Z", "note": "ephemeral reviewer dispatched, correctness+spec lens on feature diff" },
+    { "state": "GATE_MERGE", "at": "2026-07-23T16:55:00Z", "note": "review approved; two low-severity hardening notes closed (base-URI guard in get_by_uri, FR-006 vocabulary+slug retrieval test); 41 tests green; PR #24 marked ready for Sam's merge gate" }
   ],
   "gates": {
     "spec": { "approved_by": "Sam", "at": "2026-07-23T15:00:00Z", "self_resolved": [
