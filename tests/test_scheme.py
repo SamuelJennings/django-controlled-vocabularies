@@ -5,8 +5,9 @@ app-wide), FR-005 (scheme URI), FR-007 (non-ASCII slugs, collisions refused).
 """
 
 import pytest
-from controlled_vocabularies.models import ConceptScheme
 from django.core.exceptions import ValidationError
+
+from controlled_vocabularies.models import ConceptScheme
 
 
 @pytest.mark.django_db
