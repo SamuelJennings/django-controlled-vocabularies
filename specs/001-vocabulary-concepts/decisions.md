@@ -57,3 +57,20 @@ Full rationale in `research.md` (R1–R8). Headlines:
   test-only dep (US-4 justification) — Implementer checks before writing.
 - **R8** the concept's preferred label is a single `CharField` this slice; #16 grows label storage
   without touching the identity mechanism.
+
+## Self-resolved during implementation (US1, T001–T005)
+
+6. **`conf.DEFAULT_BASE_URI = "http://localhost:8000/vocabularies"`.**
+   R2 mandates a default but leaves the value to the Implementer. Chose a localhost placeholder
+   rather than reusing the `https://example.org/...` spec example: it signals "configure me for a
+   real deployment" and keeps the package usable standalone (Django dev-server convention). The
+   test suite pins its own `CONTROLLED_VOCABULARIES_BASE_URI` so URI assertions never depend on this
+   default. README documentation of the default is T012's job (not in this task set).
+
+7. **Slug collisions surface as `ValidationError` via an explicit pre-save check.**
+   R4 says a colliding slug is "refused ... surfaces as a validation error, not auto-suffixed", but
+   the DB `unique=True` constraint alone would raise `IntegrityError` (and break the test
+   transaction). Added an explicit `ConceptScheme.objects.filter(slug=…).exclude(pk=self.pk).exists()`
+   check in `save()` that raises `ValidationError` before hitting the DB, keeping `unique=True` as the
+   integrity backstop. Honest, minimal, and matches R4's stated behaviour. The same pattern will
+   apply per-scheme for `Concept` in US2.
