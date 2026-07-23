@@ -26,8 +26,8 @@
       "tasks": [
         { "id": "T001", "status": "done", "attempts": 1 },
         { "id": "T002", "status": "done", "attempts": 1 },
-        { "id": "T012", "status": "todo", "attempts": 0 },
-        { "id": "T013", "status": "todo", "attempts": 0 }
+        { "id": "T012", "status": "done", "attempts": 1 },
+        { "id": "T013", "status": "done", "attempts": 1 }
       ] },
     { "id": "US1", "priority": "P1", "issue": 20, "worktree": "merged:001-vocab-us1@e67b3f5", "status": "done", "replans": 0,
       "tasks": [

@@ -42,6 +42,19 @@ thousands of concepts and evolve as data rather than code.
 memory · lossless round-tripping over schema neatness · stable concept URIs over convenient
 identifiers · vocabulary-as-data over vocabulary-as-code · SKOS fidelity over generality.
 
+## Configuration
+
+Concept and scheme URIs are composed from a base address. Set it in your Django settings:
+
+```python
+CONTROLLED_VOCABULARIES_BASE_URI = "https://vocab.example.org/vocabularies"
+```
+
+If you leave it unset, the app falls back to `http://localhost:8000/vocabularies` so it still
+runs out of the box — set a real address before you rely on the URIs anywhere they are seen. A
+concept's URI is then `{base}/{scheme-slug}/{concept-slug}`, and the slugs follow the labels while
+a vocabulary is unpublished.
+
 ## Relationship to other packages
 
 Supersedes and retires `skos-builder` and `django-research-vocabs`, consolidating vocabulary
