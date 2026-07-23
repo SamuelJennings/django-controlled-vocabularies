@@ -42,3 +42,18 @@ defensible. Gate-level decisions live on issue #15; this file carries the fine g
 - **Architectural note to land as an ADR (agreed at intake):** the internal storage shape is not
   raw JSON-LD/RDF; RDF serializations are produced only at the import/export boundary. To be
   authored when the boundary features arrive, or earlier as a docs change.
+
+## Self-resolved at plan (S3)
+
+Full rationale in `research.md` (R1–R8). Headlines:
+
+- **R1/R6** URI is a computed property (not stored); lookup by URI parses the path — a stored/frozen
+  URI column waits for the publishing feature.
+- **R2** base address = one Django setting `CONTROLLED_VOCABULARIES_BASE_URI` with a default, read in
+  a thin `conf.py`; no settings framework.
+- **R3** slugs via `slugify(allow_unicode=True)` so non-Latin labels stay usable; empty-after-slug is
+  rejected.
+- **R7** factories use `factory_boy` in `tests/`; confirm it ships in `mvp-shared[test]` or add it as a
+  test-only dep (US-4 justification) — Implementer checks before writing.
+- **R8** the concept's preferred label is a single `CharField` this slice; #16 grows label storage
+  without touching the identity mechanism.

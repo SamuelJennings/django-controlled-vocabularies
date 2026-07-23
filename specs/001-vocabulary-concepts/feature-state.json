@@ -1,0 +1,59 @@
+{
+  "feature": "001-vocabulary-concepts",
+  "branch": "001-vocabulary-concepts",
+  "repo": "SamuelJennings/django-controlled-vocabularies",
+  "state": "GATE_PLAN",
+  "state_history": [
+    { "state": "INTAKE", "at": "2026-07-23T14:30:00Z" },
+    { "state": "SPECIFY", "at": "2026-07-23T14:50:00Z" },
+    { "state": "SETUP", "at": "2026-07-23T14:52:00Z" },
+    { "state": "GATE_SPEC", "at": "2026-07-23T15:00:00Z", "note": "approved by Sam" },
+    { "state": "PLAN", "at": "2026-07-23T15:20:00Z" },
+    { "state": "GATE_PLAN", "at": "2026-07-23T15:30:22Z" }
+  ],
+  "gates": {
+    "spec": { "approved_by": "Sam", "at": "2026-07-23T15:00:00Z", "self_resolved": [
+      "single default-language preferred label this slice; #16 grows it",
+      "notation deferred", "URI base is deployment config; mechanism a planning decision",
+      "slug collisions refused not auto-suffixed", "scheme delete cascades concepts"
+    ] },
+    "plan": { "approved_by": null, "at": null },
+    "merge": { "approved_by": null, "at": null }
+  },
+  "stories": [
+    { "id": "US0", "priority": "P0", "issue": null, "worktree": null, "status": "todo", "replans": 0,
+      "tasks": [
+        { "id": "T001", "status": "todo", "attempts": 0 },
+        { "id": "T002", "status": "todo", "attempts": 0 },
+        { "id": "T012", "status": "todo", "attempts": 0 },
+        { "id": "T013", "status": "todo", "attempts": 0 }
+      ] },
+    { "id": "US1", "priority": "P1", "issue": 20, "worktree": null, "status": "todo", "replans": 0,
+      "tasks": [
+        { "id": "T003", "status": "todo", "attempts": 0 },
+        { "id": "T004", "status": "todo", "attempts": 0 },
+        { "id": "T005", "status": "todo", "attempts": 0 }
+      ] },
+    { "id": "US2", "priority": "P1", "issue": 21, "worktree": null, "status": "todo", "replans": 0,
+      "tasks": [
+        { "id": "T006", "status": "todo", "attempts": 0 },
+        { "id": "T007", "status": "todo", "attempts": 0 },
+        { "id": "T008", "status": "todo", "attempts": 0 }
+      ] },
+    { "id": "US3", "priority": "P1", "issue": 22, "worktree": null, "status": "todo", "replans": 0,
+      "tasks": [
+        { "id": "T009", "status": "todo", "attempts": 0 },
+        { "id": "T010", "status": "todo", "attempts": 0 }
+      ] },
+    { "id": "US4", "priority": "P2", "issue": 23, "worktree": null, "status": "todo", "replans": 0,
+      "tasks": [
+        { "id": "T011", "status": "todo", "attempts": 0 }
+      ] }
+  ],
+  "budgets": {
+    "converge_cycles": { "used": 0, "max": 2 },
+    "review_cycles": { "used": 0, "max": 2 },
+    "tokens": { "used": 0, "max": 4000000 }
+  },
+  "pr": { "number": 24, "draft": true }
+}
