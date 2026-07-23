@@ -8,6 +8,7 @@ computed from a configured base address and the slug, never stored (research R1)
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.text import slugify
+from django.utils.translation import gettext_lazy as _
 
 from controlled_vocabularies import conf
 
@@ -19,9 +20,27 @@ class ConceptScheme(models.Model):
     research R5) and is unique app-wide. The ``uri`` is composed on read.
     """
 
-    name = models.CharField(max_length=255)
-    description = models.TextField(blank=True)
-    slug = models.SlugField(max_length=255, unique=True, allow_unicode=True)
+    name = models.CharField(
+        max_length=255,
+        verbose_name=_("name"),
+        help_text=_("The human-readable name of the vocabulary."),
+    )
+    description = models.TextField(
+        blank=True,
+        verbose_name=_("description"),
+        help_text=_("An optional description of what this vocabulary covers."),
+    )
+    slug = models.SlugField(
+        max_length=255,
+        unique=True,
+        allow_unicode=True,
+        verbose_name=_("slug"),
+        help_text=_("URL-safe identifier derived from the name; forms part of each concept's URI."),
+    )
+
+    class Meta:
+        verbose_name = _("vocabulary")
+        verbose_name_plural = _("vocabularies")
 
     def __str__(self) -> str:
         return self.name
@@ -35,11 +54,13 @@ class ConceptScheme(models.Model):
         """Derive the slug from ``name`` and refuse an empty or colliding slug."""
         self.slug = slugify(self.name, allow_unicode=True)
         if not self.slug:
-            raise ValidationError({"name": "Name must produce a non-empty slug."})
+            raise ValidationError({"name": _("Name must produce a non-empty slug.")})
         # Refuse a slug that collides with another scheme rather than minting a
         # duplicate identifier or silently auto-suffixing it (research R4).
         if ConceptScheme.objects.filter(slug=self.slug).exclude(pk=self.pk).exists():
-            raise ValidationError({"slug": f"A vocabulary with the slug '{self.slug}' already exists."})
+            raise ValidationError(
+                {"slug": _("A vocabulary with the slug '%(slug)s' already exists.") % {"slug": self.slug}}
+            )
         super().save(*args, **kwargs)
 
 
@@ -82,13 +103,30 @@ class Concept(models.Model):
     preferred label; richer multi-label support arrives with a later story.
     """
 
-    scheme = models.ForeignKey(ConceptScheme, on_delete=models.CASCADE, related_name="concepts")
-    label = models.CharField(max_length=255)
-    slug = models.SlugField(max_length=255, allow_unicode=True)
+    scheme = models.ForeignKey(
+        ConceptScheme,
+        on_delete=models.CASCADE,
+        related_name="concepts",
+        verbose_name=_("vocabulary"),
+        help_text=_("The vocabulary this concept belongs to."),
+    )
+    label = models.CharField(
+        max_length=255,
+        verbose_name=_("preferred label"),
+        help_text=_("The concept's preferred label in the default language."),
+    )
+    slug = models.SlugField(
+        max_length=255,
+        allow_unicode=True,
+        verbose_name=_("slug"),
+        help_text=_("URL-safe identifier derived from the label; unique within the vocabulary."),
+    )
 
     objects = ConceptManager()
 
     class Meta:
+        verbose_name = _("concept")
+        verbose_name_plural = _("concepts")
         constraints = [
             models.UniqueConstraint(fields=["scheme", "slug"], name="unique_concept_slug_per_scheme"),
         ]
@@ -105,10 +143,15 @@ class Concept(models.Model):
         """Derive the slug from ``label`` and refuse an empty or colliding slug."""
         self.slug = slugify(self.label, allow_unicode=True)
         if not self.slug:
-            raise ValidationError({"label": "Label must produce a non-empty slug."})
+            raise ValidationError({"label": _("Label must produce a non-empty slug.")})
         # Refuse a slug that collides with another concept in the same scheme
         # rather than minting a duplicate identifier or silently auto-suffixing
         # it (research R4). The UniqueConstraint is the integrity backstop.
         if Concept.objects.filter(scheme=self.scheme, slug=self.slug).exclude(pk=self.pk).exists():
-            raise ValidationError({"slug": f"A concept with the slug '{self.slug}' already exists in this vocabulary."})
+            raise ValidationError(
+                {
+                    "slug": _("A concept with the slug '%(slug)s' already exists in this vocabulary.")
+                    % {"slug": self.slug}
+                }
+            )
         super().save(*args, **kwargs)
