@@ -98,7 +98,7 @@ regardless, to keep a single deployment's data self-consistent.)
 
 Read at plan and review; applies to every change.
 
-- Coverage may not decrease (the coverage matrix cell is the reference).
+- Test coverage: **project ≥ 90%, patch ≥ 85%** (the `codecov.yml` targets are the reference), with a small tolerance. These are floors, not a 100% ratchet: a PR need not cover every defensive branch, but new code must be well tested.
 - Every public API change updates README + CHANGELOG in the same PR.
 - Lint (`ruff`), type-check (`mypy`), and `deptry` pass.
 - **Data-safety invariants have tests:** URI-upsert-on-reimport and import→export round-trip
