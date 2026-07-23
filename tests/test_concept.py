@@ -20,6 +20,15 @@ def test_add_derives_slug_from_label():
 
 
 @pytest.mark.django_db
+def test_get_concept_by_scheme_and_slug():
+    # FR-006's second retrieval mode: a concept is retrievable by its
+    # vocabulary-plus-slug pair, as a first-class query, not only via get_by_uri.
+    scheme = ConceptScheme.objects.create(name="Geothermics")
+    concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+    assert Concept.objects.get(scheme=scheme, slug="heat-flow") == concept
+
+
+@pytest.mark.django_db
 def test_list_concepts_of_a_scheme():
     scheme = ConceptScheme.objects.create(name="Geothermics")
     Concept.objects.create(scheme=scheme, label="Heat Flow")

@@ -81,3 +81,13 @@ def test_get_by_uri_unknown_uri_raises_does_not_exist():
     Concept.objects.create(scheme=scheme, label="Heat Flow")
     with pytest.raises(Concept.DoesNotExist):
         Concept.objects.get_by_uri(f"{conf.get_base_uri()}/geothermics/no-such-concept")
+
+
+@pytest.mark.django_db
+def test_get_by_uri_requires_the_configured_base():
+    scheme = ConceptScheme.objects.create(name="Geothermics")
+    concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+    # A bare relative path (no base) must not resolve: get_by_uri means "by URI",
+    # so a string outside the configured base is not an identity.
+    with pytest.raises(Concept.DoesNotExist):
+        Concept.objects.get_by_uri(f"{scheme.slug}/{concept.slug}")

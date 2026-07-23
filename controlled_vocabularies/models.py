@@ -53,14 +53,18 @@ class ConceptManager(models.Manager["Concept"]):
     def get_by_uri(self, uri: str) -> "Concept":
         """Return the concept identified by ``uri``.
 
-        Strips the configured base address, splits the remainder into its
-        ``scheme-slug/concept-slug`` parts and resolves the concept by scheme
-        slug and slug. The URI — not the primary key — is the identity
-        (Article IX); a well-formed URI with no matching concept raises
+        Requires ``uri`` to sit under the configured base address, strips that
+        base, splits the remainder into its ``scheme-slug/concept-slug`` parts
+        and resolves the concept by scheme slug and slug. The URI — not the
+        primary key — is the identity (Article IX); a URI outside the base or a
+        well-formed URI with no matching concept raises
         :class:`Concept.DoesNotExist`, the standard ORM lookup behaviour.
         Unicode slugs resolve the same as ASCII ones.
         """
-        remainder = uri.removeprefix(conf.get_base_uri()).strip("/")
+        base = conf.get_base_uri()
+        if not uri.startswith(base):
+            raise self.model.DoesNotExist(f"No concept matches the URI {uri!r}.")
+        remainder = uri.removeprefix(base).strip("/")
         parts = remainder.split("/")
         if len(parts) != 2:
             raise self.model.DoesNotExist(f"No concept matches the URI {uri!r}.")
