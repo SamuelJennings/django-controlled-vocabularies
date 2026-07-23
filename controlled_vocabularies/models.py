@@ -43,6 +43,31 @@ class ConceptScheme(models.Model):
         super().save(*args, **kwargs)
 
 
+class ConceptManager(models.Manager["Concept"]):
+    """Default manager for :class:`Concept`, adding URI-based lookup.
+
+    Subclasses the standard manager so ``Concept.objects`` keeps all default
+    behaviour and gains :meth:`get_by_uri`.
+    """
+
+    def get_by_uri(self, uri: str) -> "Concept":
+        """Return the concept identified by ``uri``.
+
+        Strips the configured base address, splits the remainder into its
+        ``scheme-slug/concept-slug`` parts and resolves the concept by scheme
+        slug and slug. The URI — not the primary key — is the identity
+        (Article IX); a well-formed URI with no matching concept raises
+        :class:`Concept.DoesNotExist`, the standard ORM lookup behaviour.
+        Unicode slugs resolve the same as ASCII ones.
+        """
+        remainder = uri.removeprefix(conf.get_base_uri()).strip("/")
+        parts = remainder.split("/")
+        if len(parts) != 2:
+            raise self.model.DoesNotExist(f"No concept matches the URI {uri!r}.")
+        scheme_slug, concept_slug = parts
+        return self.get(scheme__slug=scheme_slug, slug=concept_slug)
+
+
 class Concept(models.Model):
     """A single term within a vocabulary (a SKOS concept).
 
@@ -56,6 +81,8 @@ class Concept(models.Model):
     scheme = models.ForeignKey(ConceptScheme, on_delete=models.CASCADE, related_name="concepts")
     label = models.CharField(max_length=255)
     slug = models.SlugField(max_length=255, allow_unicode=True)
+
+    objects = ConceptManager()
 
     class Meta:
         constraints = [
