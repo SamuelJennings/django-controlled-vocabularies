@@ -164,3 +164,52 @@ human narrative.
 - **Next**: US-3 complete. US-4 (per-vocabulary default language) and US-5 (overridable slug) build on
   `Concept`; US-6 factories build on `ConceptNote`.
 - **Watch**: none.
+
+## 2026-07-24 · Implementer US-4 · T011
+
+- **Did**: Added the US-4 failing tests to `tests/test_models.py` —
+  `TestConceptSchemePerVocabularyDefaultLanguage` (a scheme with no override carries an empty
+  `default_language` and anchors identity in the app default — slug from the English `label`; a scheme
+  overridden to `de` makes `Concept.label` the German preferred label so the slug derives from it,
+  while the English preferred label is an additive `ConceptLabel` row; `effective_default_language`
+  returns the override when set, else `settings.LANGUAGE_CODE`).
+- **Verified**: `poetry run pytest tests/test_models.py::TestConceptSchemePerVocabularyDefaultLanguage
+  -q` → **3 failed** — `AttributeError` reading `scheme.default_language` and `TypeError` passing
+  `default_language=` to `create()`; red for the right reason (the override field is unbuilt). The
+  module still imports, so the prior **71 tests stay green** (`3 failed, 71 passed`). See decisions.md §24.
+- **Next**: T012 — add `ConceptScheme.default_language`; extend `effective_default_language`.
+- **Watch**: none.
+
+## 2026-07-24 · Implementer US-4 · T012
+
+- **Did**: In `controlled_vocabularies/models.py` — added `ConceptScheme.default_language`
+  (`CharField(max_length=16, blank=True, choices=settings.LANGUAGES)` with lazy `verbose_name`
+  "default language" + non-empty `help_text`); extended `effective_default_language` to
+  `self.default_language or settings.LANGUAGE_CODE` (decisions.md §22).
+- **Verified**: `poetry run pytest tests/test_models.py::TestConceptSchemePerVocabularyDefaultLanguage
+  -q` → **3 passed** (was 3 failed at T011); `poetry run ruff check controlled_vocabularies/models.py`
+  + `format --check` clean; `poetry run mypy` → no issues. (Migration `0004` was generated so the DB
+  tests run; it is committed in T013.)
+- **Next**: T013 — commit the migration, confirm no drift, run the full verify gate.
+- **Watch**: the US-1 `TestConceptSchemeDefaultLanguage` (unsaved `ConceptScheme()`, no override) still
+  passes because the field default is `""` (falsy → falls back to the app default).
+
+## 2026-07-24 · Implementer US-4 · T013
+
+- **Did**: Committed the US-4 migration
+  `controlled_vocabularies/migrations/0004_conceptscheme_default_language.py`
+  (`DJANGO_SETTINGS_MODULE=tests.settings poetry run python -m django makemigrations
+  controlled_vocabularies` — adds `default_language` to `ConceptScheme`). A new migration is expected
+  here (a genuine field-add, unlike US-2's no-migration — decisions.md §23); choices bake the
+  deterministic test `LANGUAGES` (T001); the branch's migrations are squashed to one at convergence (S5).
+- **Verified** (full gate, in the worktree via poetry):
+  1. `poetry run pytest -q` → **74 passed** (71 prior + 3 US-4).
+  2. `DJANGO_SETTINGS_MODULE=tests.settings poetry run python -m django makemigrations --check
+     --dry-run` → **No changes detected**.
+  3. `poetry run ruff check .` → **All checks passed!**
+  4. `poetry run ruff format --check .` → **11 files already formatted**.
+  5. `poetry run mypy` → **Success: no issues found in 4 source files**.
+  6. `poetry run deptry .` → **Success! No dependency issues found**.
+- **Next**: US-4 complete. US-5 (overridable slug) builds on `Concept`; US-6 factories build on the
+  full label/note model.
+- **Watch**: none.

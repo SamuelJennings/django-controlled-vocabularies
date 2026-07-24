@@ -163,3 +163,32 @@ the fine grain follows. This file is the durable record of why the spec reads as
     `language`/`kind` choices and the non-empty `value` (and any future note constraint) consistently
     with the label writer, with no hand-rolled checks. Notes carry no uniqueness, so nothing beyond
     field validation trips. **Revisit if**: bulk note authoring needs to skip per-row validation.
+
+## Implementation (US-4, T011–T013)
+
+22. **`effective_default_language` reads `self.default_language or settings.LANGUAGE_CODE` — no
+    explicit blank check.** `default_language` is `CharField(blank=True)` whose unset value is the
+    empty string, which is falsy, so the `or` short-circuits to the app default without a separate
+    `if not self.default_language` guard. **Why**: it matches the exact contract in `data-model.md`
+    and keeps the property a one-liner. The US-1 `TestConceptSchemeDefaultLanguage` test (an *unsaved*
+    `ConceptScheme()`, no override) still passes because the field default is `""`. **Revisit if**:
+    the field ever becomes nullable (`null=True`) — then `None or ...` still works, but the intent
+    would be clearer as `self.default_language or settings.LANGUAGE_CODE` unchanged.
+
+23. **US-4 is a genuine field-add migration (`0004`), unlike US-2's no-migration.** Adding
+    `ConceptScheme.default_language` is a real schema change, so `makemigrations` produced
+    `0004_conceptscheme_default_language.py` (contrast §17, where US-2 added no field and drifted
+    nothing). No data move: the override only *decides* which language `Concept.label` already holds,
+    so overriding a scheme to `de` means its concepts' `label` field carries the German preferred
+    label and the slug derives from it — the identity mechanism from #15 is reused, not rebuilt
+    (spec Assumption "identity mechanism preserved"). The branch's migrations are squashed to one at
+    convergence (S5). **Revisit if**: a later story on this branch adds a `ConceptScheme` field before
+    the squash.
+
+24. **The US-4 red (T011) fails on the missing field, not a blanked module.** The three tests read or
+    pass `default_language`, which does not exist pre-T012, so they fail precisely — an
+    `AttributeError` reading `scheme.default_language`, a `TypeError` passing it to `create()` — while
+    the module still imports and the prior 71 tests stay green. The no-override test asserts
+    `scheme.default_language == ""` first so its red is the missing field, not an accidental pass on
+    the already-correct app-default behaviour. **Why record it**: mirrors §18's discipline — the red
+    signal must isolate the new story, never collapse the file at collection.
