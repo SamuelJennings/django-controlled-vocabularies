@@ -16,6 +16,14 @@ This is a seed — it grows as the code does.
 
 ## Domain model
 
+> **Storage status (as of R1, #16).** The JSON-**document** + **projection** storage described in
+> this and the next table is the *intended* direction for the import and editor features (R2/R5),
+> per `docs/brainstorm.md`. The shipped R1 slice stores labels and notes as **relational models**
+> (`ConceptLabel`, `ConceptNote`) with the default-language preferred label held on `Concept.label`.
+> The document/predicate-registry design is deferred to the features that consume it
+> (`specs/002-multilingual-concepts/research.md` R1). Read the JSON rows below as design intent, not
+> current implementation.
+
 | Term | Definition | Notes / synonyms to avoid |
 |---|---|---|
 | **ConceptScheme** | A vocabulary: the `skos:ConceptScheme` container. A Django model. | The formal container. Don't call it a "namespace". |

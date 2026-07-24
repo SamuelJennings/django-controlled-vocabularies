@@ -5,12 +5,21 @@ Covers the test factories that downstream stories build their fixtures on:
 valid, saved objects with derived slugs/URIs, ``ConceptFactory`` must
 auto-create its owning scheme, and repeated calls must not collide on the
 app-wide-unique scheme slug or the per-scheme-unique concept slug.
+
+US-6 extends the family with ``ConceptLabelFactory`` and ``ConceptNoteFactory``
+and a ``multilingual`` trait on ``ConceptFactory`` that hangs an en+de pair of
+preferred labels and notes off a single concept in a couple of lines.
 """
 
 import pytest
 
-from controlled_vocabularies.models import Concept, ConceptScheme
-from tests.factories import ConceptFactory, ConceptSchemeFactory
+from controlled_vocabularies.models import Concept, ConceptLabel, ConceptNote, ConceptScheme
+from tests.factories import (
+    ConceptFactory,
+    ConceptLabelFactory,
+    ConceptNoteFactory,
+    ConceptSchemeFactory,
+)
 
 
 @pytest.mark.django_db
@@ -65,3 +74,66 @@ def test_concept_factory_accepts_an_explicit_scheme():
     scheme = ConceptSchemeFactory()
     concept = ConceptFactory(scheme=scheme)
     assert concept.scheme_id == scheme.pk
+
+
+@pytest.mark.django_db
+def test_concept_label_factory_produces_saved_valid_object():
+    label = ConceptLabelFactory()
+    assert isinstance(label, ConceptLabel)
+    assert label.pk is not None
+    assert label.concept_id is not None
+    assert label.language
+    assert label.kind == ConceptLabel.Kind.PREFERRED
+    assert label.text
+
+
+@pytest.mark.django_db
+def test_concept_note_factory_produces_saved_valid_object():
+    note = ConceptNoteFactory()
+    assert isinstance(note, ConceptNote)
+    assert note.pk is not None
+    assert note.concept_id is not None
+    assert note.language
+    assert note.kind == ConceptNote.Kind.DEFINITION
+    assert note.value
+
+
+@pytest.mark.django_db
+def test_concept_factory_has_no_extra_labels_or_notes_without_the_trait():
+    # The trait is opt-in: a plain concept carries only its default-language
+    # anchor label, no ConceptLabel/ConceptNote rows.
+    concept = ConceptFactory()
+    assert concept.labels.count() == 0
+    assert concept.concept_notes.count() == 0
+
+
+@pytest.mark.django_db
+def test_multilingual_trait_yields_preferred_labels_in_more_than_one_language():
+    concept = ConceptFactory(multilingual=True)
+    # en is the scheme's effective default language, so its preferred label is
+    # the anchor field itself; de is carried as a separate ConceptLabel row.
+    default_pref = concept.preferred_label()
+    german_pref = concept.preferred_label("de")
+    assert default_pref
+    assert german_pref
+    assert default_pref != german_pref
+    languages_with_a_preferred_label = {language for language in ("en", "de") if concept.preferred_label(language)}
+    assert len(languages_with_a_preferred_label) > 1
+
+
+@pytest.mark.django_db
+def test_multilingual_trait_yields_notes_in_more_than_one_language():
+    concept = ConceptFactory(multilingual=True)
+    assert concept.notes("en")
+    assert concept.notes("de")
+    languages_with_a_note = {language for language in ("en", "de") if concept.notes(language)}
+    assert len(languages_with_a_note) > 1
+
+
+@pytest.mark.django_db
+def test_multilingual_trait_uses_the_concepts_own_scheme_default_language():
+    # The German preferred label sits on a real ConceptLabel row (not the anchor),
+    # and the anchor still resolves as the en preferred label.
+    concept = ConceptFactory(multilingual=True)
+    assert concept.labels.filter(language="de", kind=ConceptLabel.Kind.PREFERRED).exists()
+    assert concept.preferred_label("en") == concept.label

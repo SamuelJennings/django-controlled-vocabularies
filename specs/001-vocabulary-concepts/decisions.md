@@ -3,13 +3,22 @@
 Ambiguities resolved without escalation while specifying, with the reasoning that makes each
 defensible. Gate-level decisions live on issue #15; this file carries the fine grain.
 
+> **Superseded in part — 2026-07-24.** FS-002 (#16) replaced this feature's single-label assumption
+> with the multilingual label/note model. §1 below is struck and forward-tagged in place; the
+> `Concept.label` field survives as the default-language preferred label and identity anchor. No
+> other decision in this record is affected.
+
 ## Self-resolved at specify
 
-1. **A concept carries one plain preferred label in this slice.**
+1. ~~**A concept carries one plain preferred label in this slice.**~~ **[Superseded by FS-002 (#16), 2026-07-24]**
    Ambiguous because full label modelling belongs to sibling #16, yet the identity design derives
    the concept slug from the preferred label, so this slice needs one. Resolved to a single
    default-language label that #16 later grows into the multilingual model. Grounded in the
    intake discussion: the concept slug is "based off of the preferred label of the concept".
+   **FS-002 has now landed that multilingual model** (per-language preferred/alternative/hidden
+   labels + SKOS notes on `ConceptLabel`/`ConceptNote`). The `Concept.label` field itself survives
+   as the required default-language preferred label and identity anchor — only the *one-label*
+   framing was superseded.
 
 2. **Notation codes are deferred.**
    Notation is identity-adjacent (a language-independent code), so it was a candidate for this

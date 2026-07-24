@@ -14,12 +14,13 @@ folded here and grouped by subject into classes:
 """
 
 import pytest
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db.models import Model, UniqueConstraint
 from django.utils.functional import Promise
 
 from controlled_vocabularies import conf
-from controlled_vocabularies.models import Concept, ConceptScheme
+from controlled_vocabularies.models import Concept, ConceptLabel, ConceptNote, ConceptScheme
 from tests.factories import ConceptSchemeFactory
 
 
@@ -387,3 +388,483 @@ class TestIndexing:
         )
         assert constraint is not None, "missing (scheme, slug) UniqueConstraint"
         assert tuple(constraint.fields) == ("scheme", "slug")
+
+
+class TestConceptSchemeDefaultLanguage:
+    """US-1 / FR-011 — a vocabulary's effective default language falls back to the
+    application's configured default when no per-vocabulary override is set (the
+    override itself is US-4 and is deliberately absent from this slice)."""
+
+    def test_effective_default_language_is_the_app_default(self):
+        # No override in this slice: the effective default is settings.LANGUAGE_CODE.
+        assert ConceptScheme().effective_default_language == settings.LANGUAGE_CODE
+
+
+class TestConceptPreferredLabels:
+    """US-1 — Preferred labels in several languages, identity preserved. FR-001 (one
+    preferred label per language), FR-002 (a default-language preferred label is
+    required and anchors identity), FR-003 (slug derives from the default-language
+    label), FR-004/SC-003 (a non-default-language label never disturbs slug or URI),
+    FR-007 (read a preferred label back by language)."""
+
+    @pytest.mark.django_db
+    def test_preferred_labels_readable_in_each_language(self, scheme):
+        # The default-language preferred label lives on Concept.label; other
+        # languages are ConceptLabel PREFERRED rows. Both read back via preferred_label.
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        concept.add_label(language="de", kind=ConceptLabel.Kind.PREFERRED, text="Wärmefluss")
+        assert concept.preferred_label("en") == "Heat flow"
+        assert concept.preferred_label("de") == "Wärmefluss"
+        # language=None means the scheme's effective default language.
+        assert concept.preferred_label() == "Heat flow"
+
+    @pytest.mark.django_db
+    def test_preferred_label_absent_language_returns_none(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        assert concept.preferred_label("fr") is None
+
+    @pytest.mark.django_db
+    def test_slug_derives_from_default_language_label(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        concept.add_label(language="de", kind=ConceptLabel.Kind.PREFERRED, text="Wärmefluss")
+        # Identity anchors to the default-language (English) label, not the German one.
+        assert concept.slug == "heat-flow"
+
+    @pytest.mark.django_db
+    def test_second_preferred_label_in_a_language_is_refused(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        concept.add_label(language="de", kind=ConceptLabel.Kind.PREFERRED, text="Wärmefluss")
+        with pytest.raises(ValidationError):
+            # At most one preferred label per language (FR-001).
+            concept.add_label(language="de", kind=ConceptLabel.Kind.PREFERRED, text="Terrestrischer Wärmefluss")
+
+    @pytest.mark.django_db
+    def test_concept_without_default_language_label_is_refused(self, scheme):
+        # The default-language preferred label is the required identity anchor (FR-002).
+        with pytest.raises(ValidationError):
+            Concept.objects.create(scheme=scheme, label="")
+
+    @pytest.mark.django_db
+    def test_preferred_label_row_in_default_language_is_refused(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        with pytest.raises(ValidationError):
+            # The default language's preferred label belongs on Concept.label, not
+            # as a separate ConceptLabel row.
+            concept.add_label(language="en", kind=ConceptLabel.Kind.PREFERRED, text="Heat flow")
+
+    @pytest.mark.django_db
+    def test_uri_and_slug_unchanged_by_non_default_label_lifecycle(self, scheme):
+        # SC-003: mutating a non-default-language label — add, edit, remove — never
+        # disturbs the concept's slug or URI.
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        original_slug = concept.slug
+        original_uri = concept.uri
+
+        german = concept.add_label(language="de", kind=ConceptLabel.Kind.PREFERRED, text="Wärmefluss")
+        concept.refresh_from_db()
+        assert concept.slug == original_slug
+        assert concept.uri == original_uri
+
+        german.text = "Terrestrischer Wärmefluss"
+        german.save()
+        concept.refresh_from_db()
+        assert concept.slug == original_slug
+        assert concept.uri == original_uri
+        assert concept.preferred_label("de") == "Terrestrischer Wärmefluss"
+
+        german.delete()
+        concept.refresh_from_db()
+        assert concept.slug == original_slug
+        assert concept.uri == original_uri
+        assert concept.preferred_label("de") is None
+
+
+class TestConceptAlternativeAndHiddenLabels:
+    """US-2 — Alternative and hidden labels in several languages, identity preserved.
+    FR-005 (any number of alternative/hidden labels per language), FR-007 (read them
+    back filtered by language), FR-004/SC-003 (an alternative or hidden label never
+    disturbs the concept's slug or URI)."""
+
+    @pytest.mark.django_db
+    def test_alt_labels_filtered_by_language(self, scheme):
+        # Two English alternatives plus a German one: alt_labels("en") returns the two
+        # English texts and nothing else (many-per-language, filtered by language).
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        concept.add_label(language="en", kind=ConceptLabel.Kind.ALTERNATIVE, text="Terrestrial heat flow")
+        concept.add_label(language="en", kind=ConceptLabel.Kind.ALTERNATIVE, text="Geothermal heat flow")
+        concept.add_label(language="de", kind=ConceptLabel.Kind.ALTERNATIVE, text="Terrestrischer Wärmefluss")
+        assert sorted(concept.alt_labels("en")) == ["Geothermal heat flow", "Terrestrial heat flow"]
+        assert concept.alt_labels("de") == ["Terrestrischer Wärmefluss"]
+
+    @pytest.mark.django_db
+    def test_alt_labels_absent_language_returns_empty_list(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        assert concept.alt_labels("fr") == []
+
+    @pytest.mark.django_db
+    def test_hidden_labels_stored_and_read_per_language(self, scheme):
+        # Hidden labels read back by language, and are held separately from
+        # alternatives — one kind never leaks into the other's reader (FR-005/FR-007).
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        concept.add_label(language="en", kind=ConceptLabel.Kind.HIDDEN, text="heatflow")
+        concept.add_label(language="en", kind=ConceptLabel.Kind.HIDDEN, text="heet flow")
+        concept.add_label(language="en", kind=ConceptLabel.Kind.ALTERNATIVE, text="Terrestrial heat flow")
+        assert sorted(concept.hidden_labels("en")) == ["heatflow", "heet flow"]
+        assert concept.hidden_labels("de") == []
+        # The two readers do not bleed into each other.
+        assert concept.alt_labels("en") == ["Terrestrial heat flow"]
+
+    @pytest.mark.django_db
+    def test_uri_and_slug_unchanged_by_alt_and_hidden_label_lifecycle(self, scheme):
+        # SC-003: mutating an alternative or hidden label — add, edit, remove — never
+        # disturbs the concept's slug or URI, in any language including the default one.
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        original_slug = concept.slug
+        original_uri = concept.uri
+
+        alt = concept.add_label(language="en", kind=ConceptLabel.Kind.ALTERNATIVE, text="Terrestrial heat flow")
+        hidden = concept.add_label(language="de", kind=ConceptLabel.Kind.HIDDEN, text="waermefluss")
+        concept.refresh_from_db()
+        assert concept.slug == original_slug
+        assert concept.uri == original_uri
+
+        alt.text = "Geothermal heat flow"
+        alt.save()
+        hidden.text = "wärmefluss"
+        hidden.save()
+        concept.refresh_from_db()
+        assert concept.slug == original_slug
+        assert concept.uri == original_uri
+        assert concept.alt_labels("en") == ["Geothermal heat flow"]
+        assert concept.hidden_labels("de") == ["wärmefluss"]
+
+        alt.delete()
+        hidden.delete()
+        concept.refresh_from_db()
+        assert concept.slug == original_slug
+        assert concept.uri == original_uri
+        assert concept.alt_labels("en") == []
+        assert concept.hidden_labels("de") == []
+
+
+class TestConceptDefinitionsAndNotes:
+    """US-3 — Definitions and the SKOS documentary notes, per language, repeatable,
+    identity preserved. FR-006 (a definition plus the six documentary note kinds —
+    scope/example/editorial/history/change/note — each language-tagged and repeatable),
+    FR-007 (read them back filtered by language and optionally kind), FR-004/SC-003 (a
+    note in any language, including the default one, never disturbs slug or URI).
+
+    Kinds are passed as their plain choice values (``"definition"``, ``"scope"``, …);
+    this keeps the test module importable while ``ConceptNote`` is being built, so only
+    these new tests go red — on the missing ``Concept`` methods — and the prior suites
+    stay green. The SKOS CURIE each kind carries is model metadata, exercised by US-7.
+    """
+
+    @pytest.mark.django_db
+    def test_definitions_readable_in_each_language(self, scheme):
+        # The definition is a ConceptNote of kind "definition"; definition(lang) reads
+        # back the value for that language (FR-006/FR-007).
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        concept.add_note(language="en", kind="definition", value="Heat energy moving through rock.")
+        concept.add_note(language="de", kind="definition", value="Wärme, die durch Gestein strömt.")
+        assert concept.definition("en") == "Heat energy moving through rock."
+        assert concept.definition("de") == "Wärme, die durch Gestein strömt."
+
+    @pytest.mark.django_db
+    def test_definition_absent_language_returns_none(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        assert concept.definition("fr") is None
+
+    @pytest.mark.django_db
+    def test_each_documentary_note_kind_stored_and_read_by_kind(self, scheme):
+        # Every documentary note kind is stored under its own kind and reads back only
+        # under that kind, in its own language (FR-006/FR-007).
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        by_kind = {
+            "scope": "Use for terrestrial heat only.",
+            "example": "Continental crust ~65 mW/m².",
+            "editorial": "Check the unit convention before publishing.",
+            "history": "Coined in mid-20th-century geophysics.",
+            "change": "Broadened from 'surface heat flow' in 2020.",
+            "note": "See also thermal gradient.",
+        }
+        for kind, value in by_kind.items():
+            concept.add_note(language="en", kind=kind, value=value)
+        for kind, value in by_kind.items():
+            assert concept.notes("en", kind=kind) == [value]
+            # A note reads back only in its own language.
+            assert concept.notes("de", kind=kind) == []
+
+    @pytest.mark.django_db
+    def test_notes_without_kind_returns_all_values_for_language(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        concept.add_note(language="en", kind="definition", value="A definition.")
+        concept.add_note(language="en", kind="scope", value="A scope note.")
+        concept.add_note(language="de", kind="note", value="Eine Notiz.")
+        assert sorted(concept.notes("en")) == ["A definition.", "A scope note."]
+        assert concept.notes("de") == ["Eine Notiz."]
+
+    @pytest.mark.django_db
+    def test_repeated_notes_of_a_kind_allowed(self, scheme):
+        # SKOS permits repeated notes of a kind per language; no uniqueness refuses them.
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        concept.add_note(language="en", kind="example", value="Continental crust ~65 mW/m².")
+        concept.add_note(language="en", kind="example", value="Oceanic crust ~100 mW/m².")
+        assert sorted(concept.notes("en", kind="example")) == [
+            "Continental crust ~65 mW/m².",
+            "Oceanic crust ~100 mW/m².",
+        ]
+
+    @pytest.mark.django_db
+    def test_uri_and_slug_unchanged_by_note_lifecycle(self, scheme):
+        # SC-003: adding, changing, or removing a note — even in the default language —
+        # never disturbs the concept's slug or URI.
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        original_slug = concept.slug
+        original_uri = concept.uri
+
+        note = concept.add_note(language="en", kind="definition", value="Heat energy moving through rock.")
+        concept.refresh_from_db()
+        assert concept.slug == original_slug
+        assert concept.uri == original_uri
+
+        note.value = "Heat energy conducted through rock."
+        note.save()
+        concept.refresh_from_db()
+        assert concept.slug == original_slug
+        assert concept.uri == original_uri
+        assert concept.definition("en") == "Heat energy conducted through rock."
+
+        note.delete()
+        concept.refresh_from_db()
+        assert concept.slug == original_slug
+        assert concept.uri == original_uri
+        assert concept.definition("en") is None
+
+
+class TestConceptSchemePerVocabularyDefaultLanguage:
+    """US-4 — Per-vocabulary default language. FR-009 (each vocabulary has a default
+    language that defaults to the app default and may be overridden per vocabulary),
+    FR-011 (the effective default language is the app default unless the vocabulary
+    overrides it), and the identity consequence: the vocabulary's effective default
+    language decides which preferred label — held on ``Concept.label`` — anchors its
+    concepts' slugs.
+
+    The override field (``ConceptScheme.default_language``) does not exist before
+    US-4, so these tests fail precisely on that missing field (an ``AttributeError``
+    reading it, a ``TypeError`` passing it) while every prior suite stays green — the
+    module still imports.
+    """
+
+    @pytest.mark.django_db
+    def test_no_override_anchors_identity_in_app_default(self, scheme):
+        # A vocabulary with no explicit override carries an empty default_language and
+        # falls back to the application's configured default (FR-009/FR-011).
+        assert scheme.default_language == ""
+        assert scheme.effective_default_language == settings.LANGUAGE_CODE
+
+        # Identity therefore anchors in the app default (English): Concept.label is the
+        # English preferred label and the slug derives from it; a German preferred label
+        # is an additive ConceptLabel row that never moves identity.
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        concept.add_label(language="de", kind=ConceptLabel.Kind.PREFERRED, text="Wärmefluss")
+        assert concept.slug == "heat-flow"
+        assert concept.preferred_label("en") == "Heat flow"
+        assert concept.preferred_label("de") == "Wärmefluss"
+
+    @pytest.mark.django_db
+    def test_override_to_de_derives_slug_from_de_label(self, db):
+        # A vocabulary overridden to German anchors identity in German: Concept.label
+        # now holds the German preferred label and the slug derives from it, while the
+        # English preferred label becomes the additive ConceptLabel row (FR-009 identity
+        # consequence, US-4 acceptance scenario 2).
+        scheme = ConceptScheme.objects.create(name="Geothermik", default_language="de")
+        assert scheme.effective_default_language == "de"
+
+        concept = Concept.objects.create(scheme=scheme, label="Wärmefluss")
+        concept.add_label(language="en", kind=ConceptLabel.Kind.PREFERRED, text="Heat flow")
+        assert concept.slug == "wärmefluss"
+        assert concept.uri == f"{scheme.uri}/wärmefluss"
+        assert concept.preferred_label("de") == "Wärmefluss"
+        assert concept.preferred_label("en") == "Heat flow"
+
+    @pytest.mark.django_db
+    def test_effective_default_language_returns_override_or_app_default(self, db):
+        # Reading the effective default language reports the explicit override when set,
+        # and the application default otherwise (US-4 acceptance scenario 3, FR-011).
+        overridden = ConceptScheme.objects.create(name="Geothermik", default_language="de")
+        assert overridden.default_language == "de"
+        assert overridden.effective_default_language == "de"
+
+        plain = ConceptScheme.objects.create(name="Geothermics")
+        assert plain.default_language == ""
+        assert plain.effective_default_language == settings.LANGUAGE_CODE
+
+    @pytest.mark.django_db
+    def test_default_language_is_freely_changeable_before_concepts_exist(self):
+        # While a vocabulary is still empty, its default language may be changed at
+        # will — nothing anchors to it yet, so there is no identity to disturb.
+        scheme = ConceptScheme.objects.create(name="Geothermik", default_language="de")
+        scheme.default_language = "fr"
+        scheme.save()
+        scheme.refresh_from_db()
+        assert scheme.default_language == "fr"
+        assert scheme.effective_default_language == "fr"
+
+    @pytest.mark.django_db
+    def test_default_language_is_frozen_once_concepts_exist(self):
+        # Once a concept exists, its identity anchor (Concept.label) is the preferred
+        # label in the vocabulary's effective default language. Changing the default
+        # language afterwards would silently reinterpret every anchor, so it is refused.
+        scheme = ConceptScheme.objects.create(name="Geothermics")  # effective default = en
+        Concept.objects.create(scheme=scheme, label="Heat flow")
+        scheme.default_language = "de"
+        with pytest.raises(ValidationError):
+            scheme.save()
+        # The stored value is unchanged.
+        scheme.refresh_from_db()
+        assert scheme.default_language == ""
+        assert scheme.effective_default_language == settings.LANGUAGE_CODE
+
+    @pytest.mark.django_db
+    def test_setting_default_language_to_the_same_value_is_allowed_with_concepts(self):
+        # Re-saving a scheme without actually changing its default language must not
+        # trip the freeze — the guard fires only on a genuine change.
+        scheme = ConceptScheme.objects.create(name="Geothermik", default_language="de")
+        Concept.objects.create(scheme=scheme, label="Wärmefluss")
+        scheme.name = "Geothermik (rev.)"  # an unrelated edit, same default_language
+        scheme.save()  # must not raise
+        scheme.refresh_from_db()
+        assert scheme.default_language == "de"
+
+
+class TestConceptOverridableSlug:
+    """US-5 — Overridable concept slug. FR-010 (a slug set explicitly is not
+    re-derived when the preferred label later changes, while a concept with no
+    explicit slug keeps tracking its default-language label), FR-012 (uniqueness
+    within a scheme holds for both derived and explicit slugs, collisions refused)."""
+
+    @pytest.mark.django_db
+    def test_explicit_slug_is_exactly_the_value_set_not_derived(self, scheme):
+        # Acceptance 1: an explicitly set slug is exactly the value given and is not
+        # derived from the preferred label (which would slugify to "heat-flow").
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        concept.set_slug("custom-identifier")
+        assert concept.slug == "custom-identifier"
+        assert concept.slug_is_manual is True
+        concept.refresh_from_db()
+        assert concept.slug == "custom-identifier"
+        assert concept.slug != "heat-flow"
+
+    @pytest.mark.django_db
+    def test_explicit_slug_survives_a_default_language_relabel(self, scheme):
+        # Acceptance 2: once set explicitly, changing the default-language preferred
+        # label does not move the slug.
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        concept.set_slug("hf")
+        concept.label = "Surface Heat Flow"
+        concept.save()
+        assert concept.slug == "hf"
+        concept.refresh_from_db()
+        assert concept.slug == "hf"
+
+    @pytest.mark.django_db
+    def test_slug_without_override_still_derives_from_label(self, scheme):
+        # Acceptance 3: a concept with no explicit slug derives it from the
+        # default-language label and keeps tracking it, exactly as in #15.
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        assert concept.slug == "heat-flow"
+        assert concept.slug_is_manual is False
+        concept.label = "Surface Heat Flow"
+        concept.save()
+        assert concept.slug == "surface-heat-flow"
+
+    @pytest.mark.django_db
+    def test_explicit_slug_colliding_within_scheme_is_refused(self, scheme):
+        # Acceptance 4: an explicit slug that collides with another concept's slug in
+        # the same scheme is refused, per the uniqueness rule inherited from #15.
+        Concept.objects.create(scheme=scheme, label="Heat Flow")  # slug "heat-flow"
+        other = Concept.objects.create(scheme=scheme, label="Gradient")
+        with pytest.raises(ValidationError):
+            other.set_slug("heat-flow")
+        assert scheme.concepts.filter(slug="heat-flow").count() == 1
+
+
+class TestReviewHardening:
+    """Fixes from the FS-002 review panel: manual-slug validation, the default-language
+    preferred backstop at ``save()``, runtime language validation (no settings-frozen
+    ``choices``), prefetch-friendly read helpers, and boundary-safe ``get_by_uri``."""
+
+    @pytest.mark.django_db
+    def test_explicit_slug_with_invalid_characters_is_refused(self, scheme):
+        # A manual slug is stored verbatim but must still be a well-formed single-segment
+        # slug: a '/' or whitespace would corrupt the composed URI and break get_by_uri.
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        with pytest.raises(ValidationError):
+            concept.set_slug("foo/bar")
+        with pytest.raises(ValidationError):
+            concept.set_slug("has spaces")
+        # A valid explicit slug still works (regression guard).
+        concept.set_slug("hf-1")
+        assert concept.slug == "hf-1"
+
+    @pytest.mark.django_db
+    def test_default_language_preferred_row_is_refused_even_via_create(self, scheme):
+        # The default-language-preferred rule is backstopped at save(), so even
+        # .objects.create() (which bypasses full_clean) cannot plant a second identity
+        # anchor alongside Concept.label.
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")  # 'en' anchor
+        with pytest.raises(ValidationError):
+            ConceptLabel.objects.create(
+                concept=concept, language="en", kind=ConceptLabel.Kind.PREFERRED, text="Heat flow (dup)"
+            )
+
+    @pytest.mark.django_db
+    def test_language_outside_the_configured_set_is_refused(self, scheme):
+        # choices=settings.LANGUAGES was dropped (so the migration does not freeze the
+        # maintainer's LANGUAGES); an unconfigured language is still refused at runtime.
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        with pytest.raises(ValidationError):
+            concept.add_label(language="xx", kind=ConceptLabel.Kind.ALTERNATIVE, text="nope")
+        with pytest.raises(ValidationError):
+            concept.add_note(language="xx", kind=ConceptNote.Kind.NOTE, value="nope")
+
+    @pytest.mark.django_db
+    def test_scheme_default_language_rejects_an_unconfigured_language(self):
+        with pytest.raises(ValidationError):
+            ConceptScheme.objects.create(name="Bad", default_language="xx")
+
+    @pytest.mark.django_db
+    def test_read_helpers_stay_cheap_under_prefetch_related(self, django_assert_num_queries, scheme):
+        # The read helpers iterate the cached related set, so prefetch_related collapses
+        # the FR-007 read-by-language path to zero extra queries per concept (a .filter()
+        # would bypass the cache and re-hit the DB per call).
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        concept.add_label(language="de", kind=ConceptLabel.Kind.PREFERRED, text="Wärmefluss")
+        concept.add_label(language="en", kind=ConceptLabel.Kind.ALTERNATIVE, text="terrestrial heat flow")
+        concept.add_note(language="de", kind=ConceptNote.Kind.DEFINITION, value="Wärmestromdichte.")
+
+        # A bulk caller select_relates the scheme (preferred_label consults its effective
+        # default language) and prefetches the label/note sets; the helpers then add no
+        # queries of their own.
+        prefetched = (
+            Concept.objects.select_related("scheme").prefetch_related("labels", "concept_notes").get(pk=concept.pk)
+        )
+        with django_assert_num_queries(0):
+            assert prefetched.preferred_label("de") == "Wärmefluss"
+            assert prefetched.alt_labels("en") == ["terrestrial heat flow"]
+            assert prefetched.hidden_labels("en") == []
+            assert prefetched.definition("de") == "Wärmestromdichte."
+            assert prefetched.notes("de") == ["Wärmestromdichte."]
+
+    @pytest.mark.django_db
+    def test_get_by_uri_rejects_a_sibling_prefix_path(self, scheme):
+        # A URI that merely shares the base as a raw prefix ('<base>X/...') must not be
+        # treated as in-base — the match is on a '/'-terminated base.
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        base = conf.get_base_uri()
+        sibling = f"{base}X/{scheme.slug}/{concept.slug}"
+        with pytest.raises(Concept.DoesNotExist):
+            Concept.objects.get_by_uri(sibling)
+        # The genuine URI still resolves (regression guard).
+        assert Concept.objects.get_by_uri(concept.uri) == concept
