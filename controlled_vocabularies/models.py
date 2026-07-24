@@ -5,8 +5,10 @@ In this slice a vocabulary is a :class:`ConceptScheme`; its identifier (URI) is
 computed from a configured base address and the slug, never stored (research R1).
 """
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Q
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 
@@ -51,6 +53,16 @@ class ConceptScheme(models.Model):
     def uri(self) -> str:
         """The scheme's URI: the configured base address plus its slug."""
         return f"{conf.get_base_uri()}/{self.slug}"
+
+    @property
+    def effective_default_language(self) -> str:
+        """The language whose preferred label anchors this vocabulary's concepts.
+
+        Falls back to the application's configured default language
+        (``settings.LANGUAGE_CODE``). A per-vocabulary override is a later story
+        (US-4); until then every vocabulary anchors identity in the app default.
+        """
+        return settings.LANGUAGE_CODE
 
     def save(self, *args, **kwargs):
         """Derive the slug from ``name`` and refuse an empty or colliding slug."""
@@ -120,7 +132,11 @@ class Concept(models.Model):
     label = models.CharField(
         max_length=255,
         verbose_name=_("preferred label"),
-        help_text=_("A human-readable preferred label for this concept. The slug is automatically derived from this."),
+        help_text=_(
+            "The preferred label in the vocabulary's effective default language. "
+            "It is the concept's identity anchor: the slug is derived from it, and "
+            "preferred labels in other languages are held as separate labels."
+        ),
     )
     slug = models.SlugField(
         max_length=255,
@@ -166,3 +182,108 @@ class Concept(models.Model):
                 }
             )
         super().save(*args, **kwargs)
+
+    def preferred_label(self, language: str | None = None) -> str | None:
+        """Return this concept's preferred label in ``language``.
+
+        ``language=None`` means the scheme's effective default language, whose
+        preferred label is :attr:`label` itself. For any other language the
+        preferred label is the matching :class:`ConceptLabel` row's text, or
+        ``None`` when the concept has no preferred label in that language (FR-007).
+        """
+        if language is None or language == self.scheme.effective_default_language:
+            return self.label
+        row = self.labels.filter(language=language, kind=ConceptLabel.Kind.PREFERRED).first()
+        return row.text if row is not None else None
+
+    def add_label(self, language: str, kind: str, text: str) -> "ConceptLabel":
+        """Add a label in ``language`` and return the created :class:`ConceptLabel`.
+
+        The row is validated before it is saved: a second preferred label in a
+        language that already has one is refused (FR-001), as is a preferred label
+        in the effective default language (that one lives on :attr:`label`). Editing
+        another language's label never touches this concept's slug or URI (FR-004).
+        """
+        row = ConceptLabel(concept=self, language=language, kind=kind, text=text)
+        row.full_clean()
+        row.save()
+        return row
+
+
+class ConceptLabel(models.Model):
+    """A language-tagged label for a concept, other than the identity anchor.
+
+    The concept's preferred label in the vocabulary's effective default language
+    is :attr:`Concept.label`; every other preferred label — and, in later stories,
+    alternative and hidden labels — is one of these rows. At most one ``PREFERRED``
+    label may exist per (concept, language), enforced by a partial unique constraint.
+    """
+
+    class Kind(models.TextChoices):
+        """The lexical role of a label (SKOS ``prefLabel`` / ``altLabel`` / ``hiddenLabel``)."""
+
+        PREFERRED = "preferred", _("preferred")
+        ALTERNATIVE = "alternative", _("alternative")
+        HIDDEN = "hidden", _("hidden")
+
+    concept = models.ForeignKey(
+        Concept,
+        on_delete=models.CASCADE,
+        related_name="labels",
+        verbose_name=_("concept"),
+        help_text=_("The concept this label names."),
+    )
+    language = models.CharField(
+        max_length=16,
+        choices=settings.LANGUAGES,
+        verbose_name=_("language"),
+        help_text=_("The language this label is written in, from the application's configured languages."),
+    )
+    kind = models.CharField(
+        max_length=16,
+        choices=Kind.choices,
+        verbose_name=_("kind"),
+        help_text=_("Whether this is the language's preferred label or an alternative or hidden one."),
+    )
+    text = models.CharField(
+        max_length=255,
+        verbose_name=_("text"),
+        help_text=_("The label text, as it reads in this language."),
+    )
+
+    class Meta:
+        verbose_name = _("label")
+        verbose_name_plural = _("labels")
+        ordering = ("language", "kind", "text")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["concept", "language"],
+                # Kind.PREFERRED by value: a nested class body cannot see its
+                # sibling Kind, so the enum's string value is used directly.
+                condition=Q(kind="preferred"),
+                name="one_preferred_label_per_language",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.text
+
+    def clean(self):
+        """Refuse a preferred label in the scheme's effective default language.
+
+        That language's preferred label is :attr:`Concept.label`, the identity
+        anchor; holding it here too would split identity across two places.
+        """
+        super().clean()
+        if self.kind == self.Kind.PREFERRED and self.language == self.concept.scheme.effective_default_language:
+            raise ValidationError(
+                {
+                    "language": ValidationError(
+                        _(
+                            "The preferred label in the default language '%(language)s' is the "
+                            "concept's own label, not a separate label."
+                        ),
+                        params={"language": self.language},
+                    )
+                }
+            )

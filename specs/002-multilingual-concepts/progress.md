@@ -37,3 +37,20 @@ human narrative.
   (`ImportError: cannot import name 'ConceptLabel'`) — red for the right reason (API not yet built).
 - **Next**: T003 — implement `ConceptLabel`, `effective_default_language`, `preferred_label`, `add_label`.
 - **Watch**: none.
+
+## 2026-07-24 · Implementer US-1 · T003
+
+- **Did**: In `controlled_vocabularies/models.py` — added `ConceptScheme.effective_default_language`
+  (returns `settings.LANGUAGE_CODE`; the per-scheme override is US-4, no field added here); clarified
+  `Concept.label` help_text (identity anchor in the effective default language); added
+  `Concept.preferred_label(language=None)` and `Concept.add_label(language, kind, text)`; added the
+  new `ConceptLabel` model (FK `related_name="labels"`, `language`/`kind`/`text`, `Kind` TextChoices
+  PREFERRED/ALTERNATIVE/HIDDEN, partial `UniqueConstraint` `one_preferred_label_per_language`, and a
+  `clean()` rejecting a PREFERRED row in the effective default language). All new fields carry lazy
+  `verbose_name` + non-empty `help_text`; validation messages use named placeholders.
+- **Verified**: `poetry run pytest tests/test_models.py -q` → 52 passed (the 8 new US-1 tests green);
+  `poetry run ruff check .` clean; `poetry run ruff format --check .` clean; `poetry run mypy` clean.
+  (Table exists because the T004 migration was generated to run the DB tests.)
+- **Next**: T004 — commit the migration and run the full verify suite.
+- **Watch**: `add_label` validates via `full_clean()` — the duplicate-preferred refusal rides on
+  `validate_constraints()` (partial UniqueConstraint), the default-language refusal on `clean()`.

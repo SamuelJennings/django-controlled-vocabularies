@@ -85,3 +85,23 @@ the fine grain follows. This file is the durable record of why the spec reads as
   here are computed and dynamic while unpublished.
 - **Notation codes**: language-independent, no consumer here; first feature that needs it models it.
 - **Relations (#17), collections (#18), lifecycle (#19), RDF import/export (R2/R4)**: sibling/later.
+
+## Implementation (US-1, T002–T004)
+
+12. **`add_label` validates through `Model.full_clean()`.** `Concept.add_label` builds an unsaved
+    `ConceptLabel`, calls `full_clean()`, then `save()`. **Why**: one call routes both US-1 refusals to
+    `ValidationError` — the second-preferred-per-language case via `validate_constraints()` (the partial
+    `UniqueConstraint`), and the preferred-in-default-language case via the model's `clean()`. No
+    hand-rolled duplicate check that could drift from the DB constraint. **Revisit if**: bulk label
+    authoring needs to skip per-row validation for performance (then batch-validate explicitly).
+
+13. **Partial `UniqueConstraint` condition uses the literal `"preferred"`, not `Kind.PREFERRED`.**
+    In `ConceptLabel.Meta` the condition is `Q(kind="preferred")`. **Why**: a nested `Meta` class body
+    cannot reference its sibling nested `Kind` enum (Python class-scoping), and `ConceptLabel` is not
+    yet bound during its own body. The literal equals `Kind.PREFERRED`'s value and is documented inline.
+    **Revisit if**: the `Kind` values are ever renamed — the literal must move with them.
+
+14. **`Kind` carries PREFERRED/ALTERNATIVE/HIDDEN now; only PREFERRED is exercised in US-1.**
+    **Why**: `ConceptLabel` is the shared label model US-2 builds alt/hidden labels on (data-model.md);
+    fixing its full lexical vocabulary once avoids a churn migration. US-1 adds no alt/hidden *helpers*
+    (those are US-2). **Revisit if**: US-2 changes the label taxonomy.
