@@ -196,13 +196,34 @@ class Concept(models.Model):
         row = self.labels.filter(language=language, kind=ConceptLabel.Kind.PREFERRED).first()
         return row.text if row is not None else None
 
+    def alt_labels(self, language: str) -> list[str]:
+        """Return this concept's alternative label texts in ``language``.
+
+        A concept may carry any number of alternative labels per language (FR-005);
+        this returns just those in ``language``, ordered as the model orders labels,
+        and an empty list when the concept has none in that language (FR-007).
+        """
+        return list(
+            self.labels.filter(language=language, kind=ConceptLabel.Kind.ALTERNATIVE).values_list("text", flat=True)
+        )
+
+    def hidden_labels(self, language: str) -> list[str]:
+        """Return this concept's hidden label texts in ``language``.
+
+        Hidden labels — misspellings and search-only variants — are held separately
+        from alternatives; like them they may occur any number of times per language
+        (FR-005) and read back an empty list when absent (FR-007).
+        """
+        return list(self.labels.filter(language=language, kind=ConceptLabel.Kind.HIDDEN).values_list("text", flat=True))
+
     def add_label(self, language: str, kind: str, text: str) -> "ConceptLabel":
-        """Add a label in ``language`` and return the created :class:`ConceptLabel`.
+        """Add a label of any :class:`ConceptLabel.Kind` and return the created row.
 
         The row is validated before it is saved: a second preferred label in a
-        language that already has one is refused (FR-001), as is a preferred label
-        in the effective default language (that one lives on :attr:`label`). Editing
-        another language's label never touches this concept's slug or URI (FR-004).
+        language that already has one is refused (FR-001), as is a preferred label in
+        the effective default language (that one lives on :attr:`label`). Alternative
+        and hidden labels carry no such uniqueness — any number may share a language
+        (FR-005). Adding a label never touches this concept's slug or URI (FR-004).
         """
         row = ConceptLabel(concept=self, language=language, kind=kind, text=text)
         row.full_clean()

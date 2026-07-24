@@ -509,7 +509,7 @@ class TestConceptAlternativeAndHiddenLabels:
         concept.add_label(language="en", kind=ConceptLabel.Kind.HIDDEN, text="heatflow")
         concept.add_label(language="en", kind=ConceptLabel.Kind.HIDDEN, text="heet flow")
         concept.add_label(language="en", kind=ConceptLabel.Kind.ALTERNATIVE, text="Terrestrial heat flow")
-        assert sorted(concept.hidden_labels("en")) == ["heet flow", "heatflow"]
+        assert sorted(concept.hidden_labels("en")) == ["heatflow", "heet flow"]
         assert concept.hidden_labels("de") == []
         # The two readers do not bleed into each other.
         assert concept.alt_labels("en") == ["Terrestrial heat flow"]
