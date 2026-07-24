@@ -699,3 +699,55 @@ class TestConceptSchemePerVocabularyDefaultLanguage:
         plain = ConceptScheme.objects.create(name="Geothermics")
         assert plain.default_language == ""
         assert plain.effective_default_language == settings.LANGUAGE_CODE
+
+
+class TestConceptOverridableSlug:
+    """US-5 — Overridable concept slug. FR-010 (a slug set explicitly is not
+    re-derived when the preferred label later changes, while a concept with no
+    explicit slug keeps tracking its default-language label), FR-012 (uniqueness
+    within a scheme holds for both derived and explicit slugs, collisions refused)."""
+
+    @pytest.mark.django_db
+    def test_explicit_slug_is_exactly_the_value_set_not_derived(self, scheme):
+        # Acceptance 1: an explicitly set slug is exactly the value given and is not
+        # derived from the preferred label (which would slugify to "heat-flow").
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        concept.set_slug("custom-identifier")
+        assert concept.slug == "custom-identifier"
+        assert concept.slug_is_manual is True
+        concept.refresh_from_db()
+        assert concept.slug == "custom-identifier"
+        assert concept.slug != "heat-flow"
+
+    @pytest.mark.django_db
+    def test_explicit_slug_survives_a_default_language_relabel(self, scheme):
+        # Acceptance 2: once set explicitly, changing the default-language preferred
+        # label does not move the slug.
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        concept.set_slug("hf")
+        concept.label = "Surface Heat Flow"
+        concept.save()
+        assert concept.slug == "hf"
+        concept.refresh_from_db()
+        assert concept.slug == "hf"
+
+    @pytest.mark.django_db
+    def test_slug_without_override_still_derives_from_label(self, scheme):
+        # Acceptance 3: a concept with no explicit slug derives it from the
+        # default-language label and keeps tracking it, exactly as in #15.
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        assert concept.slug == "heat-flow"
+        assert concept.slug_is_manual is False
+        concept.label = "Surface Heat Flow"
+        concept.save()
+        assert concept.slug == "surface-heat-flow"
+
+    @pytest.mark.django_db
+    def test_explicit_slug_colliding_within_scheme_is_refused(self, scheme):
+        # Acceptance 4: an explicit slug that collides with another concept's slug in
+        # the same scheme is refused, per the uniqueness rule inherited from #15.
+        Concept.objects.create(scheme=scheme, label="Heat Flow")  # slug "heat-flow"
+        other = Concept.objects.create(scheme=scheme, label="Gradient")
+        with pytest.raises(ValidationError):
+            other.set_slug("heat-flow")
+        assert scheme.concepts.filter(slug="heat-flow").count() == 1
