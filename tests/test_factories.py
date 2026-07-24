@@ -117,9 +117,7 @@ def test_multilingual_trait_yields_preferred_labels_in_more_than_one_language():
     assert default_pref
     assert german_pref
     assert default_pref != german_pref
-    languages_with_a_preferred_label = {
-        language for language in ("en", "de") if concept.preferred_label(language)
-    }
+    languages_with_a_preferred_label = {language for language in ("en", "de") if concept.preferred_label(language)}
     assert len(languages_with_a_preferred_label) > 1
 
 
