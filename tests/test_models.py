@@ -868,3 +868,92 @@ class TestReviewHardening:
             Concept.objects.get_by_uri(sibling)
         # The genuine URI still resolves (regression guard).
         assert Concept.objects.get_by_uri(concept.uri) == concept
+
+
+class TestBroaderNarrower:
+    """US-1 (FS-003) — a broader/narrower hierarchy, navigable both ways.
+
+    ``add_broader`` asserts one direction; ``narrower`` is derived from it, never
+    asserted separately. A concept may sit under several broader concepts
+    (polyhierarchy). Adding or removing a link never moves a concept's identity
+    (FR-004). Self, duplicate, and cross-vocabulary edges are refused.
+    """
+
+    @pytest.mark.django_db
+    def test_broader_readable_and_narrower_derived(self, scheme):
+        igneous = Concept.objects.create(scheme=scheme, label="Igneous rock")
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        granite.add_broader(igneous)
+        # one assertion, both directions
+        assert igneous in granite.broader()
+        assert granite in igneous.narrower()
+        # nothing spurious in the empty directions
+        assert list(granite.narrower()) == []
+        assert list(igneous.broader()) == []
+
+    @pytest.mark.django_db
+    def test_polyhierarchy_several_broader(self, scheme):
+        igneous = Concept.objects.create(scheme=scheme, label="Igneous rock")
+        plutonic = Concept.objects.create(scheme=scheme, label="Plutonic rock")
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        granite.add_broader(igneous)
+        granite.add_broader(plutonic)
+        assert set(granite.broader()) == {igneous, plutonic}
+
+    @pytest.mark.django_db
+    def test_remove_broader_clears_both_directions(self, scheme):
+        igneous = Concept.objects.create(scheme=scheme, label="Igneous rock")
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        granite.add_broader(igneous)
+        granite.remove_broader(igneous)
+        assert list(granite.broader()) == []
+        assert list(igneous.narrower()) == []
+        # removing an absent edge is a no-op
+        granite.remove_broader(igneous)
+
+    @pytest.mark.django_db
+    def test_self_broader_is_refused(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        with pytest.raises(ValidationError):
+            granite.add_broader(granite)
+
+    @pytest.mark.django_db
+    def test_duplicate_broader_is_refused(self, scheme):
+        igneous = Concept.objects.create(scheme=scheme, label="Igneous rock")
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        granite.add_broader(igneous)
+        with pytest.raises(ValidationError):
+            granite.add_broader(igneous)
+        # the pair is held once
+        assert list(granite.broader()) == [igneous]
+
+    @pytest.mark.django_db
+    def test_reverse_broader_is_a_distinct_edge(self, scheme):
+        # a broader b and b broader a are different edges (a 2-cycle), permitted:
+        # the cycle deferral means no traversal, and the ordered unique key differs.
+        a = Concept.objects.create(scheme=scheme, label="A")
+        b = Concept.objects.create(scheme=scheme, label="B")
+        a.add_broader(b)
+        b.add_broader(a)  # must not raise
+        assert b in a.broader()
+        assert a in b.broader()
+
+    @pytest.mark.django_db
+    def test_cross_scheme_broader_is_refused(self, scheme):
+        other = ConceptSchemeFactory()
+        here = Concept.objects.create(scheme=scheme, label="Granite")
+        there = Concept.objects.create(scheme=other, label="Quartz")
+        with pytest.raises(ValidationError):
+            here.add_broader(there)
+
+    @pytest.mark.django_db
+    def test_adding_and_removing_broader_leaves_identity_unchanged(self, scheme):
+        igneous = Concept.objects.create(scheme=scheme, label="Igneous rock")
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        uri_before, slug_before = granite.uri, granite.slug
+        granite.add_broader(igneous)
+        granite.refresh_from_db()
+        assert (granite.uri, granite.slug) == (uri_before, slug_before)
+        granite.remove_broader(igneous)
+        granite.refresh_from_db()
+        assert (granite.uri, granite.slug) == (uri_before, slug_before)

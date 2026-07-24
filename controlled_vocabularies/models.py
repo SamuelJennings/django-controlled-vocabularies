@@ -9,7 +9,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_unicode_slug
 from django.db import models
-from django.db.models import Q
+from django.db.models import F, Q
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 
@@ -391,6 +391,64 @@ class Concept(models.Model):
         row.save()
         return row
 
+    # --- relations (FS-003) ------------------------------------------------
+    # Concepts form an intra-vocabulary graph via ConceptRelation. Only one
+    # direction of the hierarchy is stored (a BROADER row: source is the
+    # narrower/child, target is the broader/parent); the narrower direction is
+    # derived by reading from the target side, so the data can never assert one
+    # direction without the other (research R1). `related` is symmetric and
+    # stored once. Adding or removing a relation never touches this concept's
+    # slug or URI (FR-004/FR-005).
+
+    def broader(self) -> "models.QuerySet[Concept]":
+        """Concepts one step broader than this one (FR-001).
+
+        The targets of this concept's BROADER rows. Empty when it has no broader
+        concept (FR-004). Returns a queryset so a caller can filter or order further.
+        """
+        return Concept.objects.filter(
+            relations_as_target__source=self,
+            relations_as_target__kind=ConceptRelation.Kind.BROADER,
+        )
+
+    def narrower(self) -> "models.QuerySet[Concept]":
+        """Concepts one step narrower than this one — the derived inverse (FR-002).
+
+        The sources of BROADER rows whose target is this concept. Never asserted
+        directly: it is read back from the single stored broader edge.
+        """
+        return Concept.objects.filter(
+            relations_as_source__target=self,
+            relations_as_source__kind=ConceptRelation.Kind.BROADER,
+        )
+
+    def add_broader(self, other: "Concept") -> "ConceptRelation":
+        """Give this concept a broader concept and return the created relation (FR-001).
+
+        Records ``self skos:broader other`` — this concept becomes the narrower one,
+        ``other`` the broader. Validated before saving: a self, cross-vocabulary,
+        duplicate, or disjointness-violating edge is refused with a translatable
+        message (FR-006/FR-009/FR-007/FR-008). Never touches this concept's slug/URI.
+        """
+        return self._add_relation(other, ConceptRelation.Kind.BROADER)
+
+    def remove_broader(self, other: "Concept") -> None:
+        """Remove the broader edge to ``other`` if present; a no-op otherwise (FR-005)."""
+        ConceptRelation.objects.filter(source=self, target=other, kind=ConceptRelation.Kind.BROADER).delete()
+
+    def _add_relation(self, other: "Concept", kind: str) -> "ConceptRelation":
+        """Create, validate, and save a relation of ``kind`` from this concept to ``other``.
+
+        The write path for the ``add_*`` helpers: it runs ``full_clean`` so the
+        friendly validation messages fire, then saves (the model ``save`` backstops
+        the invariants that have no DB constraint for the ``create``/factory path).
+        Related edges are canonicalised by the model before persistence (research R2).
+        """
+        row = ConceptRelation(source=self, target=other, kind=kind)
+        row.full_clean()
+        row.save()
+        return row
+
 
 class ConceptLabel(models.Model):
     """A language-tagged label for a concept, other than the identity anchor.
@@ -601,3 +659,137 @@ class ConceptNote(models.Model):
                     )
                 }
             )
+
+
+class ConceptRelation(models.Model):
+    """A directed, intra-vocabulary link between two concepts (a SKOS semantic relation).
+
+    Concepts form a graph: a ``broader``/``narrower`` hierarchy (an inverse pair) and a
+    symmetric ``related`` association. Only one direction of the hierarchy is stored — a
+    ``BROADER`` row where :attr:`source` is the narrower/child and :attr:`target` the
+    broader/parent — and ``narrower`` is read back from the target side, so the data can
+    never assert one direction without the other (``docs/brainstorm.md``; research R1). A
+    ``related`` row is symmetric and stored once, its endpoints ordered by primary key so
+    an assertion in either order resolves to the same row (research R2). Cross-vocabulary
+    links are mappings, a separate mechanism, and are refused here (FR-009).
+    """
+
+    class Kind(models.TextChoices):
+        """The stored relation kind. ``narrower`` is not stored — it is the inverse read of ``broader``."""
+
+        BROADER = "broader", _("broader")
+        RELATED = "related", _("related")
+
+    source = models.ForeignKey(
+        Concept,
+        on_delete=models.CASCADE,
+        related_name="relations_as_source",
+        verbose_name=_("source concept"),
+        help_text=_(
+            "One end of the relation. For a broader link this is the narrower (child) concept; "
+            "for a related link it is the lower-numbered of the pair."
+        ),
+    )
+    target = models.ForeignKey(
+        Concept,
+        on_delete=models.CASCADE,
+        related_name="relations_as_target",
+        verbose_name=_("target concept"),
+        help_text=_(
+            "The other end of the relation. For a broader link this is the broader (parent) concept; "
+            "for a related link it is the higher-numbered of the pair."
+        ),
+    )
+    kind = models.CharField(
+        max_length=16,
+        choices=Kind.choices,
+        verbose_name=_("kind"),
+        help_text=_("The kind of link: a broader/narrower hierarchy edge, or a symmetric related association."),
+    )
+
+    class Meta:
+        verbose_name = _("concept relation")
+        verbose_name_plural = _("concept relations")
+        ordering = ("source", "kind", "target")
+        constraints = [
+            # No duplicate edge (FR-007). With related's PK-canonicalisation this also
+            # blocks a mirror-order related duplicate. A reversed *broader* edge is a
+            # different, permitted edge (a 2-cycle), so the ordered triple is exact.
+            models.UniqueConstraint(fields=["source", "target", "kind"], name="unique_concept_relation"),
+            # No self-relation (FR-006), enforced at the database.
+            models.CheckConstraint(condition=~Q(source=F("target")), name="concept_relation_not_self"),
+        ]
+        indexes = [
+            # The reverse reads — derived narrower (query by target, kind=BROADER) and the
+            # incoming half of related (FR-012, research R6). Source-leading is covered by
+            # the unique constraint; both FKs are auto-indexed. Deliberate per Article XIII.
+            models.Index(fields=["target", "kind"], name="cv_relation_target_kind_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.source} {self.kind} {self.target}"
+
+    def _canonicalise(self) -> None:
+        """Order a ``related`` row's endpoints by primary key so it is stored once.
+
+        ``related`` is symmetric; storing ``(a, b)`` and ``(b, a)`` as separate rows would
+        let the same association exist twice. Ordering the endpoints by PK gives a single
+        canonical form, so the ordinary unique constraint catches a mirror-order duplicate
+        (research R2). Broader rows are directional and left untouched. Both endpoints are
+        always persisted before a relation is made, so the PKs exist.
+        """
+        if (
+            self.kind == self.Kind.RELATED
+            and self.source_id is not None
+            and self.target_id is not None
+            and self.source_id > self.target_id
+        ):
+            self.source_id, self.target_id = self.target_id, self.source_id
+
+    def _reject_self(self) -> None:
+        """Refuse a relation from a concept to itself (FR-006).
+
+        The DB ``CheckConstraint`` is the backstop; this raises the curator-facing message.
+        """
+        if self.source_id is not None and self.source_id == self.target_id:
+            raise ValidationError(_("A concept cannot be in a relation with itself."))
+
+    def _reject_cross_scheme(self) -> None:
+        """Refuse a relation whose two concepts belong to different vocabularies (FR-009).
+
+        Broader/narrower/related are intra-vocabulary; a cross-vocabulary link is a mapping,
+        a separate mechanism that is out of scope. No single-table or cross-table DB
+        constraint can express this, so it is enforced here and backstopped in :meth:`save`.
+        The message names both vocabularies through *named* placeholders (decisions.md §9).
+        """
+        if self.source_id is None or self.target_id is None:
+            return
+        if self.source.scheme_id != self.target.scheme_id:
+            raise ValidationError(
+                ValidationError(
+                    _(
+                        "A relation can only join concepts in the same vocabulary; "
+                        "'%(source)s' and '%(target)s' are in different vocabularies."
+                    ),
+                    params={"source": self.source.scheme.name, "target": self.target.scheme.name},
+                )
+            )
+
+    def clean(self):
+        """Validate the relation invariants with translatable messages (``full_clean`` path)."""
+        super().clean()
+        self._canonicalise()
+        self._reject_self()
+        self._reject_cross_scheme()
+
+    def save(self, *args, **kwargs):
+        """Persist the relation, backstopping the constraint-less invariants.
+
+        ``clean()`` runs only under ``full_clean``; ``.objects.create()``/``bulk_create``/
+        factories bypass it, so canonicalisation and the same-vocabulary / not-self rules
+        are re-applied here to keep a bad row out through any save path (the #15/#16 pattern).
+        """
+        self._canonicalise()
+        self._reject_self()
+        self._reject_cross_scheme()
+        super().save(*args, **kwargs)
