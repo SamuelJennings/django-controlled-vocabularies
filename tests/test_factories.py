@@ -137,3 +137,45 @@ def test_multilingual_trait_uses_the_concepts_own_scheme_default_language():
     concept = ConceptFactory(multilingual=True)
     assert concept.labels.filter(language="de", kind=ConceptLabel.Kind.PREFERRED).exists()
     assert concept.preferred_label("en") == concept.label
+
+
+# --- FS-003 US-4: relation scaffolding ---
+
+
+@pytest.mark.django_db
+def test_relation_factory_produces_a_broader_edge_navigable_both_ways():
+    from controlled_vocabularies.models import ConceptRelation
+    from tests.factories import ConceptRelationFactory
+
+    relation = ConceptRelationFactory()
+    assert isinstance(relation, ConceptRelation)
+    assert relation.pk is not None
+    assert relation.kind == ConceptRelation.Kind.BROADER
+    # both endpoints share one vocabulary, and the edge reads both ways
+    assert relation.source.scheme_id == relation.target.scheme_id
+    assert relation.target in relation.source.broader()
+    assert relation.source in relation.target.narrower()
+
+
+@pytest.mark.django_db
+def test_relation_factory_builds_a_single_related_association():
+    from controlled_vocabularies.models import ConceptRelation
+    from tests.factories import ConceptRelationFactory
+
+    relation = ConceptRelationFactory(kind=ConceptRelation.Kind.RELATED)
+    assert relation.source in relation.target.related()
+    assert relation.target in relation.source.related()
+    assert ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED).count() == 1
+
+
+@pytest.mark.django_db
+def test_relation_graph_helper_yields_a_navigable_graph():
+    from tests.factories import relation_graph
+
+    graph = relation_graph()
+    assert graph["parent"] in graph["child"].broader()
+    assert graph["child"] in graph["parent"].narrower()
+    assert graph["right"] in graph["left"].related()
+    # everything is in one vocabulary
+    schemes = {c.scheme_id for c in (graph["parent"], graph["child"], graph["left"], graph["right"])}
+    assert len(schemes) == 1

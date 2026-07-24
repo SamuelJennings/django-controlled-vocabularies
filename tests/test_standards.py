@@ -18,7 +18,7 @@ held to the same standard automatically.
 """
 
 import pytest
-from django.core.exceptions import ValidationError
+from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.db.models import Model, UniqueConstraint
 from django.utils.functional import Promise
 
@@ -26,10 +26,11 @@ from controlled_vocabularies.models import (
     Concept,
     ConceptLabel,
     ConceptNote,
+    ConceptRelation,
     ConceptScheme,
 )
 
-ALL_MODELS = [ConceptScheme, Concept, ConceptLabel, ConceptNote]
+ALL_MODELS = [ConceptScheme, Concept, ConceptLabel, ConceptNote, ConceptRelation]
 
 
 def _editable_fields(model: type[Model]):
@@ -154,3 +155,79 @@ def test_concept_note_and_label_fks_are_indexed():
     # FKs are auto-indexed; assert it holds for the two new child models.
     assert ConceptLabel._meta.get_field("concept").db_index is True
     assert ConceptNote._meta.get_field("concept").db_index is True
+
+
+# --- FS-003: the relation model meets the same metadata + indexing standard ---
+
+
+def _authored_nonfield_error(exc: ValidationError) -> ValidationError:
+    """The authored non-field ValidationError (params-bearing, else the first).
+
+    The relation invariants raise non-field errors under ``__all__``; ``full_clean`` may
+    append the DB constraint's own message alongside ours, so pick the one we authored.
+    """
+    errors = exc.error_dict[NON_FIELD_ERRORS]
+    return next((e for e in errors if getattr(e, "params", None)), errors[0])
+
+
+@pytest.mark.django_db
+def test_self_relation_message_is_translatable():
+    # FR-006: a self message names nothing dynamic, so it carries no placeholder — but it
+    # must still be a lazily-translatable string, not a bare str.
+    scheme = ConceptScheme.objects.create(name="Rock types")
+    granite = Concept.objects.create(scheme=scheme, label="Granite")
+    with pytest.raises(ValidationError) as excinfo:
+        granite.add_broader(granite)
+    err = _authored_nonfield_error(excinfo.value)
+    assert isinstance(err.message, Promise), "self-relation message is not lazily translatable"
+
+
+@pytest.mark.django_db
+def test_cross_vocabulary_relation_message_uses_named_placeholders():
+    # FR-009: the refusal names both vocabularies via *named* placeholders so the msgid stays static.
+    rocks = ConceptScheme.objects.create(name="Rock types")
+    minerals = ConceptScheme.objects.create(name="Minerals")
+    granite = Concept.objects.create(scheme=rocks, label="Granite")
+    quartz = Concept.objects.create(scheme=minerals, label="Quartz")
+    with pytest.raises(ValidationError) as excinfo:
+        granite.add_related(quartz)
+    err = _authored_nonfield_error(excinfo.value)
+    assert isinstance(err.message, Promise), "cross-vocabulary message is not lazily translatable"
+    assert "%(source)s" in str(err.message) and "%(target)s" in str(err.message)
+    assert set(err.params) == {"source", "target"}
+
+
+@pytest.mark.django_db
+def test_disjointness_message_uses_named_placeholder():
+    # FR-008: the refusal names the conflicting kind via a placeholder.
+    scheme = ConceptScheme.objects.create(name="Rock types")
+    granite = Concept.objects.create(scheme=scheme, label="Granite")
+    igneous = Concept.objects.create(scheme=scheme, label="Igneous rock")
+    granite.add_broader(igneous)
+    with pytest.raises(ValidationError) as excinfo:
+        granite.add_related(igneous)
+    err = _authored_nonfield_error(excinfo.value)
+    assert isinstance(err.message, Promise), "disjointness message is not lazily translatable"
+    assert "%(kind)s" in str(err.message)
+    assert set(err.params) == {"kind"}
+
+
+def test_concept_relation_reverse_read_path_is_indexed():
+    # FR-012 / research R6: the (target, kind) reverse-read path is indexed deliberately.
+    indexed = [tuple(index.fields) for index in ConceptRelation._meta.indexes]
+    assert ("target", "kind") in indexed, f"ConceptRelation missing a (target, kind) index; has {indexed}"
+
+
+def test_concept_relation_has_unique_and_self_constraints():
+    names = {c.name for c in ConceptRelation._meta.constraints}
+    assert "unique_concept_relation" in names, "missing the (source, target, kind) unique constraint (FR-007)"
+    assert "concept_relation_not_self" in names, "missing the not-self check constraint (FR-006)"
+    unique = next(c for c in ConceptRelation._meta.constraints if c.name == "unique_concept_relation")
+    assert tuple(unique.fields) == ("source", "target", "kind")
+
+
+def test_concept_relation_fks_are_indexed():
+    # FKs are auto-indexed; the source-leading composite comes from the unique constraint,
+    # the target-leading from the explicit index above.
+    assert ConceptRelation._meta.get_field("source").db_index is True
+    assert ConceptRelation._meta.get_field("target").db_index is True
