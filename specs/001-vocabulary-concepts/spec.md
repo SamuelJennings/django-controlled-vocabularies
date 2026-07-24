@@ -150,7 +150,7 @@ standard holds — no UI needed.
 
 ## Assumptions
 
-- A concept carries a single preferred label in this slice, treated as the default language's label. The full multilingual label model (per-language preferred/alternate labels, definitions, notes) is sibling feature #16, which will build on this label rather than replace the identity mechanism.
+- ~~A concept carries a single preferred label in this slice, treated as the default language's label.~~ **[Superseded by FS-002 (#16), 2026-07-24]** — FS-002 delivered the multilingual label model (per-language preferred/alternative/hidden labels plus the full SKOS documentary note family, held on `ConceptLabel`/`ConceptNote`). The `label` field survives unchanged as the required **default-language preferred label** and remains the identity anchor the slug derives from; only the single-label *assumption* was replaced.
 - All vocabularies here are self-managed and unpublished. Identifiers are computed and follow renames. The publishing feature (later) introduces freezing; nothing in this slice may assume a frozen identifier.
 - The base address used to compose URIs is deployment-level configuration; its exact configuration mechanism is a planning decision, not part of this specification.
 - Concept-to-concept relationships (#17), collections (#18), and lifecycle states with protected removal (#19) are sibling features and intentionally absent here.

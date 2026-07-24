@@ -8,6 +8,17 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Added
 
+- Multilingual concepts: each concept carries per-language labels (one preferred label per language,
+  plus any number of alternative and hidden labels) and the full SKOS documentary note family:
+  `definition`, `scopeNote`, `example`, `editorialNote`, `historyNote`, `changeNote`, and a generic
+  note. All are language-tagged and held on the new `ConceptLabel` and `ConceptNote` models. Authored
+  through the ORM. The editing interface comes later.
+- Per-vocabulary default language: a `ConceptScheme` defaults to the app's `LANGUAGE_CODE` but can
+  set its own default language, which is the one that anchors its concepts' slugs. A German
+  vocabulary anchors its identifiers in German inside an English-default app.
+- Overridable concept slugs: a slug still derives from the default-language preferred label, but a
+  curator can set an explicit slug that survives later relabels.
+- `multilingual` factory trait building a fully populated multi-language concept for downstream tests.
 - `ConceptScheme` and `Concept` models: a vocabulary is a named container of concepts, each concept
   a term within it. Slugs derive from the scheme name and the concept label and track them while a
   vocabulary is unpublished.

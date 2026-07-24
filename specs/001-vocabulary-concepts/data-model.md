@@ -7,8 +7,8 @@ owns exact declarations.
 `verbose_name` + non-empty `help_text` (`gettext_lazy`); both models declare translated
 `Meta.verbose_name`/`_plural`; validation messages are translatable with named placeholders.
 Indexing record: `ConceptScheme.slug` unique-indexed, `Concept.scheme` FK-indexed, `(scheme, slug)`
-composite-constrained; `name` and `label` deliberately unindexed this slice (no query path — label
-search belongs to #16).
+composite-constrained; `name` and `label` deliberately unindexed this slice (no query path — ~~label
+search belongs to #16~~ **[Superseded by FS-002 (#16), 2026-07-24: multilingual label search is served by the `ConceptLabel (language, kind, text)` index; the `Concept.label` anchor itself stays unindexed]**).
 
 ## ConceptScheme (a vocabulary)
 
@@ -31,7 +31,7 @@ search belongs to #16).
 | Field | Type | Rules |
 |---|---|---|
 | `scheme` | `ForeignKey(ConceptScheme, on_delete=CASCADE, related_name="concepts")` | required; deleting the scheme deletes its concepts (spec edge case) |
-| `label` | `CharField` | required; non-empty after strip; the default-language preferred label (R8; #16 extends) |
+| `label` | `CharField` | required; non-empty after strip; the default-language preferred label (R8) — **field survives FS-002 (#16) as the identity anchor; #16 added `ConceptLabel`/`ConceptNote` for every other per-language label and note** |
 | `slug` | `SlugField(allow_unicode=True)` | derived from `label` on save; unique **within** the scheme |
 
 - **Constraint**: `UniqueConstraint(fields=["scheme", "slug"], name="unique_concept_slug_per_scheme")`.

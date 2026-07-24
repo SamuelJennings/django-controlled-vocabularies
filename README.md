@@ -26,6 +26,9 @@ thousands of concepts and evolve as data rather than code.
 - A Django app — installable into any Django project (notably FairDM) and runnable standalone.
 - Both a **manager** (author, edit, version, publish) and a **consumer** (attach concepts to your
   models via a field; serve RDF at stable URIs).
+- Multilingual — a concept holds labels and definitions in any number of languages, with one
+  preferred label per language. Each vocabulary picks the language that anchors its concept URIs,
+  and a curator can override any concept's slug.
 
 **It deliberately is not:**
 
