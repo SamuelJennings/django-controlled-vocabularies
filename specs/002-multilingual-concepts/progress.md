@@ -54,3 +54,17 @@ human narrative.
 - **Next**: T004 — commit the migration and run the full verify suite.
 - **Watch**: `add_label` validates via `full_clean()` — the duplicate-preferred refusal rides on
   `validate_constraints()` (partial UniqueConstraint), the default-language refusal on `clean()`.
+
+## 2026-07-24 · Implementer US-1 · T004
+
+- **Did**: Generated the migration
+  `controlled_vocabularies/migrations/0002_alter_concept_label_conceptlabel.py`
+  (`DJANGO_SETTINGS_MODULE=tests.settings poetry run python -m django makemigrations
+  controlled_vocabularies`) — alters `Concept.label` help_text and creates `ConceptLabel`. Choices bake
+  the deterministic test `LANGUAGES` (T001); the branch's migrations are squashed to one at convergence.
+- **Verified**: `poetry run python -m django makemigrations --check --dry-run` → no changes;
+  `poetry run pytest -q` → **61 passed**; `poetry run ruff check .` clean; `poetry run ruff format
+  --check .` → 11 files already formatted; `poetry run mypy` → no issues; `poetry run deptry .` → no
+  dependency issues.
+- **Next**: US-1 complete; US-2 (alt/hidden labels) and US-3 (notes) build on `ConceptLabel`.
+- **Watch**: none.
