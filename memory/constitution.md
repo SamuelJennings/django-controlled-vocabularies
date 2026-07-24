@@ -112,6 +112,12 @@ definition (`db_index`, `unique`, an FK's automatic index, or a composite `Meta.
 `Meta.indexes`); a field with no query path stays unindexed to avoid write cost. The choice —
 indexed or not, and why — is recorded (`data-model.md` or `decisions.md`).
 
+**Migrations are consolidated per PR.** The migrations a feature branch introduces are squashed into
+as few files as possible (ideally one) before the PR is submitted — they are branch-local and
+unapplied, so this is safe at any release stage. Delete-and-regenerate for schema-only migrations;
+data migrations (`RunPython`/`RunSQL`) are kept via `squashmigrations` or left standalone. Always
+re-verify migrate-from-zero + `makemigrations --check` clean.
+
 ## Quality bar
 
 Read at plan and review; applies to every change.
