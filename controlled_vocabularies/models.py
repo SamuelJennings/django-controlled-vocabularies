@@ -203,7 +203,17 @@ class Concept(models.Model):
             # exactly as set (FR-010).
             self.slug = slugify(self.label, allow_unicode=True)
             if not self.slug:
-                raise ValidationError({"label": _("Label must produce a non-empty slug.")})
+                # FR-002: the default-language preferred label is the required identity
+                # anchor. Name the language through a *named* placeholder so the msgid
+                # stays static and translatable (decisions.md §9).
+                raise ValidationError(
+                    {
+                        "label": ValidationError(
+                            _("A preferred label in the default language '%(language)s' is required."),
+                            params={"language": self.scheme.effective_default_language},
+                        )
+                    }
+                )
         elif not self.slug:
             raise ValidationError({"slug": _("An explicit slug must not be empty.")})
         # Refuse a slug that collides with another concept in the same scheme
@@ -350,6 +360,11 @@ class ConceptLabel(models.Model):
         verbose_name = _("label")
         verbose_name_plural = _("labels")
         ordering = ("language", "kind", "text")
+        indexes = [
+            # The (language, kind, text) label lookup/search path (FR-015); the FK
+            # is auto-indexed. Deliberate per Article XIII (decisions.md, data-model).
+            models.Index(fields=["language", "kind", "text"], name="cv_label_lang_kind_text_idx"),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["concept", "language"],
@@ -364,13 +379,20 @@ class ConceptLabel(models.Model):
         return self.text
 
     def clean(self):
-        """Refuse a preferred label in the scheme's effective default language.
+        """Enforce the one-preferred-per-language rule with translatable messages.
 
-        That language's preferred label is :attr:`Concept.label`, the identity
-        anchor; holding it here too would split identity across two places.
+        A preferred label in the scheme's effective default language is refused —
+        that language's preferred label is :attr:`Concept.label`, the identity anchor,
+        and holding it here too would split identity across two places. A second
+        preferred label in a language that already has one is refused as well (FR-001).
+        The partial ``UniqueConstraint`` remains the integrity backstop for saves that
+        bypass ``full_clean``; this path gives the curator a translatable message
+        carrying the language through a *named* placeholder (decisions.md §9).
         """
         super().clean()
-        if self.kind == self.Kind.PREFERRED and self.language == self.concept.scheme.effective_default_language:
+        if self.kind != self.Kind.PREFERRED:
+            return
+        if self.language == self.concept.scheme.effective_default_language:
             raise ValidationError(
                 {
                     "language": ValidationError(
@@ -378,6 +400,20 @@ class ConceptLabel(models.Model):
                             "The preferred label in the default language '%(language)s' is the "
                             "concept's own label, not a separate label."
                         ),
+                        params={"language": self.language},
+                    )
+                }
+            )
+        already_preferred = (
+            ConceptLabel.objects.filter(concept=self.concept, language=self.language, kind=self.Kind.PREFERRED)
+            .exclude(pk=self.pk)
+            .exists()
+        )
+        if already_preferred:
+            raise ValidationError(
+                {
+                    "language": ValidationError(
+                        _("A preferred label in the language '%(language)s' already exists for this concept."),
                         params={"language": self.language},
                     )
                 }
