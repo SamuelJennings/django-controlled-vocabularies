@@ -264,3 +264,43 @@ the fine grain follows. This file is the durable record of why the spec reads as
     it**: unlike §18/§24/§28 (an `AttributeError`/blank-module signal that keeps the module importing),
     a factories story's red is necessarily an *import* failure isolated to the one test module — the
     signal still isolates US-6 and never touches the other modules' collection.
+
+## Implementation (US-7, T018–T019)
+
+32. **The duplicate-preferred-per-language refusal gained a `clean()`-level check — the exact
+    hand-rolled check §12 avoided — but the partial `UniqueConstraint` stays the integrity backstop.**
+    §12 routed the second-preferred-per-language refusal through `validate_constraints()` and warned
+    off "a hand-rolled duplicate check that could drift from the DB constraint". US-7 (Article XII,
+    FR-010) requires that refusal to carry a *translatable* message with a named placeholder, and a
+    constraint's `violation_error_message` is interpolated eagerly (`% {"name": …}`), so it cannot
+    yield the lazy `ValidationError(msgid, params={…})` form the standard demands. So `ConceptLabel.clean()`
+    now queries for an existing `PREFERRED` row in the same `(concept, language)` and raises the
+    named-placeholder error. **Why this is not the drift §12 feared**: the `clean()` query and the
+    partial constraint test the *identical* condition (`kind="preferred"`, same `(concept, language)`);
+    the constraint is unchanged and still fires on any `save()` that bypasses `full_clean` (e.g.
+    factory_boy, §30) — the `clean()` check is a message layer in front of it, not a replacement.
+    **Revisit if**: the constraint's condition and the `clean()` query ever diverge — they must move
+    together, so keep them adjacent in the model.
+
+33. **The missing-default-language-label message (FR-002) was reworded to name the language, and stays
+    keyed to `"label"`; the manual empty-slug message keeps its bare form.** The auto-slug empty guard
+    in `Concept.save()` — which fires exactly when the default-language `label` is empty (§27) — now
+    raises `ValidationError(_("A preferred label in the default language '%(language)s' is required."),
+    params={"language": effective_default_language})` instead of the old slug-worded string. It is still
+    keyed to `"label"`, so #15's `test_empty_label_message_is_translatable` and US-2's empty-label test
+    (which read `error_dict["label"]`) stay green. The *manual*-branch empty-slug error
+    (`"An explicit slug must not be empty."`, keyed to `"slug"`, §27) is left a bare `_()` string with no
+    placeholder — it is a slug-provenance error, not the FR-002 anchor requirement, and #15 §9 rules that
+    placeholder-free messages need no `params`. **Revisit if**: FR-002 ever needs enforcing on a
+    non-empty label that still slugifies to empty (e.g. punctuation-only) as a distinct message.
+
+34. **The `(language, kind, text)` index on `ConceptLabel` was the story's one schema change (migration
+    `0006`); everything else is Python-only.** data-model.md fixes this index for the label lookup/search
+    path (FR-015); it was absent (the model carried only the ordering tuple and the partial constraint),
+    so it was the sole `makemigrations` output. `ConceptNote.value` is confirmed **unindexed** (§20) and
+    the reinstated `test_standards.py` now asserts it, alongside walking all four models' `_meta` so any
+    future field inherits the metadata + indexing standard automatically. **The US-7 red (T018)** is
+    assertion/`KeyError` failures on the message and index gaps (the module imports and 12 metadata
+    assertions are already green) — the §18/§24/§28 discipline, isolating US-7 without collapsing
+    collection. **Revisit if**: note bodies gain a search path — then a search-engine-specific index
+    (not a plain b-tree) is chosen and §20 revisited.
