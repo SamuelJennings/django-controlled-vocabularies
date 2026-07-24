@@ -35,6 +35,38 @@ grilling. Anything grilling could not defensibly settle was escalated to Sam, no
   part of what a managed vocabulary must export losslessly, so G4 (faithful round-trip) is a
   defensible anchor. Kept as the cited goal; not re-litigated.
 
+## Self-resolved (S3 plan)
+
+- **Storage: one `ConceptRelation` through model, canonical direction stored, inverse derived.** Per
+  `docs/brainstorm.md`. One row per hierarchy edge (`source skos:broader target`); `narrower` is the
+  read from the `target` side; `related` canonicalised to one PK-ordered row. Rejected: per-type M2M
+  fields, both-direction storage, tree libraries (no polyhierarchy). Full reasoning in `research.md`
+  R1–R2. **Revisit if:** the RDF exporter (R2/R4) needs a different persisted shape.
+
+- **Integrity split: DB constraints where a single table expresses them, `clean()`+`save()` where it
+  spans rows.** Unique `(source,target,kind)` (duplicate) and `CheckConstraint(~Q(source=target))`
+  (self) are DB-level; disjointness (unordered pair, two kinds) and same-scheme (two tables) are
+  `clean()` with a `save()` backstop, because `create()`/factories bypass `full_clean()` (the #15/#16
+  pattern). `research.md` R3.
+
+- **`ConceptRelation` FKs use `on_delete=CASCADE`.** An edge is not consumer data; it is meaningless
+  without both endpoints. Article IX's `PROTECT`/deprecation governs *consumer references* to a
+  concept and concept *retirement* (#19), not the relation edges themselves. `data-model.md`.
+  **Revisit if:** #19 introduces a reason to retain dangling edges (it should not — deprecation keeps
+  the concept row).
+
+- **Read API is explicit methods, not a public M2M descriptor.** `broader`/`narrower`/`related` have
+  three different read shapes (directional, inverse-directional, symmetric-spanning-both-columns) that
+  one Django M2M accessor cannot express cleanly; explicit methods match #16's surface. `research.md` R4.
+
+## Process (S4 implementation)
+
+- **Phase-1 build is orchestrator-implemented, not per-story worktree Implementers.** The five stories
+  share one `models.py` + one migration (no parallelism to isolate), so Forge implements the ordered
+  task graph directly on the branch, test-first, with `verify.sh`/`tamper-check.sh` as the machine
+  gates and an independent reviewer at S6. Recorded in `progress.md`. **Revisit if:** a future feature
+  in this repo splits cleanly into parallel independent stories — then dispatch per-story worktrees.
+
 ## Escalated to Sam
 
 - None beyond the two grilled points above. The remaining scope was settled by grounding.
