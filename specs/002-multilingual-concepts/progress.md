@@ -145,3 +145,22 @@ human narrative.
 - **Next**: T010 — commit the migration, confirm no drift, run the full verify gate.
 - **Watch**: `notes(language)` with `kind=None` spans every kind (definition included); `definition`
   is just the DEFINITION-kind reader narrowed to the first row.
+
+## 2026-07-24 · Implementer US-3 · T010
+
+- **Did**: Committed the US-3 migration `controlled_vocabularies/migrations/0003_conceptnote.py`
+  (`makemigrations controlled_vocabularies` — creates `ConceptNote`; `value` a plain `TextField` with
+  no `db_index`, FK auto-indexed, no uniqueness). A new migration is expected here (unlike US-2) because
+  US-3 adds a whole model. Choices bake the deterministic test `LANGUAGES` (T001); the branch's
+  migrations are squashed to one at convergence (S5).
+- **Verified** (full gate, in the worktree via poetry):
+  1. `poetry run pytest -q` → **71 passed** (65 prior + 6 US-3).
+  2. `DJANGO_SETTINGS_MODULE=tests.settings poetry run python -m django makemigrations --check
+     --dry-run` → **No changes detected**.
+  3. `poetry run ruff check .` → **All checks passed!**
+  4. `poetry run ruff format --check .` → **11 files already formatted**.
+  5. `poetry run mypy` → **Success: no issues found in 4 source files**.
+  6. `poetry run deptry .` → **Success! No dependency issues found**.
+- **Next**: US-3 complete. US-4 (per-vocabulary default language) and US-5 (overridable slug) build on
+  `Concept`; US-6 factories build on `ConceptNote`.
+- **Watch**: none.
