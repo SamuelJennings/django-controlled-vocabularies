@@ -990,6 +990,15 @@ class TestRelated:
         assert list(granite.related()) == [quartz]
 
     @pytest.mark.django_db
+    def test_same_order_related_duplicate_is_refused(self, scheme):
+        # the exact same assertion (not just the mirror) is also refused — the pair is held once
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        quartz = Concept.objects.create(scheme=scheme, label="Quartz")
+        granite.add_related(quartz)
+        with pytest.raises(ValidationError):
+            granite.add_related(quartz)
+
+    @pytest.mark.django_db
     def test_self_related_is_refused(self, scheme):
         granite = Concept.objects.create(scheme=scheme, label="Granite")
         with pytest.raises(ValidationError):

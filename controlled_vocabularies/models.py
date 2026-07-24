@@ -802,13 +802,11 @@ class ConceptRelation(models.Model):
             return
         if self.source.scheme_id != self.target.scheme_id:
             raise ValidationError(
-                ValidationError(
-                    _(
-                        "A relation can only join concepts in the same vocabulary; "
-                        "'%(source)s' and '%(target)s' are in different vocabularies."
-                    ),
-                    params={"source": self.source.scheme.name, "target": self.target.scheme.name},
-                )
+                _(
+                    "A relation can only join concepts in the same vocabulary; "
+                    "'%(source)s' and '%(target)s' are in different vocabularies."
+                ),
+                params={"source": self.source.scheme.name, "target": self.target.scheme.name},
             )
 
     def _reject_disjointness_violation(self) -> None:
@@ -837,13 +835,11 @@ class ConceptRelation(models.Model):
         )
         if conflict:
             raise ValidationError(
-                ValidationError(
-                    _(
-                        "These concepts are already joined as '%(kind)s'; a broader/narrower "
-                        "pair and a related pair are mutually exclusive."
-                    ),
-                    params={"kind": self.Kind(other_kind).label},
-                )
+                _(
+                    "These concepts are already joined as '%(kind)s'; a broader/narrower "
+                    "pair and a related pair are mutually exclusive."
+                ),
+                params={"kind": self.Kind(other_kind).label},
             )
 
     def clean(self):
