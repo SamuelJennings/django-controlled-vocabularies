@@ -127,3 +127,14 @@ the fine grain follows. This file is the durable record of why the spec reads as
     `0002`, and US-2 added no model fields, so `makemigrations --check` is clean. Per the task's "only
     add a migration if Django reports drift", the step is a verification, not an artifact. **Revisit if**:
     a later story adds a `ConceptLabel`/`Concept` field on this branch before the S5 squash.
+
+## Implementation (US-3, T008–T010)
+
+18. **T008 tests pass note kinds as plain choice-value strings, not the `ConceptNote.Kind` enum.**
+    US-1/US-2 tests reference `ConceptLabel.Kind.PREFERRED`; the US-3 tests instead pass `"definition"`,
+    `"scope"`, … as literals. **Why**: `ConceptNote` does not exist at T008, so importing its `Kind`
+    would fail at module import and turn every test in the file red at *collection* — erasing the signal
+    that only the new US-3 tests are red and the 65 prior tests still pass. Passing the choice values
+    keeps the module importable, so the red is a precise `AttributeError` on the missing `Concept`
+    methods (`add_note`/`definition`). The literals equal the `Kind` member values chosen in T009.
+    **Revisit if**: the `Kind` values are renamed — the literals must move with them.

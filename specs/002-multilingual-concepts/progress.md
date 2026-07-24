@@ -109,3 +109,20 @@ human narrative.
   `poetry run mypy` → no issues; `poetry run deptry .` → no dependency issues.
 - **Next**: US-2 complete; US-3 (notes) builds on `Concept`.
 - **Watch**: none.
+
+## 2026-07-24 · Implementer US-3 · T008
+
+- **Did**: Added the US-3 failing tests to `tests/test_models.py` — `TestConceptDefinitionsAndNotes`
+  (en+de definitions read back by language; each documentary note kind scope/example/editorial/
+  history/change/note stored under its own kind and read per language and kind; `notes(language)`
+  with no kind returns every value for that language; repeated notes of a kind allowed; slug+URI
+  unchanged across a note's add→edit→remove, exercised in the default language to prove even a
+  default-language note leaves identity alone). Kinds passed as plain choice values (`"definition"`,
+  `"scope"`, …) so the module stays importable while `ConceptNote` is unbuilt.
+- **Verified**: `poetry run pytest tests/test_models.py::TestConceptDefinitionsAndNotes -q` →
+  6 failed with `AttributeError: 'Concept' object has no attribute 'add_note'` / `definition` — red
+  for the right reason (the US-3 API is not yet built), and the 65 prior tests stay green because the
+  module still imports. `poetry run ruff check` + `format --check` on the test file clean.
+- **Next**: T009 — add `ConceptNote`, `Concept.definition`/`notes`/`add_note`.
+- **Watch**: kinds are passed as choice-value strings, not a `ConceptNote.Kind` enum, deliberately
+  (decisions.md §18) — the enum import would fail collection and blank the red signal.

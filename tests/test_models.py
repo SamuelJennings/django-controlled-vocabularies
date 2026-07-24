@@ -545,3 +545,98 @@ class TestConceptAlternativeAndHiddenLabels:
         assert concept.uri == original_uri
         assert concept.alt_labels("en") == []
         assert concept.hidden_labels("de") == []
+
+
+class TestConceptDefinitionsAndNotes:
+    """US-3 — Definitions and the SKOS documentary notes, per language, repeatable,
+    identity preserved. FR-006 (a definition plus the six documentary note kinds —
+    scope/example/editorial/history/change/note — each language-tagged and repeatable),
+    FR-007 (read them back filtered by language and optionally kind), FR-004/SC-003 (a
+    note in any language, including the default one, never disturbs slug or URI).
+
+    Kinds are passed as their plain choice values (``"definition"``, ``"scope"``, …);
+    this keeps the test module importable while ``ConceptNote`` is being built, so only
+    these new tests go red — on the missing ``Concept`` methods — and the prior suites
+    stay green. The SKOS CURIE each kind carries is model metadata, exercised by US-7.
+    """
+
+    @pytest.mark.django_db
+    def test_definitions_readable_in_each_language(self, scheme):
+        # The definition is a ConceptNote of kind "definition"; definition(lang) reads
+        # back the value for that language (FR-006/FR-007).
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        concept.add_note(language="en", kind="definition", value="Heat energy moving through rock.")
+        concept.add_note(language="de", kind="definition", value="Wärme, die durch Gestein strömt.")
+        assert concept.definition("en") == "Heat energy moving through rock."
+        assert concept.definition("de") == "Wärme, die durch Gestein strömt."
+
+    @pytest.mark.django_db
+    def test_definition_absent_language_returns_none(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        assert concept.definition("fr") is None
+
+    @pytest.mark.django_db
+    def test_each_documentary_note_kind_stored_and_read_by_kind(self, scheme):
+        # Every documentary note kind is stored under its own kind and reads back only
+        # under that kind, in its own language (FR-006/FR-007).
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        by_kind = {
+            "scope": "Use for terrestrial heat only.",
+            "example": "Continental crust ~65 mW/m².",
+            "editorial": "Check the unit convention before publishing.",
+            "history": "Coined in mid-20th-century geophysics.",
+            "change": "Broadened from 'surface heat flow' in 2020.",
+            "note": "See also thermal gradient.",
+        }
+        for kind, value in by_kind.items():
+            concept.add_note(language="en", kind=kind, value=value)
+        for kind, value in by_kind.items():
+            assert concept.notes("en", kind=kind) == [value]
+            # A note reads back only in its own language.
+            assert concept.notes("de", kind=kind) == []
+
+    @pytest.mark.django_db
+    def test_notes_without_kind_returns_all_values_for_language(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        concept.add_note(language="en", kind="definition", value="A definition.")
+        concept.add_note(language="en", kind="scope", value="A scope note.")
+        concept.add_note(language="de", kind="note", value="Eine Notiz.")
+        assert sorted(concept.notes("en")) == ["A definition.", "A scope note."]
+        assert concept.notes("de") == ["Eine Notiz."]
+
+    @pytest.mark.django_db
+    def test_repeated_notes_of_a_kind_allowed(self, scheme):
+        # SKOS permits repeated notes of a kind per language; no uniqueness refuses them.
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        concept.add_note(language="en", kind="example", value="Continental crust ~65 mW/m².")
+        concept.add_note(language="en", kind="example", value="Oceanic crust ~100 mW/m².")
+        assert sorted(concept.notes("en", kind="example")) == [
+            "Continental crust ~65 mW/m².",
+            "Oceanic crust ~100 mW/m².",
+        ]
+
+    @pytest.mark.django_db
+    def test_uri_and_slug_unchanged_by_note_lifecycle(self, scheme):
+        # SC-003: adding, changing, or removing a note — even in the default language —
+        # never disturbs the concept's slug or URI.
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        original_slug = concept.slug
+        original_uri = concept.uri
+
+        note = concept.add_note(language="en", kind="definition", value="Heat energy moving through rock.")
+        concept.refresh_from_db()
+        assert concept.slug == original_slug
+        assert concept.uri == original_uri
+
+        note.value = "Heat energy conducted through rock."
+        note.save()
+        concept.refresh_from_db()
+        assert concept.slug == original_slug
+        assert concept.uri == original_uri
+        assert concept.definition("en") == "Heat energy conducted through rock."
+
+        note.delete()
+        concept.refresh_from_db()
+        assert concept.slug == original_slug
+        assert concept.uri == original_uri
+        assert concept.definition("en") is None
