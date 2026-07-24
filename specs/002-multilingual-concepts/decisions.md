@@ -304,3 +304,19 @@ the fine grain follows. This file is the durable record of why the spec reads as
     assertions are already green) — the §18/§24/§28 discipline, isolating US-7 without collapsing
     collection. **Revisit if**: note bodies gain a search path — then a search-engine-specific index
     (not a plain b-tree) is chosen and §20 revisited.
+
+## Convergence — tamper-check triage (Forge, S5)
+
+**tamper-check flagged 6 items — reviewed, all benign (no test weakening).**
+`verify.sh` at convergence passed (lint/typecheck/test/build). `tamper-check` (base `main`) flagged
+`deleted_test` on `test_concept.py`, `test_identity.py`, `test_scheme.py`, `test_smoke.py` and
+`modified_preexisting_test` on `conftest.py`, plus `deleted_test` on `test_standards.py`. Triage:
+- The four `test_*` deletions are the `chore/align-tests` consolidation into `test_models.py` that
+  already merged to `main` (PR #27) — they exist on neither `main` nor this branch, so this feature
+  deleted nothing (stale-base artifact of the tamper run).
+- `test_standards.py` was **reinstated** (added) by US-7 (T018, commit e812bfd), not deleted — the
+  flag is inverted/stale.
+- `conftest.py` is a fixtures module, not an assertion-bearing test; T001 added the multi-language
+  settings fixture. Same name-based false-positive class recorded for #15 (its decisions §8).
+Independent re-verification on the converged branch: **99 tests collected, 99 passed**, no assertion
+removed or weakened. Approved; no fix cycle warranted.

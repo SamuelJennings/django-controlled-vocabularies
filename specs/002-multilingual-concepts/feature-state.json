@@ -2,7 +2,7 @@
   "feature": "002-multilingual-concepts",
   "branch": "002-multilingual-concepts",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "IMPLEMENT",
+  "state": "REVIEW",
   "state_history": [
     {
       "state": "SPECIFY",
@@ -29,6 +29,16 @@
       "state": "IMPLEMENT",
       "at": "2026-07-24T11:05:00Z",
       "note": "plan approved by Sam in-session"
+    },
+    {
+      "state": "CONVERGE",
+      "at": "2026-07-24T11:40:00Z",
+      "note": "US-1..US-7 converged; migrations squashed to 0002_multilingual_concepts; full gate green (99 passed)"
+    },
+    {
+      "state": "REVIEW",
+      "at": "2026-07-24T11:45:00Z",
+      "note": "3-lens review panel (correctness/architecture/security) dispatched"
     }
   ],
   "gates": {
@@ -66,7 +76,7 @@
       "priority": "P0",
       "issue": null,
       "worktree": null,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
@@ -75,25 +85,43 @@
           "attempts": 1,
           "evidence": {
             "commands": [
-              "poetry run pytest -q"
+              "converged branch 6eefff4: poetry run pytest -q -> 99 passed; makemigrations --check clean; ruff/mypy/deptry clean"
             ],
             "verified_by_ci": false
           }
         },
         {
           "id": "T020",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "converged branch 6eefff4: poetry run pytest -q -> 99 passed; makemigrations --check clean; ruff/mypy/deptry clean"
+            ],
+            "verified_by_ci": false
+          }
         },
         {
           "id": "T021",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "converged branch 6eefff4: poetry run pytest -q -> 99 passed; makemigrations --check clean; ruff/mypy/deptry clean"
+            ],
+            "verified_by_ci": false
+          }
         },
         {
           "id": "T022",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "converged branch 6eefff4: poetry run pytest -q -> 99 passed; makemigrations --check clean; ruff/mypy/deptry clean"
+            ],
+            "verified_by_ci": false
+          }
         }
       ]
     },
@@ -102,23 +130,41 @@
       "priority": "P1",
       "issue": 28,
       "worktree": null,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T002",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "converged branch 6eefff4: poetry run pytest -q -> 99 passed; makemigrations --check clean; ruff/mypy/deptry clean"
+            ],
+            "verified_by_ci": false
+          }
         },
         {
           "id": "T003",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "converged branch 6eefff4: poetry run pytest -q -> 99 passed; makemigrations --check clean; ruff/mypy/deptry clean"
+            ],
+            "verified_by_ci": false
+          }
         },
         {
           "id": "T004",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "converged branch 6eefff4: poetry run pytest -q -> 99 passed; makemigrations --check clean; ruff/mypy/deptry clean"
+            ],
+            "verified_by_ci": false
+          }
         }
       ]
     },
@@ -127,23 +173,41 @@
       "priority": "P2",
       "issue": 29,
       "worktree": null,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T005",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "converged branch 6eefff4: poetry run pytest -q -> 99 passed; makemigrations --check clean; ruff/mypy/deptry clean"
+            ],
+            "verified_by_ci": false
+          }
         },
         {
           "id": "T006",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "converged branch 6eefff4: poetry run pytest -q -> 99 passed; makemigrations --check clean; ruff/mypy/deptry clean"
+            ],
+            "verified_by_ci": false
+          }
         },
         {
           "id": "T007",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "converged branch 6eefff4: poetry run pytest -q -> 99 passed; makemigrations --check clean; ruff/mypy/deptry clean"
+            ],
+            "verified_by_ci": false
+          }
         }
       ]
     },
@@ -152,23 +216,41 @@
       "priority": "P2",
       "issue": 30,
       "worktree": null,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T008",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "converged branch 6eefff4: poetry run pytest -q -> 99 passed; makemigrations --check clean; ruff/mypy/deptry clean"
+            ],
+            "verified_by_ci": false
+          }
         },
         {
           "id": "T009",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "converged branch 6eefff4: poetry run pytest -q -> 99 passed; makemigrations --check clean; ruff/mypy/deptry clean"
+            ],
+            "verified_by_ci": false
+          }
         },
         {
           "id": "T010",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "converged branch 6eefff4: poetry run pytest -q -> 99 passed; makemigrations --check clean; ruff/mypy/deptry clean"
+            ],
+            "verified_by_ci": false
+          }
         }
       ]
     },
@@ -177,23 +259,41 @@
       "priority": "P2",
       "issue": 31,
       "worktree": null,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T011",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "converged branch 6eefff4: poetry run pytest -q -> 99 passed; makemigrations --check clean; ruff/mypy/deptry clean"
+            ],
+            "verified_by_ci": false
+          }
         },
         {
           "id": "T012",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "converged branch 6eefff4: poetry run pytest -q -> 99 passed; makemigrations --check clean; ruff/mypy/deptry clean"
+            ],
+            "verified_by_ci": false
+          }
         },
         {
           "id": "T013",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "converged branch 6eefff4: poetry run pytest -q -> 99 passed; makemigrations --check clean; ruff/mypy/deptry clean"
+            ],
+            "verified_by_ci": false
+          }
         }
       ]
     },
@@ -202,23 +302,41 @@
       "priority": "P2",
       "issue": 32,
       "worktree": null,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T014",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "converged branch 6eefff4: poetry run pytest -q -> 99 passed; makemigrations --check clean; ruff/mypy/deptry clean"
+            ],
+            "verified_by_ci": false
+          }
         },
         {
           "id": "T015",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "converged branch 6eefff4: poetry run pytest -q -> 99 passed; makemigrations --check clean; ruff/mypy/deptry clean"
+            ],
+            "verified_by_ci": false
+          }
         },
         {
           "id": "T016",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "converged branch 6eefff4: poetry run pytest -q -> 99 passed; makemigrations --check clean; ruff/mypy/deptry clean"
+            ],
+            "verified_by_ci": false
+          }
         }
       ]
     },
@@ -227,13 +345,19 @@
       "priority": "P3",
       "issue": 33,
       "worktree": null,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T017",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "converged branch 6eefff4: poetry run pytest -q -> 99 passed; makemigrations --check clean; ruff/mypy/deptry clean"
+            ],
+            "verified_by_ci": false
+          }
         }
       ]
     },
@@ -242,18 +366,30 @@
       "priority": "P3",
       "issue": 34,
       "worktree": null,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T018",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "converged branch 6eefff4: poetry run pytest -q -> 99 passed; makemigrations --check clean; ruff/mypy/deptry clean"
+            ],
+            "verified_by_ci": false
+          }
         },
         {
           "id": "T019",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "converged branch 6eefff4: poetry run pytest -q -> 99 passed; makemigrations --check clean; ruff/mypy/deptry clean"
+            ],
+            "verified_by_ci": false
+          }
         }
       ]
     }
@@ -264,7 +400,7 @@
       "max": 2
     },
     "review_cycles": {
-      "used": 0,
+      "used": 1,
       "max": 2
     },
     "tokens": {
