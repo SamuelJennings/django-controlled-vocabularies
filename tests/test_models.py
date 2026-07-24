@@ -20,7 +20,7 @@ from django.db.models import Model, UniqueConstraint
 from django.utils.functional import Promise
 
 from controlled_vocabularies import conf
-from controlled_vocabularies.models import Concept, ConceptLabel, ConceptScheme
+from controlled_vocabularies.models import Concept, ConceptLabel, ConceptNote, ConceptScheme
 from tests.factories import ConceptSchemeFactory
 
 
@@ -788,3 +788,83 @@ class TestConceptOverridableSlug:
         with pytest.raises(ValidationError):
             other.set_slug("heat-flow")
         assert scheme.concepts.filter(slug="heat-flow").count() == 1
+
+
+class TestReviewHardening:
+    """Fixes from the FS-002 review panel: manual-slug validation, the default-language
+    preferred backstop at ``save()``, runtime language validation (no settings-frozen
+    ``choices``), prefetch-friendly read helpers, and boundary-safe ``get_by_uri``."""
+
+    @pytest.mark.django_db
+    def test_explicit_slug_with_invalid_characters_is_refused(self, scheme):
+        # A manual slug is stored verbatim but must still be a well-formed single-segment
+        # slug: a '/' or whitespace would corrupt the composed URI and break get_by_uri.
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        with pytest.raises(ValidationError):
+            concept.set_slug("foo/bar")
+        with pytest.raises(ValidationError):
+            concept.set_slug("has spaces")
+        # A valid explicit slug still works (regression guard).
+        concept.set_slug("hf-1")
+        assert concept.slug == "hf-1"
+
+    @pytest.mark.django_db
+    def test_default_language_preferred_row_is_refused_even_via_create(self, scheme):
+        # The default-language-preferred rule is backstopped at save(), so even
+        # .objects.create() (which bypasses full_clean) cannot plant a second identity
+        # anchor alongside Concept.label.
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")  # 'en' anchor
+        with pytest.raises(ValidationError):
+            ConceptLabel.objects.create(
+                concept=concept, language="en", kind=ConceptLabel.Kind.PREFERRED, text="Heat flow (dup)"
+            )
+
+    @pytest.mark.django_db
+    def test_language_outside_the_configured_set_is_refused(self, scheme):
+        # choices=settings.LANGUAGES was dropped (so the migration does not freeze the
+        # maintainer's LANGUAGES); an unconfigured language is still refused at runtime.
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        with pytest.raises(ValidationError):
+            concept.add_label(language="xx", kind=ConceptLabel.Kind.ALTERNATIVE, text="nope")
+        with pytest.raises(ValidationError):
+            concept.add_note(language="xx", kind=ConceptNote.Kind.NOTE, value="nope")
+
+    @pytest.mark.django_db
+    def test_scheme_default_language_rejects_an_unconfigured_language(self):
+        with pytest.raises(ValidationError):
+            ConceptScheme.objects.create(name="Bad", default_language="xx")
+
+    @pytest.mark.django_db
+    def test_read_helpers_stay_cheap_under_prefetch_related(self, django_assert_num_queries, scheme):
+        # The read helpers iterate the cached related set, so prefetch_related collapses
+        # the FR-007 read-by-language path to zero extra queries per concept (a .filter()
+        # would bypass the cache and re-hit the DB per call).
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        concept.add_label(language="de", kind=ConceptLabel.Kind.PREFERRED, text="Wärmefluss")
+        concept.add_label(language="en", kind=ConceptLabel.Kind.ALTERNATIVE, text="terrestrial heat flow")
+        concept.add_note(language="de", kind=ConceptNote.Kind.DEFINITION, value="Wärmestromdichte.")
+
+        # A bulk caller select_relates the scheme (preferred_label consults its effective
+        # default language) and prefetches the label/note sets; the helpers then add no
+        # queries of their own.
+        prefetched = (
+            Concept.objects.select_related("scheme").prefetch_related("labels", "concept_notes").get(pk=concept.pk)
+        )
+        with django_assert_num_queries(0):
+            assert prefetched.preferred_label("de") == "Wärmefluss"
+            assert prefetched.alt_labels("en") == ["terrestrial heat flow"]
+            assert prefetched.hidden_labels("en") == []
+            assert prefetched.definition("de") == "Wärmestromdichte."
+            assert prefetched.notes("de") == ["Wärmestromdichte."]
+
+    @pytest.mark.django_db
+    def test_get_by_uri_rejects_a_sibling_prefix_path(self, scheme):
+        # A URI that merely shares the base as a raw prefix ('<base>X/...') must not be
+        # treated as in-base — the match is on a '/'-terminated base.
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        base = conf.get_base_uri()
+        sibling = f"{base}X/{scheme.slug}/{concept.slug}"
+        with pytest.raises(Concept.DoesNotExist):
+            Concept.objects.get_by_uri(sibling)
+        # The genuine URI still resolves (regression guard).
+        assert Concept.objects.get_by_uri(concept.uri) == concept

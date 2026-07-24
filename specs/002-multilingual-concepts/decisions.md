@@ -340,3 +340,50 @@ removed or weakened. Approved; no fix cycle warranted.
     (free before concepts, frozen after, same-value allowed). Strengthens FR-009 and supersedes §9.
     **Revisit if**: a supported "re-anchor this vocabulary to another language" operation is ever
     wanted — it would need an explicit, deliberate re-slug/migration path, not a silent field edit.
+
+## Review fixes (S6) — hardening batch
+
+Applied after the three-lens review panel (all findings addressed to a clean PR; only the note-size
+cap is deferred, with a reason). Test coverage lives in `TestReviewHardening` + the freeze tests.
+
+36. **Manual slug is validated, not just stored (security, medium).** `Concept.save()` now runs
+    `validate_unicode_slug` on an explicit slug before persisting, so `set_slug("foo/bar")` or a
+    slug with spaces/control chars is refused. It is still stored verbatim (not re-slugified) — but
+    a malformed slug would corrupt the composed URI and break `get_by_uri` (Article IX). Since
+    `save()` never calls `full_clean()`, the validator is applied explicitly.
+
+37. **The default-language-preferred rule is backstopped at `save()` (correctness/security, medium).**
+    The rule "no separate PREFERRED `ConceptLabel` in the effective default language" lived only in
+    `clean()`; `.objects.create()`/factories bypass `full_clean`, so a second identity anchor could
+    be planted. Extracted to `_reject_default_language_preferred()` and called from both `clean()`
+    and `save()`. A cross-table DB constraint against `Concept.label` is not expressible, so this is
+    the honest backstop; the one-preferred-per-language rule keeps its partial `UniqueConstraint`.
+
+38. **`choices=settings.LANGUAGES` dropped from the model fields (correctness, low → real packaging
+    bug).** Binding the setting as field `choices` froze the maintainer's `LANGUAGES` into shipped
+    migration `0002`, so a downstream project with different `LANGUAGES` saw spurious
+    `makemigrations --check` drift. The `language`/`default_language` fields now carry no choices;
+    language codes are validated at runtime against `settings.LANGUAGES` (`_configured_language_codes`)
+    in `ConceptLabel.clean()`, `ConceptNote.clean()`, and `ConceptScheme.save()`. Migration
+    regenerated — no language list is frozen. `kind` choices stay (they are not settings-derived).
+
+39. **Read helpers are prefetch-friendly (architecture, medium).** `preferred_label`, `alt_labels`,
+    `hidden_labels`, `definition`, and `notes` now iterate the cached related set (`self.labels.all()`
+    / `self.concept_notes.all()`) instead of `.filter()`, which bypassed any `prefetch_related`
+    cache and forced N+1 on the FR-007 read-by-language path. A bulk caller that
+    `select_related("scheme").prefetch_related("labels","concept_notes")` now adds zero queries per
+    concept (asserted with `django_assert_num_queries`).
+
+40. **`get_by_uri` matches a '/'-terminated base (security, low).** The prefix test was
+    `uri.startswith(base)`, which accepted a sibling path sharing the base as a raw prefix
+    (`<base>X/a/b`). Now matches `f"{base}/"`, so only genuinely in-base URIs resolve.
+
+41. **`SKOS_CURIE` removed (architecture, low — YAGNI).** The kind→predicate map had no consumer
+    this slice (RDF export is R2/R4); Articles II/III discourage carrying speculative infrastructure
+    ahead of its use. It lands with the exporter that first serializes RDF. Supersedes the standalone
+    `SKOS_CURIE` mention in §19 — the `Kind` values remain named for their SKOS properties, which is
+    all this slice needs.
+
+42. **Deferred: `ConceptNote.value` size cap (security, low/speculative).** Harmless for this
+    ORM-only slice (trusted programmatic writes). Flagged for the R5 write layer to impose a
+    max length at the request boundary, where untrusted input first arrives — not here.

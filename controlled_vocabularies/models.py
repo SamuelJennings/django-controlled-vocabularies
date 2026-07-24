@@ -7,12 +7,25 @@ computed from a configured base address and the slug, never stored (research R1)
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.validators import validate_unicode_slug
 from django.db import models
 from django.db.models import Q
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 
 from controlled_vocabularies import conf
+
+
+def _configured_language_codes() -> set[str]:
+    """The language codes the application is configured for (``settings.LANGUAGES``).
+
+    Validated at runtime rather than baked into a field's ``choices``: binding
+    ``choices=settings.LANGUAGES`` on a model field freezes the maintainer's
+    language list into the shipped migration, so a downstream project with a
+    different ``LANGUAGES`` sees spurious ``makemigrations`` drift. Reading the
+    setting here keeps validation correct per install with nothing frozen.
+    """
+    return {code for code, _label in settings.LANGUAGES}
 
 
 class ConceptScheme(models.Model):
@@ -44,11 +57,11 @@ class ConceptScheme(models.Model):
     default_language = models.CharField(
         max_length=16,
         blank=True,
-        choices=settings.LANGUAGES,
         verbose_name=_("default language"),
         help_text=_(
             "The language whose preferred label anchors this vocabulary's concepts' identity. "
-            "Leave blank to fall back to the application's configured default language."
+            "Leave blank to fall back to the application's configured default language. "
+            "Must be one of the application's configured languages."
         ),
     )
 
@@ -94,6 +107,18 @@ class ConceptScheme(models.Model):
                         )
                     }
                 )
+        # An override, when given, must be one of the application's configured
+        # languages (validated at runtime, since the field carries no settings-derived
+        # choices — see _configured_language_codes).
+        if self.default_language and self.default_language not in _configured_language_codes():
+            raise ValidationError(
+                {
+                    "default_language": ValidationError(
+                        _("'%(language)s' is not one of the application's configured languages."),
+                        params={"language": self.default_language},
+                    )
+                }
+            )
         self.slug = slugify(self.name, allow_unicode=True)
         if not self.slug:
             raise ValidationError({"name": _("Name must produce a non-empty slug.")})
@@ -129,10 +154,12 @@ class ConceptManager(models.Manager["Concept"]):
         :class:`Concept.DoesNotExist`, the standard ORM lookup behaviour.
         Unicode slugs resolve the same as ASCII ones.
         """
-        base = conf.get_base_uri()
-        if not uri.startswith(base):
+        # Match on a '/'-terminated base so a sibling path that merely shares the
+        # base as a raw prefix (e.g. '<base>X/a/b') is not treated as in-base.
+        prefix = f"{conf.get_base_uri()}/"
+        if not uri.startswith(prefix):
             raise self.model.DoesNotExist(f"No concept matches the URI {uri!r}.")
-        remainder = uri.removeprefix(base).strip("/")
+        remainder = uri[len(prefix) :].strip("/")
         parts = remainder.split("/")
         if len(parts) != 2:
             raise self.model.DoesNotExist(f"No concept matches the URI {uri!r}.")
@@ -231,8 +258,27 @@ class Concept(models.Model):
                         )
                     }
                 )
-        elif not self.slug:
-            raise ValidationError({"slug": _("An explicit slug must not be empty.")})
+        else:
+            # A manual slug is stored verbatim (not re-slugified) but must still be a
+            # well-formed single-segment slug: an empty or malformed value (spaces, '/',
+            # control chars) would corrupt the composed URI and break get_by_uri
+            # (Article IX — identity IS the URI). save() never runs full_clean(), so the
+            # SlugField validator is applied explicitly here.
+            if not self.slug:
+                raise ValidationError({"slug": _("An explicit slug must not be empty.")})
+            try:
+                validate_unicode_slug(self.slug)
+            except ValidationError as exc:
+                raise ValidationError(
+                    {
+                        "slug": ValidationError(
+                            _(
+                                "An explicit slug must be a valid slug — letters, numbers, "
+                                "hyphens or underscores, with no spaces or slashes."
+                            ),
+                        )
+                    }
+                ) from exc
         # Refuse a slug that collides with another concept in the same scheme
         # rather than minting a duplicate identifier or silently auto-suffixing
         # it (research R4). This guards both derived and explicit slugs (FR-012);
@@ -258,28 +304,39 @@ class Concept(models.Model):
         """
         if language is None or language == self.scheme.effective_default_language:
             return self.label
-        row = self.labels.filter(language=language, kind=ConceptLabel.Kind.PREFERRED).first()
-        return row.text if row is not None else None
+        # Iterate the cached related set rather than .filter(): a caller's
+        # prefetch_related('labels') then collapses the FR-007 read path to one query
+        # instead of issuing a fresh query per call (a .filter() would bypass the cache).
+        for row in self.labels.all():
+            if row.language == language and row.kind == ConceptLabel.Kind.PREFERRED:
+                return row.text
+        return None
 
     def alt_labels(self, language: str) -> list[str]:
         """Return this concept's alternative label texts in ``language``.
 
         A concept may carry any number of alternative labels per language (FR-005);
         this returns just those in ``language``, ordered as the model orders labels,
-        and an empty list when the concept has none in that language (FR-007).
+        and an empty list when the concept has none in that language (FR-007). Reads
+        the cached related set so it stays cheap under ``prefetch_related``.
         """
-        return list(
-            self.labels.filter(language=language, kind=ConceptLabel.Kind.ALTERNATIVE).values_list("text", flat=True)
-        )
+        return [
+            row.text
+            for row in self.labels.all()
+            if row.language == language and row.kind == ConceptLabel.Kind.ALTERNATIVE
+        ]
 
     def hidden_labels(self, language: str) -> list[str]:
         """Return this concept's hidden label texts in ``language``.
 
         Hidden labels — misspellings and search-only variants — are held separately
         from alternatives; like them they may occur any number of times per language
-        (FR-005) and read back an empty list when absent (FR-007).
+        (FR-005) and read back an empty list when absent (FR-007). Reads the cached
+        related set so it stays cheap under ``prefetch_related``.
         """
-        return list(self.labels.filter(language=language, kind=ConceptLabel.Kind.HIDDEN).values_list("text", flat=True))
+        return [
+            row.text for row in self.labels.all() if row.language == language and row.kind == ConceptLabel.Kind.HIDDEN
+        ]
 
     def add_label(self, language: str, kind: str, text: str) -> "ConceptLabel":
         """Add a label of any :class:`ConceptLabel.Kind` and return the created row.
@@ -302,8 +359,10 @@ class Concept(models.Model):
         concept may hold more than one per language (FR-006); this returns the first
         by the model's ordering, or ``None`` when it has none in that language (FR-007).
         """
-        row = self.concept_notes.filter(language=language, kind=ConceptNote.Kind.DEFINITION).first()
-        return row.value if row is not None else None
+        for row in self.concept_notes.all():
+            if row.language == language and row.kind == ConceptNote.Kind.DEFINITION:
+                return row.value
+        return None
 
     def notes(self, language: str, kind: str | None = None) -> list[str]:
         """Return this concept's documentary note values in ``language``.
@@ -313,10 +372,11 @@ class Concept(models.Model):
         Values read back ordered as the model orders notes, and an empty list when the
         concept has none matching (FR-006/FR-007).
         """
-        rows = self.concept_notes.filter(language=language)
-        if kind is not None:
-            rows = rows.filter(kind=kind)
-        return list(rows.values_list("value", flat=True))
+        return [
+            row.value
+            for row in self.concept_notes.all()
+            if row.language == language and (kind is None or row.kind == kind)
+        ]
 
     def add_note(self, language: str, kind: str, value: str) -> "ConceptNote":
         """Add a documentary note of any :class:`ConceptNote.Kind` and return the row.
@@ -357,7 +417,6 @@ class ConceptLabel(models.Model):
     )
     language = models.CharField(
         max_length=16,
-        choices=settings.LANGUAGES,
         verbose_name=_("language"),
         help_text=_("The language this label is written in, from the application's configured languages."),
     )
@@ -396,31 +455,31 @@ class ConceptLabel(models.Model):
         return self.text
 
     def clean(self):
-        """Enforce the one-preferred-per-language rule with translatable messages.
+        """Enforce the label invariants with translatable messages.
 
-        A preferred label in the scheme's effective default language is refused —
-        that language's preferred label is :attr:`Concept.label`, the identity anchor,
-        and holding it here too would split identity across two places. A second
-        preferred label in a language that already has one is refused as well (FR-001).
-        The partial ``UniqueConstraint`` remains the integrity backstop for saves that
-        bypass ``full_clean``; this path gives the curator a translatable message
-        carrying the language through a *named* placeholder (decisions.md §9).
+        The ``language`` must be one of the application's configured languages. A
+        preferred label in the scheme's effective default language is refused — that
+        language's preferred label is :attr:`Concept.label`, the identity anchor, and
+        holding it here too would split identity across two places. A second preferred
+        label in a language that already has one is refused as well (FR-001). The partial
+        ``UniqueConstraint`` remains the integrity backstop for the duplicate-preferred
+        rule; the default-language rule is additionally backstopped in :meth:`save`
+        (no cross-table constraint against ``Concept.label`` is possible). Messages carry
+        the language through a *named* placeholder (decisions.md §9).
         """
         super().clean()
-        if self.kind != self.Kind.PREFERRED:
-            return
-        if self.language == self.concept.scheme.effective_default_language:
+        if self.language and self.language not in _configured_language_codes():
             raise ValidationError(
                 {
                     "language": ValidationError(
-                        _(
-                            "The preferred label in the default language '%(language)s' is the "
-                            "concept's own label, not a separate label."
-                        ),
+                        _("'%(language)s' is not one of the application's configured languages."),
                         params={"language": self.language},
                     )
                 }
             )
+        if self.kind != self.Kind.PREFERRED:
+            return
+        self._reject_default_language_preferred()
         already_preferred = (
             ConceptLabel.objects.filter(concept=self.concept, language=self.language, kind=self.Kind.PREFERRED)
             .exclude(pk=self.pk)
@@ -436,6 +495,38 @@ class ConceptLabel(models.Model):
                 }
             )
 
+    def _reject_default_language_preferred(self) -> None:
+        """Refuse a PREFERRED row in the scheme's effective default language.
+
+        That language's preferred label is :attr:`Concept.label`; a row here too would
+        plant a second identity anchor. Called from :meth:`clean` and again from
+        :meth:`save`, because ``.objects.create()`` and factories bypass ``full_clean``
+        and this invariant has no DB-level constraint to fall back on (a check against a
+        column on another table is not expressible).
+        """
+        if self.kind == self.Kind.PREFERRED and self.language == self.concept.scheme.effective_default_language:
+            raise ValidationError(
+                {
+                    "language": ValidationError(
+                        _(
+                            "The preferred label in the default language '%(language)s' is the "
+                            "concept's own label, not a separate label."
+                        ),
+                        params={"language": self.language},
+                    )
+                }
+            )
+
+    def save(self, *args, **kwargs):
+        """Persist the label, backstopping the default-language-preferred rule.
+
+        ``clean()`` runs only on ``full_clean``; ``.create()``/factories bypass it, so the
+        default-language guard is re-checked here to keep a second identity anchor from
+        being planted through any save path (review finding).
+        """
+        self._reject_default_language_preferred()
+        super().save(*args, **kwargs)
+
 
 class ConceptNote(models.Model):
     """A language-tagged documentary note on a concept (a SKOS documentary property).
@@ -443,7 +534,8 @@ class ConceptNote(models.Model):
     Covers the definition and the six SKOS documentary notes. Each is free prose in one
     language and may recur any number of times per (concept, language, kind) — SKOS sets
     no cardinality limit on notes, so there is no uniqueness here. The ``kind`` records
-    which SKOS property the note fills; :data:`SKOS_CURIE` maps it to the RDF predicate.
+    which SKOS property the note fills; the kind→predicate mapping for RDF export lands
+    with the exporter that first needs it (roadmap R2/R4), not here.
     """
 
     class Kind(models.TextChoices):
@@ -466,7 +558,6 @@ class ConceptNote(models.Model):
     )
     language = models.CharField(
         max_length=16,
-        choices=settings.LANGUAGES,
         verbose_name=_("language"),
         help_text=_("The language this note is written in, from the application's configured languages."),
     )
@@ -493,16 +584,20 @@ class ConceptNote(models.Model):
     def __str__(self) -> str:
         return self.value
 
+    def clean(self):
+        """Validate that ``language`` is one of the application's configured languages.
 
-# The SKOS predicate CURIE each note Kind maps to on RDF export — a straight
-# kind→predicate lookup, since the stored kind is the logical name, not the CURIE
-# (decisions.md §19).
-SKOS_CURIE = {
-    ConceptNote.Kind.DEFINITION: "skos:definition",
-    ConceptNote.Kind.SCOPE: "skos:scopeNote",
-    ConceptNote.Kind.EXAMPLE: "skos:example",
-    ConceptNote.Kind.EDITORIAL: "skos:editorialNote",
-    ConceptNote.Kind.HISTORY: "skos:historyNote",
-    ConceptNote.Kind.CHANGE: "skos:changeNote",
-    ConceptNote.Kind.NOTE: "skos:note",
-}
+        The field carries no settings-derived ``choices`` (that would freeze the list
+        into the migration), so the check runs here at ``full_clean`` — the path
+        ``Concept.add_note`` takes.
+        """
+        super().clean()
+        if self.language and self.language not in _configured_language_codes():
+            raise ValidationError(
+                {
+                    "language": ValidationError(
+                        _("'%(language)s' is not one of the application's configured languages."),
+                        params={"language": self.language},
+                    )
+                }
+            )
