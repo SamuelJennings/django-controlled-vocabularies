@@ -67,6 +67,27 @@ grilling. Anything grilling could not defensibly settle was escalated to Sam, no
   gates and an independent reviewer at S6. Recorded in `progress.md`. **Revisit if:** a future feature
   in this repo splits cleanly into parallel independent stories — then dispatch per-story worktrees.
 
+## Convergence (S5)
+
+- **Tamper-check flags triaged and cleared (additive-only).** `tamper-check.sh` flagged four modified
+  test files (`tests/test_models.py`, `tests/test_factories.py`, `tests/test_standards.py`,
+  `tests/factories.py`). Inspected: every change is an **addition** — new test classes
+  (`TestBroaderNarrower`, `TestRelated`, `TestGraphIntegrity`), new factory/helper, new standards
+  tests — plus two non-test edits (a widened import and the `ALL_MODELS` list gaining
+  `ConceptRelation`). No pre-existing test function was modified, weakened, skipped, or deleted; no
+  assertion was removed. Approved per D4 (coarse file-level flag, legitimate extension). The coverage
+  extension is the intended shape for a story that adds a model to an existing suite.
+
+- **Migration: single file, no squash needed.** The branch introduces exactly one migration
+  (`0003_conceptrelation`). Migrate-from-zero reaches the final state and `makemigrations --check` is
+  clean.
+
+- **ADR graduation: none.** This repo records design in `docs/brainstorm.md` + the feature's
+  `research.md`/`decisions.md`, not in a `docs/adr/` tree (none exists). Every decision here
+  (canonical-direction storage, integrity placement, CASCADE-vs-Article-IX, explicit-method API) is
+  already recorded in those docs, so none meets the "non-obvious AND not already recorded" ADR bar,
+  and introducing the repo's first ADR mid-feature is unwarranted.
+
 ## Escalated to Sam
 
 - None beyond the two grilled points above. The remaining scope was settled by grounding.
