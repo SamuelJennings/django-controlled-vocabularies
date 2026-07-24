@@ -640,3 +640,62 @@ class TestConceptDefinitionsAndNotes:
         assert concept.slug == original_slug
         assert concept.uri == original_uri
         assert concept.definition("en") is None
+
+
+class TestConceptSchemePerVocabularyDefaultLanguage:
+    """US-4 — Per-vocabulary default language. FR-009 (each vocabulary has a default
+    language that defaults to the app default and may be overridden per vocabulary),
+    FR-011 (the effective default language is the app default unless the vocabulary
+    overrides it), and the identity consequence: the vocabulary's effective default
+    language decides which preferred label — held on ``Concept.label`` — anchors its
+    concepts' slugs.
+
+    The override field (``ConceptScheme.default_language``) does not exist before
+    US-4, so these tests fail precisely on that missing field (an ``AttributeError``
+    reading it, a ``TypeError`` passing it) while every prior suite stays green — the
+    module still imports.
+    """
+
+    @pytest.mark.django_db
+    def test_no_override_anchors_identity_in_app_default(self, scheme):
+        # A vocabulary with no explicit override carries an empty default_language and
+        # falls back to the application's configured default (FR-009/FR-011).
+        assert scheme.default_language == ""
+        assert scheme.effective_default_language == settings.LANGUAGE_CODE
+
+        # Identity therefore anchors in the app default (English): Concept.label is the
+        # English preferred label and the slug derives from it; a German preferred label
+        # is an additive ConceptLabel row that never moves identity.
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        concept.add_label(language="de", kind=ConceptLabel.Kind.PREFERRED, text="Wärmefluss")
+        assert concept.slug == "heat-flow"
+        assert concept.preferred_label("en") == "Heat flow"
+        assert concept.preferred_label("de") == "Wärmefluss"
+
+    @pytest.mark.django_db
+    def test_override_to_de_derives_slug_from_de_label(self, db):
+        # A vocabulary overridden to German anchors identity in German: Concept.label
+        # now holds the German preferred label and the slug derives from it, while the
+        # English preferred label becomes the additive ConceptLabel row (FR-009 identity
+        # consequence, US-4 acceptance scenario 2).
+        scheme = ConceptScheme.objects.create(name="Geothermik", default_language="de")
+        assert scheme.effective_default_language == "de"
+
+        concept = Concept.objects.create(scheme=scheme, label="Wärmefluss")
+        concept.add_label(language="en", kind=ConceptLabel.Kind.PREFERRED, text="Heat flow")
+        assert concept.slug == "wärmefluss"
+        assert concept.uri == f"{scheme.uri}/wärmefluss"
+        assert concept.preferred_label("de") == "Wärmefluss"
+        assert concept.preferred_label("en") == "Heat flow"
+
+    @pytest.mark.django_db
+    def test_effective_default_language_returns_override_or_app_default(self, db):
+        # Reading the effective default language reports the explicit override when set,
+        # and the application default otherwise (US-4 acceptance scenario 3, FR-011).
+        overridden = ConceptScheme.objects.create(name="Geothermik", default_language="de")
+        assert overridden.default_language == "de"
+        assert overridden.effective_default_language == "de"
+
+        plain = ConceptScheme.objects.create(name="Geothermics")
+        assert plain.default_language == ""
+        assert plain.effective_default_language == settings.LANGUAGE_CODE
