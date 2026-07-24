@@ -1,0 +1,40 @@
+# Decision record — 003-relationships-between-concepts
+
+Self-resolved ambiguities from S0/S1. Each is defensible from grounding (issue #17,
+CONTEXT.md, `docs/brainstorm.md`, the constitution) or from the integrity set Sam agreed in
+grilling. Anything grilling could not defensibly settle was escalated to Sam, not recorded here.
+
+## Grilled with Sam (S0)
+
+- **Integrity set.** Enforce: reject self-relations; reject duplicates (same pair + type, incl.
+  mirror-image `related`); enforce broader/related disjointness. **Do not** enforce acyclicity in
+  the broader hierarchy — deliberate non-guarantee this slice. Confirmed by Sam.
+- **ORM-only, admin deferred.** Corrected the intake framing: #15 and #16 both landed
+  programmatic-only with all editing surfaces (incl. Django admin) deferred to R5. #17 follows that
+  precedent — relations through the ORM only; admin/editor UI is R5. Confirmed by Sam.
+
+## Self-resolved (S1)
+
+- **Disjointness is checked at direct adjacency, not transitively.** SKOS's formal rule is
+  related ⟂ broaderTransitive, but transitive enforcement needs the hierarchy traversal this slice
+  deliberately omits (the cycle deferral). Scoping disjointness to directly-asserted broader/narrower
+  pairs keeps it O(1)-ish and consistent with that deferral. Defensible: the two deferrals share one
+  reason (no traversal this slice). Recorded in the spec (FR-008, Assumptions, Edge Cases).
+
+- **Relations are intra-vocabulary; cross-scheme links are refused.** CONTEXT.md defines Relation as
+  an "intra-vocabulary link" and Mapping as the cross-vocabulary mechanism that "lives in the JSON
+  document, not the relation M2M." The issue says "concepts *within a vocabulary*." So both endpoints
+  of a relation must share a `ConceptScheme`; a cross-scheme relation is refused (FR-009). Not a new
+  decision — reading the grounding.
+
+- **Stored relationship types = {broader, related}; narrower derived.** Per `docs/brainstorm.md`
+  ("persist broader, read narrower back; normalise the symmetric related to one row"). The spec
+  states the behaviour (FR-002, FR-003) and leaves the storage shape to planning.
+
+- **Goal link G4 honoured as claimed.** The issue footer claims Serves: G4. The relation graph is
+  part of what a managed vocabulary must export losslessly, so G4 (faithful round-trip) is a
+  defensible anchor. Kept as the cited goal; not re-litigated.
+
+## Escalated to Sam
+
+- None beyond the two grilled points above. The remaining scope was settled by grounding.
