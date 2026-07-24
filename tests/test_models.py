@@ -477,3 +477,71 @@ class TestConceptPreferredLabels:
         assert concept.slug == original_slug
         assert concept.uri == original_uri
         assert concept.preferred_label("de") is None
+
+
+class TestConceptAlternativeAndHiddenLabels:
+    """US-2 — Alternative and hidden labels in several languages, identity preserved.
+    FR-005 (any number of alternative/hidden labels per language), FR-007 (read them
+    back filtered by language), FR-004/SC-003 (an alternative or hidden label never
+    disturbs the concept's slug or URI)."""
+
+    @pytest.mark.django_db
+    def test_alt_labels_filtered_by_language(self, scheme):
+        # Two English alternatives plus a German one: alt_labels("en") returns the two
+        # English texts and nothing else (many-per-language, filtered by language).
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        concept.add_label(language="en", kind=ConceptLabel.Kind.ALTERNATIVE, text="Terrestrial heat flow")
+        concept.add_label(language="en", kind=ConceptLabel.Kind.ALTERNATIVE, text="Geothermal heat flow")
+        concept.add_label(language="de", kind=ConceptLabel.Kind.ALTERNATIVE, text="Terrestrischer Wärmefluss")
+        assert sorted(concept.alt_labels("en")) == ["Geothermal heat flow", "Terrestrial heat flow"]
+        assert concept.alt_labels("de") == ["Terrestrischer Wärmefluss"]
+
+    @pytest.mark.django_db
+    def test_alt_labels_absent_language_returns_empty_list(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        assert concept.alt_labels("fr") == []
+
+    @pytest.mark.django_db
+    def test_hidden_labels_stored_and_read_per_language(self, scheme):
+        # Hidden labels read back by language, and are held separately from
+        # alternatives — one kind never leaks into the other's reader (FR-005/FR-007).
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        concept.add_label(language="en", kind=ConceptLabel.Kind.HIDDEN, text="heatflow")
+        concept.add_label(language="en", kind=ConceptLabel.Kind.HIDDEN, text="heet flow")
+        concept.add_label(language="en", kind=ConceptLabel.Kind.ALTERNATIVE, text="Terrestrial heat flow")
+        assert sorted(concept.hidden_labels("en")) == ["heet flow", "heatflow"]
+        assert concept.hidden_labels("de") == []
+        # The two readers do not bleed into each other.
+        assert concept.alt_labels("en") == ["Terrestrial heat flow"]
+
+    @pytest.mark.django_db
+    def test_uri_and_slug_unchanged_by_alt_and_hidden_label_lifecycle(self, scheme):
+        # SC-003: mutating an alternative or hidden label — add, edit, remove — never
+        # disturbs the concept's slug or URI, in any language including the default one.
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        original_slug = concept.slug
+        original_uri = concept.uri
+
+        alt = concept.add_label(language="en", kind=ConceptLabel.Kind.ALTERNATIVE, text="Terrestrial heat flow")
+        hidden = concept.add_label(language="de", kind=ConceptLabel.Kind.HIDDEN, text="waermefluss")
+        concept.refresh_from_db()
+        assert concept.slug == original_slug
+        assert concept.uri == original_uri
+
+        alt.text = "Geothermal heat flow"
+        alt.save()
+        hidden.text = "wärmefluss"
+        hidden.save()
+        concept.refresh_from_db()
+        assert concept.slug == original_slug
+        assert concept.uri == original_uri
+        assert concept.alt_labels("en") == ["Geothermal heat flow"]
+        assert concept.hidden_labels("de") == ["wärmefluss"]
+
+        alt.delete()
+        hidden.delete()
+        concept.refresh_from_db()
+        assert concept.slug == original_slug
+        assert concept.uri == original_uri
+        assert concept.alt_labels("en") == []
+        assert concept.hidden_labels("de") == []
