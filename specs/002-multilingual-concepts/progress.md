@@ -239,3 +239,29 @@ human narrative.
 - **Next**: US-5 complete. US-6 (factories) and US-7 build on the full label/note/slug model.
 - **Watch**: `set_slug` stores the value verbatim (no `slugify`) so R2 import can later carry source
   slugs unchanged — the caller owns URL-safety; the model only guarantees non-empty + unique.
+
+## 2026-07-24 · Implementer US-6 · T017
+
+- **Did**: Multilingual test scaffolding (factories only — no model/migration change). T017 (RED):
+  added six tests to `tests/test_factories.py` — `ConceptLabelFactory`/`ConceptNoteFactory` build
+  saved, valid child rows; a plain `ConceptFactory()` carries no label/note rows; and
+  `ConceptFactory(multilingual=True)` yields preferred labels and notes in more than one language (en
+  anchor + de row/notes). They failed at import (`ImportError` — factories absent), collapsing only
+  `test_factories.py` while the other 72 stayed green (decisions.md §31). T017 (GREEN): added
+  `ConceptLabelFactory` (default `language="de", kind=PREFERRED`), `ConceptNoteFactory` (default
+  `language="en", kind=DEFINITION`), each auto-creating its owning concept via `SubFactory`, and a
+  `multilingual` `Trait` on `ConceptFactory` that hangs a de `PREFERRED` label + en/de definitions off
+  the concept via `RelatedFactory` (decisions.md §29–§30). The en preferred label stays the anchor
+  `Concept.label`; no `PREFERRED` row is minted in the default language (the model forbids it).
+- **Verified** (full gate, in the worktree via poetry):
+  1. `poetry run pytest -q` → **84 passed** (78 prior + 6 US-6).
+  2. `poetry run python -m django makemigrations --check --dry-run --settings=tests.settings`
+     → **No changes detected**.
+  3. `poetry run ruff check .` → **All checks passed!**
+  4. `poetry run ruff format --check .` → **11 files already formatted**.
+  5. `poetry run mypy` → **Success: no issues found in 4 source files**.
+  6. `poetry run deptry .` → **Success! No dependency issues found**.
+- **Next**: US-6 complete. Factories now expose a one-line multilingual fixture for US-7+.
+- **Watch**: factory_boy calls `save()`, not `full_clean()`, so factory-built labels/notes bypass
+  `ConceptLabel.clean()`; the standalone factory defaults (de preferred, en definition) are chosen to
+  stay valid anyway. A future full_clean step must keep those defaults clean or move them behind a trait.

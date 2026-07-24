@@ -231,3 +231,36 @@ the fine grain follows. This file is the durable record of why the spec reads as
     tests stay green. The migration `0005` is generated during T015 so the DB-backed tests can run, but
     committed separately in T016 (mirrors US-4's §23 split). **Why record it**: continues §18/§24's
     discipline — the red must isolate US-5, never collapse collection.
+
+## Implementation (US-6, T017)
+
+29. **The `multilingual` trait carries the en anchor as `Concept.label` and only the *de* preferred
+    label as a `ConceptLabel` row — it never mints a `PREFERRED` row in the default language.** The
+    trait adds one `ConceptLabel(language="de", kind=PREFERRED)` plus en+de definition notes; the en
+    preferred label is the anchor `label` the base factory already sets. **Why**: `Concept.label` *is*
+    the default-language preferred label (§9, data-model), and `ConceptLabel.clean()` rejects a
+    `PREFERRED` row in the effective default language — a factory that added an en `PREFERRED` row would
+    build an object the model forbids. Sourcing the second language from `de` (the fixed non-default in
+    `tests.settings.LANGUAGES`) makes "preferred labels in more than one language" true through the two
+    legitimate channels — the field for the default, a row for the rest. **Revisit if**: a scheme with a
+    non-`en` `default_language` needs fixtures — then parameterise the trait's languages off
+    `scheme.effective_default_language` rather than hard-coding `de`.
+
+30. **The trait uses `RelatedFactory` (post-generation children), and the standalone factories default
+    to the languages that are valid *without* `full_clean`.** `ConceptLabelFactory` defaults
+    `language="de", kind=PREFERRED`; `ConceptNoteFactory` defaults `language="en", kind=DEFINITION`.
+    factory_boy calls `Model.save()`, not `full_clean()`, so the DB partial-unique constraint
+    (`one_preferred_label_per_language`) is the only guard that fires — one `de` preferred per concept
+    is fine. **Why the de default for labels**: a `PREFERRED` label needs a non-default language to be a
+    legitimate standalone row; `de` is that language in the test settings, so `ConceptLabelFactory()`
+    with no args yields a valid, saveable row rather than one that only the absent `full_clean` would
+    reject. **Revisit if**: the factories gain a `full_clean` step (e.g. to exercise `clean()` paths) —
+    then the default (language, kind) must stay `clean()`-valid or move behind an explicit trait.
+
+31. **The US-6 red (T017) fails at import — the new factories and trait do not exist — while the other
+    72 tests stay green.** The six new tests import `ConceptLabelFactory`/`ConceptNoteFactory` and call
+    `ConceptFactory(multilingual=True)`; pre-GREEN the import raises `ImportError`, collapsing only
+    `tests/test_factories.py` (its six prior tests included), and the remaining 72 pass. **Why record
+    it**: unlike §18/§24/§28 (an `AttributeError`/blank-module signal that keeps the module importing),
+    a factories story's red is necessarily an *import* failure isolated to the one test module — the
+    signal still isolates US-6 and never touches the other modules' collection.
