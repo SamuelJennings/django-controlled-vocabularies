@@ -125,7 +125,7 @@ def relation_graph(scheme=None):
     """Build a small navigable graph in one vocabulary and return its concepts.
 
     A broader/narrower pair (``child`` under ``parent``) and a separate related pair
-    (``left``–``right``), all in one scheme, built through the validated write helpers
+    (``left`` and ``right``), all in one scheme, built through the validated write helpers
     (``add_broader``/``add_related``). Returns a dict of the pieces so a test can assert
     on the graph in a couple of lines.
     """
