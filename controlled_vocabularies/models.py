@@ -23,7 +23,7 @@ class ConceptScheme(models.Model):
     name = models.CharField(
         max_length=255,
         verbose_name=_("name"),
-        help_text=_("Human-readable name of the vocabulary; its slug is derived from this."),
+        help_text=_("The human-readable name of the vocabulary. Its slug is derived automatically from this."),
     )
     description = models.TextField(
         blank=True,
@@ -35,7 +35,9 @@ class ConceptScheme(models.Model):
         unique=True,
         allow_unicode=True,
         verbose_name=_("slug"),
-        help_text=_("URL-safe identifier derived from the name; unique across all vocabularies."),
+        help_text=_(
+            "A URL-safe identifier derived automatically from the name. A slug must be unique across all vocabularies."
+        ),
     )
 
     class Meta:
@@ -118,13 +120,15 @@ class Concept(models.Model):
     label = models.CharField(
         max_length=255,
         verbose_name=_("preferred label"),
-        help_text=_("Human-readable preferred label; the slug is derived from this."),
+        help_text=_("A human-readable preferred label for this concept. The slug is automatically derived from this."),
     )
     slug = models.SlugField(
         max_length=255,
         allow_unicode=True,
         verbose_name=_("slug"),
-        help_text=_("URL-safe identifier derived from the label; unique within its vocabulary."),
+        help_text=_(
+            "A URL-safe identifier derived automatically from the label. A slug must be unique within a given vocabulary."
+        ),
     )
 
     objects = ConceptManager()
