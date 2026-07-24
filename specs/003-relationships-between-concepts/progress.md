@@ -29,3 +29,13 @@ reviewer with the correctness+spec lens on the whole diff. Rationale: the substa
 (test-first, machine verify as evidence, tamper-check, independent review) are all kept; only the
 per-story worktree isolation — which exists to de-conflict *parallel* stories — is dropped, because
 there is no parallelism to isolate.
+
+## 2026-07-24T22:48Z · S4–S7 · review-ready
+
+- **Did:** Implemented US-1..US-5 test-first (ConceptRelation + Concept graph helpers, factories,
+  standards). Converged (single migration, tamper flags triaged additive-only, no ADR graduation).
+  Independent review returned approve (no critical/high); fixed two low findings, declined one with
+  a recorded reason. Finalized the PR body and reconciled the Closes block (epic + 5 stories).
+- **Verified:** `verify.sh` all green (lint/typecheck/test/build); 139 tests pass; migrate-from-zero
+  clean; humanize scan of public markdown clean.
+- **Next:** merge gate — Sam reviews and merges. Forge does not merge.

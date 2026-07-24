@@ -3,7 +3,7 @@
   "feature": "003-relationships-between-concepts",
   "branch": "003-relationships-between-concepts",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "REVIEW",
+  "state": "PR_READY",
   "state_history": [
     {
       "state": "SPECIFY",
@@ -36,6 +36,11 @@
     {
       "state": "REVIEW",
       "at": "2026-07-24T22:42:00Z"
+    },
+    {
+      "state": "PR_READY",
+      "at": "2026-07-24T22:48:00Z",
+      "note": "review approved (no critical/high); 2 low findings fixed, 1 declined with rationale; PR body finalized, Closes block reconciled"
     }
   ],
   "gates": {
@@ -293,6 +298,6 @@
   },
   "pr": {
     "number": 41,
-    "draft": true
+    "draft": false
   }
 }
