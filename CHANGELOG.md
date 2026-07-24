@@ -8,6 +8,13 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Added
 
+- Concept relationships: concepts within a vocabulary can be linked through a broader/narrower
+  hierarchy and a symmetric related association, held on the new `ConceptRelation` model and reached
+  through `Concept.broader()`, `narrower()`, `related()`, and the `add_`/`remove_` helpers. Only the
+  broader direction is stored; narrower is derived, so the pair can never disagree. A concept may sit
+  under several broader concepts. The model refuses a self-relation, a duplicate, a broader/related
+  overlap on the same pair, and a link across vocabularies; a cycle in the hierarchy is not prevented
+  (a deliberate non-guarantee for now). Authored through the ORM; the editing interface comes later.
 - Multilingual concepts: each concept carries per-language labels (one preferred label per language,
   plus any number of alternative and hidden labels) and the full SKOS documentary note family:
   `definition`, `scopeNote`, `example`, `editorialNote`, `historyNote`, `changeNote`, and a generic
