@@ -2,7 +2,7 @@
   "feature": "002-multilingual-concepts",
   "branch": "002-multilingual-concepts",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "GATE_PLAN",
+  "state": "IMPLEMENT",
   "state_history": [
     {
       "state": "SPECIFY",
@@ -24,6 +24,11 @@
     {
       "state": "GATE_PLAN",
       "at": "2026-07-24T10:58:00Z"
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-07-24T11:05:00Z",
+      "note": "plan approved by Sam in-session"
     }
   ],
   "gates": {
@@ -41,8 +46,8 @@
       ]
     },
     "plan": {
-      "approved_by": null,
-      "at": null,
+      "approved_by": "Sam",
+      "at": "2026-07-24T11:05:00Z",
       "self_resolved": [
         "storage: relational child models (ConceptLabel/ConceptNote), not django-parler + JSON document/registry (deferred to R2/R5)",
         "identity anchor stays a field on Concept; translations are child rows (solves child-PK ordering)",
@@ -66,8 +71,14 @@
       "tasks": [
         {
           "id": "T001",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q"
+            ],
+            "verified_by_ci": false
+          }
         },
         {
           "id": "T020",
