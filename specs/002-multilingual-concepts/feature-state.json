@@ -2,7 +2,7 @@
   "feature": "002-multilingual-concepts",
   "branch": "002-multilingual-concepts",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "REVIEW",
+  "state": "PR_READY",
   "state_history": [
     {
       "state": "SPECIFY",
@@ -49,6 +49,11 @@
       "state": "REVIEW",
       "at": "2026-07-24T13:10:00Z",
       "note": "review hardening batch: manual-slug validation, default-language save-guard, drop settings-frozen choices, prefetch-friendly helpers, get_by_uri boundary, remove SKOS_CURIE, CONTEXT.md note (decisions \u00a736-\u00a742)"
+    },
+    {
+      "state": "PR_READY",
+      "at": "2026-07-24T13:25:00Z",
+      "note": "review fixes landed + humanized; PR body finalized; marked ready for review"
     }
   ],
   "gates": {
@@ -420,6 +425,6 @@
   },
   "pr": {
     "number": 35,
-    "draft": true
+    "draft": false
   }
 }
