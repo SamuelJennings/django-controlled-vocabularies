@@ -105,3 +105,25 @@ the fine grain follows. This file is the durable record of why the spec reads as
     **Why**: `ConceptLabel` is the shared label model US-2 builds alt/hidden labels on (data-model.md);
     fixing its full lexical vocabulary once avoids a churn migration. US-1 adds no alt/hidden *helpers*
     (those are US-2). **Revisit if**: US-2 changes the label taxonomy.
+
+## Implementation (US-2, T005–T007)
+
+15. **`add_label` was left unchanged in US-2; only the two readers were added.**
+    T006 asked to "extend `add_label` for alt/hidden kinds". Inspecting §12's implementation, no code
+    change was needed: `add_label` already builds any-`Kind` row and validates via `full_clean()`, and
+    since the only uniqueness is the *partial* `PREFERRED` constraint, alt/hidden rows validate and save
+    with no special-casing. Only the docstring was widened to state this. **Why record it**: so the "no
+    diff to `add_label`" reads as deliberate, not a skipped task. **Revisit if**: a kind ever needs its
+    own uniqueness or normalisation.
+
+16. **A wrong expected value in the T005 hidden-labels test was corrected within T006.**
+    T005 asserted `sorted(hidden_labels("en")) == ["heet flow", "heatflow"]`; Python sorts `"heatflow"`
+    first (`'a'` < `'e'` at index 1). The list order was the test author's slip, not implementation
+    behaviour, so the expectation was fixed in the T006 commit rather than bending the reader. **Why**:
+    the correction touches only a test this same Implementer authored in T005 (no *pre-existing* test was
+    modified); folding it into T006 keeps the red→green story of the fixture honest.
+
+17. **No US-2 migration.** T007 generated none: §14 already baked all three `Kind` values in US-1's
+    `0002`, and US-2 added no model fields, so `makemigrations --check` is clean. Per the task's "only
+    add a migration if Django reports drift", the step is a verification, not an artifact. **Revisit if**:
+    a later story adds a `ConceptLabel`/`Concept` field on this branch before the S5 squash.

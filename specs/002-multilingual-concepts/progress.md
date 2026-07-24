@@ -68,3 +68,44 @@ human narrative.
   dependency issues.
 - **Next**: US-1 complete; US-2 (alt/hidden labels) and US-3 (notes) build on `ConceptLabel`.
 - **Watch**: none.
+
+## 2026-07-24 · Implementer US-2 · T005
+
+- **Did**: Added the US-2 failing tests to `tests/test_models.py` — `TestConceptAlternativeAndHiddenLabels`
+  (two `en` + one `de` alternative → `alt_labels("en")` returns the two English texts only; hidden
+  labels stored/read per language and held separately from alternatives, neither reader bleeding into
+  the other; an absent language reads an empty list; slug+URI unchanged across an alt/hidden label's
+  add→edit→remove in both the default and a non-default language).
+- **Verified**: `poetry run pytest tests/test_models.py::TestConceptAlternativeAndHiddenLabels -q` →
+  4 failed with `AttributeError: 'Concept' object has no attribute 'alt_labels'/'hidden_labels'` — red
+  for the right reason (readers not yet built). `poetry run ruff check tests/test_models.py` +
+  `format --check` clean.
+- **Next**: T006 — add `alt_labels`/`hidden_labels`; confirm `add_label` spans alt/hidden kinds.
+- **Watch**: none.
+
+## 2026-07-24 · Implementer US-2 · T006
+
+- **Did**: In `controlled_vocabularies/models.py` — added `Concept.alt_labels(language)` and
+  `Concept.hidden_labels(language)` (each returns the matching `ConceptLabel` texts, ordered as the
+  model orders labels, empty list when none); clarified `add_label`'s docstring — it already routes
+  every `Kind` through `full_clean()`, and alt/hidden simply carry no uniqueness to trip, so no code
+  change was needed there. Corrected a wrong expected sort order in the T005 hidden-labels test
+  (`"heatflow"` sorts before `"heet flow"`) — see decisions.md §15.
+- **Verified**: `poetry run pytest -q` → **65 passed**; `poetry run ruff check .` clean;
+  `poetry run ruff format --check .` → 11 files already formatted; `poetry run mypy` → no issues;
+  `poetry run deptry .` → no dependency issues.
+- **Next**: T007 — confirm no migration drift; US-2 green.
+- **Watch**: `alt_labels`/`hidden_labels` return `list[str]` (texts), not row objects, mirroring the
+  read-by-language contract; callers wanting rows use `concept.labels.filter(...)`.
+
+## 2026-07-24 · Implementer US-2 · T007
+
+- **Did**: No migration generated — `Kind` already baked PREFERRED/ALTERNATIVE/HIDDEN in US-1's
+  `0002` migration (decisions.md §14), and US-2 added no fields, so there is no schema drift. Verified
+  rather than authored, per the task's "only add a migration if Django reports drift".
+- **Verified**: `DJANGO_SETTINGS_MODULE=tests.settings poetry run python -m django makemigrations
+  --check --dry-run` → "No changes detected"; `poetry run pytest -q` → **65 passed**;
+  `poetry run ruff check .` clean; `poetry run ruff format --check .` → 11 files already formatted;
+  `poetry run mypy` → no issues; `poetry run deptry .` → no dependency issues.
+- **Next**: US-2 complete; US-3 (notes) builds on `Concept`.
+- **Watch**: none.
