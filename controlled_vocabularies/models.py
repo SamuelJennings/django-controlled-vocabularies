@@ -157,6 +157,14 @@ class Concept(models.Model):
             "A URL-safe identifier derived automatically from the label. A slug must be unique within a given vocabulary."
         ),
     )
+    slug_is_manual = models.BooleanField(
+        default=False,
+        verbose_name=_("slug set manually"),
+        help_text=_(
+            "Whether the slug was set explicitly rather than derived from the label. "
+            "A manual slug is left untouched when the label later changes."
+        ),
+    )
 
     objects = ConceptManager()
 
@@ -175,14 +183,33 @@ class Concept(models.Model):
         """The concept's URI: its scheme's URI plus its slug."""
         return f"{self.scheme.uri}/{self.slug}"
 
+    def set_slug(self, slug: str) -> None:
+        """Set an explicit slug that survives later relabels (FR-010).
+
+        Marks the slug manual and saves, so from now on :meth:`save` leaves it
+        untouched when :attr:`label` changes. The value is stored exactly as given
+        rather than re-slugified — this same mechanism later carries an imported
+        vocabulary's own slugs unchanged (spec R2). The usual non-empty and
+        within-scheme uniqueness checks still apply (FR-012).
+        """
+        self.slug = slug
+        self.slug_is_manual = True
+        self.save()
+
     def save(self, *args, **kwargs):
-        """Derive the slug from ``label`` and refuse an empty or colliding slug."""
-        self.slug = slugify(self.label, allow_unicode=True)
-        if not self.slug:
-            raise ValidationError({"label": _("Label must produce a non-empty slug.")})
+        """Derive the slug from ``label`` (unless set manually) and refuse an empty or colliding slug."""
+        if not self.slug_is_manual:
+            # An auto slug tracks the default-language label; a manual one is left
+            # exactly as set (FR-010).
+            self.slug = slugify(self.label, allow_unicode=True)
+            if not self.slug:
+                raise ValidationError({"label": _("Label must produce a non-empty slug.")})
+        elif not self.slug:
+            raise ValidationError({"slug": _("An explicit slug must not be empty.")})
         # Refuse a slug that collides with another concept in the same scheme
         # rather than minting a duplicate identifier or silently auto-suffixing
-        # it (research R4). The UniqueConstraint is the integrity backstop.
+        # it (research R4). This guards both derived and explicit slugs (FR-012);
+        # the UniqueConstraint is the integrity backstop.
         if Concept.objects.filter(scheme=self.scheme, slug=self.slug).exclude(pk=self.pk).exists():
             raise ValidationError(
                 {
