@@ -17,3 +17,6 @@ INSTALLED_APPS = [
     "django.contrib.auth",
     "controlled_vocabularies",
 ]
+
+# Fixed base so URI-composition assertions are deterministic across the test suite.
+CONTROLLED_VOCABULARIES_BASE_URI = "https://example.org/vocabularies"

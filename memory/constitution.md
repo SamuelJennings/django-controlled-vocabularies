@@ -94,11 +94,35 @@ regardless, to keep a single deployment's data self-consistent.)
 - Schema normalisation (e.g. `dcterms:description` → the `definition` predicate) is surfaced to the
   user, never applied silently.
 
+### Article XII — Internationalization
+User-facing strings are translatable. In Python (models, forms, views, admin, validators) they are
+wrapped with `gettext_lazy` (imported as `_`): model `verbose_name` / `verbose_name_plural`, field
+`help_text` / `error_messages`, and form `label` / `help_text` / `error_messages` all use it, and
+validation messages use named placeholders (`%(slug)s`) so the msgids stay static. Templates load
+`{% load i18n %}` and wrap strings with `{% trans %}` / `{% blocktranslate %}`. Developer-facing
+diagnostics (`DoesNotExist`, logging) and pure acronyms are exempt. **`help_text` is mandatory on
+every model field.** A hard-coded user-visible string is a blocking review comment. (Materialises the
+family i18n standard — constitution-template Article VIII; this repo predates it. Follow-up: ship a
+base `en` catalog under `locale/` and add a `makemessages`-clean CI gate.)
+
+### Article XIII — Data-model conventions
+Every model field is a deliberate indexing decision. Because consumers of this package cannot add
+their own indexes, any field with a plausible lookup / filter / ordering path is indexed at its
+definition (`db_index`, `unique`, an FK's automatic index, or a composite `Meta.constraints` /
+`Meta.indexes`); a field with no query path stays unindexed to avoid write cost. The choice —
+indexed or not, and why — is recorded (`data-model.md` or `decisions.md`).
+
+**Migrations are consolidated per PR.** The migrations a feature branch introduces are squashed into
+as few files as possible (ideally one) before the PR is submitted — they are branch-local and
+unapplied, so this is safe at any release stage. Delete-and-regenerate for schema-only migrations;
+data migrations (`RunPython`/`RunSQL`) are kept via `squashmigrations` or left standalone. Always
+re-verify migrate-from-zero + `makemigrations --check` clean.
+
 ## Quality bar
 
 Read at plan and review; applies to every change.
 
-- Coverage may not decrease (the coverage matrix cell is the reference).
+- Test coverage: **project ≥ 90%, patch ≥ 85%** (the `codecov.yml` targets are the reference), with a small tolerance. These are floors, not a 100% ratchet: a PR need not cover every defensive branch, but new code must be well tested.
 - Every public API change updates README + CHANGELOG in the same PR.
 - Lint (`ruff`), type-check (`mypy`), and `deptry` pass.
 - **Data-safety invariants have tests:** URI-upsert-on-reimport and import→export round-trip
