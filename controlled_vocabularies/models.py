@@ -436,6 +436,42 @@ class Concept(models.Model):
         """Remove the broader edge to ``other`` if present; a no-op otherwise (FR-005)."""
         ConceptRelation.objects.filter(source=self, target=other, kind=ConceptRelation.Kind.BROADER).delete()
 
+    def related(self) -> "models.QuerySet[Concept]":
+        """Concepts related to this one — the symmetric association (FR-003).
+
+        Spans both columns of the ``related`` rows touching this concept (a related row
+        is stored once, PK-ordered, so this concept may sit in either column) and returns
+        the *other* endpoint each time. Empty when it has none (FR-004).
+        """
+        as_source = Concept.objects.filter(
+            relations_as_target__source=self,
+            relations_as_target__kind=ConceptRelation.Kind.RELATED,
+        )
+        as_target = Concept.objects.filter(
+            relations_as_source__target=self,
+            relations_as_source__kind=ConceptRelation.Kind.RELATED,
+        )
+        return (as_source | as_target).distinct()
+
+    def add_related(self, other: "Concept") -> "ConceptRelation":
+        """Relate this concept to ``other`` and return the created relation (FR-003).
+
+        The association is symmetric and stored once: the model orders the endpoints by
+        primary key, so asserting it in the mirror order resolves to the same row and is
+        refused as a duplicate (FR-007). A self, cross-vocabulary, or disjointness-violating
+        edge is refused (FR-006/FR-009/FR-008). Never touches either concept's slug/URI.
+        """
+        return self._add_relation(other, ConceptRelation.Kind.RELATED)
+
+    def remove_related(self, other: "Concept") -> None:
+        """Remove the related edge with ``other`` if present; a no-op otherwise (FR-005).
+
+        Matches the pair in either stored order, so removal works from either concept.
+        """
+        ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED).filter(
+            Q(source=self, target=other) | Q(source=other, target=self)
+        ).delete()
+
     def _add_relation(self, other: "Concept", kind: str) -> "ConceptRelation":
         """Create, validate, and save a relation of ``kind`` from this concept to ``other``.
 

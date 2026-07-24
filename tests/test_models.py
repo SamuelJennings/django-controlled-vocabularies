@@ -957,3 +957,68 @@ class TestBroaderNarrower:
         granite.remove_broader(igneous)
         granite.refresh_from_db()
         assert (granite.uri, granite.slug) == (uri_before, slug_before)
+
+
+class TestRelated:
+    """US-2 (FS-003) — the symmetric ``related`` association.
+
+    ``add_related`` records a sideways link that reads the same from either concept
+    and is stored once regardless of the order asserted (research R2). Self and
+    duplicate (either order) are refused; removal clears both sides; identity is
+    untouched.
+    """
+
+    @pytest.mark.django_db
+    def test_related_is_symmetric(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        quartz = Concept.objects.create(scheme=scheme, label="Quartz")
+        granite.add_related(quartz)
+        assert quartz in granite.related()
+        assert granite in quartz.related()
+
+    @pytest.mark.django_db
+    def test_related_stored_once_mirror_refused(self, scheme):
+        from controlled_vocabularies.models import ConceptRelation
+
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        quartz = Concept.objects.create(scheme=scheme, label="Quartz")
+        granite.add_related(quartz)
+        # the same association asserted in the mirror order is the one that exists
+        with pytest.raises(ValidationError):
+            quartz.add_related(granite)
+        assert ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED).count() == 1
+        assert list(granite.related()) == [quartz]
+
+    @pytest.mark.django_db
+    def test_self_related_is_refused(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        with pytest.raises(ValidationError):
+            granite.add_related(granite)
+
+    @pytest.mark.django_db
+    def test_remove_related_clears_both_sides(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        quartz = Concept.objects.create(scheme=scheme, label="Quartz")
+        granite.add_related(quartz)
+        # removal works from either side regardless of stored order
+        quartz.remove_related(granite)
+        assert list(granite.related()) == []
+        assert list(quartz.related()) == []
+        quartz.remove_related(granite)  # no-op
+
+    @pytest.mark.django_db
+    def test_cross_scheme_related_is_refused(self, scheme):
+        other = ConceptSchemeFactory()
+        here = Concept.objects.create(scheme=scheme, label="Granite")
+        there = Concept.objects.create(scheme=other, label="Quartz")
+        with pytest.raises(ValidationError):
+            here.add_related(there)
+
+    @pytest.mark.django_db
+    def test_adding_related_leaves_identity_unchanged(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        quartz = Concept.objects.create(scheme=scheme, label="Quartz")
+        uri_before, slug_before = granite.uri, granite.slug
+        granite.add_related(quartz)
+        granite.refresh_from_db()
+        assert (granite.uri, granite.slug) == (uri_before, slug_before)
