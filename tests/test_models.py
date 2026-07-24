@@ -14,12 +14,13 @@ folded here and grouped by subject into classes:
 """
 
 import pytest
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db.models import Model, UniqueConstraint
 from django.utils.functional import Promise
 
 from controlled_vocabularies import conf
-from controlled_vocabularies.models import Concept, ConceptScheme
+from controlled_vocabularies.models import Concept, ConceptLabel, ConceptScheme
 from tests.factories import ConceptSchemeFactory
 
 
@@ -387,3 +388,92 @@ class TestIndexing:
         )
         assert constraint is not None, "missing (scheme, slug) UniqueConstraint"
         assert tuple(constraint.fields) == ("scheme", "slug")
+
+
+class TestConceptSchemeDefaultLanguage:
+    """US-1 / FR-011 — a vocabulary's effective default language falls back to the
+    application's configured default when no per-vocabulary override is set (the
+    override itself is US-4 and is deliberately absent from this slice)."""
+
+    def test_effective_default_language_is_the_app_default(self):
+        # No override in this slice: the effective default is settings.LANGUAGE_CODE.
+        assert ConceptScheme().effective_default_language == settings.LANGUAGE_CODE
+
+
+class TestConceptPreferredLabels:
+    """US-1 — Preferred labels in several languages, identity preserved. FR-001 (one
+    preferred label per language), FR-002 (a default-language preferred label is
+    required and anchors identity), FR-003 (slug derives from the default-language
+    label), FR-004/SC-003 (a non-default-language label never disturbs slug or URI),
+    FR-007 (read a preferred label back by language)."""
+
+    @pytest.mark.django_db
+    def test_preferred_labels_readable_in_each_language(self, scheme):
+        # The default-language preferred label lives on Concept.label; other
+        # languages are ConceptLabel PREFERRED rows. Both read back via preferred_label.
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        concept.add_label(language="de", kind=ConceptLabel.Kind.PREFERRED, text="Wärmefluss")
+        assert concept.preferred_label("en") == "Heat flow"
+        assert concept.preferred_label("de") == "Wärmefluss"
+        # language=None means the scheme's effective default language.
+        assert concept.preferred_label() == "Heat flow"
+
+    @pytest.mark.django_db
+    def test_preferred_label_absent_language_returns_none(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        assert concept.preferred_label("fr") is None
+
+    @pytest.mark.django_db
+    def test_slug_derives_from_default_language_label(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        concept.add_label(language="de", kind=ConceptLabel.Kind.PREFERRED, text="Wärmefluss")
+        # Identity anchors to the default-language (English) label, not the German one.
+        assert concept.slug == "heat-flow"
+
+    @pytest.mark.django_db
+    def test_second_preferred_label_in_a_language_is_refused(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        concept.add_label(language="de", kind=ConceptLabel.Kind.PREFERRED, text="Wärmefluss")
+        with pytest.raises(ValidationError):
+            # At most one preferred label per language (FR-001).
+            concept.add_label(language="de", kind=ConceptLabel.Kind.PREFERRED, text="Terrestrischer Wärmefluss")
+
+    @pytest.mark.django_db
+    def test_concept_without_default_language_label_is_refused(self, scheme):
+        # The default-language preferred label is the required identity anchor (FR-002).
+        with pytest.raises(ValidationError):
+            Concept.objects.create(scheme=scheme, label="")
+
+    @pytest.mark.django_db
+    def test_preferred_label_row_in_default_language_is_refused(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        with pytest.raises(ValidationError):
+            # The default language's preferred label belongs on Concept.label, not
+            # as a separate ConceptLabel row.
+            concept.add_label(language="en", kind=ConceptLabel.Kind.PREFERRED, text="Heat flow")
+
+    @pytest.mark.django_db
+    def test_uri_and_slug_unchanged_by_non_default_label_lifecycle(self, scheme):
+        # SC-003: mutating a non-default-language label — add, edit, remove — never
+        # disturbs the concept's slug or URI.
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        original_slug = concept.slug
+        original_uri = concept.uri
+
+        german = concept.add_label(language="de", kind=ConceptLabel.Kind.PREFERRED, text="Wärmefluss")
+        concept.refresh_from_db()
+        assert concept.slug == original_slug
+        assert concept.uri == original_uri
+
+        german.text = "Terrestrischer Wärmefluss"
+        german.save()
+        concept.refresh_from_db()
+        assert concept.slug == original_slug
+        assert concept.uri == original_uri
+        assert concept.preferred_label("de") == "Terrestrischer Wärmefluss"
+
+        german.delete()
+        concept.refresh_from_db()
+        assert concept.slug == original_slug
+        assert concept.uri == original_uri
+        assert concept.preferred_label("de") is None

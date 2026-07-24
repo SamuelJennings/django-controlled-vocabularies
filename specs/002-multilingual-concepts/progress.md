@@ -25,3 +25,15 @@ human narrative.
   clean, no CRITICAL. Ledger created (schema-valid). Following #15's precedent, tasks live in the
   ledger + `tasks.md`, not as GitHub task sub-issues.
 - **GATE_PLAN** — awaiting Sam.
+
+## 2026-07-24 · Implementer US-1 · T002
+
+- **Did**: Added the US-1 failing tests to `tests/test_models.py` — `TestConceptSchemeDefaultLanguage`
+  (effective default = app `LANGUAGE_CODE`) and `TestConceptPreferredLabels` (en+de preferred labels
+  read back by language; slug derived from the default-language label; second preferred in a language
+  refused; missing default-language label refused; a PREFERRED row in the default language refused;
+  slug+URI unchanged across a non-default label's add→edit→remove; absent language → `None`).
+- **Verified**: `poetry run pytest tests/test_models.py -q` → collection ERROR
+  (`ImportError: cannot import name 'ConceptLabel'`) — red for the right reason (API not yet built).
+- **Next**: T003 — implement `ConceptLabel`, `effective_default_language`, `preferred_label`, `add_label`.
+- **Watch**: none.
