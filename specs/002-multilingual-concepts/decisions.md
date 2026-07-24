@@ -192,3 +192,42 @@ the fine grain follows. This file is the durable record of why the spec reads as
     `scheme.default_language == ""` first so its red is the missing field, not an accidental pass on
     the already-correct app-default behaviour. **Why record it**: mirrors §18's discipline — the red
     signal must isolate the new story, never collapse the file at collection.
+
+## Implementation (US-5, T014–T016)
+
+25. **`slug_is_manual` is a boolean flag on `Concept`, not a "slug came from import" enum or a
+    nullable override slug.** `save()` re-derives the slug from `label` only when the flag is `False`;
+    a `True` flag means the slug is the curator's and is left exactly as stored. **Why**: FR-010 needs
+    a single bit — "does the label drive the slug or not" — and a boolean expresses precisely that with
+    the least surface. A separate override-slug column would duplicate `slug` and force every reader to
+    decide which one wins; encoding provenance as an enum (auto/manual/imported) would pre-build R2
+    import semantics this slice does not own. The flag defaults `False`, so every existing and
+    factory-built concept keeps #15's derive-on-save behaviour untouched. **Revisit if**: R2 import
+    needs to distinguish "manual" from "imported" for audit — then widen to an enum, keeping `False`/
+    auto as the default.
+
+26. **`set_slug(value)` stores the value verbatim — it does not re-slugify.** The entry point sets
+    `slug = value`, flags it manual, and saves; the non-empty and within-scheme uniqueness checks still
+    run (FR-012), but the value is not passed through `slugify`. **Why**: FR-010 acceptance 1 requires
+    the slug to be *exactly* what was set, and the same mechanism must later carry an imported
+    vocabulary's own URI-path slugs unchanged (spec Assumption "imported vocabularies keep their own
+    slugs", R2). Re-slugifying would silently rewrite a curator's or a source's chosen identifier.
+    Callers own the responsibility of passing a URL-safe value; the model only guarantees non-empty and
+    unique. **Revisit if**: a UI layer (R5) wants to offer "tidy this into a slug" — that belongs in the
+    UI, not in `set_slug`.
+
+27. **The empty-slug guard splits by provenance: an auto slug errors on `label`, a manual one on
+    `slug`.** In `save()`, when not manual an empty derived slug raises `ValidationError({"label": …})`
+    (unchanged from #15 — a bad *label* is the cause); when manual an empty explicit slug raises
+    `ValidationError({"slug": …})` (the *slug* the caller set is the cause). **Why**: the error points
+    at the field the curator can actually fix, and it keeps the existing US-2 `test_empty_label_is_rejected`
+    / message tests (which read `error_dict["label"]`) green — the manual branch is additive and never
+    reached by label-derived saves. **Revisit if**: `full_clean`-based validation replaces the hand-rolled
+    save checks — then both would surface through the normal field-cleaning path.
+
+28. **The US-5 red (T014) fails on the missing entry point and field, not a blanked module.** The four
+    tests call `concept.set_slug(...)` and read `concept.slug_is_manual`, neither of which exists
+    pre-T015, so they fail with a precise `AttributeError` while the module imports and the prior 74
+    tests stay green. The migration `0005` is generated during T015 so the DB-backed tests can run, but
+    committed separately in T016 (mirrors US-4's §23 split). **Why record it**: continues §18/§24's
+    discipline — the red must isolate US-5, never collapse collection.

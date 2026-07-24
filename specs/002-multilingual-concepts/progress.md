@@ -213,3 +213,29 @@ human narrative.
 - **Next**: US-4 complete. US-5 (overridable slug) builds on `Concept`; US-6 factories build on the
   full label/note model.
 - **Watch**: none.
+
+## 2026-07-24 · Implementer US-5 · T014–T016
+
+- **Did**: Overridable concept slug (model layer). T014 (RED): added
+  `TestConceptOverridableSlug` (4 tests) to `tests/test_models.py` covering FR-010/FR-012 —
+  explicit slug exactly the value set, explicit slug survives a default-language relabel, no-override
+  slug still derives from the label (as #15), explicit slug colliding within scheme refused; they
+  failed on the missing `set_slug`/`slug_is_manual` (`AttributeError`), module still imports, prior 74
+  green (decisions.md §28). T015 (GREEN): added `Concept.slug_is_manual`
+  (`BooleanField(default=False)`, lazy `verbose_name` "slug set manually" + non-empty `help_text`);
+  `save()` re-derives `slug` from `label` only when not manual; `set_slug(value)` sets the value
+  verbatim + flags manual + saves; within-scheme uniqueness enforced for both derived and explicit
+  slugs; empty-slug guard splits by provenance — `label` for auto, `slug` for manual
+  (decisions.md §25–§27). T016: committed migration `0005_concept_slug_is_manual` (genuine field-add,
+  default `False` → existing concepts stay auto-derived; branch migrations squash at S5).
+- **Verified** (full gate, in the worktree via poetry):
+  1. `poetry run pytest -q` → **78 passed** (74 prior + 4 US-5).
+  2. `DJANGO_SETTINGS_MODULE=tests.settings poetry run django-admin makemigrations --check --dry-run`
+     → **No changes detected**.
+  3. `poetry run ruff check .` → **All checks passed!**
+  4. `poetry run ruff format --check .` → **11 files already formatted**.
+  5. `poetry run mypy` → **Success: no issues found in 4 source files**.
+  6. `poetry run deptry .` → **Success! No dependency issues found**.
+- **Next**: US-5 complete. US-6 (factories) and US-7 build on the full label/note/slug model.
+- **Watch**: `set_slug` stores the value verbatim (no `slugify`) so R2 import can later carry source
+  slugs unchanged — the caller owns URL-safety; the model only guarantees non-empty + unique.
