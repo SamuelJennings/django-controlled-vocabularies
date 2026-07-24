@@ -12,7 +12,8 @@ scope, [`CONTEXT.md`](CONTEXT.md) for the ubiquitous language, and
 ## Stack & commands
 
 - **Stack:** Python 3.11+, Django 5.2+, Poetry-managed. Installable Django app (also runnable standalone).
-- **Install:** `poetry install`
+- **Install:** `poetry install && poetry run pre-commit install` — the second step wires the git hook so the full pre-commit suite runs on every commit locally. The CI **Code Quality** job runs the same `.pre-commit-config.yaml`, so skipping the local install lets hook-only failures (end-of-file-fixer, trailing-whitespace, check-yaml, poetry-lock) reach CI instead of being caught at commit time.
+- **Pre-commit (run the whole suite):** `poetry run pre-commit run --all-files` — this is the authoritative pre-push gate; it is a superset of the individual commands below (it also runs the file-hygiene and poetry hooks). Prefer it over running the tools piecemeal.
 - **Test:** `poetry run pytest`
 - **Lint:** `poetry run ruff check .`
 - **Format:** `poetry run ruff format .`

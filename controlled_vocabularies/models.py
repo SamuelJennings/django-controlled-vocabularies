@@ -76,7 +76,24 @@ class ConceptScheme(models.Model):
         return self.default_language or settings.LANGUAGE_CODE
 
     def save(self, *args, **kwargs):
-        """Derive the slug from ``name`` and refuse an empty or colliding slug."""
+        """Derive the slug from ``name``, freeze the default language once concepts
+        exist, and refuse an empty or colliding slug."""
+        # Freeze the default language once the vocabulary has concepts. Each concept's
+        # identity anchor (``Concept.label``) is its preferred label in the effective
+        # default language; changing that language afterwards would silently reinterpret
+        # every anchor and break the one-preferred-label-per-language invariant. Before
+        # any concept exists there is nothing to disturb, so the change is free.
+        if self.pk is not None:
+            stored = ConceptScheme.objects.filter(pk=self.pk).values_list("default_language", flat=True).first()
+            if stored is not None and stored != self.default_language and self.concepts.exists():
+                raise ValidationError(
+                    {
+                        "default_language": _(
+                            "A vocabulary's default language cannot be changed once it has concepts, "
+                            "because it would reinterpret their identity."
+                        )
+                    }
+                )
         self.slug = slugify(self.name, allow_unicode=True)
         if not self.slug:
             raise ValidationError({"name": _("Name must produce a non-empty slug.")})

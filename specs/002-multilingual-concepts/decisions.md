@@ -59,8 +59,11 @@ the fine grain follows. This file is the durable record of why the spec reads as
    effective default is `settings.LANGUAGE_CODE` unless a vocabulary overrides it. Standard Django,
    so recorded as an assumption rather than re-specified.
 
-9. **Changing a vocabulary's default language does not retroactively re-slug existing concepts.**
-   A slug moves only when its own source label changes (and no explicit slug is set). Reason:
+9. ~~**Changing a vocabulary's default language does not retroactively re-slug existing concepts.**
+   A slug moves only when its own source label changes (and no explicit slug is set).~~
+   **⟶ Superseded by §35 (review fix, 2026-07-24).** The freeze makes the stronger guarantee — the
+   default language cannot change at all once concepts exist, so the "changed default language"
+   scenario no longer arises. The reasoning below is exactly what the freeze now enforces. Reason:
    retroactive re-slugging would silently rewrite identifiers of concepts a curator may already
    depend on — the opposite of the stability the identity model promises. Documented as an edge case
    with a test so it is explicit, not accidental.
@@ -320,3 +323,20 @@ the fine grain follows. This file is the durable record of why the spec reads as
   settings fixture. Same name-based false-positive class recorded for #15 (its decisions §8).
 Independent re-verification on the converged branch: **99 tests collected, 99 passed**, no assertion
 removed or weakened. Approved; no fix cycle warranted.
+
+## Review fix (S6) — freeze the default language once concepts exist
+
+35. **A `ConceptScheme`'s `default_language` is frozen once the vocabulary has concepts.**
+    Raised as a **high-severity** review finding and approved by Sam. `Concept.label` holds the
+    preferred label in the scheme's *effective default language*; if the default language could be
+    changed after concepts exist, every concept's identity anchor would be silently reinterpreted
+    (its `label` would no longer be the default-language preferred label) and a `ConceptLabel`
+    PREFERRED row could collide with the new default language, breaking the
+    one-preferred-per-language invariant. **Fix**: `ConceptScheme.save()` compares the incoming
+    `default_language` against the stored value and, when it differs and `self.concepts.exists()`,
+    raises a translatable `ValidationError`. Before any concept exists the change is free (nothing
+    anchors to it yet); a no-op re-save (same value) never trips the guard. Logic-only — no schema
+    change, no migration. Tests: three cases in `TestConceptSchemePerVocabularyDefaultLanguage`
+    (free before concepts, frozen after, same-value allowed). Strengthens FR-009 and supersedes §9.
+    **Revisit if**: a supported "re-anchor this vocabulary to another language" operation is ever
+    wanted — it would need an explicit, deliberate re-slug/migration path, not a silent field edit.

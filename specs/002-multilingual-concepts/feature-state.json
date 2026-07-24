@@ -39,6 +39,11 @@
       "state": "REVIEW",
       "at": "2026-07-24T11:45:00Z",
       "note": "3-lens review panel (correctness/architecture/security) dispatched"
+    },
+    {
+      "state": "REVIEW",
+      "at": "2026-07-24T12:40:00Z",
+      "note": "review fix: high-severity finding \u2014 freeze ConceptScheme.default_language once concepts exist (decisions \u00a735); CI pre-commit end-of-file fix; pre-commit documented in AGENTS.md"
     }
   ],
   "gates": {

@@ -700,6 +700,43 @@ class TestConceptSchemePerVocabularyDefaultLanguage:
         assert plain.default_language == ""
         assert plain.effective_default_language == settings.LANGUAGE_CODE
 
+    @pytest.mark.django_db
+    def test_default_language_is_freely_changeable_before_concepts_exist(self):
+        # While a vocabulary is still empty, its default language may be changed at
+        # will — nothing anchors to it yet, so there is no identity to disturb.
+        scheme = ConceptScheme.objects.create(name="Geothermik", default_language="de")
+        scheme.default_language = "fr"
+        scheme.save()
+        scheme.refresh_from_db()
+        assert scheme.default_language == "fr"
+        assert scheme.effective_default_language == "fr"
+
+    @pytest.mark.django_db
+    def test_default_language_is_frozen_once_concepts_exist(self):
+        # Once a concept exists, its identity anchor (Concept.label) is the preferred
+        # label in the vocabulary's effective default language. Changing the default
+        # language afterwards would silently reinterpret every anchor, so it is refused.
+        scheme = ConceptScheme.objects.create(name="Geothermics")  # effective default = en
+        Concept.objects.create(scheme=scheme, label="Heat flow")
+        scheme.default_language = "de"
+        with pytest.raises(ValidationError):
+            scheme.save()
+        # The stored value is unchanged.
+        scheme.refresh_from_db()
+        assert scheme.default_language == ""
+        assert scheme.effective_default_language == settings.LANGUAGE_CODE
+
+    @pytest.mark.django_db
+    def test_setting_default_language_to_the_same_value_is_allowed_with_concepts(self):
+        # Re-saving a scheme without actually changing its default language must not
+        # trip the freeze — the guard fires only on a genuine change.
+        scheme = ConceptScheme.objects.create(name="Geothermik", default_language="de")
+        Concept.objects.create(scheme=scheme, label="Wärmefluss")
+        scheme.name = "Geothermik (rev.)"  # an unrelated edit, same default_language
+        scheme.save()  # must not raise
+        scheme.refresh_from_db()
+        assert scheme.default_language == "de"
+
 
 class TestConceptOverridableSlug:
     """US-5 — Overridable concept slug. FR-010 (a slug set explicitly is not
