@@ -138,3 +138,28 @@ the fine grain follows. This file is the durable record of why the spec reads as
     keeps the module importable, so the red is a precise `AttributeError` on the missing `Concept`
     methods (`add_note`/`definition`). The literals equal the `Kind` member values chosen in T009.
     **Revisit if**: the `Kind` values are renamed — the literals must move with them.
+
+19. **`ConceptNote.kind` values are the logical names; each carries its SKOS CURIE via a side map.**
+    `Kind` values are `definition/scope/example/editorial/history/change/note` (matching the public
+    contract's documented `kind ∈ {…}` set), and a module-level `SKOS_CURIE` dict maps each to its
+    SKOS predicate CURIE (`skos:definition`, `skos:scopeNote`, `skos:example`, `skos:editorialNote`,
+    `skos:historyNote`, `skos:changeNote`, `skos:note`). **Why**: the write contract passes the logical
+    kind, not a CURIE, so the stored value is the logical name; carrying the CURIE alongside makes the
+    later RDF export a straight kind→predicate lookup (tasks.md US-3 checkpoint) without coupling the
+    stored value to RDF syntax. **Revisit if**: a kind needs more than one predicate, or the CURIE
+    prefix is made configurable.
+
+20. **`ConceptNote.value` is deliberately UNINDEXED (Article XIII recorded decision).**
+    `value` is free documentary prose (`TextField`) with no lookup path in this slice — notes are read
+    by fetching a concept's related `concept_notes` and filtering on the auto-indexed FK plus
+    `language`/`kind`, never by searching `value`. Indexing free text would cost write/storage for a
+    query nobody issues here. FR-015 requires only the *label*-lookup value indexed (that is
+    `ConceptLabel`), and #15's rule is "a queryable-but-unindexed field is a recorded decision" — this
+    is that record. **Revisit if**: full-text search over note bodies is added (then a dedicated search
+    index / `GinIndex` chosen for the search engine, not a plain b-tree).
+
+21. **`add_note` validates through `Model.full_clean()`, mirroring `add_label` (§12).** It builds an
+    unsaved `ConceptNote`, calls `full_clean()`, then `save()`. **Why**: one path validates the
+    `language`/`kind` choices and the non-empty `value` (and any future note constraint) consistently
+    with the label writer, with no hand-rolled checks. Notes carry no uniqueness, so nothing beyond
+    field validation trips. **Revisit if**: bulk note authoring needs to skip per-row validation.

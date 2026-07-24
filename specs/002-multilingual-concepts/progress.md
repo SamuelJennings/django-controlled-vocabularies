@@ -126,3 +126,22 @@ human narrative.
 - **Next**: T009 — add `ConceptNote`, `Concept.definition`/`notes`/`add_note`.
 - **Watch**: kinds are passed as choice-value strings, not a `ConceptNote.Kind` enum, deliberately
   (decisions.md §18) — the enum import would fail collection and blank the red signal.
+
+## 2026-07-24 · Implementer US-3 · T009
+
+- **Did**: In `controlled_vocabularies/models.py` — added the `ConceptNote` model (FK
+  `related_name="concept_notes"`, `language` `choices=settings.LANGUAGES`, `kind` `TextChoices`
+  DEFINITION/SCOPE/EXAMPLE/EDITORIAL/HISTORY/CHANGE/NOTE with logical-name values, `value` `TextField`,
+  no uniqueness, `Meta.ordering=("language","kind")`); a module-level `SKOS_CURIE` map from each kind to
+  its SKOS predicate CURIE (decisions.md §19); and `Concept.definition(language)` (first definition
+  value or `None`), `Concept.notes(language, kind=None)` (all values, optionally one kind), and
+  `Concept.add_note(language, kind, value)` (validates via `full_clean`, decisions.md §21). All new
+  fields carry lazy `verbose_name` + non-empty `help_text`; `value` is left deliberately unindexed
+  (decisions.md §20).
+- **Verified**: `poetry run pytest tests/test_models.py::TestConceptDefinitionsAndNotes -q` →
+  **6 passed** (was 6 failed at T008); `poetry run ruff check controlled_vocabularies/models.py` +
+  `format` clean. (Migration `0003_conceptnote.py` was generated so the DB tests run; it is committed
+  in T010.)
+- **Next**: T010 — commit the migration, confirm no drift, run the full verify gate.
+- **Watch**: `notes(language)` with `kind=None` spans every kind (definition included); `definition`
+  is just the DEFINITION-kind reader narrowed to the first row.

@@ -230,6 +230,42 @@ class Concept(models.Model):
         row.save()
         return row
 
+    def definition(self, language: str) -> str | None:
+        """Return this concept's first definition in ``language``.
+
+        The definition is the primary documentary note (SKOS ``definition``). A
+        concept may hold more than one per language (FR-006); this returns the first
+        by the model's ordering, or ``None`` when it has none in that language (FR-007).
+        """
+        row = self.concept_notes.filter(language=language, kind=ConceptNote.Kind.DEFINITION).first()
+        return row.value if row is not None else None
+
+    def notes(self, language: str, kind: str | None = None) -> list[str]:
+        """Return this concept's documentary note values in ``language``.
+
+        With ``kind=None`` this spans every kind — the definition and the SKOS
+        documentary notes alike; pass a :class:`ConceptNote.Kind` to narrow to one.
+        Values read back ordered as the model orders notes, and an empty list when the
+        concept has none matching (FR-006/FR-007).
+        """
+        rows = self.concept_notes.filter(language=language)
+        if kind is not None:
+            rows = rows.filter(kind=kind)
+        return list(rows.values_list("value", flat=True))
+
+    def add_note(self, language: str, kind: str, value: str) -> "ConceptNote":
+        """Add a documentary note of any :class:`ConceptNote.Kind` and return the row.
+
+        The row is validated before it is saved (``full_clean``): its ``language`` and
+        ``kind`` must be configured choices and ``value`` non-empty. Notes carry no
+        uniqueness — SKOS permits repeated notes of a kind per language (FR-006) — and
+        adding one never touches this concept's slug or URI (FR-004).
+        """
+        row = ConceptNote(concept=self, language=language, kind=kind, value=value)
+        row.full_clean()
+        row.save()
+        return row
+
 
 class ConceptLabel(models.Model):
     """A language-tagged label for a concept, other than the identity anchor.
@@ -308,3 +344,74 @@ class ConceptLabel(models.Model):
                     )
                 }
             )
+
+
+class ConceptNote(models.Model):
+    """A language-tagged documentary note on a concept (a SKOS documentary property).
+
+    Covers the definition and the six SKOS documentary notes. Each is free prose in one
+    language and may recur any number of times per (concept, language, kind) — SKOS sets
+    no cardinality limit on notes, so there is no uniqueness here. The ``kind`` records
+    which SKOS property the note fills; :data:`SKOS_CURIE` maps it to the RDF predicate.
+    """
+
+    class Kind(models.TextChoices):
+        """The SKOS documentary property a note fills (``definition`` / ``scopeNote`` / …)."""
+
+        DEFINITION = "definition", _("definition")
+        SCOPE = "scope", _("scope note")
+        EXAMPLE = "example", _("example")
+        EDITORIAL = "editorial", _("editorial note")
+        HISTORY = "history", _("history note")
+        CHANGE = "change", _("change note")
+        NOTE = "note", _("note")
+
+    concept = models.ForeignKey(
+        Concept,
+        on_delete=models.CASCADE,
+        related_name="concept_notes",
+        verbose_name=_("concept"),
+        help_text=_("The concept this note describes."),
+    )
+    language = models.CharField(
+        max_length=16,
+        choices=settings.LANGUAGES,
+        verbose_name=_("language"),
+        help_text=_("The language this note is written in, from the application's configured languages."),
+    )
+    kind = models.CharField(
+        max_length=16,
+        choices=Kind.choices,
+        verbose_name=_("kind"),
+        help_text=_(
+            "Which SKOS documentary property this note fills — its definition, a scope note, an example, and so on."
+        ),
+    )
+    # value is free documentary prose with no lookup path this slice, so it is
+    # deliberately left unindexed (Article XIII; decisions.md §20).
+    value = models.TextField(
+        verbose_name=_("value"),
+        help_text=_("The note text, as it reads in this language."),
+    )
+
+    class Meta:
+        verbose_name = _("note")
+        verbose_name_plural = _("notes")
+        ordering = ("language", "kind")
+
+    def __str__(self) -> str:
+        return self.value
+
+
+# The SKOS predicate CURIE each note Kind maps to on RDF export — a straight
+# kind→predicate lookup, since the stored kind is the logical name, not the CURIE
+# (decisions.md §19).
+SKOS_CURIE = {
+    ConceptNote.Kind.DEFINITION: "skos:definition",
+    ConceptNote.Kind.SCOPE: "skos:scopeNote",
+    ConceptNote.Kind.EXAMPLE: "skos:example",
+    ConceptNote.Kind.EDITORIAL: "skos:editorialNote",
+    ConceptNote.Kind.HISTORY: "skos:historyNote",
+    ConceptNote.Kind.CHANGE: "skos:changeNote",
+    ConceptNote.Kind.NOTE: "skos:note",
+}
