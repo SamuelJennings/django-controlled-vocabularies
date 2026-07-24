@@ -112,3 +112,14 @@ Full rationale in `research.md` (R1–R8). Headlines:
     (`slug.unique`, FK `db_index`, the `(scheme, slug)` `UniqueConstraint`); `name`/`label` stay
     deliberately unindexed this slice (no query path — label search belongs to #16), per Article XIII
     and the data-model indexing record.
+
+## Pre-merge migration squash (Sam, 2026-07-23)
+
+11. **Squashed the feature's three migrations into one `0001_initial`.** `0001_initial`, `0002_concept`,
+    and `0003_*` (metadata) were branch-local and unapplied to any shared DB, so deleting and
+    regenerating them is safe regardless of release state (a migration only becomes load-bearing once
+    a DB anyone cares about has applied it — never true for a pre-merge feature branch). All were
+    schema/metadata-only (no `RunPython`/`RunSQL`), so delete-and-regenerate was the clean mechanism.
+    Verified: single `0001_initial` creates both models with full metadata; `makemigrations --check`
+    clean; migrate-from-zero via the test DB green (53 passed); ruff/mypy/deptry green. Policy now in
+    `pipeline.md` S5 and constitution Article XIII.
