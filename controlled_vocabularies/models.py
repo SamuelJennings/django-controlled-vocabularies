@@ -811,21 +811,59 @@ class ConceptRelation(models.Model):
                 )
             )
 
+    def _reject_disjointness_violation(self) -> None:
+        """Refuse a pair already joined by the *other* kind of relation (FR-008).
+
+        SKOS makes ``related`` disjoint from the ``broader``/``narrower`` hierarchy: a pair
+        of concepts may be joined one way or the other, not both. This refuses a new relation
+        when a relation of the other kind already joins the same unordered pair in either
+        stored direction. It is a single indexed lookup on the pair — **no hierarchy
+        traversal**, so it is scoped to *directly*-asserted pairs (a transitively hierarchical
+        pair may still be related; the transitive check would need the walk this slice avoids).
+        Has no single-table DB constraint (it spans two rows and two kinds), so it lives here
+        and is backstopped in :meth:`save`. The message names the conflicting kind.
+        """
+        if self.source_id is None or self.target_id is None:
+            return
+        other_kind = self.Kind.RELATED if self.kind == self.Kind.BROADER else self.Kind.BROADER
+        conflict = (
+            ConceptRelation.objects.filter(kind=other_kind)
+            .filter(
+                Q(source_id=self.source_id, target_id=self.target_id)
+                | Q(source_id=self.target_id, target_id=self.source_id)
+            )
+            .exclude(pk=self.pk)
+            .exists()
+        )
+        if conflict:
+            raise ValidationError(
+                ValidationError(
+                    _(
+                        "These concepts are already joined as '%(kind)s'; a broader/narrower "
+                        "pair and a related pair are mutually exclusive."
+                    ),
+                    params={"kind": self.Kind(other_kind).label},
+                )
+            )
+
     def clean(self):
         """Validate the relation invariants with translatable messages (``full_clean`` path)."""
         super().clean()
         self._canonicalise()
         self._reject_self()
         self._reject_cross_scheme()
+        self._reject_disjointness_violation()
 
     def save(self, *args, **kwargs):
         """Persist the relation, backstopping the constraint-less invariants.
 
         ``clean()`` runs only under ``full_clean``; ``.objects.create()``/``bulk_create``/
-        factories bypass it, so canonicalisation and the same-vocabulary / not-self rules
-        are re-applied here to keep a bad row out through any save path (the #15/#16 pattern).
+        factories bypass it, so canonicalisation and the same-vocabulary / not-self /
+        disjointness rules are re-applied here to keep a bad row out through any save path
+        (the #15/#16 pattern).
         """
         self._canonicalise()
         self._reject_self()
         self._reject_cross_scheme()
+        self._reject_disjointness_violation()
         super().save(*args, **kwargs)

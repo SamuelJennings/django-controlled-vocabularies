@@ -1022,3 +1022,69 @@ class TestRelated:
         granite.add_related(quartz)
         granite.refresh_from_db()
         assert (granite.uri, granite.slug) == (uri_before, slug_before)
+
+
+class TestGraphIntegrity:
+    """US-3 (FS-003) — the graph cannot enter a SKOS-contradictory state.
+
+    A pair joined by a direct broader/narrower link cannot also be ``related``
+    (disjointness), checked at direct adjacency only. Cycles in the hierarchy and
+    a related link between only-transitively-hierarchical concepts are *accepted* —
+    both are recorded non-guarantees this slice (no hierarchy traversal is performed).
+    """
+
+    @pytest.mark.django_db
+    def test_hierarchical_pair_cannot_also_be_related(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        igneous = Concept.objects.create(scheme=scheme, label="Igneous rock")
+        granite.add_broader(igneous)
+        # refused in either order of attempt
+        with pytest.raises(ValidationError):
+            granite.add_related(igneous)
+        with pytest.raises(ValidationError):
+            igneous.add_related(granite)
+
+    @pytest.mark.django_db
+    def test_related_pair_cannot_be_given_a_broader_link(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        quartz = Concept.objects.create(scheme=scheme, label="Quartz")
+        granite.add_related(quartz)
+        with pytest.raises(ValidationError):
+            granite.add_broader(quartz)
+        with pytest.raises(ValidationError):
+            quartz.add_broader(granite)
+
+    @pytest.mark.django_db
+    def test_disjointness_constrains_a_pair_not_the_vocabulary(self, scheme):
+        a = Concept.objects.create(scheme=scheme, label="A")
+        b = Concept.objects.create(scheme=scheme, label="B")
+        c = Concept.objects.create(scheme=scheme, label="C")
+        d = Concept.objects.create(scheme=scheme, label="D")
+        a.add_broader(b)  # one pair hierarchical
+        c.add_related(d)  # a different pair related
+        assert b in a.broader()
+        assert d in c.related()
+
+    @pytest.mark.django_db
+    def test_transitively_hierarchical_pair_can_be_related(self, scheme):
+        # a -> b -> c (broader). a and c are only *transitively* hierarchical, so relating
+        # them is accepted — disjointness is checked at direct adjacency only.
+        a = Concept.objects.create(scheme=scheme, label="A")
+        b = Concept.objects.create(scheme=scheme, label="B")
+        c = Concept.objects.create(scheme=scheme, label="C")
+        a.add_broader(b)
+        b.add_broader(c)
+        a.add_related(c)  # must not raise
+        assert c in a.related()
+
+    @pytest.mark.django_db
+    def test_cyclic_broader_chain_is_accepted(self, scheme):
+        # a -> b -> c -> a. No cycle prevention this slice (recorded non-guarantee); the
+        # inserts must succeed and perform no hierarchy traversal.
+        a = Concept.objects.create(scheme=scheme, label="A")
+        b = Concept.objects.create(scheme=scheme, label="B")
+        c = Concept.objects.create(scheme=scheme, label="C")
+        a.add_broader(b)
+        b.add_broader(c)
+        c.add_broader(a)  # closes the loop; must not raise
+        assert a in c.broader()
