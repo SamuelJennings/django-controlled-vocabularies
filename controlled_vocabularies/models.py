@@ -41,6 +41,16 @@ class ConceptScheme(models.Model):
             "A URL-safe identifier derived automatically from the name. A slug must be unique across all vocabularies."
         ),
     )
+    default_language = models.CharField(
+        max_length=16,
+        blank=True,
+        choices=settings.LANGUAGES,
+        verbose_name=_("default language"),
+        help_text=_(
+            "The language whose preferred label anchors this vocabulary's concepts' identity. "
+            "Leave blank to fall back to the application's configured default language."
+        ),
+    )
 
     class Meta:
         verbose_name = _("vocabulary")
@@ -58,11 +68,12 @@ class ConceptScheme(models.Model):
     def effective_default_language(self) -> str:
         """The language whose preferred label anchors this vocabulary's concepts.
 
-        Falls back to the application's configured default language
-        (``settings.LANGUAGE_CODE``). A per-vocabulary override is a later story
-        (US-4); until then every vocabulary anchors identity in the app default.
+        Returns the per-vocabulary :attr:`default_language` override when set,
+        otherwise the application's configured default language
+        (``settings.LANGUAGE_CODE``). Independently-authored vocabularies can thus
+        anchor identity in their own language (FR-009/FR-011).
         """
-        return settings.LANGUAGE_CODE
+        return self.default_language or settings.LANGUAGE_CODE
 
     def save(self, *args, **kwargs):
         """Derive the slug from ``name`` and refuse an empty or colliding slug."""
