@@ -1,0 +1,268 @@
+{
+  "feature": "002-multilingual-concepts",
+  "branch": "002-multilingual-concepts",
+  "repo": "SamuelJennings/django-controlled-vocabularies",
+  "state": "GATE_PLAN",
+  "state_history": [
+    {
+      "state": "SPECIFY",
+      "at": "2026-07-24T10:20:00Z"
+    },
+    {
+      "state": "SETUP",
+      "at": "2026-07-24T10:45:00Z"
+    },
+    {
+      "state": "GATE_SPEC",
+      "at": "2026-07-24T10:50:00Z",
+      "note": "approved by Sam in-session"
+    },
+    {
+      "state": "PLAN",
+      "at": "2026-07-24T10:55:00Z"
+    },
+    {
+      "state": "GATE_PLAN",
+      "at": "2026-07-24T10:58:00Z"
+    }
+  ],
+  "gates": {
+    "spec": {
+      "approved_by": "Sam",
+      "at": "2026-07-24T10:50:00Z",
+      "self_resolved": [
+        "identity anchors to the default-language preferred label; supersedes #15's single-label decision",
+        "default language: app-wide LANGUAGE_CODE, overridable per ConceptScheme",
+        "concept slug overridable; explicit slug pinned across relabels; future-proofs imported slugs",
+        "descriptions carry the full SKOS documentary note family",
+        "labels/notes language-tagged multi-valued; one preferred per language",
+        "languages = settings.LANGUAGES; changing a scheme default language does not retroactively re-slug",
+        "SKOS pairwise label disjointness deferred to a later validation feature"
+      ]
+    },
+    "plan": {
+      "approved_by": null,
+      "at": null,
+      "self_resolved": [
+        "storage: relational child models (ConceptLabel/ConceptNote), not django-parler + JSON document/registry (deferred to R2/R5)",
+        "identity anchor stays a field on Concept; translations are child rows (solves child-PK ordering)",
+        "slug provenance via a persisted slug_is_manual flag",
+        "one ConceptNote typed by kind covers definition + documentary notes"
+      ]
+    },
+    "merge": {
+      "approved_by": null,
+      "at": null
+    }
+  },
+  "stories": [
+    {
+      "id": "US0",
+      "priority": "P0",
+      "issue": null,
+      "worktree": null,
+      "status": "todo",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T001",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T020",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T021",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T022",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
+    },
+    {
+      "id": "US1",
+      "priority": "P1",
+      "issue": 28,
+      "worktree": null,
+      "status": "todo",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T002",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T003",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T004",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
+    },
+    {
+      "id": "US2",
+      "priority": "P2",
+      "issue": 29,
+      "worktree": null,
+      "status": "todo",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T005",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T006",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T007",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
+    },
+    {
+      "id": "US3",
+      "priority": "P2",
+      "issue": 30,
+      "worktree": null,
+      "status": "todo",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T008",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T009",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T010",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
+    },
+    {
+      "id": "US4",
+      "priority": "P2",
+      "issue": 31,
+      "worktree": null,
+      "status": "todo",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T011",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T012",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T013",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
+    },
+    {
+      "id": "US5",
+      "priority": "P2",
+      "issue": 32,
+      "worktree": null,
+      "status": "todo",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T014",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T015",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T016",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
+    },
+    {
+      "id": "US6",
+      "priority": "P3",
+      "issue": 33,
+      "worktree": null,
+      "status": "todo",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T017",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
+    },
+    {
+      "id": "US7",
+      "priority": "P3",
+      "issue": 34,
+      "worktree": null,
+      "status": "todo",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T018",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T019",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
+    }
+  ],
+  "budgets": {
+    "converge_cycles": {
+      "used": 0,
+      "max": 2
+    },
+    "review_cycles": {
+      "used": 0,
+      "max": 2
+    },
+    "tokens": {
+      "used": 0,
+      "max": 4000000
+    }
+  },
+  "pr": {
+    "number": 35,
+    "draft": true
+  }
+}
