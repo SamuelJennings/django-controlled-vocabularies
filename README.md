@@ -32,6 +32,9 @@ thousands of concepts and evolve as data rather than code.
 - A graph, not a flat list — concepts link to one another through a broader/narrower hierarchy
   (navigable both ways, and a concept may sit under several broader concepts) and a symmetric
   related association, all within one vocabulary.
+- Organisable into collections — a curator can gather a vocabulary's concepts into named
+  collections, optionally in a deliberate order, separate from the hierarchy and from any other
+  collection a concept belongs to.
 
 **It deliberately is not:**
 

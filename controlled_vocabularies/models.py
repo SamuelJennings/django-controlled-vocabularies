@@ -9,7 +9,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_unicode_slug
 from django.db import models
-from django.db.models import F, Q
+from django.db.models import F, Max, Q
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 
@@ -485,6 +485,15 @@ class Concept(models.Model):
         row.save()
         return row
 
+    def collections(self) -> list["Collection"]:
+        """The collections this concept is a member of (empty when it belongs to none).
+
+        Read from the reverse membership relation. Collections are an organisational
+        overlay: reading or changing membership never touches the concept's identity,
+        labels, or relations (FS-004 FR-008).
+        """
+        return list(Collection.objects.filter(memberships__concept=self).distinct())
+
 
 class ConceptLabel(models.Model):
     """A language-tagged label for a concept, other than the identity anchor.
@@ -862,4 +871,244 @@ class ConceptRelation(models.Model):
         self._reject_self()
         self._reject_cross_scheme()
         self._reject_disjointness_violation()
+        super().save(*args, **kwargs)
+
+
+class Collection(models.Model):
+    """A named grouping of concepts within one vocabulary (a SKOS collection).
+
+    A collection captures a grouping the ``broader``/``narrower`` hierarchy does not
+    express — how a curator wants a vocabulary organised and displayed. Its members are
+    concepts of the *same* vocabulary (:class:`CollectionMember` enforces it); membership
+    is many-to-many and asserts no semantic relation between members (FS-004 FR-008). When
+    :attr:`ordered` (a ``skos:OrderedCollection``) the members carry a deliberate sequence
+    read back by :meth:`members`; otherwise the collection is a set. The ``slug`` is derived
+    from ``name`` on save and unique within the scheme; the ``uri`` is composed on read under
+    a ``/collection/`` segment so it can never collide with a concept URI (research R4).
+    """
+
+    scheme = models.ForeignKey(
+        ConceptScheme,
+        on_delete=models.CASCADE,
+        related_name="collections",
+        verbose_name=_("vocabulary"),
+        help_text=_("The vocabulary this collection belongs to. Its members are concepts of this vocabulary."),
+    )
+    name = models.CharField(
+        max_length=255,
+        verbose_name=_("name"),
+        help_text=_("The human-readable name of the collection. Its slug is derived automatically from this."),
+    )
+    slug = models.SlugField(
+        max_length=255,
+        allow_unicode=True,
+        verbose_name=_("slug"),
+        help_text=_(
+            "A URL-safe identifier derived automatically from the name. A slug must be unique within a given vocabulary."
+        ),
+    )
+    ordered = models.BooleanField(
+        default=False,
+        verbose_name=_("ordered"),
+        help_text=_(
+            "Whether the collection's members carry a deliberate sequence (a SKOS ordered collection). "
+            "An unordered collection is a plain set."
+        ),
+    )
+
+    class Meta:
+        verbose_name = _("collection")
+        verbose_name_plural = _("collections")
+        constraints = [
+            models.UniqueConstraint(fields=["scheme", "slug"], name="unique_collection_slug_per_scheme"),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+    @property
+    def uri(self) -> str:
+        """The collection's URI: its scheme's URI, a ``collection`` segment, and its slug.
+
+        The ``/collection/`` segment keeps a collection's identity space disjoint from a
+        concept's (whose URI is ``{scheme.uri}/{slug}``), so the two can never mint the same
+        URI when RDF projection lands (research R4).
+        """
+        return f"{self.scheme.uri}/collection/{self.slug}"
+
+    def save(self, *args, **kwargs):
+        """Derive the slug from ``name`` and refuse an empty or colliding slug.
+
+        The same identity discipline :class:`ConceptScheme`/:class:`Concept` use: a
+        non-empty slug, and no collision with another collection in the same vocabulary
+        (the ``UniqueConstraint`` is the integrity backstop), with translatable
+        named-placeholder messages.
+        """
+        self.slug = slugify(self.name, allow_unicode=True)
+        if not self.slug:
+            raise ValidationError({"name": _("Name must produce a non-empty slug.")})
+        if Collection.objects.filter(scheme=self.scheme, slug=self.slug).exclude(pk=self.pk).exists():
+            raise ValidationError(
+                {
+                    "slug": ValidationError(
+                        _("A collection with the slug '%(slug)s' already exists in this vocabulary."),
+                        params={"slug": self.slug},
+                    )
+                }
+            )
+        super().save(*args, **kwargs)
+
+    def add(self, concept: "Concept") -> "CollectionMember":
+        """Add ``concept`` to the collection as a member; append it (FS-004 FR-002).
+
+        A concept already in the collection is held once — the existing membership is
+        returned unchanged, never duplicated (FR-004). A concept from another vocabulary is
+        refused (FR-005), validated on this write path via ``full_clean`` so the curator-facing
+        message fires. The new member's ``position`` is the current maximum plus one, so an
+        ordered collection reads members back in the order they were added.
+        """
+        existing = self.memberships.filter(concept=concept).first()
+        if existing is not None:
+            return existing
+        highest = self.memberships.aggregate(highest=Max("position"))["highest"]
+        position = 0 if highest is None else highest + 1
+        member = CollectionMember(collection=self, concept=concept, position=position)
+        member.full_clean()
+        member.save()
+        return member
+
+    def remove(self, concept: "Concept") -> None:
+        """Remove ``concept``'s membership if present; a no-op otherwise (FS-004 FR-002).
+
+        Only the membership row is deleted — the concept itself, and its membership in any
+        other collection, are untouched (FR-003).
+        """
+        self.memberships.filter(concept=concept).delete()
+
+    def members(self) -> list["Concept"]:
+        """The collection's member concepts (empty when it has none).
+
+        When :attr:`ordered`, returned in ascending ``position`` — the deliberate sequence
+        (FR-006); removing a member leaves the survivors in their original relative order,
+        because a gap between positions does not affect the read (FR-007). When not ordered,
+        returned as a set (no promised sequence).
+        """
+        memberships = self.memberships.select_related("concept")
+        memberships = memberships.order_by("position", "id") if self.ordered else memberships.order_by("id")
+        return [membership.concept for membership in memberships]
+
+    def set_member_order(self, concepts: "list[Concept]") -> None:
+        """Reassign the members' positions to the given sequence (FS-004 FR-007).
+
+        Valid only on an ordered collection — ordering is meaningless for a set, so an
+        unordered collection refuses it with a translatable message (FR-006). ``concepts``
+        must be exactly the collection's current member set; otherwise it is refused. After
+        it returns, :meth:`members` reflects the new sequence.
+        """
+        if not self.ordered:
+            raise ValidationError(
+                _("Only an ordered collection can have its members ordered; '%(name)s' is not ordered."),
+                params={"name": self.name},
+            )
+        current = {membership.concept_id for membership in self.memberships.all()}
+        given = [concept.pk for concept in concepts]
+        if len(given) != len(current) or set(given) != current:
+            raise ValidationError(_("The given concepts must be exactly this collection's current members."))
+        position_of = {concept_id: index for index, concept_id in enumerate(given)}
+        for membership in self.memberships.all():
+            new_position = position_of[membership.concept_id]
+            if membership.position != new_position:
+                membership.position = new_position
+                membership.save(update_fields=["position"])
+
+
+class CollectionMember(models.Model):
+    """The membership edge joining a :class:`Collection` to one member :class:`Concept`.
+
+    A through model because the edge carries a ``position`` (the sort key for an ordered
+    collection) and must be validated for scheme-confinement — a bare ``ManyToManyField``
+    offers neither. Held once per ``(collection, concept)`` by a unique constraint (FR-004);
+    both endpoints must belong to the same vocabulary (FR-005). ``on_delete=CASCADE`` on both
+    FKs because a membership is not consumer data and is meaningless without both ends — the
+    same reasoning ``ConceptRelation`` uses for a relation edge; Article IX's
+    ``PROTECT``/deprecation governs consumer references and concept retirement (#19), which
+    this slice does not touch.
+    """
+
+    collection = models.ForeignKey(
+        Collection,
+        on_delete=models.CASCADE,
+        related_name="memberships",
+        verbose_name=_("collection"),
+        help_text=_("The collection this membership belongs to."),
+    )
+    concept = models.ForeignKey(
+        Concept,
+        on_delete=models.CASCADE,
+        related_name="collection_memberships",
+        verbose_name=_("concept"),
+        help_text=_("The member concept. It must belong to the collection's own vocabulary."),
+    )
+    position = models.PositiveIntegerField(
+        default=0,
+        verbose_name=_("position"),
+        help_text=_(
+            "The member's place in an ordered collection's sequence. Meaningful only when the "
+            "collection is ordered; ignored otherwise."
+        ),
+    )
+
+    class Meta:
+        verbose_name = _("collection member")
+        verbose_name_plural = _("collection members")
+        ordering = ("collection", "position", "id")
+        constraints = [
+            # A concept is held once per collection (FR-004). This also provides the
+            # collection-leading membership index.
+            models.UniqueConstraint(fields=["collection", "concept"], name="unique_collection_member"),
+        ]
+        indexes = [
+            # Backs the ordered members() read (Article XIII, deliberate). The reverse
+            # read (a concept's collections) is covered by the auto-indexed concept FK.
+            models.Index(fields=["collection", "position"], name="cv_collection_member_order_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.concept} in {self.collection}"
+
+    def _reject_cross_scheme(self) -> None:
+        """Refuse a member from a different vocabulary than the collection's (FR-005).
+
+        A collection groups only its own vocabulary's concepts. No single- or cross-table DB
+        constraint can express this equality, so it is enforced here and backstopped in
+        :meth:`save`. The message names both vocabularies through *named* placeholders so the
+        translatable msgid stays static.
+        """
+        if self.collection_id is None or self.concept_id is None:
+            return
+        if self.collection.scheme_id != self.concept.scheme_id:
+            raise ValidationError(
+                _(
+                    "A collection can only group concepts from its own vocabulary; "
+                    "'%(concept_scheme)s' is not '%(collection_scheme)s'."
+                ),
+                params={
+                    "concept_scheme": self.concept.scheme.name,
+                    "collection_scheme": self.collection.scheme.name,
+                },
+            )
+
+    def clean(self):
+        """Validate the membership invariants with translatable messages (``full_clean`` path)."""
+        super().clean()
+        self._reject_cross_scheme()
+
+    def save(self, *args, **kwargs):
+        """Persist the membership, backstopping the scheme-confinement rule.
+
+        ``clean()`` runs only under ``full_clean``; ``.objects.create``/factories bypass it,
+        so the same-vocabulary rule is re-applied here to keep a cross-vocabulary row out
+        through any save path (the #15/#16/#17 pattern).
+        """
+        self._reject_cross_scheme()
         super().save(*args, **kwargs)

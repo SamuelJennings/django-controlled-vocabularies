@@ -3,7 +3,7 @@
   "feature": "004-collections-group-concepts",
   "branch": "004-collections-group-concepts",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "PLAN",
+  "state": "IMPLEMENT",
   "state_history": [
     {
       "state": "SPECIFY",
@@ -22,6 +22,11 @@
       "state": "PLAN",
       "at": "2026-07-25T11:01:00Z",
       "note": "Sam: run planning autonomously to the Plan gate; evaluate the suggested ordering lib, rejection acceptable"
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-07-25T11:10:00Z",
+      "note": "Plan gate approved; orchestrator-implemented, test-first, single worktree (Phase-1)"
     }
   ],
   "gates": {
@@ -38,8 +43,12 @@
       ]
     },
     "plan": {
-      "approved_by": null,
-      "at": null
+      "approved_by": "Sam",
+      "at": "2026-07-25T11:10:00Z",
+      "self_resolved": [
+        "django-ordered-model evaluated and rejected (unmaintained for Django 5.2/6.0); hand-rolled position ordering",
+        "Task graph tracked in ledger, not mirrored as granular GitHub task issues (matches FS-003)"
+      ]
     },
     "merge": {
       "approved_by": null,

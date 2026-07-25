@@ -20,7 +20,7 @@ from django.db.models import Model, UniqueConstraint
 from django.utils.functional import Promise
 
 from controlled_vocabularies import conf
-from controlled_vocabularies.models import Concept, ConceptLabel, ConceptNote, ConceptScheme
+from controlled_vocabularies.models import Collection, Concept, ConceptLabel, ConceptNote, ConceptScheme
 from tests.factories import ConceptSchemeFactory
 
 
@@ -1097,3 +1097,222 @@ class TestGraphIntegrity:
         b.add_broader(c)
         c.add_broader(a)  # closes the loop; must not raise
         assert a in c.broader()
+
+
+class TestCollectionMembership:
+    """US-1 — Gather concepts into a named collection.
+
+    A ``Collection`` groups concepts of one vocabulary; members are added and read
+    back, a concept may sit in several collections, and a member is held once.
+    """
+
+    @pytest.mark.django_db
+    def test_add_and_read_members(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        basalt = Concept.objects.create(scheme=scheme, label="Basalt")
+        quartz = Concept.objects.create(scheme=scheme, label="Quartz")
+        igneous = Collection.objects.create(scheme=scheme, name="Common igneous rocks")
+        igneous.add(granite)
+        igneous.add(basalt)
+        assert set(igneous.members()) == {granite, basalt}
+        assert quartz not in igneous.members()
+
+    @pytest.mark.django_db
+    def test_new_collection_has_no_members(self, scheme):
+        empty = Collection.objects.create(scheme=scheme, name="Empty")
+        assert list(empty.members()) == []
+
+    @pytest.mark.django_db
+    def test_adding_same_concept_twice_holds_it_once(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        igneous = Collection.objects.create(scheme=scheme, name="Igneous")
+        igneous.add(granite)
+        igneous.add(granite)  # must not raise, must not duplicate
+        assert list(igneous.members()).count(granite) == 1
+        assert igneous.memberships.count() == 1
+
+    @pytest.mark.django_db
+    def test_a_concept_can_belong_to_several_collections(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        igneous = Collection.objects.create(scheme=scheme, name="Igneous")
+        field_guide = Collection.objects.create(scheme=scheme, name="Field-guide rocks")
+        igneous.add(granite)
+        field_guide.add(granite)
+        assert granite in igneous.members()
+        assert granite in field_guide.members()
+        # removing from one leaves the other intact
+        igneous.remove(granite)
+        assert granite not in igneous.members()
+        assert granite in field_guide.members()
+
+    @pytest.mark.django_db
+    def test_remove_member_leaves_others_untouched(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        basalt = Concept.objects.create(scheme=scheme, label="Basalt")
+        igneous = Collection.objects.create(scheme=scheme, name="Igneous")
+        igneous.add(granite)
+        igneous.add(basalt)
+        igneous.remove(granite)
+        assert granite not in igneous.members()
+        assert basalt in igneous.members()
+
+    @pytest.mark.django_db
+    def test_remove_a_non_member_is_a_no_op(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        igneous = Collection.objects.create(scheme=scheme, name="Igneous")
+        igneous.remove(granite)  # not a member; must not raise
+        assert list(igneous.members()) == []
+
+    @pytest.mark.django_db
+    def test_concept_reports_its_collections(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        igneous = Collection.objects.create(scheme=scheme, name="Igneous")
+        field_guide = Collection.objects.create(scheme=scheme, name="Field-guide rocks")
+        igneous.add(granite)
+        field_guide.add(granite)
+        assert set(granite.collections()) == {igneous, field_guide}
+
+    @pytest.mark.django_db
+    def test_colliding_collection_slug_in_one_scheme_is_refused(self, scheme):
+        Collection.objects.create(scheme=scheme, name="Igneous rocks")
+        with pytest.raises(ValidationError):
+            Collection.objects.create(scheme=scheme, name="Igneous rocks")
+
+    @pytest.mark.django_db
+    def test_same_collection_name_allowed_across_schemes(self):
+        a = ConceptScheme.objects.create(name="Rocks")
+        b = ConceptScheme.objects.create(name="Minerals")
+        first = Collection.objects.create(scheme=a, name="Common")
+        second = Collection.objects.create(scheme=b, name="Common")
+        assert first.slug == second.slug
+        assert first.scheme_id != second.scheme_id
+
+    @pytest.mark.django_db
+    def test_membership_leaves_concept_identity_unchanged(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        uri_before, slug_before = granite.uri, granite.slug
+        igneous = Collection.objects.create(scheme=scheme, name="Igneous")
+        igneous.add(granite)
+        igneous.remove(granite)
+        granite.refresh_from_db()
+        assert granite.uri == uri_before
+        assert granite.slug == slug_before
+
+    @pytest.mark.django_db
+    def test_uri_composes_under_a_collection_segment(self):
+        vocab = ConceptScheme.objects.create(name="Rocks")
+        coll = Collection.objects.create(scheme=vocab, name="Common igneous rocks")
+        assert coll.uri == f"{vocab.uri}/collection/{coll.slug}"
+
+    @pytest.mark.django_db
+    def test_str_is_the_name(self, scheme):
+        coll = Collection.objects.create(scheme=scheme, name="Common igneous rocks")
+        assert str(coll) == "Common igneous rocks"
+
+
+class TestOrderedCollection:
+    """US-2 — A collection with a deliberate order.
+
+    An ``ordered`` collection reads its members in the sequence they were arranged;
+    an unordered one is a set and refuses ordering operations.
+    """
+
+    @pytest.mark.django_db
+    def test_ordered_members_read_in_add_sequence(self, scheme):
+        basalt = Concept.objects.create(scheme=scheme, label="Basalt")
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        gabbro = Concept.objects.create(scheme=scheme, label="Gabbro")
+        reading = Collection.objects.create(scheme=scheme, name="Reading order", ordered=True)
+        reading.add(basalt)
+        reading.add(granite)
+        reading.add(gabbro)
+        assert list(reading.members()) == [basalt, granite, gabbro]
+
+    @pytest.mark.django_db
+    def test_set_member_order_rearranges(self, scheme):
+        basalt = Concept.objects.create(scheme=scheme, label="Basalt")
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        gabbro = Concept.objects.create(scheme=scheme, label="Gabbro")
+        reading = Collection.objects.create(scheme=scheme, name="Reading order", ordered=True)
+        for c in (basalt, granite, gabbro):
+            reading.add(c)
+        reading.set_member_order([gabbro, basalt, granite])
+        assert list(reading.members()) == [gabbro, basalt, granite]
+
+    @pytest.mark.django_db
+    def test_removing_a_member_keeps_relative_order(self, scheme):
+        basalt = Concept.objects.create(scheme=scheme, label="Basalt")
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        gabbro = Concept.objects.create(scheme=scheme, label="Gabbro")
+        reading = Collection.objects.create(scheme=scheme, name="Reading order", ordered=True)
+        for c in (basalt, granite, gabbro):
+            reading.add(c)
+        reading.remove(granite)  # remove the middle member
+        assert list(reading.members()) == [basalt, gabbro]
+
+    @pytest.mark.django_db
+    def test_set_member_order_on_unordered_collection_is_refused(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        basalt = Concept.objects.create(scheme=scheme, label="Basalt")
+        plain = Collection.objects.create(scheme=scheme, name="A set")
+        plain.add(granite)
+        plain.add(basalt)
+        with pytest.raises(ValidationError):
+            plain.set_member_order([basalt, granite])
+
+    @pytest.mark.django_db
+    def test_set_member_order_with_a_different_set_is_refused(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        basalt = Concept.objects.create(scheme=scheme, label="Basalt")
+        quartz = Concept.objects.create(scheme=scheme, label="Quartz")
+        reading = Collection.objects.create(scheme=scheme, name="Reading order", ordered=True)
+        reading.add(granite)
+        reading.add(basalt)
+        with pytest.raises(ValidationError):
+            reading.set_member_order([granite, basalt, quartz])  # quartz is not a member
+
+    @pytest.mark.django_db
+    def test_unordered_collection_returns_its_members_as_a_set(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        basalt = Concept.objects.create(scheme=scheme, label="Basalt")
+        plain = Collection.objects.create(scheme=scheme, name="A set")
+        plain.add(granite)
+        plain.add(basalt)
+        assert set(plain.members()) == {granite, basalt}
+
+
+class TestMembershipIntegrity:
+    """US-3 — Membership stays inside the vocabulary and clear of the hierarchy."""
+
+    @pytest.mark.django_db
+    def test_cross_vocabulary_member_is_refused(self):
+        rocks = ConceptScheme.objects.create(name="Rocks")
+        minerals = ConceptScheme.objects.create(name="Minerals")
+        igneous = Collection.objects.create(scheme=rocks, name="Igneous")
+        mica = Concept.objects.create(scheme=minerals, label="Mica")
+        with pytest.raises(ValidationError):
+            igneous.add(mica)
+        assert list(igneous.members()) == []
+
+    @pytest.mark.django_db
+    def test_membership_asserts_no_relation(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        basalt = Concept.objects.create(scheme=scheme, label="Basalt")
+        igneous = Collection.objects.create(scheme=scheme, name="Igneous")
+        igneous.add(granite)
+        igneous.add(basalt)
+        assert basalt not in granite.related()
+        assert basalt not in granite.broader()
+        assert basalt not in granite.narrower()
+
+    @pytest.mark.django_db
+    def test_existing_relation_is_unchanged_by_shared_membership(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        igneous_rock = Concept.objects.create(scheme=scheme, label="Igneous rock")
+        granite.add_broader(igneous_rock)
+        coll = Collection.objects.create(scheme=scheme, name="Igneous")
+        coll.add(granite)
+        coll.add(igneous_rock)
+        # the pre-existing broader/narrower link is untouched
+        assert igneous_rock in granite.broader()
+        assert granite in igneous_rock.narrower()

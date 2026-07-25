@@ -179,3 +179,52 @@ def test_relation_graph_helper_yields_a_navigable_graph():
     # everything is in one vocabulary
     schemes = {c.scheme_id for c in (graph["parent"], graph["child"], graph["left"], graph["right"])}
     assert len(schemes) == 1
+
+
+# --- FS-004 US-4: collection scaffolding ---
+
+
+@pytest.mark.django_db
+def test_collection_factory_produces_saved_valid_object():
+    from controlled_vocabularies.models import Collection
+    from tests.factories import CollectionFactory
+
+    collection = CollectionFactory()
+    assert isinstance(collection, Collection)
+    assert collection.pk is not None
+    assert collection.name
+    assert collection.slug
+    assert collection.ordered is False
+    assert collection.uri == f"{collection.scheme.uri}/collection/{collection.slug}"
+
+
+@pytest.mark.django_db
+def test_collection_member_factory_joins_a_collection_and_a_concept_in_one_scheme():
+    from controlled_vocabularies.models import CollectionMember
+    from tests.factories import CollectionMemberFactory
+
+    member = CollectionMemberFactory()
+    assert isinstance(member, CollectionMember)
+    assert member.pk is not None
+    # both ends share one vocabulary — the cross-vocabulary guard never trips
+    assert member.collection.scheme_id == member.concept.scheme_id
+    assert member.concept in member.collection.members()
+
+
+@pytest.mark.django_db
+def test_collection_with_members_helper_yields_a_populated_collection():
+    from tests.factories import collection_with_members
+
+    collection, members = collection_with_members()
+    assert set(collection.members()) == set(members)
+    # every member is in the collection's own vocabulary
+    assert {c.scheme_id for c in members} == {collection.scheme_id}
+
+
+@pytest.mark.django_db
+def test_collection_with_members_helper_builds_an_ordered_collection():
+    from tests.factories import collection_with_members
+
+    collection, members = collection_with_members(ordered=True)
+    assert collection.ordered is True
+    assert list(collection.members()) == members
