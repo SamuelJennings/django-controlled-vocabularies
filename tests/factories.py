@@ -11,6 +11,8 @@ across repeated calls: ``ConceptScheme.slug`` is unique app-wide and
 import factory
 
 from controlled_vocabularies.models import (
+    Collection,
+    CollectionMember,
     Concept,
     ConceptLabel,
     ConceptNote,
@@ -137,3 +139,50 @@ def relation_graph(scheme=None):
     child.add_broader(parent)
     left.add_related(right)
     return {"scheme": scheme, "parent": parent, "child": child, "left": left, "right": right}
+
+
+class CollectionFactory(factory.django.DjangoModelFactory):
+    """Build a saved :class:`Collection`, auto-creating its owning scheme.
+
+    ``name`` drives the derived, per-scheme-unique slug via a sequence so repeated
+    calls never collide. Unordered by default; pass ``ordered=True`` for an ordered
+    collection.
+    """
+
+    class Meta:
+        model = Collection
+
+    scheme = factory.SubFactory(ConceptSchemeFactory)
+    name = factory.Sequence(lambda n: f"Collection {n}")
+
+
+class CollectionMemberFactory(factory.django.DjangoModelFactory):
+    """Build a saved :class:`CollectionMember` joining a collection to a concept.
+
+    ``collection`` and ``concept`` are auto-created in the *same* scheme — a
+    membership is intra-vocabulary — via ``SelfAttribute`` so the cross-vocabulary
+    guard never trips.
+    """
+
+    class Meta:
+        model = CollectionMember
+
+    collection = factory.SubFactory(CollectionFactory)
+    concept = factory.SubFactory(ConceptFactory, scheme=factory.SelfAttribute("..collection.scheme"))
+
+
+def collection_with_members(scheme=None, labels=("Granite", "Basalt", "Gabbro"), ordered=False):
+    """Build a collection populated with concepts and return ``(collection, members)``.
+
+    The concepts are created in the collection's own scheme and added through
+    :meth:`Collection.add` (so validation and, for an ordered collection, positions are
+    honoured). ``members`` is the list in the order they were added — for an ordered
+    collection this is the sequence :meth:`Collection.members` reads back. Lets a test
+    assert on a populated (or ordered) collection in a couple of lines.
+    """
+    scheme = scheme or ConceptSchemeFactory()
+    collection = CollectionFactory(scheme=scheme, ordered=ordered)
+    members = [ConceptFactory(scheme=scheme, label=label) for label in labels]
+    for concept in members:
+        collection.add(concept)
+    return collection, members

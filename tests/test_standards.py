@@ -23,6 +23,8 @@ from django.db.models import Model, UniqueConstraint
 from django.utils.functional import Promise
 
 from controlled_vocabularies.models import (
+    Collection,
+    CollectionMember,
     Concept,
     ConceptLabel,
     ConceptNote,
@@ -30,7 +32,7 @@ from controlled_vocabularies.models import (
     ConceptScheme,
 )
 
-ALL_MODELS = [ConceptScheme, Concept, ConceptLabel, ConceptNote, ConceptRelation]
+ALL_MODELS = [ConceptScheme, Concept, ConceptLabel, ConceptNote, ConceptRelation, Collection, CollectionMember]
 
 
 def _editable_fields(model: type[Model]):
@@ -231,3 +233,75 @@ def test_concept_relation_fks_are_indexed():
     # the target-leading from the explicit index above.
     assert ConceptRelation._meta.get_field("source").db_index is True
     assert ConceptRelation._meta.get_field("target").db_index is True
+
+
+# --- FS-004: the collection models meet the same metadata + indexing standard ---
+# (Collection and CollectionMember are in ALL_MODELS above, so the field-metadata and
+# Meta.verbose_name walks already cover them. Below: the new validation messages and the
+# deliberate indexing decision.)
+
+
+@pytest.mark.django_db
+def test_cross_vocabulary_membership_message_uses_named_placeholders():
+    # FR-005: adding a concept from another vocabulary names both vocabularies via *named*
+    # placeholders so the translatable msgid stays static.
+    rocks = ConceptScheme.objects.create(name="Rocks")
+    minerals = ConceptScheme.objects.create(name="Minerals")
+    igneous = Collection.objects.create(scheme=rocks, name="Igneous")
+    mica = Concept.objects.create(scheme=minerals, label="Mica")
+    with pytest.raises(ValidationError) as excinfo:
+        igneous.add(mica)
+    err = _authored_nonfield_error(excinfo.value)
+    assert isinstance(err.message, Promise), "cross-vocabulary membership message is not lazily translatable"
+    assert "%(concept_scheme)s" in str(err.message) and "%(collection_scheme)s" in str(err.message)
+    assert set(err.params) == {"concept_scheme", "collection_scheme"}
+
+
+@pytest.mark.django_db
+def test_not_ordered_guard_message_uses_named_placeholder():
+    # FR-006: ordering an unordered collection is refused with a translatable message that
+    # names the collection via a placeholder.
+    scheme = ConceptScheme.objects.create(name="Rocks")
+    granite = Concept.objects.create(scheme=scheme, label="Granite")
+    plain = Collection.objects.create(scheme=scheme, name="A set")
+    plain.add(granite)
+    with pytest.raises(ValidationError) as excinfo:
+        plain.set_member_order([granite])
+    # a non-field ValidationError raised directly (no error_dict); read messages/params off it
+    assert isinstance(excinfo.value.messages[0], str)
+    err = excinfo.value.error_list[0]
+    assert isinstance(err.message, Promise), "not-ordered guard message is not lazily translatable"
+    assert "%(name)s" in str(err.message)
+    assert set(err.params) == {"name"}
+
+
+def test_collection_member_has_held_once_constraint_and_order_index():
+    # FR-004 / Article XIII: held-once is a DB unique constraint; the ordered read is index-backed.
+    names = {c.name for c in CollectionMember._meta.constraints}
+    assert "unique_collection_member" in names, "missing the (collection, concept) held-once constraint (FR-004)"
+    unique = next(c for c in CollectionMember._meta.constraints if c.name == "unique_collection_member")
+    assert tuple(unique.fields) == ("collection", "concept")
+    indexed = [tuple(index.fields) for index in CollectionMember._meta.indexes]
+    assert ("collection", "position") in indexed, (
+        f"CollectionMember missing a (collection, position) index; has {indexed}"
+    )
+
+
+def test_collection_has_per_scheme_unique_slug_constraint():
+    # FR-009: two collections in one vocabulary are distinguishable by a per-scheme-unique slug.
+    constraint = next(
+        (
+            c
+            for c in Collection._meta.constraints
+            if isinstance(c, UniqueConstraint) and c.name == "unique_collection_slug_per_scheme"
+        ),
+        None,
+    )
+    assert constraint is not None, "missing unique_collection_slug_per_scheme constraint"
+    assert tuple(constraint.fields) == ("scheme", "slug")
+
+
+def test_collection_member_fks_are_indexed():
+    # FKs are auto-indexed; the reverse read (a concept's collections) rides the concept FK index.
+    assert CollectionMember._meta.get_field("collection").db_index is True
+    assert CollectionMember._meta.get_field("concept").db_index is True
