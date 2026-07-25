@@ -29,6 +29,9 @@ thousands of concepts and evolve as data rather than code.
 - Multilingual — a concept holds labels and definitions in any number of languages, with one
   preferred label per language. Each vocabulary picks the language that anchors its concept URIs,
   and a curator can override any concept's slug.
+- A graph, not a flat list — concepts link to one another through a broader/narrower hierarchy
+  (navigable both ways, and a concept may sit under several broader concepts) and a symmetric
+  related association, all within one vocabulary.
 
 **It deliberately is not:**
 

@@ -10,7 +10,13 @@ across repeated calls: ``ConceptScheme.slug`` is unique app-wide and
 
 import factory
 
-from controlled_vocabularies.models import Concept, ConceptLabel, ConceptNote, ConceptScheme
+from controlled_vocabularies.models import (
+    Concept,
+    ConceptLabel,
+    ConceptNote,
+    ConceptRelation,
+    ConceptScheme,
+)
 
 
 class ConceptSchemeFactory(factory.django.DjangoModelFactory):
@@ -96,3 +102,38 @@ class ConceptNoteFactory(factory.django.DjangoModelFactory):
     language = "en"
     kind = ConceptNote.Kind.DEFINITION
     value = factory.Sequence(lambda n: f"Definition {n}")
+
+
+class ConceptRelationFactory(factory.django.DjangoModelFactory):
+    """Build a saved :class:`ConceptRelation` between two concepts in one vocabulary.
+
+    ``source`` and ``target`` are auto-created in the *same* scheme — a relation is
+    intra-vocabulary — via ``SelfAttribute`` so the cross-vocabulary guard never trips.
+    ``kind`` defaults to ``BROADER`` (``source`` is the narrower/child); pass
+    ``kind=ConceptRelation.Kind.RELATED`` for a symmetric association.
+    """
+
+    class Meta:
+        model = ConceptRelation
+
+    source = factory.SubFactory(ConceptFactory)
+    target = factory.SubFactory(ConceptFactory, scheme=factory.SelfAttribute("..source.scheme"))
+    kind = ConceptRelation.Kind.BROADER
+
+
+def relation_graph(scheme=None):
+    """Build a small navigable graph in one vocabulary and return its concepts.
+
+    A broader/narrower pair (``child`` under ``parent``) and a separate related pair
+    (``left`` and ``right``), all in one scheme, built through the validated write helpers
+    (``add_broader``/``add_related``). Returns a dict of the pieces so a test can assert
+    on the graph in a couple of lines.
+    """
+    scheme = scheme or ConceptSchemeFactory()
+    parent = ConceptFactory(scheme=scheme)
+    child = ConceptFactory(scheme=scheme)
+    left = ConceptFactory(scheme=scheme)
+    right = ConceptFactory(scheme=scheme)
+    child.add_broader(parent)
+    left.add_related(right)
+    return {"scheme": scheme, "parent": parent, "child": child, "left": left, "right": right}

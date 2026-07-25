@@ -868,3 +868,232 @@ class TestReviewHardening:
             Concept.objects.get_by_uri(sibling)
         # The genuine URI still resolves (regression guard).
         assert Concept.objects.get_by_uri(concept.uri) == concept
+
+
+class TestBroaderNarrower:
+    """US-1 (FS-003) — a broader/narrower hierarchy, navigable both ways.
+
+    ``add_broader`` asserts one direction; ``narrower`` is derived from it, never
+    asserted separately. A concept may sit under several broader concepts
+    (polyhierarchy). Adding or removing a link never moves a concept's identity
+    (FR-004). Self, duplicate, and cross-vocabulary edges are refused.
+    """
+
+    @pytest.mark.django_db
+    def test_broader_readable_and_narrower_derived(self, scheme):
+        igneous = Concept.objects.create(scheme=scheme, label="Igneous rock")
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        granite.add_broader(igneous)
+        # one assertion, both directions
+        assert igneous in granite.broader()
+        assert granite in igneous.narrower()
+        # nothing spurious in the empty directions
+        assert list(granite.narrower()) == []
+        assert list(igneous.broader()) == []
+
+    @pytest.mark.django_db
+    def test_polyhierarchy_several_broader(self, scheme):
+        igneous = Concept.objects.create(scheme=scheme, label="Igneous rock")
+        plutonic = Concept.objects.create(scheme=scheme, label="Plutonic rock")
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        granite.add_broader(igneous)
+        granite.add_broader(plutonic)
+        assert set(granite.broader()) == {igneous, plutonic}
+
+    @pytest.mark.django_db
+    def test_remove_broader_clears_both_directions(self, scheme):
+        igneous = Concept.objects.create(scheme=scheme, label="Igneous rock")
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        granite.add_broader(igneous)
+        granite.remove_broader(igneous)
+        assert list(granite.broader()) == []
+        assert list(igneous.narrower()) == []
+        # removing an absent edge is a no-op
+        granite.remove_broader(igneous)
+
+    @pytest.mark.django_db
+    def test_self_broader_is_refused(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        with pytest.raises(ValidationError):
+            granite.add_broader(granite)
+
+    @pytest.mark.django_db
+    def test_duplicate_broader_is_refused(self, scheme):
+        igneous = Concept.objects.create(scheme=scheme, label="Igneous rock")
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        granite.add_broader(igneous)
+        with pytest.raises(ValidationError):
+            granite.add_broader(igneous)
+        # the pair is held once
+        assert list(granite.broader()) == [igneous]
+
+    @pytest.mark.django_db
+    def test_reverse_broader_is_a_distinct_edge(self, scheme):
+        # a broader b and b broader a are different edges (a 2-cycle), permitted:
+        # the cycle deferral means no traversal, and the ordered unique key differs.
+        a = Concept.objects.create(scheme=scheme, label="A")
+        b = Concept.objects.create(scheme=scheme, label="B")
+        a.add_broader(b)
+        b.add_broader(a)  # must not raise
+        assert b in a.broader()
+        assert a in b.broader()
+
+    @pytest.mark.django_db
+    def test_cross_scheme_broader_is_refused(self, scheme):
+        other = ConceptSchemeFactory()
+        here = Concept.objects.create(scheme=scheme, label="Granite")
+        there = Concept.objects.create(scheme=other, label="Quartz")
+        with pytest.raises(ValidationError):
+            here.add_broader(there)
+
+    @pytest.mark.django_db
+    def test_adding_and_removing_broader_leaves_identity_unchanged(self, scheme):
+        igneous = Concept.objects.create(scheme=scheme, label="Igneous rock")
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        uri_before, slug_before = granite.uri, granite.slug
+        granite.add_broader(igneous)
+        granite.refresh_from_db()
+        assert (granite.uri, granite.slug) == (uri_before, slug_before)
+        granite.remove_broader(igneous)
+        granite.refresh_from_db()
+        assert (granite.uri, granite.slug) == (uri_before, slug_before)
+
+
+class TestRelated:
+    """US-2 (FS-003) — the symmetric ``related`` association.
+
+    ``add_related`` records a sideways link that reads the same from either concept
+    and is stored once regardless of the order asserted (research R2). Self and
+    duplicate (either order) are refused; removal clears both sides; identity is
+    untouched.
+    """
+
+    @pytest.mark.django_db
+    def test_related_is_symmetric(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        quartz = Concept.objects.create(scheme=scheme, label="Quartz")
+        granite.add_related(quartz)
+        assert quartz in granite.related()
+        assert granite in quartz.related()
+
+    @pytest.mark.django_db
+    def test_related_stored_once_mirror_refused(self, scheme):
+        from controlled_vocabularies.models import ConceptRelation
+
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        quartz = Concept.objects.create(scheme=scheme, label="Quartz")
+        granite.add_related(quartz)
+        # the same association asserted in the mirror order is the one that exists
+        with pytest.raises(ValidationError):
+            quartz.add_related(granite)
+        assert ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED).count() == 1
+        assert list(granite.related()) == [quartz]
+
+    @pytest.mark.django_db
+    def test_same_order_related_duplicate_is_refused(self, scheme):
+        # the exact same assertion (not just the mirror) is also refused — the pair is held once
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        quartz = Concept.objects.create(scheme=scheme, label="Quartz")
+        granite.add_related(quartz)
+        with pytest.raises(ValidationError):
+            granite.add_related(quartz)
+
+    @pytest.mark.django_db
+    def test_self_related_is_refused(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        with pytest.raises(ValidationError):
+            granite.add_related(granite)
+
+    @pytest.mark.django_db
+    def test_remove_related_clears_both_sides(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        quartz = Concept.objects.create(scheme=scheme, label="Quartz")
+        granite.add_related(quartz)
+        # removal works from either side regardless of stored order
+        quartz.remove_related(granite)
+        assert list(granite.related()) == []
+        assert list(quartz.related()) == []
+        quartz.remove_related(granite)  # no-op
+
+    @pytest.mark.django_db
+    def test_cross_scheme_related_is_refused(self, scheme):
+        other = ConceptSchemeFactory()
+        here = Concept.objects.create(scheme=scheme, label="Granite")
+        there = Concept.objects.create(scheme=other, label="Quartz")
+        with pytest.raises(ValidationError):
+            here.add_related(there)
+
+    @pytest.mark.django_db
+    def test_adding_related_leaves_identity_unchanged(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        quartz = Concept.objects.create(scheme=scheme, label="Quartz")
+        uri_before, slug_before = granite.uri, granite.slug
+        granite.add_related(quartz)
+        granite.refresh_from_db()
+        assert (granite.uri, granite.slug) == (uri_before, slug_before)
+
+
+class TestGraphIntegrity:
+    """US-3 (FS-003) — the graph cannot enter a SKOS-contradictory state.
+
+    A pair joined by a direct broader/narrower link cannot also be ``related``
+    (disjointness), checked at direct adjacency only. Cycles in the hierarchy and
+    a related link between only-transitively-hierarchical concepts are *accepted* —
+    both are recorded non-guarantees this slice (no hierarchy traversal is performed).
+    """
+
+    @pytest.mark.django_db
+    def test_hierarchical_pair_cannot_also_be_related(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        igneous = Concept.objects.create(scheme=scheme, label="Igneous rock")
+        granite.add_broader(igneous)
+        # refused in either order of attempt
+        with pytest.raises(ValidationError):
+            granite.add_related(igneous)
+        with pytest.raises(ValidationError):
+            igneous.add_related(granite)
+
+    @pytest.mark.django_db
+    def test_related_pair_cannot_be_given_a_broader_link(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        quartz = Concept.objects.create(scheme=scheme, label="Quartz")
+        granite.add_related(quartz)
+        with pytest.raises(ValidationError):
+            granite.add_broader(quartz)
+        with pytest.raises(ValidationError):
+            quartz.add_broader(granite)
+
+    @pytest.mark.django_db
+    def test_disjointness_constrains_a_pair_not_the_vocabulary(self, scheme):
+        a = Concept.objects.create(scheme=scheme, label="A")
+        b = Concept.objects.create(scheme=scheme, label="B")
+        c = Concept.objects.create(scheme=scheme, label="C")
+        d = Concept.objects.create(scheme=scheme, label="D")
+        a.add_broader(b)  # one pair hierarchical
+        c.add_related(d)  # a different pair related
+        assert b in a.broader()
+        assert d in c.related()
+
+    @pytest.mark.django_db
+    def test_transitively_hierarchical_pair_can_be_related(self, scheme):
+        # a -> b -> c (broader). a and c are only *transitively* hierarchical, so relating
+        # them is accepted — disjointness is checked at direct adjacency only.
+        a = Concept.objects.create(scheme=scheme, label="A")
+        b = Concept.objects.create(scheme=scheme, label="B")
+        c = Concept.objects.create(scheme=scheme, label="C")
+        a.add_broader(b)
+        b.add_broader(c)
+        a.add_related(c)  # must not raise
+        assert c in a.related()
+
+    @pytest.mark.django_db
+    def test_cyclic_broader_chain_is_accepted(self, scheme):
+        # a -> b -> c -> a. No cycle prevention this slice (recorded non-guarantee); the
+        # inserts must succeed and perform no hierarchy traversal.
+        a = Concept.objects.create(scheme=scheme, label="A")
+        b = Concept.objects.create(scheme=scheme, label="B")
+        c = Concept.objects.create(scheme=scheme, label="C")
+        a.add_broader(b)
+        b.add_broader(c)
+        c.add_broader(a)  # closes the loop; must not raise
+        assert a in c.broader()
