@@ -11,9 +11,9 @@ All notable changes to this project are documented in this file. The format foll
 - Collections: a vocabulary's concepts can be gathered into named collections, optionally ordered,
   held on the new `Collection` and `CollectionMember` models and reached through `Collection.add()`,
   `remove()`, `members()`, `set_member_order()`, and `Concept.collections()`. Membership is
-  many-to-many, held once per collection, and confined to the collection's own vocabulary; it asserts
+  many-to-many, held once per collection, and confined to the collection's own vocabulary. It asserts
   no relation between members, so a collection stays clear of the broader/narrower hierarchy. An
-  ordered collection reads its members back in a deliberate sequence. Authored through the ORM; the
+  ordered collection reads its members back in a deliberate sequence. Authored through the ORM. The
   editing interface comes later.
 
 - Concept relationships: concepts within a vocabulary can be linked through a broader/narrower

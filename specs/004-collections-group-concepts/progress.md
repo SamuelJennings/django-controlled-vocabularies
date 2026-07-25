@@ -20,3 +20,16 @@ the human-readable trail.
   Tracking, decisions D7). `plan.md`, `research.md`, `data-model.md`, `contracts/python-api.md`,
   `quickstart.md`, `tasks.md` (T001–T015) written; analyze prerequisites green; `feature-state.json`
   created (all tasks `todo`, Spec gate recorded). **Awaiting the Plan gate.**
+
+## 2026-07-25 — S4→S7
+
+- **S4 implement.** All five stories built test-first on one worktree (orchestrator-implemented).
+  Two models (`Collection`, `CollectionMember`), helper API, one migration (0004). 175 tests green;
+  verify.sh green (lint/typecheck/test/build). Tamper-check: 4 flags, triaged additive-only (D8).
+  Ledger stories → done; `## Story complete` comments posted to #42–#46 (bot).
+- **S5 converge.** Single migration; migrate-from-zero + `makemigrations --check` clean; story-comment
+  gate green. No ADR graduation (no `docs/adr/` tree; decisions live in `decisions.md`, matching FS-003).
+- **S6 review.** Self-review, correctness + spec lens: no findings. Coverage 96% (floor 90%). Added
+  two tests for defensive/cosmetic branches to keep the PR clean.
+- **S7 PR ready.** Humanized README/CHANGELOG (split semicolon clause-joins). PR #47 body finalized,
+  `Closes` block reconciled. **Awaiting the merge gate (Sam).**

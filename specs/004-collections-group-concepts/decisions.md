@@ -82,3 +82,15 @@ package's evolve-for-years mandate (Article VIII). The alternative is trivial: a
 intact because integer gaps are harmless — so the library's headline gap-free-reordering feature buys
 nothing here. Full evaluation in `research.md` R5; trade-off recorded in `plan.md` Complexity Tracking.
 Sam confirmed a reasoned rejection is an acceptable planning outcome.
+
+## D8 — Tamper-check flags triaged additive-only (S4)
+
+**Flags:** `modified_preexisting_test` on `tests/factories.py`, `test_factories.py`, `test_models.py`,
+`test_standards.py`.
+
+**Triage:** additive-only. 393 insertions / 2 deletions across the four files; the only two deleted
+lines are the `test_models.py` model-import line and the `test_standards.py` `ALL_MODELS` line, each
+*extended* to include `Collection`/`CollectionMember` (so the existing metadata field-walk covers the
+new models automatically). No pre-existing test assertion was weakened, reordered, or removed — every
+other change is a new appended test class/function. Consistent with the FS-002/FS-003 pattern of
+extending the shared suite. Article I satisfied (no pre-existing behaviour test modified).

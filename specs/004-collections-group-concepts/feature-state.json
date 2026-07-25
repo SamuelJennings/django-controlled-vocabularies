@@ -3,7 +3,7 @@
   "feature": "004-collections-group-concepts",
   "branch": "004-collections-group-concepts",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "IMPLEMENT",
+  "state": "PR_READY",
   "state_history": [
     {
       "state": "SPECIFY",
@@ -27,6 +27,21 @@
       "state": "IMPLEMENT",
       "at": "2026-07-25T11:10:00Z",
       "note": "Plan gate approved; orchestrator-implemented, test-first, single worktree (Phase-1)"
+    },
+    {
+      "state": "CONVERGE",
+      "at": "2026-07-25T11:40:00Z",
+      "note": "single migration 0004; migrate-from-zero + makemigrations --check clean; story-comment gate green; no ADR graduation (decisions in decisions.md, matching FS-003)"
+    },
+    {
+      "state": "REVIEW",
+      "at": "2026-07-25T11:40:00Z",
+      "note": "self-review: no correctness findings; coverage 96% (>=90 floor); verify green"
+    },
+    {
+      "state": "PR_READY",
+      "at": "2026-07-25T11:40:00Z",
+      "note": "PR #47 body finalized; Closes block reconciled to epic + 5 stories; humanize pass on README/CHANGELOG"
     }
   ],
   "gates": {
@@ -61,42 +76,54 @@
       "priority": "P1",
       "issue": 42,
       "worktree": null,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T001",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "kit verify.sh (lint/typecheck/test/build green)"
+            ],
             "verified_by_ci": false
           }
         },
         {
           "id": "T002",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "kit verify.sh (lint/typecheck/test/build green)"
+            ],
             "verified_by_ci": false
           }
         },
         {
           "id": "T003",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "kit verify.sh (lint/typecheck/test/build green)"
+            ],
             "verified_by_ci": false
           }
         },
         {
           "id": "T004",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "kit verify.sh (lint/typecheck/test/build green)"
+            ],
             "verified_by_ci": false
           }
         }
@@ -107,33 +134,42 @@
       "priority": "P2",
       "issue": 43,
       "worktree": null,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T005",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "kit verify.sh (lint/typecheck/test/build green)"
+            ],
             "verified_by_ci": false
           }
         },
         {
           "id": "T006",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "kit verify.sh (lint/typecheck/test/build green)"
+            ],
             "verified_by_ci": false
           }
         },
         {
           "id": "T007",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "kit verify.sh (lint/typecheck/test/build green)"
+            ],
             "verified_by_ci": false
           }
         }
@@ -144,33 +180,42 @@
       "priority": "P2",
       "issue": 44,
       "worktree": null,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T008",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "kit verify.sh (lint/typecheck/test/build green)"
+            ],
             "verified_by_ci": false
           }
         },
         {
           "id": "T009",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "kit verify.sh (lint/typecheck/test/build green)"
+            ],
             "verified_by_ci": false
           }
         },
         {
           "id": "T010",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "kit verify.sh (lint/typecheck/test/build green)"
+            ],
             "verified_by_ci": false
           }
         }
@@ -181,15 +226,18 @@
       "priority": "P3",
       "issue": 45,
       "worktree": null,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T011",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "kit verify.sh (lint/typecheck/test/build green)"
+            ],
             "verified_by_ci": false
           }
         }
@@ -200,42 +248,54 @@
       "priority": "P3",
       "issue": 46,
       "worktree": null,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T012",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "kit verify.sh (lint/typecheck/test/build green)"
+            ],
             "verified_by_ci": false
           }
         },
         {
           "id": "T013",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "kit verify.sh (lint/typecheck/test/build green)"
+            ],
             "verified_by_ci": false
           }
         },
         {
           "id": "T014",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "kit verify.sh (lint/typecheck/test/build green)"
+            ],
             "verified_by_ci": false
           }
         },
         {
           "id": "T015",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "kit verify.sh (lint/typecheck/test/build green)"
+            ],
             "verified_by_ci": false
           }
         }

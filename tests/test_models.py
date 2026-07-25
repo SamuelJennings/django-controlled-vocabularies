@@ -1188,6 +1188,20 @@ class TestCollectionMembership:
         assert first.scheme_id != second.scheme_id
 
     @pytest.mark.django_db
+    def test_name_that_slugifies_to_empty_is_refused(self, scheme):
+        # A name with no slug-able characters would mint an empty identifier; refuse it
+        # rather than store an unidentifiable collection (the scheme/concept rule).
+        with pytest.raises(ValidationError):
+            Collection.objects.create(scheme=scheme, name="***")
+
+    @pytest.mark.django_db
+    def test_membership_str_names_the_concept_and_collection(self, scheme):
+        granite = Concept.objects.create(scheme=scheme, label="Granite")
+        igneous = Collection.objects.create(scheme=scheme, name="Igneous")
+        member = igneous.add(granite)
+        assert str(member) == "Granite in Igneous"
+
+    @pytest.mark.django_db
     def test_membership_leaves_concept_identity_unchanged(self, scheme):
         granite = Concept.objects.create(scheme=scheme, label="Granite")
         uri_before, slug_before = granite.uri, granite.slug
