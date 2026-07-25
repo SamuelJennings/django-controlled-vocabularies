@@ -67,3 +67,18 @@ this slice only adds collections and membership referencing existing concepts.
 
 **Why:** matches the FS-003 boundary; #19 (lifecycle) explicitly owns safe removal and depends on
 this slice. Confirmed with Sam at grilling that lifecycle is a later spec.
+
+## D7 — Ordering is hand-rolled; `django-ordered-model` rejected (planning, S3)
+
+**Considered:** Sam flagged `django-ordered-model` for consideration as a well-supported ordering API.
+
+**Chosen:** hand-rolled `position` `PositiveIntegerField` on `CollectionMember`; no ordering library.
+
+**Why:** the library's last release is March 2023 and its test matrix reaches only Django 5.1 — no
+Django 5.2 LTS or 6.0, which this repo's CI *requires* (Article X, the seven checks). Depending on
+unmaintained code for a core domain model contradicts Article VII (dependency discipline) and the
+package's evolve-for-years mandate (Article VIII). The alternative is trivial: an ordered read is
+`ORDER BY position`, rearranging is reassigning positions, and mid-list removal leaves relative order
+intact because integer gaps are harmless — so the library's headline gap-free-reordering feature buys
+nothing here. Full evaluation in `research.md` R5; trade-off recorded in `plan.md` Complexity Tracking.
+Sam confirmed a reasoned rejection is an acceptable planning outcome.
