@@ -25,8 +25,8 @@ minors, and one minor can move two goals. And once `1.0` ships, a breaking chang
 `1.x`; it waits for the next major, because a consumer pinned to `>=1,<2` is trusting that it will
 not break.
 
-The repo is at `0.0.x` today. Nothing is built yet, so the first published release is still some
-way off.
+The repo is at `0.0.x` today. R1 is done and R2 through R5 are not, so the first published release
+is still some way off.
 
 ## Essential goals: v0.1.0
 
@@ -34,17 +34,38 @@ Everything needed to reach a minimum usable release.
 
 ### R1 — Core domain foundation
 
-*Large, expect several stories · advances the foundation, and G6 directly.*
+*Large, expect several stories · advances the foundation, and G6 directly.* **Delivered.**
 
 Nothing else can be built until the system can represent a vocabulary and everything inside it, so
-this goes first.
+this goes first. It shipped as four features:
+
+- a vocabulary and its concepts
+  ([#15](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/15));
+- multilingual labels and notes
+  ([#16](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/16));
+- the relationship graph
+  ([#17](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/17));
+- collections
+  ([#18](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/18)).
 
 **Deliverables:**
 
 - models for concept schemes, concepts, collections, labels, and concept relationships;
-- creation and querying through the ORM and the Django admin;
-- stable identity for concepts, and a concept lifecycle;
+- creation and querying through the ORM;
+- stable identity for concepts;
 - tests covering the identity and safety behaviour.
+
+Two items were written into R1 at the start and moved out while it was being built.
+
+The Django admin moved to R5. All four features deferred every admin and editor surface, because a
+curator-facing interface is one coherent piece of work, and building a quarter of it against each
+model in turn produces something nobody would want to keep.
+
+The concept lifecycle moved to R4
+([#19](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/19), closed as
+deferred rather than rejected). A concept only becomes unsafe to remove once the vocabulary holding
+it has been published, and publication is a vocabulary-level release event that arrives with R4.
+Until something can reference a concept, a delete guard defends against a harm that cannot happen.
 
 Serves the foundation and G6. Out of scope: RDF import and export, the consumption field, the
 served URLs, and the editing interface.
@@ -92,8 +113,14 @@ Serves G2. Out of scope: import, export and serving, the editing interface.
 This closes the consume loop and makes the stable-URI promise real: a published concept URI has to
 resolve to standards-compliant RDF. The details belong in this feature's own spec.
 
+It also absorbs the concept lifecycle deferred out of R1. Publishing a vocabulary and freezing its
+concept URIs are the same moment, so the rules that protect a published concept belong here rather
+than in the foundation.
+
 **Deliverables:**
 
+- vocabulary publication as a deliberate, one-way release, after which a concept is retired by
+  deprecation instead of deletion;
 - concept and scheme URLs that resolve to valid SKOS in Turtle and at least one other
   serialization, chosen by content negotiation;
 - a human-readable response alongside the machine ones;
