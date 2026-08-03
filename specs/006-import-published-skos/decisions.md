@@ -174,3 +174,26 @@ turns out to need the idiom.
 
 The test for this reinstates the measured bomb as its input, so the control is proven against the
 actual defect rather than a stand-in.
+
+## D10 — `mypy_path` is dropped; it collided with the new `io` package (T002, Implementer US0)
+
+Creating `controlled_vocabularies/io/` made `poetry run mypy` fail immediately: "Source file found
+twice under different module names: `controlled_vocabularies.io` and `io`". The repo's
+`[tool.mypy]` carried `mypy_path = "controlled_vocabularies/"` from onboarding, which adds that
+directory itself as a search root — so every module inside it is reachable both as
+`controlled_vocabularies.<name>` (via `files = ["controlled_vocabularies"]`) and as a bare
+top-level `<name>` (via `mypy_path`). `conf.py`, `models.py`, and `apps.py` never collided because
+nothing else on the path is named that; `io` does, because it is a stdlib module name.
+
+`--explicit-package-bases` was tried first and made it worse — it surfaced the identical collision
+for `conf.py` too, showing the setting was already fragile and `io` only exposed it. `mypy_path` add
+no behaviour `files` does not already provide (confirmed: `poetry run mypy` still reports "Success:
+no issues found" across all five source files, baseline four plus `io/__init__.py`, with the line
+removed), so it is dropped rather than worked around.
+
+**Why:** the plan named this package `io/` (plan.md Project Structure) and that name is right for a
+reader with no other job — inventing a different name to dodge a stdlib collision would be the tail
+wagging the dog, and the actual fix costs one redundant config line.
+
+**Revisit if:** a future module inside `controlled_vocabularies/` needs `MYPYPATH`-style resolution
+that `files` alone does not give it — none of the existing modules do, and `io/` does not either.
