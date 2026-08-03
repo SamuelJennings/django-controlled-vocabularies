@@ -51,34 +51,41 @@ after `ConceptScheme.objects.create(permanent_uri="http://vocab.example.org/ext"
 value and saving rewrites it, and assigning `None` and saving silently returns the record to a
 provisional identity. This is a planning omission, not an implementer failure.
 
-- [ ] T024 [US1] Write failing tests in `tests/test_models.py` (class `TestPermanentUriIsFixed`), for
+- [x] T024 [US1] Write failing tests in `tests/test_models.py` (class `TestPermanentUriIsFixed`), for
       each of the three models: a record loaded from the database refuses a save that changes its
       stored `permanent_uri`; it refuses a save that clears it to `None`; the refusal is a
       `ValidationError` on the `permanent_uri` key with a translatable named-placeholder message; and
       re-saving with the identifier unchanged succeeds. Also assert the two allowed transitions still
       work: a record created with an identifier keeps it, and a record created without one may still
       have one set once (this is the path R4's publish action will use).
-- [ ] T025 [US1] Enforce it: snapshot the loaded value in a `from_db` classmethod on each model
+- [x] T025 [US1] Enforce it: snapshot the loaded value in a `from_db` classmethod on each model
       (guarding against a deferred `permanent_uri` from `.only()`/`.defer()`, where no snapshot is
       available and the check must be skipped rather than fire on a phantom change), and refuse the
       change from `save()` and `clean()` via a module-level helper alongside
       `_reject_permanent_uri_held_by_another_model`. A record with no snapshot — one freshly
       constructed in memory — is unconstrained, so setting an identifier for the first time is
       allowed and only rewriting a stored one is refused.
+- [x] T026 [US1] Close the two holes T025's snapshot left, found by probing the delivered code
+      (decisions.md D12). A `.only()`/`.defer()` load carries no snapshot, so a rewrite *or* a clear
+      through one was accepted silently — read the stored value back instead, but only once the
+      deferred column has actually been assigned, so an untouched deferred save still never fetches
+      it. And a record's own instance kept its `None` snapshot after the save that first stored an
+      identifier, so it could be saved again under a second one — adopt the written value as the
+      stored one at the end of each `save()`. Tests for both, per model, in `TestPermanentUriIsFixed`.
 
 ## Phase 3: User Story 2 — Find a record by its identifier, wherever it points (P2)
 
-- [ ] T009 [US2] Write failing tests in `tests/test_models.py` (class `TestGetByUri`): an external
+- [x] T009 [US2] Write failing tests in `tests/test_models.py` (class `TestGetByUri`): an external
       identifier resolves to its record; a local record still resolves by its own identifier; an
       unheld identifier raises `DoesNotExist` for both kinds; an imported and a local record do not
       answer to each other's identifier; `ConceptScheme` and `Collection` resolve too. Include the
       FR-014 compatibility assertion — `Concept.objects.get_by_uri` still exists under that name and
       still answers for locally authored concepts exactly as before.
-- [ ] T010 [US2] Add `PermanentUriLookupMixin` with `get_by_uri(uri)`: exact match on `permanent_uri`
+- [x] T010 [US2] Add `PermanentUriLookupMixin` with `get_by_uri(uri)`: exact match on `permanent_uri`
       first, then the model's base-relative parse, then `DoesNotExist` with R1's message. Move
       `ConceptManager.get_by_uri`'s existing parse into the model-specific hook the mixin calls; do not
       change its behaviour for local identifiers.
-- [ ] T011 [US2] Put the mixin on the `ConceptScheme` and `Collection` managers, adding their parses
+- [x] T011 [US2] Put the mixin on the `ConceptScheme` and `Collection` managers, adding their parses
       (`{base}/{slug}` and `{base}/{scheme-slug}/collection/{slug}`).
 
 ## Phase 4: User Story 3 — A record authored here shows the identifier it will publish under (P2)
@@ -135,7 +142,7 @@ provisional identity. This is a planning omission, not an implementer failure.
 - Phase 1 is strictly first: every story needs the column to exist.
 - Phases 2–5 all edit `models.py`, so they run **sequentially** despite being independent by story.
   Phase 1 (Phase 2 in the pipeline's numbering) parallelism is not available here for that reason.
-- Phase 2b (T024/T025) closes FR-002/FR-013 and edits `models.py`, so it runs before Phase 3.
+- Phase 2b (T024–T026) closes FR-002/FR-013 and edits `models.py`, so it runs before Phase 3.
 - Phase 6's T018 and T019 touch different test files and may run in parallel.
 - Phase 7 is last; T021 and T022 are documentation and may run alongside each other.
 - Migration squashing happens at convergence (S5), not here.

@@ -175,3 +175,36 @@ special-casing needs a concrete class to hang it on. `Model.DoesNotExist` is alw
 mypy cannot check. Each manager's own `_get_by_local_parse` keeps raising `self.model.DoesNotExist`
 explicitly (there the model is concrete, not generic), so the observable exception type callers see is
 unchanged in every case tested.
+
+## D12 — A deferred load is not an exemption from fixedness, and fixedness starts at the storing save
+
+**Ambiguous**: T025 delivered the rewrite guard as a snapshot taken in `from_db`, and deliberately
+left a record loaded with `permanent_uri` deferred unconstrained — there was no snapshot to compare
+against, so the guard skipped. Reviewing that code found the exemption is reachable from ordinary
+code, and found a second hole the same snapshot design created.
+
+**Chosen**: both are closed (T026).
+
+1. A record loaded with the column deferred now has the stored value read back and compared, but
+   only once the column has actually been assigned. While the column is still deferred nothing about
+   the identifier can have changed, so every identifier check is skipped and the column is never
+   fetched — an untouched deferred save costs exactly what it did before.
+2. Each `save()` now adopts the value it wrote as the stored one, so the instance that first stores
+   an identifier is fixed from that moment rather than from its next load.
+
+**Why**: FR-002 and FR-013 say a stored identifier is never changed, without qualification. Probing
+the delivered code showed `Model.objects.only("id").get(pk=...)` followed by an assignment and a
+save rewrote a stored identifier silently, and the same route set it to `None`, returning an imported
+record to a provisional identity — the exact failure the feature exists to prevent. `.only()` and
+`.defer()` are ordinary performance idioms in Django list views, not exotic escape hatches, so an
+invariant that any of them bypasses is not an invariant. The second hole was reachable without any
+deferral at all: a record created provisional, given an identifier and saved, could be given a
+different identifier and saved again from the same in-memory instance, because its snapshot was still
+`None`. That is precisely the instance R4's publish action will be holding.
+
+**Cost**: one extra query, paid only on a save that assigns a previously deferred `permanent_uri`.
+Each of the three parts is covered by tests that fail when that part alone is removed.
+
+**Not covered, deliberately**: `QuerySet.update()` and raw SQL bypass this, as they bypass every
+`save()`-based rule in Django, including the slug and default-language rules this app already relies
+on. Nothing portable defends against that at the database level for a conditional invariant.

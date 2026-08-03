@@ -126,3 +126,32 @@ the human-readable trail.
   T017 is what closes it, not this pass.
 - **Next**: US-3 (T012–T015, provisional-URI and uniqueness tests) and US-4 (T016–T017, `local_url`)
   are out of this implementer's scope — not started.
+
+## T026 — closing two holes in the fixedness guard (review, 2026-08-03)
+
+- **Why**: reviewing the T024/T025 delivery rather than accepting its report. T025 exempted a record
+  loaded with `permanent_uri` deferred, and asserted that exemption in a test
+  (`test_deferred_permanent_uri_is_unconstrained`). Probing it directly showed the exemption is
+  reachable from ordinary code: `Model.objects.only("id").get(pk=...)`, assign, save — the stored
+  identifier was rewritten, and the same route cleared it to `None`, returning an imported record to
+  a provisional identity. A second probe found a hole with no deferral involved: a provisional record
+  given an identifier and saved could be given a different one and saved again from the same
+  in-memory instance, because its snapshot was still `None`. Both contradict FR-002 and FR-013.
+- **Tests first**: the exemption test was replaced by four parametrized tests across all three models
+  — a deferred load refuses a rewrite, refuses a clear, leaves the column deferred when it never
+  touches it (the evidence the read-back is not paid for on every deferred save), and a provisional
+  record may be given an identifier only once. Confirmed red, 12 failing, before any change.
+- **Implementation**: `from_db` now flags a deferred load instead of silently leaving no snapshot;
+  `_reject_permanent_uri_rewrite` reads the stored value back when the flag is set *and* the column
+  has since been assigned; `_permanent_uri_still_deferred` short-circuits `save()` and `clean()` when
+  it has not; and `_note_permanent_uri_saved` adopts the written value at the end of each `save()`.
+  The three duplicated `save()` blocks collapsed into one `_validate_permanent_uri_on_save` helper.
+  Recorded as `decisions.md` D12.
+- **Verified with**: `poetry run pytest -q` → **234 passed** (223 + 12 new − 1 replaced).
+  `ruff check` → All checks passed. `ruff format --check` → 12 files already formatted.
+  `mypy controlled_vocabularies` → Success, 4 source files. `makemigrations --check --dry-run` → No
+  changes detected. Each of the three parts of the fix was removed in turn and the suite re-run: the
+  read-back fails 6 tests, the post-save snapshot fails 3, the deferred short-circuit fails 3, all
+  for the right reason. The original probes now raise instead of silently rewriting.
+- **Not covered, deliberately**: `QuerySet.update()` and raw SQL, which bypass every `save()`-based
+  rule this app already has. Noted in D12.
