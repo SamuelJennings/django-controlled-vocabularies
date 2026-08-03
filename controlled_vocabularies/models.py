@@ -62,6 +62,46 @@ def validate_permanent_uri(value: str) -> None:
         )
 
 
+def _snapshot_permanent_uri(instance: "ConceptScheme | Concept | Collection", field_names) -> None:
+    """Record the ``permanent_uri`` a record was loaded with, for the rewrite guard.
+
+    Called from each model's ``from_db``. Only recorded when the field was
+    actually fetched — left at its default (``None``) when ``.only()``/
+    ``.defer()`` excluded it, so :func:`_reject_permanent_uri_rewrite` treats a
+    deferred field the same as "nothing stored yet" rather than comparing
+    against a value never read (T025).
+    """
+    if "permanent_uri" in field_names:
+        instance._loaded_permanent_uri = instance.permanent_uri
+
+
+def _reject_permanent_uri_rewrite(instance: "ConceptScheme | Concept | Collection") -> None:
+    """Refuse a save that changes or clears an already-stored ``permanent_uri``.
+
+    Fixedness moves one way only (FR-002, FR-013): once a record has been loaded
+    from the database holding an identifier, no save may change or clear it.
+    Compared against the snapshot :func:`_snapshot_permanent_uri` took when the
+    record was loaded, which defaults to ``None`` — indistinguishable, and
+    deliberately so, whether the record is freshly constructed in memory, was
+    loaded with ``permanent_uri`` deferred, or was loaded genuinely provisional.
+    Each of those is unconstrained, so setting an identifier for the first time
+    is allowed (the path R4's publish action will use).
+    """
+    loaded = instance._loaded_permanent_uri
+    if loaded is None:
+        return
+    if instance.permanent_uri != loaded:
+        raise ValidationError(
+            {
+                "permanent_uri": ValidationError(
+                    _("The permanent URI '%(uri)s' is fixed and cannot be changed or cleared once stored."),
+                    params={"uri": loaded},
+                    code="permanent_uri_fixed",
+                )
+            }
+        )
+
+
 def _reject_permanent_uri_held_by_another_model(instance: "ConceptScheme | Concept | Collection") -> None:
     """Refuse a ``permanent_uri`` already held by a record of a *different* model.
 
@@ -105,6 +145,11 @@ class ConceptScheme(models.Model):
     The ``slug`` is derived from ``name`` on every save (dynamic while unpublished,
     research R5) and is unique app-wide. The ``uri`` is composed on read.
     """
+
+    #: The ``permanent_uri`` this instance was loaded from the database with, set
+    #: by :meth:`from_db` (T025). Not a model field — bookkeeping for
+    #: :func:`_reject_permanent_uri_rewrite`.
+    _loaded_permanent_uri: str | None = None
 
     name = models.CharField(
         max_length=255,
@@ -162,6 +207,13 @@ class ConceptScheme(models.Model):
     def __str__(self) -> str:
         return self.name
 
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        """Snapshot the loaded ``permanent_uri`` so a later save can detect a rewrite (T025)."""
+        instance = super().from_db(db, field_names, values)
+        _snapshot_permanent_uri(instance, field_names)
+        return instance
+
     @property
     def uri(self) -> str:
         """The scheme's permanent URI: its identity.
@@ -201,6 +253,7 @@ class ConceptScheme(models.Model):
         so it lives here rather than on the field itself (research R4).
         """
         super().clean()
+        _reject_permanent_uri_rewrite(self)
         _reject_permanent_uri_held_by_another_model(self)
 
     def save(self, *args, **kwargs):
@@ -248,6 +301,7 @@ class ConceptScheme(models.Model):
                     )
                 }
             )
+        _reject_permanent_uri_rewrite(self)
         if self.permanent_uri:
             # save() never calls full_clean(), so the field validator alone would
             # leave the import path — the one this feature exists to serve —
@@ -301,6 +355,11 @@ class Concept(models.Model):
     owning scheme's URI (research R1). ``label`` is the default-language
     preferred label; richer multi-label support arrives with a later story.
     """
+
+    #: The ``permanent_uri`` this instance was loaded from the database with, set
+    #: by :meth:`from_db` (T025). Not a model field — bookkeeping for
+    #: :func:`_reject_permanent_uri_rewrite`.
+    _loaded_permanent_uri: str | None = None
 
     scheme = models.ForeignKey(
         ConceptScheme,
@@ -363,6 +422,13 @@ class Concept(models.Model):
 
     def __str__(self) -> str:
         return self.label
+
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        """Snapshot the loaded ``permanent_uri`` so a later save can detect a rewrite (T025)."""
+        instance = super().from_db(db, field_names, values)
+        _snapshot_permanent_uri(instance, field_names)
+        return instance
 
     @property
     def uri(self) -> str:
@@ -448,6 +514,7 @@ class Concept(models.Model):
                     )
                 }
             )
+        _reject_permanent_uri_rewrite(self)
         if self.permanent_uri:
             # save() never calls full_clean(), so the field validator alone would
             # leave the import path — the one this feature exists to serve —
@@ -468,6 +535,7 @@ class Concept(models.Model):
         so it lives here rather than on the field itself (research R4).
         """
         super().clean()
+        _reject_permanent_uri_rewrite(self)
         _reject_permanent_uri_held_by_another_model(self)
 
     def preferred_label(self, language: str | None = None) -> str | None:
@@ -1063,6 +1131,11 @@ class Collection(models.Model):
     a ``/collection/`` segment so it can never collide with a concept URI (research R4).
     """
 
+    #: The ``permanent_uri`` this instance was loaded from the database with, set
+    #: by :meth:`from_db` (T025). Not a model field — bookkeeping for
+    #: :func:`_reject_permanent_uri_rewrite`.
+    _loaded_permanent_uri: str | None = None
+
     scheme = models.ForeignKey(
         ConceptScheme,
         on_delete=models.CASCADE,
@@ -1119,6 +1192,13 @@ class Collection(models.Model):
     def __str__(self) -> str:
         return self.name
 
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        """Snapshot the loaded ``permanent_uri`` so a later save can detect a rewrite (T025)."""
+        instance = super().from_db(db, field_names, values)
+        _snapshot_permanent_uri(instance, field_names)
+        return instance
+
     @property
     def uri(self) -> str:
         """The collection's permanent URI: its identity.
@@ -1149,6 +1229,7 @@ class Collection(models.Model):
         so it lives here rather than on the field itself (research R4).
         """
         super().clean()
+        _reject_permanent_uri_rewrite(self)
         _reject_permanent_uri_held_by_another_model(self)
 
     def save(self, *args, **kwargs):
@@ -1171,6 +1252,7 @@ class Collection(models.Model):
                     )
                 }
             )
+        _reject_permanent_uri_rewrite(self)
         if self.permanent_uri:
             # save() never calls full_clean(), so the field validator alone would
             # leave the import path — the one this feature exists to serve —
