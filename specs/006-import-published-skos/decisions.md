@@ -361,3 +361,30 @@ rather than a value this function only computes when creating.
 **Revisit if:** US-2 (re-import) needs a vocabulary's default language to be changeable after the
 fact under some deliberate, separate mechanism — that is a new capability, not a fix to this one,
 and R1's guard would need its own reconsideration first.
+
+## D19 — Which vocabulary a file with more than one declared is about (T007, orchestrator review)
+
+US-1 landed with the file's vocabulary chosen as the lexicographically-first `skos:ConceptScheme`
+in the graph. That is an arbitrary rule wearing a deterministic one's clothes: a file typing a
+second scheme because one of its concepts belongs elsewhere — the case spec Edge Cases §1 requires
+be set aside, not refused — would import the *foreign* vocabulary whenever its identifier happened
+to sort first, and D5 then makes the file authoritative for everything written into it. The
+existing fixture only passed because `http://example.org/minerals/` sorts before
+`http://example.org/other/`.
+
+Making multiplicity itself fatal was considered and rejected: it would make Edge Cases §1
+unreachable, since a file cannot state a foreign membership without typing the vocabulary it names.
+
+Chosen: the declared vocabulary the file's own concepts belong to, counted across the same three
+membership predicates `_conflicting_scheme_ref` already reads, is the one being imported. A genuine
+tie with no caller-named target is fatal (`VOCABULARY_AMBIGUOUS`), naming every declared vocabulary
+in the message, because at that point the file really does not say. A named target always decides,
+and one matching nothing in the file still falls through to the existing mismatch check.
+
+The order-independence test swaps the foreign vocabulary's identifier so it sorts first and asserts
+the right vocabulary is still imported — it fails against the sorted-first rule, so the test proves
+the defect rather than describing it.
+
+**Revisit if:** a real published file is found that declares two vocabularies with an equal claim
+and a convention for which is primary (a `dcterms:isPartOf`, say) — that convention would then
+decide ahead of the count, rather than the run being refused.

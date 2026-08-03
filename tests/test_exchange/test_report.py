@@ -38,6 +38,7 @@ _EXAMPLE_FATAL_PARAMS = {
     FatalReason.REFUSED_IDENTITY: {},
     FatalReason.VOCABULARY_UNDETERMINED: {},
     FatalReason.VOCABULARY_TARGET_MISMATCH: {"target": "https://example.org/vocab/target"},
+    FatalReason.VOCABULARY_AMBIGUOUS: {"declared": "https://example.org/vocab/a, https://example.org/vocab/b"},
 }
 
 

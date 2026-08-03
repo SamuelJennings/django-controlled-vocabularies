@@ -125,6 +125,7 @@ class FatalReason(TextChoices):
     REFUSED_IDENTITY = "refused_identity", _("identifier refused by the identity rules")
     VOCABULARY_UNDETERMINED = "vocabulary_undetermined", _("vocabulary not declared and no target named")
     VOCABULARY_TARGET_MISMATCH = "vocabulary_target_mismatch", _("declared vocabulary does not match the named target")
+    VOCABULARY_AMBIGUOUS = "vocabulary_ambiguous", _("the file declares more than one vocabulary and none was named")
 
     @property
     def template(self) -> Promise:
@@ -146,6 +147,10 @@ _FATAL_TEMPLATES: dict[FatalReason, Promise] = {
     ),
     FatalReason.VOCABULARY_TARGET_MISMATCH: _(
         "'%(subject)s' is not the vocabulary named as the import's target ('%(target)s'); the run was refused."
+    ),
+    FatalReason.VOCABULARY_AMBIGUOUS: _(
+        "'%(subject)s' declares more than one vocabulary (%(declared)s) and none was named as the import's "
+        "target; the run was refused."
     ),
 }
 

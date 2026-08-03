@@ -135,6 +135,48 @@ class TestImportSkosVocabulary:
         assert report.fatal == []
 
 
+class TestChoosingBetweenDeclaredVocabularies:
+    """T007 — which vocabulary a file with more than one declared is about.
+
+    Typing a second ``skos:ConceptScheme`` is ordinary: it is how a concept
+    names a vocabulary it belongs to elsewhere, which spec Edge Cases §1
+    requires be set aside rather than refused. So the file's own concepts
+    decide, and only a genuine tie with no named target is refused.
+    """
+
+    def test_the_vocabulary_most_of_the_concepts_belong_to_is_the_one_imported(self, db):
+        report = import_skos(FIXTURES / "mixed_scheme_membership.ttl")
+        assert ConceptScheme.objects.get().static_uri == "http://example.org/minerals/"
+        assert report.fatal == []
+
+    def test_the_choice_does_not_depend_on_the_order_of_the_identifiers(self, db, tmp_path):
+        # The same file with the two vocabularies' identifiers swapped so the
+        # foreign one now sorts first. Sorted-first selection would import it.
+        source = (FIXTURES / "mixed_scheme_membership.ttl").read_text()
+        swapped = source.replace("http://example.org/other/", "http://example.org/aaa-other/")
+        renamed = tmp_path / "swapped.ttl"
+        renamed.write_text(swapped)
+        import_skos(renamed)
+        assert ConceptScheme.objects.get().static_uri == "http://example.org/minerals/"
+
+    def test_two_vocabularies_with_an_equal_claim_fail_without_a_named_target(self, db):
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(FIXTURES / "two_vocabularies.ttl")
+        finding = exc_info.value.report.fatal[0]
+        assert finding.reason is FatalReason.VOCABULARY_AMBIGUOUS
+        assert "http://example.org/alpha/" in finding.render()
+        assert "http://example.org/beta/" in finding.render()
+        assert ConceptScheme.objects.count() == 0
+        assert Concept.objects.count() == 0
+
+    def test_a_named_target_decides_between_them(self, db):
+        target = ConceptSchemeFactory(name="Beta vocabulary", static_uri="http://example.org/beta/")
+        report = import_skos(FIXTURES / "two_vocabularies.ttl", scheme=target)
+        assert report.fatal == []
+        assert ConceptScheme.objects.count() == 1
+        assert Concept.objects.get(scheme=target).static_uri == "http://example.org/beta/two"
+
+
 class TestImportedVocabularyDefaultLanguage:
     """T008 — FR-005/decisions.md D4: the imported vocabulary's default
     language comes from the file where the file says, and only ever a

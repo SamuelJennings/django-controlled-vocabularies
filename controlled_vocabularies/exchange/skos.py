@@ -13,6 +13,7 @@ creation, slugging, and fatal-finding collection on top of it.
 
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 
 import rdflib
@@ -254,6 +255,59 @@ def _determine_default_language(
     return ""
 
 
+def _choose_declared_scheme(
+    graph: rdflib.Graph,
+    declared_nodes: list[rdflib.term.Node],
+    concept_nodes: list[rdflib.term.Node],
+    target: ConceptScheme | None,
+    report: ImportReport,
+    *,
+    source_label: str,
+) -> rdflib.term.Node | None:
+    """Pick the one vocabulary a file is declaring, or fail saying it cannot (FR-005).
+
+    A file routinely types more than one ``skos:ConceptScheme`` without being
+    about more than one: the second is a vocabulary some concept claims
+    membership of, which spec Edge Cases §1 requires be set aside rather than
+    refused. So multiplicity itself is not fatal. What decides is which
+    declared vocabulary the file's own concepts belong to — the same three
+    membership predicates :func:`_conflicting_scheme_ref` reads — and the one
+    with the most members is the vocabulary being imported.
+
+    Choosing by any property of the identifier itself, such as taking the
+    first in sorted order, would make a curator's import depend on the
+    alphabet: a foreign reference sorting ahead of the file's real vocabulary
+    would import the wrong one, and D5 makes the file authoritative for
+    everything it then writes. A genuine tie, with no caller-named target to
+    resolve it, is refused instead. A named target always decides, and one
+    matching none of the declared vocabularies falls through to
+    :func:`_resolve_scheme`'s existing mismatch check.
+    """
+    if len(declared_nodes) < 2:
+        return declared_nodes[0] if declared_nodes else None
+    if target is not None:
+        named = [node for node in declared_nodes if str(node) == target.uri]
+        if named:
+            return named[0]
+        return declared_nodes[0]
+
+    members: Counter[str] = Counter()
+    for concept_node in concept_nodes:
+        for scheme_uri in _scheme_refs(graph, concept_node):
+            members[scheme_uri] += 1
+    ranked = sorted(declared_nodes, key=lambda node: (-members[str(node)], str(node)))
+    best, runner_up = members[str(ranked[0])], members[str(ranked[1])]
+    if best > runner_up:
+        return ranked[0]
+
+    report.add_fatal(
+        FatalReason.VOCABULARY_AMBIGUOUS,
+        subject=source_label,
+        declared=", ".join(str(node) for node in declared_nodes),
+    )
+    return None
+
+
 def _resolve_scheme(
     graph: rdflib.Graph,
     declared_node: rdflib.term.Node | None,
@@ -337,11 +391,16 @@ def _conflicting_scheme_ref(graph: rdflib.Graph, concept_node: rdflib.term.Node,
     imported — so this returns ``None`` both when every reference agrees
     with ``target_scheme_uri`` and when there is no reference to check.
     """
+    others = _scheme_refs(graph, concept_node) - {target_scheme_uri}
+    return sorted(others)[0] if others else None
+
+
+def _scheme_refs(graph: rdflib.Graph, concept_node: rdflib.term.Node) -> set[str]:
+    """Every vocabulary URI this concept declares membership of, by any of the three predicates."""
     refs = {str(obj) for obj in graph.objects(concept_node, SKOS.inScheme)}
     refs |= {str(obj) for obj in graph.objects(concept_node, SKOS.topConceptOf)}
     refs |= {str(subj) for subj in graph.subjects(SKOS.hasTopConcept, concept_node)}
-    others = refs - {target_scheme_uri}
-    return sorted(others)[0] if others else None
+    return refs
 
 
 def _preferred_label_in(graph: rdflib.Graph, node: rdflib.term.Node, language: str) -> str | None:
@@ -476,11 +535,15 @@ def import_skos(
 
     with transaction.atomic():
         declared_nodes = sorted(graph.subjects(rdflib.RDF.type, SKOS.ConceptScheme), key=str)
-        declared_node = declared_nodes[0] if declared_nodes else None
         concept_nodes = sorted(graph.subjects(rdflib.RDF.type, SKOS.Concept), key=str)
 
-        target_scheme, declared_uri = _resolve_scheme(
-            graph, declared_node, concept_nodes, scheme, report, source_label=source_label
+        declared_node = _choose_declared_scheme(
+            graph, declared_nodes, concept_nodes, scheme, report, source_label=source_label
+        )
+        target_scheme, declared_uri = (
+            (None, None)
+            if report.fatal
+            else _resolve_scheme(graph, declared_node, concept_nodes, scheme, report, source_label=source_label)
         )
         if target_scheme is not None and declared_uri is not None:
             _import_concepts(graph, target_scheme, declared_uri, concept_nodes, report)

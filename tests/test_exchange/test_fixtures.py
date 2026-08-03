@@ -25,17 +25,20 @@ BASE_SERIALIZATIONS = [
     ("rocks.jsonld", "json-ld"),
 ]
 
-# Every fixture this task ships, whatever its purpose, must at least be present
-# and parse as RDF (fatal-path fixtures are semantically invalid for import,
-# never syntactically invalid RDF — that distinction is exactly what makes them
-# useful fatal-path material rather than parser-crash material).
-ALL_FIXTURES = [
-    *BASE_SERIALIZATIONS,
-    ("rocks_updated.ttl", "turtle"),
-    ("blank_node_concept.ttl", "turtle"),
-    ("blank_node_collection.ttl", "turtle"),
-    ("refused_uri_scheme.ttl", "turtle"),
-]
+# Every fixture in the directory, whatever its purpose, must at least parse as
+# RDF (fatal-path fixtures are semantically invalid for import, never
+# syntactically invalid RDF — that distinction is exactly what makes them
+# useful fatal-path material rather than parser-crash material). Discovered by
+# walking the directory rather than listed by hand, so a fixture added by a
+# later story is covered without anyone remembering to register it.
+SUFFIX_FORMATS = {".ttl": "turtle", ".rdf": "xml", ".jsonld": "json-ld"}
+ALL_FIXTURES = sorted((path.name, SUFFIX_FORMATS[path.suffix]) for path in FIXTURES.iterdir() if path.is_file())
+
+
+def test_the_fixture_directory_is_not_empty():
+    # Guards the discovery above: an empty or moved directory would otherwise
+    # parametrize to nothing and report as a clean pass.
+    assert len(ALL_FIXTURES) >= len(BASE_SERIALIZATIONS)
 
 
 @pytest.mark.parametrize("filename,fmt", ALL_FIXTURES)

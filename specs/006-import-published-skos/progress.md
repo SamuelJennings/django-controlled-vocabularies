@@ -418,3 +418,27 @@ again — the guard it works around (R1's frozen-`default_language`-once-populat
 the kind of thing US-2's "the file is authoritative for what it contains" (D5) could collide with
 a second time if a vocabulary's *declared* default language genuinely changes between two
 publications of the same file. That scenario is not handled here (D18's own "Revisit if").
+
+## Phase US-1 review (orchestrator)
+
+**Did**: reviewed T006–T012 and re-ran the full gate independently — 393 passed, mypy/ruff/deptry
+clean, `models.py` confirmed untouched against the phase base. D14–D18 accepted as written; D18's
+fix (default language frozen once a scheme has concepts) is correct against R1's own guard.
+
+One defect fixed, recorded as D19: the file's vocabulary was chosen as the lexicographically-first
+declared `skos:ConceptScheme`, so a file naming a foreign vocabulary whose identifier sorted first
+would have imported the wrong one. Now chosen by which declared vocabulary the file's own concepts
+belong to, with a genuine tie and no named target fatal (`VOCABULARY_AMBIGUOUS`). New fixture
+`two_vocabularies.ttl`; the order-independence test fails against the old rule.
+
+Also made `tests/test_exchange/test_fixtures.py` discover fixtures by walking the directory rather
+than a hand-kept list — six fixtures added during US-1 were not in it — with a guard test so an
+empty directory cannot parametrize to nothing and read as a pass.
+
+**Verified**: `poetry run pytest -q` — 409 passed. ruff check, ruff format --check, mypy (9 source
+files), deptry, `makemigrations --check --dry-run`, `pre-commit run --all-files` — all clean.
+
+**Carried to US-2**: D18's open question is now required work, not a suggestion. A re-imported file
+whose declared default language differs from the one frozen on the existing vocabulary must be
+reported as set aside, not silently ignored — silence is what D1 forbids. D17's `NO_PREFERRED_LABEL`
+set-aside is minimal and belongs to T022 to finish.
