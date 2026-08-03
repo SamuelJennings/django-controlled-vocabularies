@@ -155,3 +155,57 @@ the human-readable trail.
   for the right reason. The original probes now raise instead of silently rewriting.
 - **Not covered, deliberately**: `QuerySet.update()` and raw SQL, which bypass every `save()`-based
   rule this app already has. Noted in D12.
+
+## 2026-08-03 — Phase 4 (T012–T015) and Phase 5 (T016–T017) implementation
+
+- **Why**: US-3 (a locally authored record shows the identifier it will publish under) and US-4
+  (every record has a place on this site) — the two remaining stories the T009–T011 report flagged as
+  out of scope, and specifically the "Watch" note it left open: whether T017's `local_url` extraction
+  closes the spec.md Edge Cases §4 hole (a concept or collection added locally to a vocabulary whose
+  own identifier is externally fixed composing under the *publisher's* domain).
+- **Tests first — Phase 4 (T012–T014)**: `TestProvisionalUri` (9 tests: composition, rename-follow,
+  base-address-follow, and `has_permanent_uri is False`, for all three models), `TestPreExistingRecordsUpgrade`
+  (3 tests: the FR-009/Article IX evidence — a record built the way a pre-005 database holds one reports
+  the identifier R1's composition produced and still resolves by it), and `TestPermanentUriDatabaseUniqueness`
+  (4 tests: `bulk_create` — which bypasses `save()`/`clean()` — hits the per-model partial `UniqueConstraint`
+  directly and raises `IntegrityError`, plus many-`NULL`-coexist-freely). All 16 passed immediately, run and
+  confirmed before anything else in this phase. This is not a test-first violation: tasks.md's own T015 text
+  anticipated it ("Expected to be no production change beyond Phase 2 and 3 — if any is needed, it belongs
+  here"), because Phase 2's `uri` composition (T006) and Phase 2/3's constraints and migration (T003/T004)
+  already deliver every guarantee these three stories describe. A mutation check (temporarily corrupting
+  `Concept.uri`'s composition) confirmed the `TestProvisionalUri` concept cases are non-vacuous rather than
+  incidentally passing on a tautology.
+- **T015**: confirmed — no production change was needed for Phase 4. Marked complete alongside T014.
+- **Tests first — Phase 5 (T016)**: `TestLocalUrl` (10 tests) written and run before any implementation.
+  All 10 failed with `AttributeError: '<Model>' object has no attribute 'local_url'` (exit 1) — including
+  the two Edge Cases §4 regression tests (`test_local_concept_of_an_externally_fixed_scheme_composes_under_this_sites_address`
+  and its collection counterpart), which assert a locally authored concept/collection inside an externally
+  fixed vocabulary does *not* start with the publisher's domain. Confirmed red for the right reason (the
+  attribute genuinely does not exist yet, not a typo or fixture problem) before T017.
+- **Implementation (T017)**: added `local_url` to `ConceptScheme` (`{base}/{slug}`, moved verbatim from
+  what `uri`'s provisional branch used to inline), `Concept` (`{scheme.local_url}/{slug}`), and `Collection`
+  (`{scheme.local_url}/collection/{slug}`) — composing from the *parent's* `local_url`, never from its `uri`,
+  exactly as data-model.md specifies. `uri` on all three models became `self.permanent_uri or self.local_url`.
+  This is the fix: previously `Concept.uri`/`Collection.uri` read `self.scheme.uri` directly, so when a
+  scheme carried an external `permanent_uri` a locally authored concept or collection in it silently composed
+  its own provisional identifier under the *publisher's* domain. All 10 `TestLocalUrl` tests flipped from red
+  to green with no other change.
+- **Verified with**: `poetry run pytest -q` → **260 passed** (250 after Phase 4 + 10 `TestLocalUrl`).
+  `poetry run ruff check .` → All checks passed (fixed 3 auto-fixable `SIM117` findings in the T014 tests
+  along the way, committed separately as style, not folded into T014's or T017's commit). `poetry run ruff
+  format --check .` → 12 files already formatted. `poetry run mypy controlled_vocabularies` → Success, 4
+  source files. `DJANGO_SETTINGS_MODULE=tests.settings poetry run python -m django makemigrations --check
+  --dry-run` → No changes detected (T017 added no field). `git status --short` → clean.
+- **Commits**: `27705ff` (T012), `2a15930` (T013), `578a5c4` (T014+T015), `6bad5fc` (T016, failing),
+  `bbfc3d9` + `8249000` (style: ruff `SIM117`/format fixes surfaced while verifying, scoped to the T014
+  tests, not model code), `b299a3b` (T017, `local_url` + Edge Cases §4 fix).
+- **Deviation**: none from the task text for T016/T017 (strict red-then-green, as prescribed). Phase 4's
+  tests-pass-immediately outcome is not a deviation — it is what T015 itself predicted — but is called out
+  explicitly here rather than silently claimed as "test-first" in the strict red-before-green sense.
+- **No new decision**: data-model.md's `local_url` composition (`{base}/{slug}`, `{scheme.local_url}/{slug}`,
+  `{scheme.local_url}/collection/{slug}`) was already fully specified; nothing here needed a judgment call
+  beyond what tasks.md and data-model.md already state, so no new `decisions.md` entry was added.
+- **Out of scope, untouched as briefed**: T018–T023 (factories, `CONTEXT.md`, `README.md`, `forge verify`,
+  migration squashing).
+- **Next**: Phase 6 (T018–T020, US-5 metadata/indexing/factories) and Phase 7 (T021–T023, docs/polish) are
+  out of this implementer's scope — not started.
