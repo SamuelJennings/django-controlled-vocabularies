@@ -632,6 +632,74 @@ class TestGetByUri:
             Concept.objects.get_by_uri(collection.uri)
 
 
+class TestProvisionalUri:
+    """US-3 — a record authored here shows the identifier it will publish under
+    (FR-005). A record with no ``permanent_uri`` reports the value R1's
+    composition produces; that value follows a rename and a change to the
+    configured base address; ``permanent_uri`` stays ``None`` and
+    ``has_permanent_uri`` is ``False`` throughout."""
+
+    @pytest.mark.django_db
+    def test_scheme_with_no_permanent_uri_reports_the_composed_value(self):
+        scheme = ConceptScheme.objects.create(name="Geothermics")
+        assert scheme.permanent_uri is None
+        assert scheme.has_permanent_uri is False
+        assert scheme.uri == f"{conf.get_base_uri()}/{scheme.slug}"
+
+    @pytest.mark.django_db
+    def test_scheme_provisional_uri_follows_a_rename(self):
+        scheme = ConceptScheme.objects.create(name="Geothermics")
+        scheme.name = "Geothermal Science"
+        scheme.save()
+        assert scheme.uri == f"{conf.get_base_uri()}/geothermal-science"
+
+    @pytest.mark.django_db
+    def test_scheme_provisional_uri_follows_a_base_address_change(self, settings):
+        scheme = ConceptScheme.objects.create(name="Geothermics")
+        settings.CONTROLLED_VOCABULARIES_BASE_URI = "https://elsewhere.example.org/vocab"
+        assert scheme.uri == "https://elsewhere.example.org/vocab/geothermics"
+
+    @pytest.mark.django_db
+    def test_concept_with_no_permanent_uri_reports_the_composed_value(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        assert concept.permanent_uri is None
+        assert concept.has_permanent_uri is False
+        assert concept.uri == f"{conf.get_base_uri()}/{scheme.slug}/{concept.slug}"
+
+    @pytest.mark.django_db
+    def test_concept_provisional_uri_follows_a_rename(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        concept.label = "Surface Heat Flow"
+        concept.save()
+        assert concept.uri == f"{conf.get_base_uri()}/{scheme.slug}/surface-heat-flow"
+
+    @pytest.mark.django_db
+    def test_concept_provisional_uri_follows_a_base_address_change(self, scheme, settings):
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        settings.CONTROLLED_VOCABULARIES_BASE_URI = "https://elsewhere.example.org/vocab"
+        assert concept.uri == f"https://elsewhere.example.org/vocab/{scheme.slug}/{concept.slug}"
+
+    @pytest.mark.django_db
+    def test_collection_with_no_permanent_uri_reports_the_composed_value(self, scheme):
+        collection = Collection.objects.create(scheme=scheme, name="Igneous")
+        assert collection.permanent_uri is None
+        assert collection.has_permanent_uri is False
+        assert collection.uri == f"{conf.get_base_uri()}/{scheme.slug}/collection/{collection.slug}"
+
+    @pytest.mark.django_db
+    def test_collection_provisional_uri_follows_a_rename(self, scheme):
+        collection = Collection.objects.create(scheme=scheme, name="Igneous")
+        collection.name = "Igneous Rocks"
+        collection.save()
+        assert collection.uri == f"{conf.get_base_uri()}/{scheme.slug}/collection/igneous-rocks"
+
+    @pytest.mark.django_db
+    def test_collection_provisional_uri_follows_a_base_address_change(self, scheme, settings):
+        collection = Collection.objects.create(scheme=scheme, name="Igneous")
+        settings.CONTROLLED_VOCABULARIES_BASE_URI = "https://elsewhere.example.org/vocab"
+        assert collection.uri == f"https://elsewhere.example.org/vocab/{scheme.slug}/collection/{collection.slug}"
+
+
 def _editable_fields(model: type[Model]):
     """The model's own, user-editable, concrete fields (excludes the auto pk
     and reverse relations) — every one must meet the metadata standard."""

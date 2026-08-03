@@ -90,7 +90,7 @@ provisional identity. This is a planning omission, not an implementer failure.
 
 ## Phase 4: User Story 3 — A record authored here shows the identifier it will publish under (P2)
 
-- [ ] T012 [US3] Write failing tests (class `TestProvisionalUri`): a record with no `permanent_uri`
+- [x] T012 [US3] Write failing tests (class `TestProvisionalUri`): a record with no `permanent_uri`
       reports the composed value; it follows a rename; it follows an `override_settings` base-address
       change; `permanent_uri` is `None` and `has_permanent_uri` is `False`.
 - [ ] T013 [US3] Write the upgrade test: build records the way a pre-005 database holds them (no
