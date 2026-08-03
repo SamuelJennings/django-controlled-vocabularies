@@ -140,3 +140,37 @@ a value in an unsupported language, a predicate with no home — is set aside, b
 vocabulary is routinely a partial export of a larger one and refusing those would make real files
 unimportable. Problems are collected rather than raised at the first, so one run tells a curator
 everything wrong with their file.
+
+## D9 — RDF/XML is scanned before it is parsed, and that costs a dependency
+
+Added at S3, from a measurement rather than a worry. Article V names imported RDF as untrusted
+input, so rdflib's RDF/XML parser was probed rather than assumed safe (`research.md` R3).
+
+External entities turned out to be closed already: a document referencing a canary file on disk
+parsed cleanly and produced an empty string, with nothing leaked. Internal entity expansion is
+open. Eight nested entity declarations in a document of roughly 400 bytes expanded to a single
+literal of 781,250 characters, and the amplification grows without bound in the document's own
+size. Any deployment that lets a curator supply a vocabulary file — which is precisely what this
+feature enables — can be brought down by a small file.
+
+Three ways to close it were considered. Refusing every document carrying a DTD is free but also
+refuses legitimate published files, because entity declarations for namespace shortening are a
+common idiom in hand-authored RDF/XML. Capping the input file size does nothing, since the
+amplification starts from something already small. Parsing through `defusedxml` with entity
+declarations forbidden closes it completely.
+
+Chosen: `defusedxml`, as a pre-flight scan rather than a replacement parser. rdflib's RDF/XML
+parser calls `xml.sax.make_parser()` internally and takes no parser argument, so a defused parser
+cannot be injected and monkeypatching a third-party internal is not something to ship. Instead the
+bytes go through `defusedxml.sax` with a do-nothing handler first, and only reach rdflib if that
+returns cleanly. Verified both ways: the bomb raises `EntitiesForbidden` at the scan, an ordinary
+RDF/XML document passes untouched.
+
+The cost is one small single-purpose runtime dependency, one extra XML pass on RDF/XML input only,
+and the loss of the namespace-entity idiom — those files now fail with a clear translatable
+message naming the cause, rather than by exhausting memory. That trade favours safety, which is
+where Article V points for untrusted input, and it is reversible if a real published vocabulary
+turns out to need the idiom.
+
+The test for this reinstates the measured bomb as its input, so the control is proven against the
+actual defect rather than a stand-in.
