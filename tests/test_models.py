@@ -739,40 +739,37 @@ class TestPermanentUriDatabaseUniqueness:
     @pytest.mark.django_db
     def test_two_schemes_with_the_same_permanent_uri_hit_the_database_constraint(self):
         ConceptScheme.objects.create(name="Rocks", permanent_uri="http://vocabs.example.org/dup")
-        with pytest.raises(IntegrityError):
-            with transaction.atomic():
-                ConceptScheme.objects.bulk_create(
-                    [ConceptScheme(name="Other rocks", slug="other-rocks", permanent_uri="http://vocabs.example.org/dup")]
-                )
+        with pytest.raises(IntegrityError), transaction.atomic():
+            ConceptScheme.objects.bulk_create(
+                [ConceptScheme(name="Other rocks", slug="other-rocks", permanent_uri="http://vocabs.example.org/dup")]
+            )
 
     @pytest.mark.django_db
     def test_two_concepts_with_the_same_permanent_uri_hit_the_database_constraint(self, scheme):
         Concept.objects.create(scheme=scheme, label="Granite", permanent_uri="http://vocabs.example.org/dup")
-        with pytest.raises(IntegrityError):
-            with transaction.atomic():
-                Concept.objects.bulk_create(
-                    [
-                        Concept(
-                            scheme=scheme, label="Basalt", slug="basalt", permanent_uri="http://vocabs.example.org/dup"
-                        )
-                    ]
-                )
+        with pytest.raises(IntegrityError), transaction.atomic():
+            Concept.objects.bulk_create(
+                [
+                    Concept(
+                        scheme=scheme, label="Basalt", slug="basalt", permanent_uri="http://vocabs.example.org/dup"
+                    )
+                ]
+            )
 
     @pytest.mark.django_db
     def test_two_collections_with_the_same_permanent_uri_hit_the_database_constraint(self, scheme):
         Collection.objects.create(scheme=scheme, name="Igneous", permanent_uri="http://vocabs.example.org/dup")
-        with pytest.raises(IntegrityError):
-            with transaction.atomic():
-                Collection.objects.bulk_create(
-                    [
-                        Collection(
-                            scheme=scheme,
-                            name="Metamorphic",
-                            slug="metamorphic",
-                            permanent_uri="http://vocabs.example.org/dup",
-                        )
-                    ]
-                )
+        with pytest.raises(IntegrityError), transaction.atomic():
+            Collection.objects.bulk_create(
+                [
+                    Collection(
+                        scheme=scheme,
+                        name="Metamorphic",
+                        slug="metamorphic",
+                        permanent_uri="http://vocabs.example.org/dup",
+                    )
+                ]
+            )
 
     @pytest.mark.django_db
     def test_many_records_holding_no_permanent_uri_coexist_freely(self, scheme):
