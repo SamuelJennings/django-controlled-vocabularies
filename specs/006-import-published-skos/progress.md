@@ -372,3 +372,49 @@ deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigr
 entries all present with their reasons, as data.
 
 **Watch**: none.
+
+## 2026-08-03T23:00:00Z · Implementer US1 · T012
+
+**Did**: `TestReportPopulatedByARealRun` — a first import against an empty database reports every
+record (scheme + concepts) as created and nothing as updated, with no duplicate URIs in the
+bucket; a re-import reverses that (everything updated, nothing created); a set-aside entry
+(`no_default_language_label.ttl`) carries its reason/subject/params directly, groupable via
+`set_aside_by_reason()` without ever rendering a message; a single run against a pre-seeded
+partial state (`mixed_scheme_membership.ttl`, one concept already present under the file's
+scheme) produces created, updated, *and* set-aside entries together correctly.
+
+**Deviation** (decisions.md D18, new): writing the last of those tests surfaced a real bug, not a
+test-authoring accident. `_resolve_scheme` (T008) unconditionally recomputed and assigned
+`default_language` on *every* matched scheme, including one that already had concepts from an
+earlier run — colliding with `ConceptScheme.save()`'s own R1 guard, which refuses to change
+`default_language` once a scheme has concepts (it anchors their identity). The collision raised an
+undecorated `django.core.exceptions.ValidationError` straight out of the transaction, bypassing
+this feature's own translatable-report contract entirely (FR-003/FR-015) — not a set-aside, not a
+fatal finding, just a crash. Fixed: `default_language` is now set from the file only when the
+scheme is being freshly created (`row.pk is None`, so it provably has no concepts yet); an
+existing scheme's already-frozen value is left untouched, which is also the only reading of D4's
+algorithm consistent with R1's own guard (that value cannot legitimately have changed since first
+frozen). The scheme-name language selection now reads `row.effective_default_language` instead of
+a value this function only computes on create. One dedicated regression test added directly
+(`test_default_language_is_not_recomputed_for_a_scheme_that_already_has_concepts`) alongside the
+`TestReportPopulatedByARealRun` coverage.
+
+**Verified**: `poetry run pytest -q` — 393 passed (388 + 5 new: 4 in `test_skos.py`'s new
+`TestReportPopulatedByARealRun`, 1 regression test in `TestImportedVocabularyDefaultLanguage`).
+`poetry run ruff check .` — all checks passed. `poetry run ruff format --check .` — 23 files
+formatted. `poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15
+files scanned. `poetry run python -m django makemigrations --check --dry-run
+--settings=tests.settings` — no changes detected. `poetry run pre-commit run --all-files` — all
+hooks passed.
+
+**Phase US-1 complete (T006–T012).** `import_skos()` reads a Turtle/RDF-XML/JSON-LD file, resolves
+or refuses the vocabulary it declares, imports its concepts with deterministic slugs, collects
+every fatal and set-aside finding, and rolls back the whole transaction on any fatal one. `models.py`
+was not touched. T013+ (US-2, re-import behaviour) is the next Implementer's scope — this
+Implementer stops here.
+
+**Watch**: US-2's re-import work should read decisions.md D18 before touching `_resolve_scheme`
+again — the guard it works around (R1's frozen-`default_language`-once-populated rule) is exactly
+the kind of thing US-2's "the file is authoritative for what it contains" (D5) could collide with
+a second time if a vocabulary's *declared* default language genuinely changes between two
+publications of the same file. That scenario is not handled here (D18's own "Revisit if").
