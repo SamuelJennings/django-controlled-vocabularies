@@ -132,3 +132,23 @@ class TestImportSkosVocabulary:
         target = ConceptSchemeFactory(name="Loose concepts")
         report = import_skos(FIXTURES / "no_scheme_declared.ttl", scheme=target)
         assert report.fatal == []
+
+
+class TestImportedVocabularyDefaultLanguage:
+    """T008 — FR-005/decisions.md D4: the imported vocabulary's default
+    language comes from the file where the file says, and only ever a
+    language the site is configured for."""
+
+    def test_a_vocabulary_declared_in_a_configured_non_default_language_uses_it(self, db):
+        import_skos(FIXTURES / "french_vocabulary.ttl")
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/geology/")
+        assert scheme.default_language == "fr"
+        assert scheme.effective_default_language == "fr"
+        assert scheme.name == "Types de roches"
+
+    def test_a_vocabulary_declared_in_an_unconfigured_language_falls_back_to_the_site_default(self, db):
+        import_skos(FIXTURES / "unconfigured_language_vocabulary.ttl")
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/geology2/")
+        # Neither "es" (declared) nor "es" (commonest concept label language)
+        # is configured, so nothing overrides the site default.
+        assert scheme.effective_default_language == "en"

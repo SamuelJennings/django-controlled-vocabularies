@@ -17,6 +17,7 @@ from pathlib import Path
 
 import rdflib
 import rdflib.util
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils.translation import gettext_lazy as _
@@ -190,9 +191,72 @@ def _get_or_create_scheme(uri: str) -> ConceptScheme:
         return ConceptScheme(static_uri=uri)
 
 
+def _configured_language_codes() -> set[str]:
+    """The language codes the application is configured for (``settings.LANGUAGES``).
+
+    A small, local duplicate of the identical one-liner in ``models.py``
+    (which keeps its own copy private) rather than reaching into that
+    module's internals — Article III's "prefer duplication over the wrong
+    abstraction" applied to a single set-comprehension.
+    """
+    return {code for code, _label in settings.LANGUAGES}
+
+
+def _label_languages(graph: rdflib.Graph, node: rdflib.term.Node, predicate: rdflib.URIRef) -> list[str]:
+    """The language tags of ``predicate``'s literal values on ``node`` (empty-tag values excluded).
+
+    A small typed narrowing point: ``graph.objects()`` yields the general
+    ``rdflib.term.Node`` type, which has no ``.language`` attribute — only
+    ``rdflib.Literal`` does. Isolating the ``isinstance`` check here once
+    keeps the two callers below plain comprehensions.
+    """
+    return [
+        literal.language
+        for literal in graph.objects(node, predicate)
+        if isinstance(literal, rdflib.Literal) and literal.language
+    ]
+
+
+def _determine_default_language(
+    graph: rdflib.Graph,
+    declared_node: rdflib.term.Node,
+    concept_nodes: list[rdflib.term.Node],
+) -> str:
+    """The imported vocabulary's default language, per FR-005 (T008, decisions.md D4).
+
+    Taken from the file where the file says: the language the vocabulary
+    declares itself in — its own ``skos:prefLabel``, when tagged with
+    exactly one language — else the language most of its concepts' own
+    preferred labels use, counted across ``concept_nodes`` and tied deterministically by
+    language code. Either way the resolved language must be one the site is
+    configured for (``settings.LANGUAGES``); when neither is, this returns
+    ``""``, which :attr:`ConceptScheme.default_language` already treats as
+    "fall back to the site's own default" (``effective_default_language``) —
+    the mechanism R1 built, reused rather than duplicated.
+    """
+    configured = _configured_language_codes()
+    declared_languages = set(_label_languages(graph, declared_node, SKOS.prefLabel))
+    if len(declared_languages) == 1:
+        (declared_language,) = declared_languages
+        if declared_language in configured:
+            return declared_language
+
+    counts: dict[str, int] = {}
+    for node in concept_nodes:
+        for language in _label_languages(graph, node, SKOS.prefLabel):
+            counts[language] = counts.get(language, 0) + 1
+    if counts:
+        commonest = sorted(counts.items(), key=lambda item: (-item[1], item[0]))[0][0]
+        if commonest in configured:
+            return commonest
+
+    return ""
+
+
 def _resolve_scheme(
     graph: rdflib.Graph,
     declared_node: rdflib.term.Node | None,
+    concept_nodes: list[rdflib.term.Node],
     target: ConceptScheme | None,
     report: ImportReport,
     *,
@@ -236,7 +300,13 @@ def _resolve_scheme(
 
     row = target if target is not None else _get_or_create_scheme(declared_uri)
     created = row.pk is None
-    name = _first_literal(graph, declared_node, SKOS.prefLabel)
+    row.default_language = _determine_default_language(graph, declared_node, concept_nodes)
+    name = _first_literal(graph, declared_node, SKOS.prefLabel, language=row.default_language or None)
+    if not name:
+        # The declared default language (or the site's, on fallback) carries
+        # no prefLabel on the scheme itself — fall back to any language
+        # rather than leaving name unset (T007's original, simpler rule).
+        name = _first_literal(graph, declared_node, SKOS.prefLabel)
     if name:
         row.name = name
     row.static_uri = declared_uri
@@ -277,10 +347,11 @@ def import_skos(
     with transaction.atomic():
         declared_nodes = sorted(graph.subjects(rdflib.RDF.type, SKOS.ConceptScheme), key=str)
         declared_node = declared_nodes[0] if declared_nodes else None
+        concept_nodes = sorted(graph.subjects(rdflib.RDF.type, SKOS.Concept), key=str)
 
-        # The concept walk (T009) attaches here once it lands; T007 only
-        # resolves the vocabulary itself.
-        _resolve_scheme(graph, declared_node, scheme, report, source_label=source_label)
+        # The concept walk itself (T009) attaches here once it lands; T007/T008
+        # only resolve the vocabulary and its default language.
+        _resolve_scheme(graph, declared_node, concept_nodes, scheme, report, source_label=source_label)
 
         if report.fatal:
             raise SkosImportFailed(report)
