@@ -20,6 +20,7 @@ import rdflib.util
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 
 from controlled_vocabularies.exchange.mapping import SKOS
@@ -361,10 +362,10 @@ def _import_concepts(
     preferred label in ``target_scheme``'s effective default language is set
     aside and reported (FR-006) rather than crashing the run — required for
     T009 to create concepts at all, even though the acceptance scenario
-    dedicated to this case is T022's (decisions.md D14). A matched or newly
-    created :class:`Concept` is written through the model's own ``save()``,
-    which derives its slug from ``label`` (T010 layers deterministic
-    disambiguation on top of that default).
+    dedicated to this case is T022's (decisions.md D17). A matched or newly
+    created :class:`Concept` is given a deterministic, scheme-unique slug
+    (:func:`_assign_unique_slug`, FR-007) and written through the model's own
+    ``save()``.
     """
     for node in concept_nodes:
         hint = _first_literal(graph, node, SKOS.prefLabel)
@@ -397,11 +398,46 @@ def _import_concepts(
         concept.scheme = target_scheme
         concept.static_uri = uri
         concept.label = label
+        _assign_unique_slug(concept, target_scheme)
         concept.save()
         if created:
             report.add_created(uri)
         else:
             report.add_updated(uri)
+
+
+def _assign_unique_slug(concept: Concept, scheme: ConceptScheme) -> None:
+    """Give ``concept`` a deterministic, scheme-unique slug derived from its label (T010, FR-007).
+
+    Nothing is derived from ``concept.static_uri`` — identity and slug are
+    deliberately independent (FR-007's own words). ``Concept.save()`` itself
+    already derives a slug from ``label`` when ``slug_is_manual`` is false,
+    but it only *refuses* a collision rather than resolving one (research R4
+    was written for curator-authored content, where two concepts sharing a
+    label is rare and worth a hard stop). A published file is not so
+    well-behaved: two source concepts commonly share a preferred label
+    (decisions.md D6), so the importer computes the slug itself here — the
+    same base derivation, with a deterministic numeric suffix appended only
+    when that value already belongs to a *different* concept in the same
+    scheme (``concept_nodes`` is processed in a stable, URI-sorted order, so
+    which of two colliding concepts gets the plain slug and which gets the
+    suffix is the same on every run of the identical file).
+
+    Setting ``slug_is_manual`` stops ``Concept.save()`` from re-deriving (and
+    silently overwriting) this value on a later plain save unrelated to this
+    importer. It does not pin the slug in the sense a curator's own manual
+    slug is pinned: every re-import recomputes it fresh from the (possibly
+    since-renamed) label, so an imported concept's slug still moves on a
+    rename, exactly as decisions.md D6 requires.
+    """
+    base = slugify(concept.label, allow_unicode=True)
+    candidate = base
+    suffix = 1
+    while Concept.objects.filter(scheme=scheme, slug=candidate).exclude(pk=concept.pk).exists():
+        suffix += 1
+        candidate = f"{base}-{suffix}"
+    concept.slug = candidate
+    concept.slug_is_manual = True
 
 
 def import_skos(

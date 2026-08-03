@@ -211,3 +211,37 @@ class TestImportConcepts:
         assert Concept.objects.get(static_uri="http://example.org/rocks/granite").pk == granite_pk
         assert "http://example.org/rocks/granite" in report.updated
         assert "http://example.org/rocks/granite" not in report.created
+
+
+class TestConceptSlugs:
+    """T010 — FR-007/decisions.md D6: an imported concept's slug is derived
+    from its label by the model's own rule, disambiguated by a deterministic
+    numeric suffix when two concepts in one vocabulary derive the same
+    value; never derived from the identifier."""
+
+    def test_two_concepts_sharing_a_label_get_distinct_deterministic_slugs(self, db):
+        import_skos(FIXTURES / "duplicate_slug.ttl")
+        first = Concept.objects.get(static_uri="http://example.org/quarry2/quartz-a")
+        second = Concept.objects.get(static_uri="http://example.org/quarry2/quartz-b")
+        assert first.slug == "quartz"
+        assert second.slug == "quartz-2"
+        assert first.static_uri != second.static_uri
+
+    def test_reimporting_the_identical_file_keeps_each_concept_s_slug(self, db):
+        import_skos(FIXTURES / "duplicate_slug.ttl")
+        first_slug_before = Concept.objects.get(static_uri="http://example.org/quarry2/quartz-a").slug
+        second_slug_before = Concept.objects.get(static_uri="http://example.org/quarry2/quartz-b").slug
+
+        import_skos(FIXTURES / "duplicate_slug.ttl")
+
+        assert Concept.objects.get(static_uri="http://example.org/quarry2/quartz-a").slug == first_slug_before
+        assert Concept.objects.get(static_uri="http://example.org/quarry2/quartz-b").slug == second_slug_before
+        assert Concept.objects.filter(scheme__static_uri="http://example.org/quarry2/").count() == 2
+
+    def test_slug_is_never_derived_from_the_identifier(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
+        # The URI's own last path segment is "igneous"; the label is "Igneous
+        # rock". If the slug tracked the identifier it would read "igneous",
+        # not "igneous-rock".
+        assert igneous.slug == "igneous-rock"
