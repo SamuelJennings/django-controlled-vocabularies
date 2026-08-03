@@ -615,6 +615,57 @@ class TestPermanentUriRewriteGuardReadsTheDatabase:
         assert record.permanent_uri == "http://vocabs.example.org/new"
 
 
+class TestPermanentUriUpdateFieldsExclusion:
+    """US-1 — T030. ``permanent_uri``'s validation, fixedness, and cross-model
+    checks must run only on a save that actually writes that column. Verified
+    gap: assigning a bad or conflicting value to ``permanent_uri`` in memory
+    and then saving with ``update_fields`` that excludes it ran full
+    validation against a value that was never going to reach the database,
+    incorrectly blocking an otherwise unrelated save."""
+
+    @pytest.mark.django_db
+    def test_an_invalid_value_in_an_excluded_column_does_not_block_the_save(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Local")
+        concept.permanent_uri = "not-absolute"
+        concept.save(update_fields=["label"])
+        concept.refresh_from_db()
+        assert concept.permanent_uri is None
+
+    @pytest.mark.django_db
+    def test_a_would_be_rewrite_conflict_in_an_excluded_column_does_not_block_the_save(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Local", permanent_uri="http://ex.org/fixed")
+        reloaded = Concept.objects.get(pk=concept.pk)
+        reloaded.permanent_uri = "http://ex.org/rewritten"
+        reloaded.save(update_fields=["label"])
+        reloaded.refresh_from_db()
+        assert reloaded.permanent_uri == "http://ex.org/fixed"
+
+    @pytest.mark.django_db
+    def test_assigning_and_saving_excluding_the_column_leaves_the_record_provisional_and_still_storable(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Local")
+        concept.permanent_uri = "http://ex.org/never-written"
+        concept.save(update_fields=["label"])
+        concept.refresh_from_db()
+        assert concept.permanent_uri is None
+        concept.permanent_uri = "http://ex.org/right"
+        concept.save()
+        concept.refresh_from_db()
+        assert concept.permanent_uri == "http://ex.org/right"
+
+    @pytest.mark.django_db
+    def test_saving_with_the_column_included_in_update_fields_still_fixes_it(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Local")
+        concept.permanent_uri = "http://ex.org/fixed"
+        concept.save(update_fields=["label", "permanent_uri"])
+        concept.refresh_from_db()
+        assert concept.permanent_uri == "http://ex.org/fixed"
+        concept.permanent_uri = "http://ex.org/rewritten"
+        with pytest.raises(ValidationError):
+            concept.save(update_fields=["permanent_uri"])
+        concept.refresh_from_db()
+        assert concept.permanent_uri == "http://ex.org/fixed"
+
+
 class TestGetByUri:
     """US-2 — a record is found by its identifier wherever it points (FR-007).
     ``get_by_uri`` tries an exact match on the stored ``permanent_uri`` first,

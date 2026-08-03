@@ -296,8 +296,17 @@ class PermanentUriModel(models.Model):
 
     def save(self, *args, **kwargs):
         """Validate ``permanent_uri`` — reading the database, never a stale
-        snapshot — before the write."""
-        _check_permanent_uri(self, validate_format=True)
+        snapshot — before the write.
+
+        Skipped entirely when ``update_fields`` is given and excludes
+        ``permanent_uri`` (T030): that save is never going to touch the
+        column, so an in-memory value assigned but not meant to be written —
+        malformed, or conflicting with what another instance already stored —
+        must not block an otherwise unrelated save.
+        """
+        update_fields = kwargs.get("update_fields")
+        if update_fields is None or "permanent_uri" in update_fields:
+            _check_permanent_uri(self, validate_format=True)
         super().save(*args, **kwargs)
 
 
