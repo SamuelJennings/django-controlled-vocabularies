@@ -269,3 +269,51 @@ and its default-language preferred label; scheme membership via `inScheme`/`topC
 `hasTopConcept`; a concept claiming a different vocabulary set aside and reported.
 
 **Watch**: none.
+
+## 2026-08-03T22:25:00Z · Implementer US1 · T009
+
+**Did**: `_import_concepts()` wired into `import_skos()`, walking `concept_nodes` (already computed
+at T008) in the same deterministic order. Each concept's identity is checked with the same
+`_identify()`/`_FatalIdentity` the vocabulary itself uses (D3 applies identically to a concept).
+`_conflicting_scheme_ref()` checks all three SKOS scheme-membership predicates
+(`skos:inScheme`/`skos:topConceptOf` on the concept, `skos:hasTopConcept` from the scheme) against
+the target scheme's own URI; a concept with no scheme reference at all is read as belonging to the
+vocabulary being imported (decisions.md D16 — new, since neither the spec nor tasks.md said what
+"no reference at all" should do), and one naming a *different* scheme is set aside
+(`VOCABULARY_MISMATCH`) rather than imported. `_preferred_label_in()` picks the default-language
+`skos:prefLabel` deterministically. A matched or new `Concept` is written through the model's own
+`save()` (slug auto-derives from `label` for now; T010 layers deterministic disambiguation on top).
+
+**Deviation** (decisions.md D17, new): implemented "a concept with no preferred label in the
+default language is set aside" now, rather than leaving it for T022 (Phase US-3) as `tasks.md`'s
+phase split implies. FR-006 — T009's own governing requirement — states this in the same sentence
+as concept creation itself, and the alternative was an unhandled crash on ordinary real-world
+input. One fixture/test added (`no_default_language_label.ttl`); T022 is free to extend without
+needing new implementation.
+
+Also recorded, retroactively, two decisions this task's work exposed as unsettled but that were
+actually taken back at T006/T007: **D14** (`serialization`, not `format`, as the parameter name —
+`ruff` `A002`) and **D15** (`import_skos`'s target-vocabulary parameter takes a `ConceptScheme`
+instance, not a string — `#52` resolves whatever a curator types before calling in).
+
+Tightened two `TestImportSkosVocabulary` assertions from T007 (`report.created ==
+[ROCKS_URI]`/`report.updated == [ROCKS_URI]`) to membership checks (`ROCKS_URI in report.created`),
+since those buckets now also carry the concepts this task's `_import_concepts()` adds — the same
+report object, exercised further by the next task in the same phase, not a behaviour regression on
+what T007 itself asserts.
+
+New fixtures: `mixed_scheme_membership.ttl` (exercises all three scheme-membership predicates plus
+a concept explicitly claiming a different vocabulary) and `no_default_language_label.ttl` (a
+concept with no preferred label in the vocabulary's declared default language, "en").
+
+**Verified**: `poetry run pytest -q` — 380 passed (375 + 5 new in `test_skos.py`'s new
+`TestImportConcepts`, all four gate commands re-run clean afterward too). `poetry run ruff check .`
+— all checks passed. `poetry run ruff format --check .` — 23 files formatted. `poetry run mypy` —
+success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m
+django makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry
+run pre-commit run --all-files` — all hooks passed.
+
+**Next**: T010 — slugs: derived by the model's own rule, disambiguated by a deterministic suffix
+within the vocabulary.
+
+**Watch**: none.

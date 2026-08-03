@@ -273,3 +273,67 @@ substitution of convenience. `refused_uri_scheme.ttl` (an `ftp://` identifier, o
 **Revisit if:** T006 fixes the parse call's `publicID` to something stable (e.g. an empty string)
 independent of the file's own path, at which point a genuine "absent identifier" fixture distinct
 from the blank-node case becomes buildable and meaningful.
+
+## D14 — the caller-stated-serialization parameter is named `serialization`, not `format`
+
+Neither `plan.md` nor `tasks.md` fixed the name of `_read_graph`'s (and later `import_skos`'s)
+caller-facing serialization argument. `format` was the obvious first choice — it matches
+`rdflib.util.guess_format`'s own vocabulary — but `ruff`'s `A002` rule refuses it as shadowing the
+`format` builtin, and the repo's `ruff` configuration does not suppress `A002` the way it
+suppresses `A003` (class-attribute shadowing) for the model layer. Renamed to `serialization`
+throughout `_read_graph`, `import_skos`, and their tests. No behavioural consequence; recorded
+because a caller building on this Python API needs the real keyword name.
+
+## D15 — `import_skos`'s target-vocabulary parameter takes a `ConceptScheme` instance, not a string
+
+FR-005 says the caller "MAY name a target vocabulary" but neither `plan.md` nor `research.md`
+fixes what "naming" one means as a Python parameter — a slug, a URI string, or an already-resolved
+model instance. A string is ambiguous (a slug and a URI look the same at the type level, and only
+one of `Concept`/`ConceptScheme`/`Collection`'s `get_by_uri` variants would apply), and resolving
+either would duplicate lookup logic `#52` (the CLI wrapper this feature's entry point exists for)
+will need to do anyway when it turns a command-line argument into something concrete.
+
+Chosen: `import_skos(..., scheme: ConceptScheme | None = None)` — the caller resolves (or
+constructs) the target vocabulary itself before calling in, the same shape a programmatic caller
+already uses for every other cross-reference in this package. Simpler than adding a second
+resolution path inside this feature, and it is `#52`'s job, not this one's, to turn a CLI argument
+into a model instance (spec's own scope note: "any command-line or web-facing entry point" is out
+of scope here).
+
+## D16 — a concept's scheme-membership predicates are read leniently: no reference at all is not a conflict
+
+FR-006 requires concepts to land "inside the vocabulary being imported"; the spec's Edge Cases §1
+separately requires a concept that *explicitly* claims a different vocabulary to be set aside
+rather than silently reassigned. Neither text says what a concept with **no**
+`skos:inScheme`/`skos:topConceptOf`/`skos:hasTopConcept` reference at all should do — real
+published files are not always fully annotated, especially a single-vocabulary file where scheme
+membership is implicit from context.
+
+Chosen: absence of any scheme reference is read as belonging to the vocabulary being imported
+(the same node the file also declares as `skos:Concept`, with nothing else naming it elsewhere),
+not as a set-aside or fatal condition. Only an *explicit* reference to a different scheme URI
+triggers `VOCABULARY_MISMATCH`. This keeps the base fixture's default behaviour permissive for the
+common case (`tests/fixtures/skos/rocks.ttl`'s concepts all declare `inScheme` anyway, so this
+choice is not exercised by that fixture) while still catching the case the spec names by name
+(`mixed_scheme_membership.ttl`'s `foreign` concept).
+
+## D17 — a concept with no preferred label in the default language is set aside starting at T009, not T022
+
+`tasks.md` assigns the acceptance test for this case to T022 (Phase US-3, "The concepts arrive
+with their labels and notes"). But FR-006 — T009's own governing requirement — states concept
+creation and this exact fallback in one sentence: "each holding ... its preferred label in the
+vocabulary's default language. A concept carrying no preferred label in that language MUST be set
+aside and reported, and MUST NOT fail the run." Leaving it unhandled at T009 would mean a concept
+lacking a default-language label crashes the run with an unhandled exception on real, unremarkable
+input — the opposite of what FR-006 requires — rather than the translatable, reported outcome. The
+`SetAsideReason.NO_PREFERRED_LABEL` value already existed from Phase 0 for exactly this case.
+
+Chosen: implement it now, with one covering fixture/test (`no_default_language_label.ttl`), and
+leave T022 free to add whatever richer acceptance coverage it wants without needing new
+implementation — it will simply find the behaviour already correct. This is judged necessary for
+T009's own correctness, not scope creep into US-3's territory (US-3's remaining scope — alternative/
+hidden labels, notes of every kind, unmodelled-predicate reporting — is untouched).
+
+**Revisit if:** the US-3 Implementer's own design for this disagrees with the shape chosen here
+(e.g. a different set-aside reason, or additional context in `params`) — the fixture and test
+added at T009 are minimal and meant to be extended, not treated as the final word.
