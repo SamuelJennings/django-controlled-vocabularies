@@ -14,7 +14,7 @@ from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.core.validators import validate_unicode_slug
 from django.db import models
 from django.db.models import F, Max, Q
-from django.utils.text import slugify
+from django.utils.text import Truncator, slugify
 from django.utils.translation import gettext_lazy as _
 
 from controlled_vocabularies import conf
@@ -30,17 +30,32 @@ _UNSAFE_PERMANENT_URI_SCHEMES = frozenset({"javascript", "data", "vbscript"})
 #: every mainstream database, including MySQL's 3072-byte cap on ``utf8mb4``.
 PERMANENT_URI_MAX_LENGTH = 500
 
+#: How much of an offending value a validation message echoes (T032). A
+#: hostile value can be arbitrarily long; bounding the echo keeps the message
+#: itself from becoming another hazard, independent of the true length always
+#: reported via %(length)s/%(max_length)s in the too-long message.
+_PERMANENT_URI_MESSAGE_ECHO_CHARS = 80
+
+
+def _echoed_uri(value: str) -> str:
+    """The value as it appears inside a validation message: bounded, never the
+    unbounded raw value (T032)."""
+    return str(Truncator(value).chars(_PERMANENT_URI_MESSAGE_ECHO_CHARS))
+
 
 def validate_permanent_uri(value: str) -> None:
     """Validate an externally assigned permanent URI (FR-004).
 
-    Requires a well-formed absolute identifier — a non-empty scheme and a
-    non-empty remainder, so a bare relative path is refused — refuses a
-    scheme that can carry executable content, and caps length at 500
-    characters. Used both as a field validator (so ``full_clean()`` catches
-    it) and called directly from each model's ``save()``, because Django's
-    ``save()`` never calls ``full_clean()`` and the import path this feature
-    exists to serve writes through ``save()`` directly (research R5).
+    Checks length first — before parsing even runs — so an arbitrarily long
+    hostile value is refused with a short, bounded message rather than one
+    that runs `urlsplit` on it and then echoes it in full (T032). Requires a
+    well-formed absolute identifier — a non-empty scheme and a non-empty
+    remainder, so a bare relative path is refused — and refuses a scheme that
+    can carry executable content. Used both as a field validator (so
+    ``full_clean()`` catches it) and called directly from each model's
+    ``save()``, because Django's ``save()`` never calls ``full_clean()`` and
+    the import path this feature exists to serve writes through ``save()``
+    directly (research R5).
 
     ``urllib.parse.urlsplit`` itself raises a bare ``ValueError`` — not a
     ``ValidationError`` — for some malformed input (e.g. a netloc with
@@ -49,31 +64,31 @@ def validate_permanent_uri(value: str) -> None:
     exception no caller expects, and surface as a 500 rather than a field
     error in a form/admin/DRF context (T031).
     """
+    if len(value) > PERMANENT_URI_MAX_LENGTH:
+        raise ValidationError(
+            _("A permanent URI cannot exceed %(max_length)s characters; '%(uri)s' has %(length)s."),
+            params={"max_length": PERMANENT_URI_MAX_LENGTH, "uri": _echoed_uri(value), "length": len(value)},
+            code="permanent_uri_too_long",
+        )
     try:
         parsed = urllib.parse.urlsplit(value)
     except ValueError as exc:
         raise ValidationError(
             _("'%(uri)s' could not be parsed as a URI."),
-            params={"uri": value},
+            params={"uri": _echoed_uri(value)},
             code="permanent_uri_unparseable",
         ) from exc
     if not parsed.scheme or not (parsed.netloc or parsed.path):
         raise ValidationError(
             _("'%(uri)s' is not a well-formed absolute identifier with a scheme."),
-            params={"uri": value},
+            params={"uri": _echoed_uri(value)},
             code="permanent_uri_not_absolute",
         )
     if parsed.scheme.lower() in _UNSAFE_PERMANENT_URI_SCHEMES:
         raise ValidationError(
             _("'%(uri)s' uses the scheme '%(scheme)s', which is not permitted."),
-            params={"uri": value, "scheme": parsed.scheme},
+            params={"uri": _echoed_uri(value), "scheme": parsed.scheme},
             code="permanent_uri_unsafe_scheme",
-        )
-    if len(value) > PERMANENT_URI_MAX_LENGTH:
-        raise ValidationError(
-            _("A permanent URI cannot exceed %(max_length)s characters; '%(uri)s' has %(length)s."),
-            params={"max_length": PERMANENT_URI_MAX_LENGTH, "uri": value, "length": len(value)},
-            code="permanent_uri_too_long",
         )
 
 

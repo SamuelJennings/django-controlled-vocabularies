@@ -359,6 +359,28 @@ class TestPermanentUri:
         with pytest.raises(ValidationError):
             validate_permanent_uri("http://example.org/" + "x" * 500)
 
+    def test_overlong_identifier_message_does_not_echo_the_full_raw_value(self):
+        """T032. The too-long refusal used to interpolate the raw value
+        untruncated: a 2028-character hostile value produced a ~2086-character
+        error message, because the length check ran last (after checks that
+        also echo the raw value) and nothing bounded the echoed value. The
+        true length must still be reported; only the echoed value is bounded."""
+        hostile = "http://example.org/" + "x" * 2008  # 2028 characters
+        with pytest.raises(ValidationError) as excinfo:
+            validate_permanent_uri(hostile)
+        message = excinfo.value.messages[0]
+        assert len(message) < 200, f"error message is {len(message)} chars — echoes the raw value untruncated"
+        assert str(len(hostile)) in message, "the true length must still be reported"
+
+    def test_length_is_checked_before_parsing_so_a_malformed_overlong_value_reports_length(self):
+        """T032. The length check now runs first, so a value that is both
+        malformed (no scheme) and overlong is refused for its length, not
+        echoed untruncated in the not-absolute message."""
+        hostile = "not-absolute-" + "x" * 3000
+        with pytest.raises(ValidationError) as excinfo:
+            validate_permanent_uri(hostile)
+        assert excinfo.value.code == "permanent_uri_too_long"
+
     def test_accepts_urn_identifier(self):
         validate_permanent_uri("urn:uuid:9f6c1e2a-1234-4a12-9abc-1234567890ab")
 

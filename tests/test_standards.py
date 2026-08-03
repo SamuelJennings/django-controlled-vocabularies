@@ -21,6 +21,7 @@ import pytest
 from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.db.models import Model, UniqueConstraint
 from django.utils.functional import Promise
+from django.utils.text import Truncator
 
 from controlled_vocabularies.models import (
     Collection,
@@ -154,14 +155,16 @@ def test_permanent_uri_unsafe_scheme_message_uses_named_placeholders():
 
 def test_permanent_uri_too_long_message_uses_named_placeholders():
     # FR-004/FR-010: an over-length identifier is refused, naming the bound and the
-    # offending value's actual length.
+    # offending value's actual length. The echoed value itself is bounded to 80 chars
+    # (T032) — a hostile value can be arbitrarily long, and echoing it in full would
+    # make the message itself another hazard — but the true length is still reported.
     overlong = "http://example.org/" + "x" * 500
     with pytest.raises(ValidationError) as excinfo:
         validate_permanent_uri(overlong)
     err = excinfo.value
     assert isinstance(err.message, Promise), "too-long message is not lazily translatable"
     assert all(placeholder in str(err.message) for placeholder in ("%(max_length)s", "%(uri)s", "%(length)s"))
-    assert err.params == {"max_length": 500, "uri": overlong, "length": len(overlong)}
+    assert err.params == {"max_length": 500, "uri": str(Truncator(overlong).chars(80)), "length": len(overlong)}
 
 
 @pytest.mark.django_db
