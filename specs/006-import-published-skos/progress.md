@@ -161,3 +161,33 @@ files. `poetry run pytest -q` — 339 passed. `poetry run ruff check .` — all 
 `poetry run ruff format --check .` — 20 files already formatted. `poetry run deptry .` — no issues.
 
 **Watch**: plan.md and tasks.md now say `exchange/`; any brief quoting `io/` is stale.
+
+## 2026-08-03T21:30:00Z · Implementer US1 · T006
+
+**Did**: `controlled_vocabularies/exchange/skos.py` — `_read_graph(file, *, serialization=None)`:
+resolves the serialization from the caller or `rdflib.util.guess_format`, restricted to the
+three FR-002 names (`turtle`/`xml`/`json-ld` — an explicit but unsupported format, e.g. `n3`, is
+refused just as an undetermined one is); routes RDF/XML through T004's `scan_rdf_xml` pre-flight
+before rdflib reads the file itself. Raises the new `SkosImportError` (a `ValidationError`
+subclass, translatable, named placeholders) for a missing file, an undetermined/unsupported
+serialization, or an unparseable one. `mapping.py` lands alongside it per decisions.md D11/D12 —
+currently just the `SKOS` namespace constant; no predicate table yet, since Phase US-1 reads
+fixed predicates directly and nothing yet needs a lookup table (Article II — no speculative
+abstraction). `rdflib` moved from `[tool.poetry.group.dev.dependencies]` to
+`[tool.poetry.dependencies]` in this commit, ran `poetry lock`.
+
+**Deviation** (renamed a parameter, no decisions.md entry needed — mechanical): tasks.md/plan.md
+never fixed the caller-stated-serialization parameter's name; `format` was the natural first
+choice but `ruff` (`A002`) flags it as shadowing the builtin, so it is `serialization` instead.
+
+**Verified**: `poetry run pytest -q` — 351 passed (339 + 12 new). `poetry run ruff check .` — all
+checks passed. `poetry run ruff format --check .` — 23 files formatted. `poetry run mypy` —
+success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python
+-m django makemigrations --check --dry-run --settings=tests.settings` — no changes detected.
+`poetry run pre-commit run --all-files` — all hooks passed (after `poetry lock`, required once
+`rdflib` moved dependency groups).
+
+**Next**: T007 — the vocabulary: `import_skos()`'s public entry point, matched via `get_by_uri`,
+created/updated/target-mismatch/no-target handling.
+
+**Watch**: none.
