@@ -93,7 +93,7 @@ provisional identity. This is a planning omission, not an implementer failure.
 - [x] T012 [US3] Write failing tests (class `TestProvisionalUri`): a record with no `permanent_uri`
       reports the composed value; it follows a rename; it follows an `override_settings` base-address
       change; `permanent_uri` is `None` and `has_permanent_uri` is `False`.
-- [ ] T013 [US3] Write the upgrade test: build records the way a pre-005 database holds them (no
+- [x] T013 [US3] Write the upgrade test: build records the way a pre-005 database holds them (no
       `permanent_uri`) and assert each reports exactly the identifier R1's composition produced, and
       that existing references still resolve. This is the FR-009 / Article IX evidence.
 - [ ] T014 [US3] Write the uniqueness tests: two records of the same model holding one `permanent_uri`

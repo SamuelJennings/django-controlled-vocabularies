@@ -700,6 +700,34 @@ class TestProvisionalUri:
         assert collection.uri == f"https://elsewhere.example.org/vocab/{scheme.slug}/collection/{collection.slug}"
 
 
+class TestPreExistingRecordsUpgrade:
+    """US-3 — FR-009 / Article IX: a record from before this feature landed has
+    ``permanent_uri`` left ``NULL`` by the migration (no backfill, data-model.md),
+    so it reports exactly the identifier R1's composition produced for it before
+    this feature existed, and every existing reference to it still resolves."""
+
+    @pytest.mark.django_db
+    def test_pre_existing_scheme_reports_its_previous_identifier_and_resolves(self):
+        scheme = ConceptScheme.objects.create(name="Geothermics")
+        assert scheme.permanent_uri is None
+        assert scheme.uri == "https://example.org/vocabularies/geothermics"
+        assert ConceptScheme.objects.get_by_uri(scheme.uri) == scheme
+
+    @pytest.mark.django_db
+    def test_pre_existing_concept_reports_its_previous_identifier_and_resolves(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        assert concept.permanent_uri is None
+        assert concept.uri == f"https://example.org/vocabularies/{scheme.slug}/heat-flow"
+        assert Concept.objects.get_by_uri(concept.uri) == concept
+
+    @pytest.mark.django_db
+    def test_pre_existing_collection_reports_its_previous_identifier_and_resolves(self, scheme):
+        collection = Collection.objects.create(scheme=scheme, name="Igneous")
+        assert collection.permanent_uri is None
+        assert collection.uri == f"https://example.org/vocabularies/{scheme.slug}/collection/igneous"
+        assert Collection.objects.get_by_uri(collection.uri) == collection
+
+
 def _editable_fields(model: type[Model]):
     """The model's own, user-editable, concrete fields (excludes the auto pk
     and reverse relations) — every one must meet the metadata standard."""
