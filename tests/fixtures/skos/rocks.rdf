@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rdf:RDF
+    xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:skos="http://www.w3.org/2004/02/skos/core#">
+
+  <skos:ConceptScheme rdf:about="http://example.org/rocks/">
+    <skos:prefLabel xml:lang="en">Rock types</skos:prefLabel>
+    <skos:hasTopConcept rdf:resource="http://example.org/rocks/igneous"/>
+    <skos:hasTopConcept rdf:resource="http://example.org/rocks/sedimentary"/>
+  </skos:ConceptScheme>
+
+  <skos:Concept rdf:about="http://example.org/rocks/igneous">
+    <skos:inScheme rdf:resource="http://example.org/rocks/"/>
+    <skos:topConceptOf rdf:resource="http://example.org/rocks/"/>
+    <skos:prefLabel xml:lang="en">Igneous rock</skos:prefLabel>
+    <skos:prefLabel xml:lang="de">Magmatisches Gestein</skos:prefLabel>
+    <skos:prefLabel xml:lang="fr">Roche ignée</skos:prefLabel>
+    <skos:definition xml:lang="en">Rock formed by the cooling and solidification of magma or lava.</skos:definition>
+    <skos:narrower rdf:resource="http://example.org/rocks/basalt"/>
+  </skos:Concept>
+
+  <skos:Concept rdf:about="http://example.org/rocks/granite">
+    <skos:inScheme rdf:resource="http://example.org/rocks/"/>
+    <skos:prefLabel xml:lang="en">Granite</skos:prefLabel>
+    <skos:prefLabel xml:lang="de">Granit</skos:prefLabel>
+    <skos:prefLabel xml:lang="fr">Granite</skos:prefLabel>
+    <skos:altLabel xml:lang="en">Magma rock</skos:altLabel>
+    <skos:hiddenLabel xml:lang="en">Granit rock</skos:hiddenLabel>
+    <skos:scopeNote xml:lang="en">Used here for coarse-grained intrusive igneous rock.</skos:scopeNote>
+    <skos:broader rdf:resource="http://example.org/rocks/igneous"/>
+    <skos:related rdf:resource="http://example.org/rocks/quartz"/>
+  </skos:Concept>
+
+  <skos:Concept rdf:about="http://example.org/rocks/basalt">
+    <skos:inScheme rdf:resource="http://example.org/rocks/"/>
+    <skos:prefLabel xml:lang="en">Basalt</skos:prefLabel>
+    <skos:prefLabel xml:lang="de">Basalt</skos:prefLabel>
+    <skos:example xml:lang="en">Columnar basalt at the Giant's Causeway.</skos:example>
+  </skos:Concept>
+
+  <skos:Concept rdf:about="http://example.org/rocks/sedimentary">
+    <skos:inScheme rdf:resource="http://example.org/rocks/"/>
+    <skos:topConceptOf rdf:resource="http://example.org/rocks/"/>
+    <skos:prefLabel xml:lang="en">Sedimentary rock</skos:prefLabel>
+    <skos:prefLabel xml:lang="fr">Roche sédimentaire</skos:prefLabel>
+    <skos:editorialNote xml:lang="en">Confirm classification against the regional survey before publishing.</skos:editorialNote>
+  </skos:Concept>
+
+  <skos:Concept rdf:about="http://example.org/rocks/quartz">
+    <skos:inScheme rdf:resource="http://example.org/rocks/"/>
+    <skos:prefLabel xml:lang="en">Quartz</skos:prefLabel>
+    <skos:altLabel xml:lang="de">Quartz</skos:altLabel>
+    <skos:historyNote xml:lang="en">Reclassified from 'Silica minerals' in the 2020 revision.</skos:historyNote>
+    <skos:changeNote xml:lang="en">Definition tightened in 2022.</skos:changeNote>
+    <skos:note xml:lang="en">See also feldspar for a related silicate.</skos:note>
+  </skos:Concept>
+
+  <skos:Collection rdf:about="http://example.org/rocks/collection/silica-bearing">
+    <skos:prefLabel xml:lang="en">Silica-bearing rocks</skos:prefLabel>
+    <skos:member rdf:resource="http://example.org/rocks/granite"/>
+    <skos:member rdf:resource="http://example.org/rocks/quartz"/>
+  </skos:Collection>
+
+  <skos:OrderedCollection rdf:about="http://example.org/rocks/collection/example-sequence">
+    <skos:prefLabel xml:lang="en">Example sequence</skos:prefLabel>
+    <skos:memberList rdf:parseType="Collection">
+      <rdf:Description rdf:about="http://example.org/rocks/basalt"/>
+      <rdf:Description rdf:about="http://example.org/rocks/granite"/>
+      <rdf:Description rdf:about="http://example.org/rocks/sedimentary"/>
+    </skos:memberList>
+  </skos:OrderedCollection>
+
+</rdf:RDF>

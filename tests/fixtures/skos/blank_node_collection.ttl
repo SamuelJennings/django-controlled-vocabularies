@@ -1,0 +1,20 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+# Fatal path (decisions.md D3, US-5 acceptance 5, T030): the same blank-node-identity
+# rule that governs a concept governs a collection too — no identifier that
+# survives re-serialization, so the run must fail and name it.
+
+<http://example.org/rocks/>
+    a skos:ConceptScheme ;
+    skos:prefLabel "Rock types"@en .
+
+<http://example.org/rocks/igneous>
+    a skos:Concept ;
+    skos:inScheme <http://example.org/rocks/> ;
+    skos:prefLabel "Igneous rock"@en .
+
+[]
+    a skos:Collection ;
+    skos:prefLabel "Nameless collection"@en ;
+    skos:member <http://example.org/rocks/igneous> .

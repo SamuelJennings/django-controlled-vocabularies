@@ -1,0 +1,15 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+# Fatal path (decisions.md D3, FR-004): a concept identified only by a blank
+# node supplies no identifier that survives re-serialization, so the run must
+# fail and name it rather than inventing or skipping it.
+
+<http://example.org/rocks/>
+    a skos:ConceptScheme ;
+    skos:prefLabel "Rock types"@en .
+
+[]
+    a skos:Concept ;
+    skos:inScheme <http://example.org/rocks/> ;
+    skos:prefLabel "Nameless"@en .

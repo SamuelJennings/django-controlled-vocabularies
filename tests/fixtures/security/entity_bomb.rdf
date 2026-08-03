@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<!DOCTYPE bomb [
+<!ENTITY e0 "xx">
+<!ENTITY e1 "&e0;&e0;&e0;&e0;&e0;">
+<!ENTITY e2 "&e1;&e1;&e1;&e1;&e1;">
+<!ENTITY e3 "&e2;&e2;&e2;&e2;&e2;">
+<!ENTITY e4 "&e3;&e3;&e3;&e3;&e3;">
+<!ENTITY e5 "&e4;&e4;&e4;&e4;&e4;">
+<!ENTITY e6 "&e5;&e5;&e5;&e5;&e5;">
+<!ENTITY e7 "&e6;&e6;&e6;&e6;&e6;">
+<!ENTITY e8 "&e7;&e7;&e7;&e7;&e7;">
+]>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about="http://example.org/bomb">
+    <rdf:value>&e8;</rdf:value>
+  </rdf:Description>
+</rdf:RDF>
