@@ -152,3 +152,26 @@ that actually exercise the code and would catch a real regression — was verifi
 than by construction. It was not verified by the more reliable means (red before green, by construction)
 and is logged here so a reviewer can weigh it. No test was weakened, skipped, or written to match a
 bug; the mutation check above is the evidence.
+
+## D11 — `get_by_uri`'s exact-match step catches `ObjectDoesNotExist`, not `self.model.DoesNotExist`
+
+**Ambiguous**: not called out in `tasks.md` or `research.md`/`data-model.md` — an implementation detail
+that surfaced only once `PermanentUriLookupMixin` was made generic.
+
+**Chosen**: `PermanentUriLookupMixin.get_by_uri` catches `django.core.exceptions.ObjectDoesNotExist`
+around the exact-match `self.get(permanent_uri=uri)` call, rather than `self.model.DoesNotExist` (what
+the pre-existing `ConceptManager.get_by_uri` used, and what each manager's own
+`_get_by_local_parse` still raises explicitly).
+
+**Why defensible**: `PermanentUriLookupMixin` is `models.Manager[_PermanentUriModel]`, generic over a
+`TypeVar` bound to `models.Model`, so it can back `ConceptSchemeManager`, `ConceptManager`, and
+`CollectionManager` from one implementation (research R6's stated goal — one shared mixin, not three
+drifting copies). mypy/django-stubs can resolve `.DoesNotExist` off a *concrete* model class
+(`type[Concept]`) but not off a still-generic `type[_PermanentUriModel]`, because the attribute is
+injected by Django's `ModelBase` metaclass rather than declared on `Model` itself, and the stubs'
+special-casing needs a concrete class to hang it on. `Model.DoesNotExist` is always a subclass of
+`django.core.exceptions.ObjectDoesNotExist`, so catching the base class here is exactly as precise —
+`self.get()` raises no other `ObjectDoesNotExist` subclass in this call — while removing an annotation
+mypy cannot check. Each manager's own `_get_by_local_parse` keeps raising `self.model.DoesNotExist`
+explicitly (there the model is concrete, not generic), so the observable exception type callers see is
+unchanged in every case tested.
