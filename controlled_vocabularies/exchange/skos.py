@@ -301,8 +301,16 @@ def _resolve_scheme(
 
     row = target if target is not None else _get_or_create_scheme(declared_uri)
     created = row.pk is None
-    row.default_language = _determine_default_language(graph, declared_node, concept_nodes)
-    name = _first_literal(graph, declared_node, SKOS.prefLabel, language=row.default_language or None)
+    if created:
+        # ConceptScheme.save() itself refuses to change default_language once
+        # the scheme has concepts (R1 — it is the anchor every concept's
+        # identity is built against, decisions.md D4). Recomputing it here on
+        # every run would fight that guard the moment it legitimately
+        # differs from what a previous run already froze; only a freshly
+        # created scheme has no concepts yet to protect, so only a freshly
+        # created scheme's default_language is set from the file at all.
+        row.default_language = _determine_default_language(graph, declared_node, concept_nodes)
+    name = _first_literal(graph, declared_node, SKOS.prefLabel, language=row.effective_default_language)
     if not name:
         # The declared default language (or the site's, on fallback) carries
         # no prefLabel on the scheme itself — fall back to any language

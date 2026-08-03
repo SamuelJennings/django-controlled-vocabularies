@@ -337,3 +337,27 @@ hidden labels, notes of every kind, unmodelled-predicate reporting — is untouc
 **Revisit if:** the US-3 Implementer's own design for this disagrees with the shape chosen here
 (e.g. a different set-aside reason, or additional context in `params`) — the fixture and test
 added at T009 are minimal and meant to be extended, not treated as the final word.
+
+## D18 — an existing scheme's `default_language` is recomputed only when the scheme is freshly created
+
+Found by a T012 test, not by inspection: `_resolve_scheme` (T008) unconditionally recomputed and
+assigned `row.default_language` from the file on every run, including one matching an *existing*
+scheme via `get_by_uri`. `ConceptScheme.save()` itself (R1) refuses to change `default_language`
+once the scheme has concepts — it anchors every concept's identity, so changing it after the fact
+would silently reinterpret them — and raises a `ValidationError` the moment the freshly computed
+value differs from what a previous run already froze. That `ValidationError` is not one of this
+feature's own translatable, reported outcomes; it would surface as an unhandled exception,
+defeating FR-003's "collect every problem" and FR-015's "report as data" for no reason tied to the
+file itself.
+
+Chosen: only a freshly created scheme (`row.pk is None`, so it provably has no concepts yet to
+protect) has `default_language` set from the file at all. An existing scheme's already-stored
+value stands untouched — which is also the *correct* reading of decisions.md D4's own algorithm,
+since R1's guard means that value cannot legitimately have changed since it was first frozen. The
+scheme's `name` selection (which language's `prefLabel` to prefer) now reads
+`row.effective_default_language` — the actually-anchoring language, frozen or freshly chosen —
+rather than a value this function only computes when creating.
+
+**Revisit if:** US-2 (re-import) needs a vocabulary's default language to be changeable after the
+fact under some deliberate, separate mechanism — that is a new capability, not a fix to this one,
+and R1's guard would need its own reconsideration first.

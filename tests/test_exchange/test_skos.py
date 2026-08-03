@@ -16,7 +16,7 @@ from controlled_vocabularies.exchange.report import FatalReason, SetAsideReason
 from controlled_vocabularies.exchange.safety import UnsafeRdfXmlError
 from controlled_vocabularies.exchange.skos import SkosImportError, SkosImportFailed, _read_graph, import_skos
 from controlled_vocabularies.models import Concept, ConceptScheme
-from tests.factories import ConceptSchemeFactory
+from tests.factories import ConceptFactory, ConceptSchemeFactory
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "skos"
 SECURITY_FIXTURES = Path(__file__).parent.parent / "fixtures" / "security"
@@ -153,6 +153,19 @@ class TestImportedVocabularyDefaultLanguage:
         # Neither "es" (declared) nor "es" (commonest concept label language)
         # is configured, so nothing overrides the site default.
         assert scheme.effective_default_language == "en"
+
+    def test_default_language_is_not_recomputed_for_a_scheme_that_already_has_concepts(self, db):
+        # ConceptScheme.save() itself refuses to change default_language once
+        # concepts exist (R1's own guard — it anchors their identity). A
+        # scheme matched by URI that already has concepts from an earlier
+        # run must not trip that guard just because this run recomputed a
+        # (possibly identical, possibly not) value from the file.
+        scheme = ConceptSchemeFactory(name="Geology", static_uri="http://example.org/geology/", default_language="")
+        ConceptFactory(scheme=scheme, label="Existing concept")
+        report = import_skos(FIXTURES / "french_vocabulary.ttl")
+        assert report.fatal == []
+        scheme.refresh_from_db()
+        assert scheme.default_language == ""
 
 
 class TestImportConcepts:
@@ -295,3 +308,63 @@ class TestFatalFindingsAndAtomicity:
         existing.refresh_from_db()
         assert existing.name == "Original name"
         assert Concept.objects.count() == concept_count_before
+
+
+class TestReportPopulatedByARealRun:
+    """T012 — FR-015: a real run's report distinguishes what was created,
+    what was updated, and what was set aside with its reason, all as data a
+    caller reads directly rather than parses from prose."""
+
+    def test_a_first_import_reports_everything_as_created_nothing_as_updated(self, db):
+        report = import_skos(FIXTURES / "rocks.ttl")
+        expected = {
+            "http://example.org/rocks/",
+            "http://example.org/rocks/igneous",
+            "http://example.org/rocks/granite",
+            "http://example.org/rocks/basalt",
+            "http://example.org/rocks/sedimentary",
+            "http://example.org/rocks/quartz",
+        }
+        assert set(report.created) == expected
+        assert report.updated == []
+        assert report.set_aside == []
+        assert report.fatal == []
+        # No duplicates within the bucket either — each URI reported exactly once.
+        assert len(report.created) == len(expected)
+
+    def test_a_reimport_reports_everything_as_updated_nothing_as_created(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        report = import_skos(FIXTURES / "rocks.ttl")
+        assert set(report.updated) == {
+            "http://example.org/rocks/",
+            "http://example.org/rocks/igneous",
+            "http://example.org/rocks/granite",
+            "http://example.org/rocks/basalt",
+            "http://example.org/rocks/sedimentary",
+            "http://example.org/rocks/quartz",
+        }
+        assert report.created == []
+
+    def test_set_aside_entries_carry_their_reason_subject_and_params_as_data(self, db):
+        report = import_skos(FIXTURES / "no_default_language_label.ttl")
+        assert len(report.set_aside) == 1
+        entry = report.set_aside[0]
+        assert entry.reason is SetAsideReason.NO_PREFERRED_LABEL
+        assert entry.subject == "http://example.org/quarry/c"
+        assert entry.params == {"language": "en"}
+        # A caller groups/counts without parsing report.render() output.
+        grouped = report.set_aside_by_reason()
+        assert len(grouped[SetAsideReason.NO_PREFERRED_LABEL]) == 1
+
+    def test_created_updated_and_set_aside_all_coexist_in_one_run(self, db):
+        # Pre-seed one of mixed_scheme_membership.ttl's concepts so this run
+        # exercises created, updated, and set-aside together.
+        scheme = ConceptSchemeFactory(name="Minerals", static_uri="http://example.org/minerals/")
+        Concept.objects.create(scheme=scheme, static_uri="http://example.org/minerals/quartz", label="Old quartz")
+
+        report = import_skos(FIXTURES / "mixed_scheme_membership.ttl")
+
+        assert "http://example.org/minerals/quartz" in report.updated
+        assert {"http://example.org/minerals/feldspar", "http://example.org/minerals/mica"} <= set(report.created)
+        assert any(entry.reason is SetAsideReason.VOCABULARY_MISMATCH for entry in report.set_aside)
+        assert report.fatal == []
