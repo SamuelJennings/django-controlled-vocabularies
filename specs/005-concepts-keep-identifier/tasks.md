@@ -11,37 +11,60 @@ by file even where they are independent by story.
 
 ## Phase 1: Foundational (sequential, before any story)
 
-- [ ] T001 [Setup] Confirm `tests/settings.py` still carries a `CONTROLLED_VOCABULARIES_BASE_URI` that
+- [x] T001 [Setup] Confirm `tests/settings.py` still carries a `CONTROLLED_VOCABULARIES_BASE_URI` that
       tests can override with `override_settings`, and that no new dependency is needed (`urllib.parse`
       is standard library). No code change expected — this is a check, not a task that edits files.
-- [ ] T002 [Foundation] In `controlled_vocabularies/models.py` add `validate_permanent_uri(value)`:
+- [x] T002 [Foundation] In `controlled_vocabularies/models.py` add `validate_permanent_uri(value)`:
       parse with `urllib.parse.urlsplit`, require a non-empty scheme and non-empty remainder, refuse
       `javascript`/`data`/`vbscript` case-insensitively, refuse over 500 characters. Every refusal is a
       `ValidationError` with a lazily translatable message using **named** placeholders.
-- [ ] T003 [Foundation] Add the `permanent_uri` field to `ConceptScheme`, `Concept`, and `Collection`
+- [x] T003 [Foundation] Add the `permanent_uri` field to `ConceptScheme`, `Concept`, and `Collection`
       per `data-model.md`: `CharField(max_length=500, null=True, blank=True)`, translatable
       `verbose_name` and `help_text`, `validators=[validate_permanent_uri]`, and a
       `UniqueConstraint(fields=["permanent_uri"], condition=Q(permanent_uri__isnull=False))` in each
       model's `Meta`.
-- [ ] T004 [Foundation] Generate the migration (`makemigrations`) — three `AddField` and three
+- [x] T004 [Foundation] Generate the migration (`makemigrations`) — three `AddField` and three
       `AddConstraint`, no data migration. Assert by inspection that it contains no `RunPython`.
 
 ## Phase 2: User Story 1 — A record keeps the identifier it arrived with (P1) 🎯 MVP
 
-- [ ] T005 [US1] Write failing tests in `tests/test_models.py` (class `TestPermanentUri`):
+- [x] T005 [US1] Write failing tests in `tests/test_models.py` (class `TestPermanentUri`):
       an identifier supplied at creation reads back verbatim from `uri`; it survives a rename; it
       survives `override_settings` changing the base address; a scheme and a collection keep their own,
       and a concept's is not derived from its scheme's; `has_permanent_uri` is `True`. Also the refusal
       cases: non-absolute, `javascript:`, over-length — each raising `ValidationError` — and `urn:`
       accepted.
-- [ ] T006 [US1] Rework `uri` on all three models to return `self.permanent_uri or self.local_url`, and
+- [x] T006 [US1] Rework `uri` on all three models to return `self.permanent_uri or self.local_url`, and
       add `has_permanent_uri`. Keep the existing docstrings' intent: `uri` is still identity.
-- [ ] T007 [US1] Call `validate_permanent_uri` from each model's `save()` when `permanent_uri` is set,
+- [x] T007 [US1] Call `validate_permanent_uri` from each model's `save()` when `permanent_uri` is set,
       so the import path is protected where `full_clean()` is not called. Add a test asserting a bare
       `Model.objects.create(...)` with a bad identifier raises rather than storing.
-- [ ] T008 [US1] Add the cross-model duplicate check to `clean()` and `save()`: refuse a `permanent_uri`
+- [x] T008 [US1] Add the cross-model duplicate check to `clean()` and `save()`: refuse a `permanent_uri`
       already held by a record of a different model, with a translatable named-placeholder message.
       Test a concept and a collection cannot share one.
+
+## Phase 2b: User Story 1 — a stored identifier cannot be rewritten or cleared (P1)
+
+Added 2026-08-03 after reviewing the US-1 report. FR-002 ("never changed once stored") and FR-013
+("fixedness moves in one direction only") had no implementing task, and a probe confirmed the gap:
+after `ConceptScheme.objects.create(permanent_uri="http://vocab.example.org/ext")`, assigning a new
+value and saving rewrites it, and assigning `None` and saving silently returns the record to a
+provisional identity. This is a planning omission, not an implementer failure.
+
+- [ ] T024 [US1] Write failing tests in `tests/test_models.py` (class `TestPermanentUriIsFixed`), for
+      each of the three models: a record loaded from the database refuses a save that changes its
+      stored `permanent_uri`; it refuses a save that clears it to `None`; the refusal is a
+      `ValidationError` on the `permanent_uri` key with a translatable named-placeholder message; and
+      re-saving with the identifier unchanged succeeds. Also assert the two allowed transitions still
+      work: a record created with an identifier keeps it, and a record created without one may still
+      have one set once (this is the path R4's publish action will use).
+- [ ] T025 [US1] Enforce it: snapshot the loaded value in a `from_db` classmethod on each model
+      (guarding against a deferred `permanent_uri` from `.only()`/`.defer()`, where no snapshot is
+      available and the check must be skipped rather than fire on a phantom change), and refuse the
+      change from `save()` and `clean()` via a module-level helper alongside
+      `_reject_permanent_uri_held_by_another_model`. A record with no snapshot — one freshly
+      constructed in memory — is unconstrained, so setting an identifier for the first time is
+      allowed and only rewriting a stored one is refused.
 
 ## Phase 3: User Story 2 — Find a record by its identifier, wherever it points (P2)
 
@@ -76,7 +99,12 @@ by file even where they are independent by story.
 
 - [ ] T016 [US4] Write failing tests (class `TestLocalUrl`): a local unpublished record's `local_url`
       and `uri` are equal; an imported record's differ and its `local_url` is on this site; a
-      collection's `local_url` can never equal a concept's; `local_url` follows a rename.
+      collection's `local_url` can never equal a concept's; `local_url` follows a rename. **Include
+      spec.md Edge Cases §4 explicitly** (raised in the US-1 report): a concept authored locally
+      inside a vocabulary whose own identifier is externally fixed must compose its provisional
+      identifier under *this site's* address, not the publisher's. Until T017 lands, `Concept.uri`
+      still reads through `self.scheme.uri` and this case composes under the publisher's domain, so
+      this test fails before the change and passes after — it is the evidence T017 closed it.
 - [ ] T017 [US4] Add `local_url` to all three models, composing from the parent's `local_url` — never
       from `uri`, which would put a concept of an imported vocabulary on the publisher's domain. Move
       R1's composition into it and leave `conf.get_base_uri()` as the single read site for the address.
@@ -107,6 +135,7 @@ by file even where they are independent by story.
 - Phase 1 is strictly first: every story needs the column to exist.
 - Phases 2–5 all edit `models.py`, so they run **sequentially** despite being independent by story.
   Phase 1 (Phase 2 in the pipeline's numbering) parallelism is not available here for that reason.
+- Phase 2b (T024/T025) closes FR-002/FR-013 and edits `models.py`, so it runs before Phase 3.
 - Phase 6's T018 and T019 touch different test files and may run in parallel.
 - Phase 7 is last; T021 and T022 are documentation and may run alongside each other.
 - Migration squashing happens at convergence (S5), not here.
