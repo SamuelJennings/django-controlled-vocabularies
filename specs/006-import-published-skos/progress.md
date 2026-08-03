@@ -40,3 +40,25 @@ mypy` — success, 5 source files (baseline 4 + `io/__init__.py`). `poetry run d
 
 **Watch**: the `mypy_path` removal is repo-wide config, not story-scoped — flag it in review since
 it touches the shared toolchain config rather than only this feature's new files.
+
+## 2026-08-03T20:15:00Z · Implementer US0 · T003
+
+**Did**: `controlled_vocabularies/io/report.py` — `ImportReport` (four buckets: `created`,
+`updated`, `set_aside`, `absent_from_source`, plus `set_aside_by_reason()` for grouping/counting)
+and `SetAsideEntry` (`reason`, `subject`, `params`, frozen, with a `render()` that substitutes at
+call time rather than baking the message in at creation time). `SetAsideReason` is a
+`TextChoices` closed vocabulary of eight reasons covering FR-014 and the spec's Key Entities
+(language not configured, predicate not modelled, notation, mapping, missing relation end,
+missing collection member, no preferred label in default language, vocabulary mismatch); fatal
+findings (missing/blank-node identity) are deliberately excluded — D3/D8 fail the whole run for
+those rather than setting them aside. Re-exported from `io/__init__.py`.
+
+**Verified**: `poetry run pytest -q` — 317 passed (287 + 30 new). `poetry run ruff check .` — all
+checks passed. `poetry run ruff format .` — 2 files reformatted (report.py, test_report.py) then
+clean. `poetry run mypy` — success, 6 source files. `poetry run deptry .` — no issues, 12 files
+scanned. `poetry run pre-commit run --all-files` — all hooks passed.
+
+**Next**: T001+T004 together — declare `rdflib`/`defusedxml` and write `safety.py`'s pre-flight
+scan in the same commit (deptry ordering rule).
+
+**Watch**: none.
