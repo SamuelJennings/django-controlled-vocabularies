@@ -62,3 +62,39 @@ scanned. `poetry run pre-commit run --all-files` — all hooks passed.
 scan in the same commit (deptry ordering rule).
 
 **Watch**: none.
+
+## 2026-08-03T20:35:00Z · Implementer US0 · T001/T004
+
+**Did**: `controlled_vocabularies/io/safety.py` — `scan_rdf_xml(data: bytes)`, a pre-flight
+`defusedxml.sax` scan (do-nothing content handler) that stands in front of `rdflib`'s RDF/XML
+parser, which calls `xml.sax.make_parser()` itself and accepts no parser argument. Raises
+`UnsafeRdfXmlError` (a `ValidationError` subclass, translatable with named placeholders) for a
+document that declares any entity (`EntitiesForbidden` — covers both the internal-expansion bomb
+and, since declaring is enough, an external-entity reference) or that points its DOCTYPE at an
+external subset (`ExternalReferenceForbidden`); returns `None` untouched for an ordinary document.
+Declared `defusedxml` as a runtime dependency in the same commit (T001), per Article VII.
+
+Test fixtures added under `tests/fixtures/security/`: `entity_bomb.rdf` reinstates the exact
+research.md R3 shape — 8 nested entity declarations (`e0`..`e8`), each the previous repeated 5
+times from a 2-character base, matching R3's measured 781,250-character expansion — rather than a
+mock; `external_entity.rdf` reinstates R3's own canary-file XXE probe; `external_dtd.rdf` is a
+second, distinct route to the same untrusted-fetch problem (no entity declared, but the DOCTYPE
+itself names an external system id); `ordinary.rdf` is a plain SKOS RDF/XML document with no DTD.
+
+**Deviation** (decisions.md D11): tasks.md's T001 reads as declaring both `rdflib` and `defusedxml`
+together. `rdflib` is not declared — nothing in Phase 0 imports it (Phase 0 stops before
+`skos.py`/`mapping.py`, T006), and declaring it early failed `deptry` (`DEP002` unused dependency),
+the exact case Article VII exists to catch. Only `defusedxml` is declared now; `rdflib` lands with
+T006.
+
+**Verified**: `poetry run pytest -q` — 321 passed (317 + 4 new). `poetry run ruff check .` — all
+checks passed. `poetry run ruff format --check .` — 19 files already formatted. `poetry run mypy`
+— success, 7 source files. `poetry run deptry .` — no issues, 13 files scanned (confirmed both with
+`rdflib` declared, where it failed `DEP002`, and without, where it passed). `poetry run pre-commit
+run --all-files` — all hooks passed.
+
+**Next**: T005 — fixture vocabularies under `tests/fixtures/` (Turtle/RDF-XML/JSON-LD, re-import
+edits, malformed fatal-path cases).
+
+**Watch**: T006 must declare `rdflib` in its own commit alongside `skos.py`/`mapping.py` — flagged
+here so it isn't missed at that stage exit.
