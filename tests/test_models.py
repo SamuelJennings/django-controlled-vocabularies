@@ -1925,3 +1925,64 @@ class TestMembershipIntegrity:
         # the pre-existing broader/narrower link is untouched
         assert igneous_rock in granite.broader()
         assert granite in igneous_rock.narrower()
+
+
+class TestBlankPermanentUriIsAbsent:
+    """US-1 — an empty string is *absence* of an identifier, not an identifier.
+
+    ``permanent_uri`` is nullable so that the partial ``UniqueConstraint``
+    (``permanent_uri__isnull=False``) exempts provisional records. An empty
+    string is not null, so it falls *inside* the constraint while
+    ``uri``/``has_permanent_uri`` both read it as absent — the second such
+    record fails at the database with an opaque error. Assigning ``""``
+    instead of ``None`` is the ordinary shape of importer and serializer code
+    (``node.get("about") or ""``), so the models normalise it on the way in.
+    """
+
+    @pytest.mark.django_db
+    def test_two_schemes_assigned_a_blank_permanent_uri_coexist(self):
+        first = ConceptScheme.objects.create(name="First", permanent_uri="")
+        second = ConceptScheme.objects.create(name="Second", permanent_uri="")
+        assert first.permanent_uri is None
+        assert second.permanent_uri is None
+        assert first.uri == first.local_url
+        assert second.uri == second.local_url
+
+    @pytest.mark.django_db
+    def test_two_concepts_assigned_a_blank_permanent_uri_coexist(self, scheme):
+        first = Concept.objects.create(scheme=scheme, label="First", permanent_uri="")
+        second = Concept.objects.create(scheme=scheme, label="Second", permanent_uri="")
+        assert first.permanent_uri is None
+        assert second.permanent_uri is None
+
+    @pytest.mark.django_db
+    def test_two_collections_assigned_a_blank_permanent_uri_coexist(self, scheme):
+        first = Collection.objects.create(scheme=scheme, name="First", permanent_uri="")
+        second = Collection.objects.create(scheme=scheme, name="Second", permanent_uri="")
+        assert first.permanent_uri is None
+        assert second.permanent_uri is None
+
+    @pytest.mark.django_db
+    def test_a_blank_permanent_uri_is_stored_as_null_not_an_empty_string(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow", permanent_uri="")
+        concept.refresh_from_db()
+        assert concept.permanent_uri is None
+        assert concept.has_permanent_uri is False
+        assert Concept.objects.filter(permanent_uri__isnull=True).count() == 1
+
+    @pytest.mark.django_db
+    def test_full_clean_also_normalises_a_blank_permanent_uri(self, scheme):
+        concept = Concept(scheme=scheme, label="Heat Flow", permanent_uri="")
+        concept.full_clean(exclude=["slug"])
+        assert concept.permanent_uri is None
+
+    @pytest.mark.django_db
+    def test_clearing_a_stored_permanent_uri_with_a_blank_is_still_refused(self, scheme):
+        concept = Concept.objects.create(
+            scheme=scheme, label="Heat Flow", permanent_uri="http://vocab.example.org/hf"
+        )
+        reloaded = Concept.objects.get(pk=concept.pk)
+        reloaded.permanent_uri = ""
+        with pytest.raises(ValidationError) as excinfo:
+            reloaded.save()
+        assert "fixed and cannot be changed or cleared" in str(excinfo.value)
