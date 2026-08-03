@@ -397,11 +397,11 @@ class TestPermanentUriIsFixed:
     FR-013). Fixedness moves one way only: a record loaded from the database
     refuses a save that changes or clears its stored ``permanent_uri``, the
     refusal is a translatable ``ValidationError`` on the ``permanent_uri`` key,
-    and re-saving with the identifier unchanged still succeeds. A record that has
-    never been loaded from the database — freshly constructed, or reloaded with
-    ``permanent_uri`` deferred — has no snapshot to compare against and is
-    unconstrained, so setting an identifier for the first time (the path R4's
-    publish action will use) is allowed."""
+    and re-saving with the identifier unchanged still succeeds. Fixedness starts
+    at the save that first stores an identifier, and a deferred load is no way
+    around it. Only a record with nothing stored is unconstrained, so setting an
+    identifier for the first time (the path R4's publish action will use) is
+    allowed."""
 
     @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
     @pytest.mark.django_db
@@ -463,18 +463,64 @@ class TestPermanentUriIsFixed:
         record.save()
         assert record.permanent_uri == "http://vocabs.example.org/published"
 
+    @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
     @pytest.mark.django_db
-    def test_deferred_permanent_uri_is_unconstrained(self, scheme):
-        concept = Concept.objects.create(
-            scheme=scheme, label="Granite", permanent_uri="http://vocabs.example.org/rock/granite"
-        )
-        deferred = Concept.objects.only("label").get(pk=concept.pk)
-        # permanent_uri was never loaded, so there is no snapshot to compare
-        # against — the guard skips rather than firing on a phantom change.
-        deferred.permanent_uri = "http://vocabs.example.org/rock/other"
+    def test_a_deferred_load_still_refuses_a_rewrite(self, model, scheme):
+        """`.only()`/`.defer()` is an ordinary query idiom, not an escape hatch.
+
+        The instance carries no snapshot because the column was never fetched,
+        so the stored identifier is read back before the save is allowed
+        through.
+        """
+        record = _create_with_permanent_uri(model, scheme, "http://vocabs.example.org/original")
+        deferred = model.objects.only("id").get(pk=record.pk)
+        deferred.permanent_uri = "http://vocabs.example.org/rewritten"
+        with pytest.raises(ValidationError):
+            deferred.save()
+        record.refresh_from_db()
+        assert record.permanent_uri == "http://vocabs.example.org/original"
+
+    @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
+    @pytest.mark.django_db
+    def test_a_deferred_load_still_refuses_a_clear(self, model, scheme):
+        record = _create_with_permanent_uri(model, scheme, "http://vocabs.example.org/original")
+        deferred = model.objects.only("id").get(pk=record.pk)
+        deferred.permanent_uri = None
+        with pytest.raises(ValidationError):
+            deferred.save()
+        record.refresh_from_db()
+        assert record.permanent_uri == "http://vocabs.example.org/original"
+
+    @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
+    @pytest.mark.django_db
+    def test_a_deferred_load_that_leaves_the_identifier_alone_never_fetches_it(self, model, scheme):
+        """The read-back is paid for only when the deferred column is assigned.
+
+        A record loaded without ``permanent_uri`` and saved untouched must not
+        fetch it, or every deferred save in the app pays for this guard. The
+        column staying deferred afterwards is the evidence it was never read.
+        """
+        record = _create_with_permanent_uri(model, scheme, "http://vocabs.example.org/original")
+        deferred = model.objects.only("id").get(pk=record.pk)
         deferred.save()
-        deferred.refresh_from_db()
-        assert deferred.permanent_uri == "http://vocabs.example.org/rock/other"
+        assert "permanent_uri" in deferred.get_deferred_fields()
+        record.refresh_from_db()
+        assert record.permanent_uri == "http://vocabs.example.org/original"
+
+    @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
+    @pytest.mark.django_db
+    def test_a_provisional_record_may_be_given_an_identifier_only_once(self, model, scheme):
+        """Fixedness starts at the save that stores the identifier, not at the
+        next load — otherwise the instance R4's publish action holds could
+        publish the same record twice under different identifiers."""
+        record = _create_without_permanent_uri(model, scheme)
+        record.permanent_uri = "http://vocabs.example.org/published"
+        record.save()
+        record.permanent_uri = "http://vocabs.example.org/published-again"
+        with pytest.raises(ValidationError):
+            record.save()
+        record.refresh_from_db()
+        assert record.permanent_uri == "http://vocabs.example.org/published"
 
 
 class TestGetByUri:
