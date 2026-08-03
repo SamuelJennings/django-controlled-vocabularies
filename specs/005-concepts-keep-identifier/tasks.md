@@ -144,7 +144,7 @@ provisional identity. This is a planning omission, not an implementer failure.
       **local URL** joins it. Both defined in the vocabulary the code now uses (spec Assumptions, D9).
 - [x] T022 Check `README.md` for any claim that a concept's identifier is always composed from the
       configured address, and correct it if present.
-- [ ] T023 Run `forge verify` (lint, typecheck, tests, build) and confirm green across the matrix.
+- [x] T023 Run `forge verify` (lint, typecheck, tests, build) and confirm green across the matrix.
       Confirm `makemigrations --check` is clean and a migrate-from-zero reaches the same state.
 
 ## Dependencies and parallelism

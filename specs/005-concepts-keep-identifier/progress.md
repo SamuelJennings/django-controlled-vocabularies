@@ -308,3 +308,25 @@ the human-readable trail.
   the rest describe stable/consumption-facing properties, not the composition rule). No code change.
 - **Deviation**: none.
 - **Commit**: see below.
+
+## 2026-08-03 — Phase 7 (T023) gate run — Phase 6/7 complete
+
+- **Did**: T023, the closing gate for Phase 6 and Phase 7. Ran the full verification matrix from a
+  clean working tree on `005-impl`:
+  - `poetry run pytest -q` → **281 passed**, 0 failed.
+  - `poetry run ruff check .` → All checks passed.
+  - `poetry run ruff format --check .` → 12 files already formatted.
+  - `poetry run mypy controlled_vocabularies` → Success, 4 source files.
+  - `DJANGO_SETTINGS_MODULE=tests.settings poetry run python -m django makemigrations --check --dry-run`
+    → No changes detected.
+  - Migrate-from-zero: `tests/settings.py` points at an in-memory sqlite database
+    (`NAME=":memory:"`), so every fresh process invocation starts from an empty database.
+    `DJANGO_SETTINGS_MODULE=tests.settings poetry run python -m django migrate --run-syncdb` applied
+    all five `controlled_vocabularies` migrations (`0001_initial` through
+    `0005_collection_permanent_uri_concept_permanent_uri_and_more`) cleanly, each reporting `OK`;
+    inspecting the resulting `conceptscheme` table's schema directly (`PRAGMA table_info`) confirmed
+    `permanent_uri` landed as a nullable `varchar(500)`, matching data-model.md.
+  - `git status --short` → clean except this task's own doc edits.
+- **Deviation**: none.
+- **Phase 6/7 complete**: T018–T023 all done. This closes out FS-005's implementation task list
+  (Phases 1 through 7, including 2b and 5b).
