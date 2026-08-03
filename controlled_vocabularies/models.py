@@ -1,9 +1,12 @@
 """Models for controlled_vocabularies.
 
 The relational models are the source of truth for a vocabulary and its concepts.
-In this slice a vocabulary is a :class:`ConceptScheme`; its identifier (URI) is
-computed from a configured base address and the slug, never stored (research R1).
+A record's ``uri`` is its permanent identity: an externally assigned identifier
+held verbatim when one was supplied (``permanent_uri``, FS-005), or otherwise
+composed from a configured base address and the slug exactly as R1 did.
 """
+
+import urllib.parse
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -14,6 +17,74 @@ from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 
 from controlled_vocabularies import conf
+
+#: Schemes that can carry executable content and must never be accepted as an
+#: externally assigned permanent URI (FR-004) — a stored identifier is later
+#: rendered as a link by the browsing interface, so a hostile scheme accepted
+#: here becomes a hazard there.
+_UNSAFE_PERMANENT_URI_SCHEMES = frozenset({"javascript", "data", "vbscript"})
+
+#: The length bound for a permanent URI (FR-004, decisions.md D5): far beyond any
+#: identifier real SKOS vocabularies use, and inside the unique-index limit of
+#: every mainstream database, including MySQL's 3072-byte cap on ``utf8mb4``.
+PERMANENT_URI_MAX_LENGTH = 500
+
+
+def validate_permanent_uri(value: str) -> None:
+    """Validate an externally assigned permanent URI (FR-004).
+
+    Requires a well-formed absolute identifier — a non-empty scheme and a
+    non-empty remainder, so a bare relative path is refused — refuses a
+    scheme that can carry executable content, and caps length at 500
+    characters. Used both as a field validator (so ``full_clean()`` catches
+    it) and called directly from each model's ``save()``, because Django's
+    ``save()`` never calls ``full_clean()`` and the import path this feature
+    exists to serve writes through ``save()`` directly (research R5).
+    """
+    parsed = urllib.parse.urlsplit(value)
+    if not parsed.scheme or not (parsed.netloc or parsed.path):
+        raise ValidationError(
+            _("'%(uri)s' is not a well-formed absolute identifier with a scheme."),
+            params={"uri": value},
+            code="permanent_uri_not_absolute",
+        )
+    if parsed.scheme.lower() in _UNSAFE_PERMANENT_URI_SCHEMES:
+        raise ValidationError(
+            _("'%(uri)s' uses the scheme '%(scheme)s', which is not permitted."),
+            params={"uri": value, "scheme": parsed.scheme},
+            code="permanent_uri_unsafe_scheme",
+        )
+    if len(value) > PERMANENT_URI_MAX_LENGTH:
+        raise ValidationError(
+            _("A permanent URI cannot exceed %(max_length)s characters; '%(uri)s' has %(length)s."),
+            params={"max_length": PERMANENT_URI_MAX_LENGTH, "uri": value, "length": len(value)},
+            code="permanent_uri_too_long",
+        )
+
+
+def _reject_permanent_uri_held_by_another_model(instance: "ConceptScheme | Concept | Collection") -> None:
+    """Refuse a ``permanent_uri`` already held by a record of a *different* model.
+
+    Uniqueness within one model is a database constraint (FR-006, per-model
+    ``UniqueConstraint``). No portable constraint spans the three tables, so this
+    covers the cross-model case (research R4): a concept and a collection, say,
+    must not hold the same externally assigned identifier. Only runs when the
+    column is actually set, so nothing is paid for a still-provisional record.
+    """
+    if not instance.permanent_uri:
+        return
+    model = type(instance)
+    others = [candidate for candidate in (ConceptScheme, Concept, Collection) if candidate is not model]
+    if any(candidate.objects.filter(permanent_uri=instance.permanent_uri).exists() for candidate in others):
+        raise ValidationError(
+            {
+                "permanent_uri": ValidationError(
+                    _("The permanent URI '%(uri)s' is already held by another record."),
+                    params={"uri": instance.permanent_uri},
+                    code="permanent_uri_held_elsewhere",
+                )
+            }
+        )
 
 
 def _configured_language_codes() -> set[str]:
@@ -64,18 +135,52 @@ class ConceptScheme(models.Model):
             "Must be one of the application's configured languages."
         ),
     )
+    permanent_uri = models.CharField(
+        max_length=PERMANENT_URI_MAX_LENGTH,
+        null=True,
+        blank=True,
+        verbose_name=_("permanent URI"),
+        help_text=_(
+            "The identifier assigned by this vocabulary's publisher, held exactly as given. "
+            "Fixed once set. Leave blank for a vocabulary authored here, which reports the "
+            "identifier composed from this site's address instead."
+        ),
+        validators=[validate_permanent_uri],
+    )
 
     class Meta:
         verbose_name = _("vocabulary")
         verbose_name_plural = _("vocabularies")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["permanent_uri"],
+                condition=Q(permanent_uri__isnull=False),
+                name="conceptscheme_permanent_uri_unique",
+            ),
+        ]
 
     def __str__(self) -> str:
         return self.name
 
     @property
     def uri(self) -> str:
-        """The scheme's URI: the configured base address plus its slug."""
-        return f"{conf.get_base_uri()}/{self.slug}"
+        """The scheme's permanent URI: its identity.
+
+        The externally assigned identifier when one is held (fixed, held
+        verbatim), otherwise the value composed from the configured base
+        address and its slug (provisional, follows a rename or a change to
+        the configured address).
+        """
+        return self.permanent_uri or f"{conf.get_base_uri()}/{self.slug}"
+
+    @property
+    def has_permanent_uri(self) -> bool:
+        """Whether this scheme's permanent URI is externally fixed (research R2).
+
+        Recorded by the presence of :attr:`permanent_uri`, never inferred by
+        comparing it against the configured base address (FR-003).
+        """
+        return bool(self.permanent_uri)
 
     @property
     def effective_default_language(self) -> str:
@@ -87,6 +192,16 @@ class ConceptScheme(models.Model):
         anchor identity in their own language (FR-009/FR-011).
         """
         return self.default_language or settings.LANGUAGE_CODE
+
+    def clean(self):
+        """Refuse a ``permanent_uri`` already held by a record of a different model.
+
+        Field validators (:func:`validate_permanent_uri`) already cover format on the
+        ``full_clean()`` path; the cross-model check needs a query beyond one field
+        so it lives here rather than on the field itself (research R4).
+        """
+        super().clean()
+        _reject_permanent_uri_held_by_another_model(self)
 
     def save(self, *args, **kwargs):
         """Derive the slug from ``name``, freeze the default language once concepts
@@ -133,6 +248,16 @@ class ConceptScheme(models.Model):
                     )
                 }
             )
+        if self.permanent_uri:
+            # save() never calls full_clean(), so the field validator alone would
+            # leave the import path — the one this feature exists to serve —
+            # accepting a value the specification says can never be stored
+            # (research R5, the same trap Concept.slug was defended against).
+            try:
+                validate_permanent_uri(self.permanent_uri)
+            except ValidationError as exc:
+                raise ValidationError({"permanent_uri": exc}) from exc
+            _reject_permanent_uri_held_by_another_model(self)
         super().save(*args, **kwargs)
 
 
@@ -209,6 +334,18 @@ class Concept(models.Model):
             "A manual slug is left untouched when the label later changes."
         ),
     )
+    permanent_uri = models.CharField(
+        max_length=PERMANENT_URI_MAX_LENGTH,
+        null=True,
+        blank=True,
+        verbose_name=_("permanent URI"),
+        help_text=_(
+            "The identifier assigned by this concept's publisher, held exactly as given. "
+            "Fixed once set. Leave blank for a concept authored here, which reports the "
+            "identifier composed from this site's address instead."
+        ),
+        validators=[validate_permanent_uri],
+    )
 
     objects = ConceptManager()
 
@@ -217,6 +354,11 @@ class Concept(models.Model):
         verbose_name_plural = _("concepts")
         constraints = [
             models.UniqueConstraint(fields=["scheme", "slug"], name="unique_concept_slug_per_scheme"),
+            models.UniqueConstraint(
+                fields=["permanent_uri"],
+                condition=Q(permanent_uri__isnull=False),
+                name="concept_permanent_uri_unique",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -224,8 +366,22 @@ class Concept(models.Model):
 
     @property
     def uri(self) -> str:
-        """The concept's URI: its scheme's URI plus its slug."""
-        return f"{self.scheme.uri}/{self.slug}"
+        """The concept's permanent URI: its identity.
+
+        The externally assigned identifier when one is held (fixed, held
+        verbatim, and never derived from its scheme's), otherwise its scheme's
+        URI plus its own slug (provisional, follows a rename).
+        """
+        return self.permanent_uri or f"{self.scheme.uri}/{self.slug}"
+
+    @property
+    def has_permanent_uri(self) -> bool:
+        """Whether this concept's permanent URI is externally fixed (research R2).
+
+        Recorded by the presence of :attr:`permanent_uri`, never inferred by
+        comparing it against the configured base address (FR-003).
+        """
+        return bool(self.permanent_uri)
 
     def set_slug(self, slug: str) -> None:
         """Set an explicit slug that survives later relabels (FR-010).
@@ -292,7 +448,27 @@ class Concept(models.Model):
                     )
                 }
             )
+        if self.permanent_uri:
+            # save() never calls full_clean(), so the field validator alone would
+            # leave the import path — the one this feature exists to serve —
+            # accepting a value the specification says can never be stored
+            # (research R5, the same trap the slug fields were defended against).
+            try:
+                validate_permanent_uri(self.permanent_uri)
+            except ValidationError as exc:
+                raise ValidationError({"permanent_uri": exc}) from exc
+            _reject_permanent_uri_held_by_another_model(self)
         super().save(*args, **kwargs)
+
+    def clean(self):
+        """Refuse a ``permanent_uri`` already held by a record of a different model.
+
+        Field validators (:func:`validate_permanent_uri`) already cover format on the
+        ``full_clean()`` path; the cross-model check needs a query beyond one field
+        so it lives here rather than on the field itself (research R4).
+        """
+        super().clean()
+        _reject_permanent_uri_held_by_another_model(self)
 
     def preferred_label(self, language: str | None = None) -> str | None:
         """Return this concept's preferred label in ``language``.
@@ -915,12 +1091,29 @@ class Collection(models.Model):
             "An unordered collection is a plain set."
         ),
     )
+    permanent_uri = models.CharField(
+        max_length=PERMANENT_URI_MAX_LENGTH,
+        null=True,
+        blank=True,
+        verbose_name=_("permanent URI"),
+        help_text=_(
+            "The identifier assigned by this collection's publisher, held exactly as given. "
+            "Fixed once set. Leave blank for a collection authored here, which reports the "
+            "identifier composed from this site's address instead."
+        ),
+        validators=[validate_permanent_uri],
+    )
 
     class Meta:
         verbose_name = _("collection")
         verbose_name_plural = _("collections")
         constraints = [
             models.UniqueConstraint(fields=["scheme", "slug"], name="unique_collection_slug_per_scheme"),
+            models.UniqueConstraint(
+                fields=["permanent_uri"],
+                condition=Q(permanent_uri__isnull=False),
+                name="collection_permanent_uri_unique",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -928,13 +1121,35 @@ class Collection(models.Model):
 
     @property
     def uri(self) -> str:
-        """The collection's URI: its scheme's URI, a ``collection`` segment, and its slug.
+        """The collection's permanent URI: its identity.
 
-        The ``/collection/`` segment keeps a collection's identity space disjoint from a
-        concept's (whose URI is ``{scheme.uri}/{slug}``), so the two can never mint the same
-        URI when RDF projection lands (research R4).
+        The externally assigned identifier when one is held (fixed, held
+        verbatim), otherwise its scheme's URI, a ``collection`` segment, and its
+        own slug (provisional, follows a rename). The ``/collection/`` segment
+        keeps a collection's identity space disjoint from a concept's (whose URI
+        is ``{scheme.uri}/{slug}``), so the two can never mint the same URI when
+        RDF projection lands (research R4).
         """
-        return f"{self.scheme.uri}/collection/{self.slug}"
+        return self.permanent_uri or f"{self.scheme.uri}/collection/{self.slug}"
+
+    @property
+    def has_permanent_uri(self) -> bool:
+        """Whether this collection's permanent URI is externally fixed (research R2).
+
+        Recorded by the presence of :attr:`permanent_uri`, never inferred by
+        comparing it against the configured base address (FR-003).
+        """
+        return bool(self.permanent_uri)
+
+    def clean(self):
+        """Refuse a ``permanent_uri`` already held by a record of a different model.
+
+        Field validators (:func:`validate_permanent_uri`) already cover format on the
+        ``full_clean()`` path; the cross-model check needs a query beyond one field
+        so it lives here rather than on the field itself (research R4).
+        """
+        super().clean()
+        _reject_permanent_uri_held_by_another_model(self)
 
     def save(self, *args, **kwargs):
         """Derive the slug from ``name`` and refuse an empty or colliding slug.
@@ -956,6 +1171,16 @@ class Collection(models.Model):
                     )
                 }
             )
+        if self.permanent_uri:
+            # save() never calls full_clean(), so the field validator alone would
+            # leave the import path — the one this feature exists to serve —
+            # accepting a value the specification says can never be stored
+            # (research R5, the same trap the slug fields were defended against).
+            try:
+                validate_permanent_uri(self.permanent_uri)
+            except ValidationError as exc:
+                raise ValidationError({"permanent_uri": exc}) from exc
+            _reject_permanent_uri_held_by_another_model(self)
         super().save(*args, **kwargs)
 
     def add(self, concept: "Concept") -> "CollectionMember":
