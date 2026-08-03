@@ -346,3 +346,29 @@ identifier the identity rules refuse each fail the run; every problem in a file 
 than raised at the first; the transaction rolls back.
 
 **Watch**: none.
+
+## 2026-08-03T22:55:00Z · Implementer US1 · T011
+
+**Did**: no new production code. `_resolve_scheme()`/`_import_concepts()` already collect every
+fatal finding into `report.fatal` rather than raising at the first (T007/T009), and `import_skos()`
+already raises `SkosImportFailed` only once nothing further can be checked, inside
+`transaction.atomic()` (T007) — the collect-then-raise-once, roll-back-on-raise pattern
+research.md R7 calls for was built in from the start rather than deferred to this task. T011 is
+therefore pure test coverage: a blank-node concept and a refused-URI-scheme concept each proven to
+fail the run and write nothing; `multiple_fatal_problems.ttl` (new fixture — a blank-node concept,
+a refused-scheme concept, and one perfectly ordinary concept together) proving both fatal findings
+are reported in one run rather than stopping at the first, and that the rollback undoes a scheme
+field write made *before* the fatal concepts were even reached (an existing scheme's `name` is
+provably unchanged after the failed run), not only concept creation.
+
+**Verified**: `poetry run pytest -q` — 388 passed (383 + 5 new in `test_skos.py`'s new
+`TestFatalFindingsAndAtomicity`). `poetry run ruff check .` — all checks passed. `poetry run ruff
+format --check .` — 23 files formatted. `poetry run mypy` — success, 9 source files. `poetry run
+deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations --check
+--dry-run --settings=tests.settings` — no changes detected. `poetry run pre-commit run
+--all-files` — all hooks passed.
+
+**Next**: T012 — the report, populated by a real run: created and updated records and set-aside
+entries all present with their reasons, as data.
+
+**Watch**: none.
