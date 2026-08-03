@@ -235,3 +235,37 @@ commonest preferred-label language, else site default.
 
 **Watch**: the concept walk (T009) is not wired into `import_skos()` yet — a successful T007-era
 call writes at most the one `ConceptScheme` row and never touches `Concept`.
+
+## 2026-08-03T22:05:00Z · Implementer US1 · T008
+
+**Did**: `_determine_default_language()` (decisions.md D4, FR-005): the vocabulary's own declared
+language when its `skos:prefLabel` carries exactly one and the site is configured for it; else
+the commonest language among `concept_nodes`' own `skos:prefLabel` values (ties broken by
+language code, for a result that doesn't depend on graph iteration order); else `""`, which
+`ConceptScheme.default_language` already treats as "fall back to `effective_default_language`" —
+R1's own mechanism, reused rather than reimplemented (D4 names this explicitly). `import_skos()`
+now also computes `concept_nodes` (sorted, deterministic) ahead of T009's own use of it, since
+T008's algorithm needs to see the concepts' labels too. `_resolve_scheme()`'s scheme-`name`
+selection now prefers the resolved default language's own label, falling back to any language
+when the scheme carries none in it (unchanged outcome for `rocks.ttl`, since English is both
+declared and configured).
+
+New fixtures: `french_vocabulary.ttl` (declares itself in French, a configured non-default
+language) and `unconfigured_language_vocabulary.ttl` (declares itself in Spanish, which the test
+site's `LANGUAGES` does not include at all — falls back to the site default).
+
+**Verified**: `poetry run pytest -q` — 375 passed (373 + 2 new in `test_skos.py`'s new
+`TestImportedVocabularyDefaultLanguage`). `poetry run ruff check .` — all checks passed. `poetry
+run ruff format --check .` — 23 files formatted. `poetry run mypy` — success, 9 source files
+(one round of fixes: `graph.objects()` yields the general `rdflib.term.Node`, which has no
+`.language` attribute — only `rdflib.Literal` does; added `_label_languages()` as the one place
+that narrows with `isinstance`, rather than repeating the check at each call site). `poetry run
+deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations --check
+--dry-run --settings=tests.settings` — no changes detected. `poetry run pre-commit run
+--all-files` — all hooks passed.
+
+**Next**: T009 — concepts: created inside the vocabulary, each holding its published identifier
+and its default-language preferred label; scheme membership via `inScheme`/`topConceptOf`/
+`hasTopConcept`; a concept claiming a different vocabulary set aside and reported.
+
+**Watch**: none.
