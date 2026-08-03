@@ -314,6 +314,20 @@ class TestPermanentUri:
         settings.CONTROLLED_VOCABULARIES_BASE_URI = "https://elsewhere.example.org/vocab"
         assert concept.uri == "http://vocabs.example.org/rock/granite"
 
+    @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
+    @pytest.mark.django_db
+    def test_permanent_uri_case_round_trips_byte_identical_through_save_and_reload(self, model, scheme):
+        """T036. US-1 scenario 5 / FR-002: an arrived identifier is "not...
+        re-cased". The code never touches case, so this was a coverage gap
+        rather than a defect — locks in that a mixed-case identifier survives
+        save and reload byte-identical, on all three models."""
+        mixed_case = "http://Vocabs.Example.ORG/Rock/GRANITE"
+        record = _create_with_permanent_uri(model, scheme, mixed_case)
+        assert record.permanent_uri == mixed_case
+        record.refresh_from_db()
+        assert record.permanent_uri == mixed_case
+        assert record.uri == mixed_case
+
     @pytest.mark.django_db
     def test_scheme_and_collection_keep_their_own_permanent_uri(self):
         scheme = ConceptScheme.objects.create(name="Rocks", permanent_uri="http://vocabs.example.org/rocks")
