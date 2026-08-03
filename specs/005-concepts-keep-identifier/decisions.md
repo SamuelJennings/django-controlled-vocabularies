@@ -19,20 +19,27 @@ the code today.
 identified and locally viewable, and it matches how SKOS itself treats a concept's URI (a global
 identifier, not a site path). Established in the intake discussion, not inferred.
 
-## D2 — "Permanent" is a promise earned at publication, not a field that is sometimes empty
+## D2 — Every record has a permanent URI; the column holds it once it turns static
 
-**Ambiguous**: whether an unpublished, locally authored record has a permanent URI at all.
+**Ambiguous**: how a permanent URI behaves before the record is published.
 
-**Chosen**: every record always has one. For an unpublished local record it holds the value the
-record will publish under and follows the record's slugs; for anything imported or published it is
-fixed. The difference between the two states is **fixedness**, never presence.
+**Chosen**: every record always has one. It is **dynamic** while the record is authored here and
+unpublished, composed from the site's configured address and the record's slugs and free to move when
+those move. It turns **static** when the record arrives from an external publisher, or when its
+vocabulary is published, and never changes afterwards. The difference between the two states is
+whether the value can still move, never whether it exists.
 
-**Why defensible**: the maintainer's position is that an unpublished vocabulary has no permanent URI
-in the promise sense, and that populating the field with the eventual value is still right. A single
-always-present value keeps one rule for the whole system, avoids every caller special-casing an
-absent identity, and preserves R1's behaviour exactly, so this feature is not a breaking change.
-The alternative — no identifier until publication — would have made lookup fail for unpublished
-local records and forced a null check into every consumer for no gain.
+**Why defensible**: the maintainer's position is that the identifier is dynamic until publication
+and static from then on, which is exactly these two states. An always-present value keeps one rule for
+the whole system, avoids every caller special-casing an absent identity, and preserves R1's behaviour
+exactly, so this feature is not a breaking change. The alternative — no identifier at all until
+publication — would have made lookup fail for unpublished local records and forced a null check into
+every consumer for no gain.
+
+*(Corrected 2026-08-03. An earlier draft of this entry claimed an unpublished record has no permanent
+URI. That was this run's wording, not the maintainer's, and it is wrong: the URI exists throughout and
+only its mutability changes. The column was renamed from `permanent_uri` to `static_uri` at the same
+time, because a column named for the whole concept implied records without one had no identity.)*
 
 ## D3 — Fixedness is recorded, never inferred from the configured base address
 

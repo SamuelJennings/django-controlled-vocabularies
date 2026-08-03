@@ -20,19 +20,19 @@ configured base address, which it previously refused before reaching the databas
 
 ```python
 # Field, on ConceptScheme, Concept and Collection.
-record.permanent_uri            # -> str | None   the publisher's identifier, None while provisional
+record.static_uri        # -> str | None  the permanent URI once static; None while dynamic
 
 # Properties, on all three.
-record.local_url                # -> str          where the record is viewed on this site
-record.has_permanent_uri        # -> bool         whether the identifier is fixed
+record.local_url         # -> str         where the record is viewed on this site
+record.has_static_uri    # -> bool        whether the permanent URI has turned static
 
 # Manager lookup, now on all three.
 ConceptScheme.objects.get_by_uri(uri)   # -> ConceptScheme, raises ConceptScheme.DoesNotExist
 Collection.objects.get_by_uri(uri)      # -> Collection,    raises Collection.DoesNotExist
 
 # Validation, importable so #50 can check a value before building a record.
-from controlled_vocabularies.models import validate_permanent_uri
-validate_permanent_uri(value)   # -> None, raises ValidationError
+from controlled_vocabularies.models import validate_static_uri
+validate_static_uri(value)   # -> None, raises ValidationError
 ```
 
 ## Behaviour contract
@@ -40,17 +40,17 @@ validate_permanent_uri(value)   # -> None, raises ValidationError
 ```python
 # A record that arrived from elsewhere keeps its identifier, verbatim and forever.
 c = Concept.objects.create(scheme=s, name="Granite",
-                           permanent_uri="http://vocabs.example.org/rock/granite")
+                           static_uri="http://vocabs.example.org/rock/granite")
 c.uri                      # "http://vocabs.example.org/rock/granite"
-c.has_permanent_uri        # True
+c.has_static_uri           # True
 c.name = "Granite (coarse)"; c.save()
 c.uri                      # unchanged
 # and unchanged again after settings.CONTROLLED_VOCABULARIES_BASE_URI changes.
 
 # A record authored here carries the value it will publish under.
 d = Concept.objects.create(scheme=s, name="Basalt")
-d.permanent_uri            # None
-d.has_permanent_uri        # False
+d.static_uri               # None  — still dynamic
+d.has_static_uri           # False
 d.uri == d.local_url       # True — the ordinary case for local unpublished work
 d.uri                      # "{base}/{scheme-slug}/basalt", and it follows a rename
 
@@ -64,21 +64,21 @@ Concept.objects.get_by_uri(d.uri)                                     # -> d
 Concept.objects.get_by_uri("http://vocabs.example.org/nothing")       # raises Concept.DoesNotExist
 
 # Refusals, each a ValidationError with a translatable, named-placeholder message.
-validate_permanent_uri("not-absolute")                    # raises
-validate_permanent_uri("javascript:alert(1)")             # raises
-validate_permanent_uri("http://example.org/" + "x" * 500) # raises
-validate_permanent_uri("urn:uuid:9f6c...")                # accepted — real vocabularies use these
+validate_static_uri("not-absolute")                    # raises
+validate_static_uri("javascript:alert(1)")             # raises
+validate_static_uri("http://example.org/" + "x" * 500) # raises
+validate_static_uri("urn:uuid:9f6c...")                # accepted — real vocabularies use these
 ```
 
 ## Guarantees the tests assert
 
 - An externally assigned identifier is never rewritten, normalised, re-cased, or recomputed, by any
   operation including a re-import that matched the record by it (FR-002, FR-013).
-- Fixedness never reverses: nothing turns a record holding an identifier back into a provisional one
+- A static permanent URI never becomes dynamic again: nothing turns a record holding one back
   (FR-013).
-- No two records of the same model may hold the same `permanent_uri`, and the refusal comes from the
+- No two records of the same model may hold the same `static_uri`, and the refusal comes from the
   database constraint (FR-006). Across models the refusal comes from validation (research R4).
 - A collection's `local_url` can never equal a concept's, because the `collection` segment separates
   them — the R1 rule, preserved (FR-008).
 - Records created before this feature report exactly the identifiers they reported before, because they
-  hold no `permanent_uri` and compose as they always did (FR-009).
+  hold no `static_uri` and compose as they always did (FR-009).
