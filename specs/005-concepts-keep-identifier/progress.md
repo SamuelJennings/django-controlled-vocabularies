@@ -280,3 +280,16 @@ the human-readable trail.
 - **Deviation**: none — no production or doc change was needed; the decision was already correctly
   implemented and documented.
 - **Commit**: see below.
+
+## 2026-08-03 — Phase 7 (T021) docs
+
+- **Did**: T021. `CONTEXT.md`'s single **URI** glossary entry ("the globally stable identifier of a
+  scheme or concept") is replaced by **permanent URI**, extended to cover collections as well as
+  schemes and concepts and to state both fixedness paths (externally assigned and held verbatim, or
+  composed here and fixed at publication). **Local URL** joins it as a distinct entry: this site's own
+  address, always composed from the configured address and the record's slugs, distinct from the
+  permanent URI for an imported record. The one other in-file mention of the old term ("URI identity"
+  in the Architectural decisions closing line) was updated to "permanent URI identity" for consistency.
+  No code change — documentation only.
+- **Deviation**: none.
+- **Commit**: see below.

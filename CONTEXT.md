@@ -10,7 +10,8 @@ This is a seed — it grows as the code does.
 |---|---|---|
 | **SKOS** | W3C [Simple Knowledge Organization System](https://www.w3.org/TR/skos-reference/) — the RDF vocabulary this package targets exclusively. | Not "ontology" (that implies OWL). |
 | **Triple** | The atom of RDF: **subject** (the thing described), **predicate** (a property), **object** (the value). | In this package: subject = a Concept/Scheme, predicate = a JSON key, object = a JSON value. |
-| **URI** | The globally stable identifier of a scheme or concept. **Identity lives here, never in the database PK.** | Immutable after publish (`docs/brainstorm.md`). |
+| **Permanent URI** | The globally stable identifier of a scheme, concept, or collection. When a record arrives from an external publisher this is assigned there and held exactly as given; when a record is authored on this site it is composed from the site's configured address and follows the record until publication, at which point it too becomes fixed. **Identity lives here, never in the database PK.** | Was called "URI". Fixed once externally assigned or once published; never rewritten before then, either. |
+| **Local URL** | This site's own address for a record, always composed from the site's configured address and the record's slugs, regardless of what its permanent URI is. For a locally authored, unpublished record the two are the same string; for an imported record they differ, because the record is viewable here even though its identity belongs to its publisher. | The address a record is viewed at, not necessarily its identity. |
 | **CURIE** | Compact URI, `prefix:name` (e.g. `skos:prefLabel`), expanded against known namespaces. | The shorthand form, not a full URI. |
 | **Turtle / TTL / RDF-XML / JSON-LD** | Serialization formats produced on export and accepted on import (via rdflib). | Formats, not the data model. |
 
@@ -50,4 +51,4 @@ This is a seed — it grows as the code does.
 
 Design reasoning lives in [`docs/brainstorm.md`](docs/brainstorm.md). Start there for the "why" behind
 models-as-truth, document-plus-projection storage, canonical-direction relations, the
-shared/translated split, URI identity, and the consumption field.
+shared/translated split, permanent URI identity, and the consumption field.

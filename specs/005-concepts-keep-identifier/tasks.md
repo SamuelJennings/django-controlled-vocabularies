@@ -140,7 +140,7 @@ provisional identity. This is a planning omission, not an implementer failure.
 
 ## Phase 7: Polish and docs
 
-- [ ] T021 Update `CONTEXT.md`: the single **URI** glossary entry becomes **permanent URI**, and
+- [x] T021 Update `CONTEXT.md`: the single **URI** glossary entry becomes **permanent URI**, and
       **local URL** joins it. Both defined in the vocabulary the code now uses (spec Assumptions, D9).
 - [ ] T022 Check `README.md` for any claim that a concept's identifier is always composed from the
       configured address, and correct it if present.
