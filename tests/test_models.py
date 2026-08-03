@@ -16,6 +16,7 @@ folded here and grouped by subject into classes:
 import pytest
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.db.models import Model, UniqueConstraint
 from django.utils.functional import Promise
 
@@ -726,6 +727,59 @@ class TestPreExistingRecordsUpgrade:
         assert collection.permanent_uri is None
         assert collection.uri == f"https://example.org/vocabularies/{scheme.slug}/collection/igneous"
         assert Collection.objects.get_by_uri(collection.uri) == collection
+
+
+class TestPermanentUriDatabaseUniqueness:
+    """US-3 — FR-006/SC-005: two records of the same model cannot hold the same
+    ``permanent_uri``, and the refusal is the database constraint itself, not
+    application validation — ``bulk_create`` bypasses ``save()``/``clean()`` so
+    this reaches the constraint directly. Many records holding none coexist
+    freely, since the constraint is partial (``condition=Q(permanent_uri__isnull=False)``)."""
+
+    @pytest.mark.django_db
+    def test_two_schemes_with_the_same_permanent_uri_hit_the_database_constraint(self):
+        ConceptScheme.objects.create(name="Rocks", permanent_uri="http://vocabs.example.org/dup")
+        with pytest.raises(IntegrityError):
+            with transaction.atomic():
+                ConceptScheme.objects.bulk_create(
+                    [ConceptScheme(name="Other rocks", slug="other-rocks", permanent_uri="http://vocabs.example.org/dup")]
+                )
+
+    @pytest.mark.django_db
+    def test_two_concepts_with_the_same_permanent_uri_hit_the_database_constraint(self, scheme):
+        Concept.objects.create(scheme=scheme, label="Granite", permanent_uri="http://vocabs.example.org/dup")
+        with pytest.raises(IntegrityError):
+            with transaction.atomic():
+                Concept.objects.bulk_create(
+                    [
+                        Concept(
+                            scheme=scheme, label="Basalt", slug="basalt", permanent_uri="http://vocabs.example.org/dup"
+                        )
+                    ]
+                )
+
+    @pytest.mark.django_db
+    def test_two_collections_with_the_same_permanent_uri_hit_the_database_constraint(self, scheme):
+        Collection.objects.create(scheme=scheme, name="Igneous", permanent_uri="http://vocabs.example.org/dup")
+        with pytest.raises(IntegrityError):
+            with transaction.atomic():
+                Collection.objects.bulk_create(
+                    [
+                        Collection(
+                            scheme=scheme,
+                            name="Metamorphic",
+                            slug="metamorphic",
+                            permanent_uri="http://vocabs.example.org/dup",
+                        )
+                    ]
+                )
+
+    @pytest.mark.django_db
+    def test_many_records_holding_no_permanent_uri_coexist_freely(self, scheme):
+        Concept.objects.create(scheme=scheme, label="A")
+        Concept.objects.create(scheme=scheme, label="B")
+        Concept.objects.create(scheme=scheme, label="C")
+        assert Concept.objects.filter(permanent_uri__isnull=True).count() == 3
 
 
 def _editable_fields(model: type[Model]):

@@ -96,10 +96,10 @@ provisional identity. This is a planning omission, not an implementer failure.
 - [x] T013 [US3] Write the upgrade test: build records the way a pre-005 database holds them (no
       `permanent_uri`) and assert each reports exactly the identifier R1's composition produced, and
       that existing references still resolve. This is the FR-009 / Article IX evidence.
-- [ ] T014 [US3] Write the uniqueness tests: two records of the same model holding one `permanent_uri`
+- [x] T014 [US3] Write the uniqueness tests: two records of the same model holding one `permanent_uri`
       are refused **by the database constraint** (assert `IntegrityError`, not a `ValidationError`);
       many records holding none coexist freely.
-- [ ] T015 [US3] Make Phase 4's tests pass. Expected to be no production change beyond Phase 2 and 3 —
+- [x] T015 [US3] Make Phase 4's tests pass. Expected to be no production change beyond Phase 2 and 3 —
       if any is needed, it belongs here rather than being smuggled into an earlier phase.
 
 ## Phase 5: User Story 4 — Every record has a place on this site (P2)
