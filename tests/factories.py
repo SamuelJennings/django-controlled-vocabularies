@@ -22,12 +22,22 @@ from controlled_vocabularies.models import (
 
 
 class ConceptSchemeFactory(factory.django.DjangoModelFactory):
-    """Build a saved :class:`ConceptScheme` with an app-wide-unique name."""
+    """Build a saved :class:`ConceptScheme` with an app-wide-unique name.
+
+    The opt-in ``external`` trait gives the scheme a fixed, plausible externally
+    assigned ``permanent_uri`` (FS-005), as if it had arrived from an import
+    rather than been authored here.
+    """
 
     class Meta:
         model = ConceptScheme
 
     name = factory.Sequence(lambda n: f"Vocabulary {n}")
+
+    class Params:
+        external = factory.Trait(
+            permanent_uri=factory.Sequence(lambda n: f"http://publisher.example.org/vocab/{n}"),
+        )
 
 
 class ConceptFactory(factory.django.DjangoModelFactory):
@@ -37,7 +47,10 @@ class ConceptFactory(factory.django.DjangoModelFactory):
     (``en`` in the test suite) — the concept's identity anchor. The opt-in
     ``multilingual`` trait hangs a second-language preferred label plus notes off
     the concept so a single ``ConceptFactory(multilingual=True)`` call yields a
-    concept whose preferred labels and notes span more than one language.
+    concept whose preferred labels and notes span more than one language. The
+    opt-in ``external`` trait gives the concept a fixed, plausible externally
+    assigned ``permanent_uri`` (FS-005), independent of its (by default,
+    provisional) scheme's own identifier.
     """
 
     class Meta:
@@ -47,6 +60,9 @@ class ConceptFactory(factory.django.DjangoModelFactory):
     label = factory.Sequence(lambda n: f"Concept {n}")
 
     class Params:
+        external = factory.Trait(
+            permanent_uri=factory.Sequence(lambda n: f"http://publisher.example.org/concept/{n}"),
+        )
         multilingual = factory.Trait(
             # en preferred label is the anchor ``label`` above; de is a real
             # ConceptLabel PREFERRED row (the field owns only the default language).
@@ -146,7 +162,8 @@ class CollectionFactory(factory.django.DjangoModelFactory):
 
     ``name`` drives the derived, per-scheme-unique slug via a sequence so repeated
     calls never collide. Unordered by default; pass ``ordered=True`` for an ordered
-    collection.
+    collection. The opt-in ``external`` trait gives the collection a fixed,
+    plausible externally assigned ``permanent_uri`` (FS-005).
     """
 
     class Meta:
@@ -154,6 +171,11 @@ class CollectionFactory(factory.django.DjangoModelFactory):
 
     scheme = factory.SubFactory(ConceptSchemeFactory)
     name = factory.Sequence(lambda n: f"Collection {n}")
+
+    class Params:
+        external = factory.Trait(
+            permanent_uri=factory.Sequence(lambda n: f"http://publisher.example.org/collection/{n}"),
+        )
 
 
 class CollectionMemberFactory(factory.django.DjangoModelFactory):

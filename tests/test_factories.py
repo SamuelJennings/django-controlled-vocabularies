@@ -228,3 +228,56 @@ def test_collection_with_members_helper_builds_an_ordered_collection():
     collection, members = collection_with_members(ordered=True)
     assert collection.ordered is True
     assert list(collection.members()) == members
+
+
+# --- FS-005 US-5: the `external` trait produces a record carrying a fixed,
+# plausible externally assigned permanent_uri, opt-in like `multilingual`. ---
+
+
+@pytest.mark.django_db
+def test_scheme_factory_without_the_trait_is_provisional():
+    scheme = ConceptSchemeFactory()
+    assert scheme.permanent_uri is None
+    assert scheme.has_permanent_uri is False
+
+
+@pytest.mark.django_db
+def test_scheme_factory_external_trait_yields_a_fixed_externally_assigned_uri():
+    scheme = ConceptSchemeFactory(external=True)
+    assert scheme.has_permanent_uri is True
+    assert scheme.permanent_uri
+    assert scheme.uri == scheme.permanent_uri
+
+
+@pytest.mark.django_db
+def test_concept_factory_without_the_trait_is_provisional():
+    concept = ConceptFactory()
+    assert concept.permanent_uri is None
+    assert concept.has_permanent_uri is False
+
+
+@pytest.mark.django_db
+def test_concept_factory_external_trait_yields_a_fixed_externally_assigned_uri():
+    concept = ConceptFactory(external=True)
+    assert concept.has_permanent_uri is True
+    assert concept.uri == concept.permanent_uri
+    # the concept's own identifier, independent of its (here, provisional) scheme
+    assert concept.scheme.has_permanent_uri is False
+
+
+@pytest.mark.django_db
+def test_collection_factory_without_the_trait_is_provisional():
+    from tests.factories import CollectionFactory
+
+    collection = CollectionFactory()
+    assert collection.permanent_uri is None
+    assert collection.has_permanent_uri is False
+
+
+@pytest.mark.django_db
+def test_collection_factory_external_trait_yields_a_fixed_externally_assigned_uri():
+    from tests.factories import CollectionFactory
+
+    collection = CollectionFactory(external=True)
+    assert collection.has_permanent_uri is True
+    assert collection.uri == collection.permanent_uri

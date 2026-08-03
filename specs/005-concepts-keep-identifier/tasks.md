@@ -131,7 +131,7 @@ provisional identity. This is a planning omission, not an implementer failure.
 - [x] T018 [P] [US5] Extend `tests/test_standards.py` so the metadata walk covers the three new
       columns: non-empty lazily translatable `verbose_name` and `help_text`, and every refusal message
       this feature introduces translatable with named placeholders.
-- [ ] T019 [P] [US5] Add an `external` trait to `ConceptSchemeFactory`, `ConceptFactory`, and
+- [x] T019 [P] [US5] Add an `external` trait to `ConceptSchemeFactory`, `ConceptFactory`, and
       `CollectionFactory` in `tests/factories.py` producing a record with a plausible externally
       assigned identifier; cover it in `tests/test_factories.py`.
 - [ ] T020 [US5] Assert the indexing decision in `tests/test_standards.py`: `permanent_uri` is covered

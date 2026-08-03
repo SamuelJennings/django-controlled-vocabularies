@@ -231,3 +231,23 @@ the human-readable trail.
 - **Deviation**: none — T018 needed no production change, matching the fact that Phase 6 lands after
   every model change (Phase 1–5b) that could touch metadata or messages.
 - **Commit**: see below.
+
+## 2026-08-03 — Phase 6 (T019) implementation
+
+- **Did**: T019. Added an opt-in `external` trait (`factory.Trait`, matching `ConceptFactory`'s existing
+  `multilingual` trait idiom) to `ConceptSchemeFactory`, `ConceptFactory`, and `CollectionFactory` in
+  `tests/factories.py`, each setting `permanent_uri` to a per-model `factory.Sequence` under
+  `http://publisher.example.org/...` — a plausible externally assigned identifier, distinct per call.
+  Six tests added to `tests/test_factories.py`: for each of the three factories, a plain call is
+  provisional (`permanent_uri is None`, `has_permanent_uri is False`) and `Factory(external=True)`
+  yields a record with `has_permanent_uri is True` and `uri == permanent_uri`.
+- **Tests first**: ran the three `external=True` tests before the trait existed — all three failed with
+  `TypeError: <Model>() got unexpected keyword arguments: 'external'` (exit 1), confirming `factory_boy`
+  rejects an unrecognised parameter rather than silently ignoring it. Added the traits; all 6 new tests
+  passed, 25/25 in `tests/test_factories.py`, 277/277 for the full suite.
+- **Verified with**: `poetry run pytest -q` → 277 passed (266 baseline + 5 new in T018's
+  `test_standards.py` + 6 new in T019's `test_factories.py`). `poetry run ruff check
+  tests/factories.py tests/test_factories.py` → All checks passed. `poetry run ruff format --check`
+  on the same two files → already formatted.
+- **Deviation**: none.
+- **Commit**: see below.
