@@ -11,7 +11,13 @@ count without parsing a message.
 import pytest
 from django.utils.functional import Promise
 
-from controlled_vocabularies.exchange.report import ImportReport, SetAsideEntry, SetAsideReason
+from controlled_vocabularies.exchange.report import (
+    FatalFinding,
+    FatalReason,
+    ImportReport,
+    SetAsideEntry,
+    SetAsideReason,
+)
 
 # One example params dict per reason, exercising every named placeholder its
 # template declares (beyond the universal %(subject)s).
@@ -24,6 +30,14 @@ _EXAMPLE_PARAMS = {
     SetAsideReason.MISSING_MEMBER: {"collection": "https://example.org/vocab/collection/rocks"},
     SetAsideReason.NO_PREFERRED_LABEL: {"language": "en"},
     SetAsideReason.VOCABULARY_MISMATCH: {"other": "https://example.org/vocab/other"},
+}
+
+# One example params dict per fatal reason (T007), the same shape as _EXAMPLE_PARAMS.
+_EXAMPLE_FATAL_PARAMS = {
+    FatalReason.MISSING_IDENTITY: {},
+    FatalReason.REFUSED_IDENTITY: {},
+    FatalReason.VOCABULARY_UNDETERMINED: {},
+    FatalReason.VOCABULARY_TARGET_MISMATCH: {"target": "https://example.org/vocab/target"},
 }
 
 
@@ -105,3 +119,55 @@ def test_set_aside_entry_is_immutable():
     entry = SetAsideEntry(reason=SetAsideReason.NOTATION, subject="https://example.org/vocab/x")
     with pytest.raises((AttributeError, TypeError)):
         entry.subject = "changed"
+
+
+# --- FatalReason / FatalFinding (T007) --------------------------------------
+
+
+def test_import_report_starts_with_an_empty_fatal_bucket():
+    assert ImportReport().fatal == []
+
+
+def test_add_fatal_records_reason_subject_and_params_as_data():
+    report = ImportReport()
+    report.add_fatal(FatalReason.MISSING_IDENTITY, "https://example.org/vocab/rocks/blank")
+    assert len(report.fatal) == 1
+    entry = report.fatal[0]
+    assert isinstance(entry, FatalFinding)
+    assert entry.reason is FatalReason.MISSING_IDENTITY
+    assert entry.subject == "https://example.org/vocab/rocks/blank"
+    assert entry.params == {}
+
+
+@pytest.mark.parametrize("reason", list(FatalReason))
+def test_every_fatal_reason_has_a_translatable_label(reason):
+    assert isinstance(reason.label, Promise), f"{reason} label is not lazily translatable"
+
+
+@pytest.mark.parametrize("reason", list(FatalReason))
+def test_every_fatal_reason_template_is_translatable_with_a_named_subject_placeholder(reason):
+    assert isinstance(reason.template, Promise), f"{reason} template is not lazily translatable"
+    assert "%(subject)s" in str(reason.template), f"{reason} template lacks a named %(subject)s placeholder"
+
+
+@pytest.mark.parametrize("reason", list(FatalReason))
+def test_every_fatal_reason_renders_with_its_example_params(reason):
+    entry = FatalFinding(reason=reason, subject="https://example.org/vocab/x", params=_EXAMPLE_FATAL_PARAMS[reason])
+    rendered = entry.render()
+    assert isinstance(rendered, str)
+    assert "https://example.org/vocab/x" in rendered
+    for value in _EXAMPLE_FATAL_PARAMS[reason].values():
+        assert value in rendered
+
+
+def test_fatal_finding_is_immutable():
+    finding = FatalFinding(reason=FatalReason.MISSING_IDENTITY, subject="https://example.org/vocab/x")
+    with pytest.raises((AttributeError, TypeError)):
+        finding.subject = "changed"
+
+
+def test_set_aside_reason_and_fatal_reason_are_disjoint_vocabularies():
+    # decisions.md D3/D8: a fatal finding is never one of the set-aside reasons.
+    set_aside_values = {reason.value for reason in SetAsideReason}
+    fatal_values = {reason.value for reason in FatalReason}
+    assert set_aside_values.isdisjoint(fatal_values)

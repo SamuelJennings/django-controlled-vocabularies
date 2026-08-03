@@ -10,7 +10,22 @@ are a later story (tasks.md Phase US-1); this module grows its re-exports one
 task at a time, each landing with the test that covers it.
 """
 
-from controlled_vocabularies.exchange.report import ImportReport, SetAsideEntry, SetAsideReason
-from controlled_vocabularies.exchange.skos import SkosImportError
+from controlled_vocabularies.exchange.report import (
+    FatalFinding,
+    FatalReason,
+    ImportReport,
+    SetAsideEntry,
+    SetAsideReason,
+)
+from controlled_vocabularies.exchange.skos import SkosImportError, SkosImportFailed, import_skos
 
-__all__ = ["ImportReport", "SetAsideEntry", "SetAsideReason", "SkosImportError"]
+__all__ = [
+    "FatalFinding",
+    "FatalReason",
+    "ImportReport",
+    "SetAsideEntry",
+    "SetAsideReason",
+    "SkosImportError",
+    "SkosImportFailed",
+    "import_skos",
+]

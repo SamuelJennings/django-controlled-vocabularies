@@ -1,0 +1,15 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+# FR-005: a file that carries concepts but declares no skos:ConceptScheme of
+# its own. Importing this without a named target must fail (nothing to
+# attach the concepts to); importing it naming an existing vocabulary must
+# succeed, adding these concepts to that one.
+
+<http://example.org/loose/basalt>
+    a skos:Concept ;
+    skos:prefLabel "Basalt"@en .
+
+<http://example.org/loose/granite>
+    a skos:Concept ;
+    skos:prefLabel "Granite"@en .

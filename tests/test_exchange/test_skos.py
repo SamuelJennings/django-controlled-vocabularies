@@ -12,13 +12,17 @@ from pathlib import Path
 import pytest
 import rdflib
 
+from controlled_vocabularies.exchange.report import FatalReason
 from controlled_vocabularies.exchange.safety import UnsafeRdfXmlError
-from controlled_vocabularies.exchange.skos import SkosImportError, _read_graph
+from controlled_vocabularies.exchange.skos import SkosImportError, SkosImportFailed, _read_graph, import_skos
+from controlled_vocabularies.models import ConceptScheme
+from tests.factories import ConceptSchemeFactory
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "skos"
 SECURITY_FIXTURES = Path(__file__).parent.parent / "fixtures" / "security"
 
 SKOS = rdflib.Namespace("http://www.w3.org/2004/02/skos/core#")
+ROCKS_URI = "http://example.org/rocks/"
 
 
 class TestReadGraph:
@@ -77,3 +81,54 @@ class TestReadGraph:
     def test_ordinary_rdf_xml_is_unaffected_by_the_safety_scan(self):
         graph = _read_graph(SECURITY_FIXTURES / "ordinary.rdf", serialization="xml")
         assert len(graph) > 0
+
+
+class TestImportSkosVocabulary:
+    """T007 — the vocabulary itself: created, updated, matched against a named
+    target, or refused when neither the file nor the caller can settle which
+    one is being imported. The concept walk lands in T009; until then a
+    successful call here writes at most the one ``ConceptScheme`` row."""
+
+    def test_a_declared_vocabulary_is_created_when_not_already_held(self, db):
+        report = import_skos(FIXTURES / "rocks.ttl")
+        scheme = ConceptScheme.objects.get(static_uri=ROCKS_URI)
+        assert scheme.name == "Rock types"
+        assert report.created == [ROCKS_URI]
+        assert report.updated == []
+        assert report.fatal == []
+
+    def test_a_declared_vocabulary_already_held_is_updated_not_duplicated(self, db):
+        existing = ConceptSchemeFactory(name="Old name", static_uri=ROCKS_URI)
+        report = import_skos(FIXTURES / "rocks.ttl")
+        existing.refresh_from_db()
+        assert existing.name == "Rock types"
+        assert ConceptScheme.objects.filter(static_uri=ROCKS_URI).count() == 1
+        assert report.updated == [ROCKS_URI]
+        assert report.created == []
+
+    def test_a_named_target_that_matches_the_file_succeeds(self, db):
+        target = ConceptSchemeFactory(name="Old name", static_uri=ROCKS_URI)
+        report = import_skos(FIXTURES / "rocks.ttl", scheme=target)
+        target.refresh_from_db()
+        assert target.name == "Rock types"
+        assert report.fatal == []
+
+    def test_a_named_target_that_contradicts_the_file_fails_and_writes_nothing(self, db):
+        target = ConceptSchemeFactory(name="Unrelated vocabulary", external=True)
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(FIXTURES / "rocks.ttl", scheme=target)
+        assert exc_info.value.report.fatal[0].reason is FatalReason.VOCABULARY_TARGET_MISMATCH
+        target.refresh_from_db()
+        assert target.name == "Unrelated vocabulary"
+        assert not ConceptScheme.objects.filter(static_uri=ROCKS_URI).exists()
+
+    def test_a_file_declaring_no_vocabulary_fails_without_a_named_target(self, db):
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(FIXTURES / "no_scheme_declared.ttl")
+        assert exc_info.value.report.fatal[0].reason is FatalReason.VOCABULARY_UNDETERMINED
+        assert ConceptScheme.objects.count() == 0
+
+    def test_a_file_declaring_no_vocabulary_succeeds_with_a_named_target(self, db):
+        target = ConceptSchemeFactory(name="Loose concepts")
+        report = import_skos(FIXTURES / "no_scheme_declared.ttl", scheme=target)
+        assert report.fatal == []
