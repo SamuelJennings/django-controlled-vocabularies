@@ -374,6 +374,109 @@ class TestPermanentUri:
             Collection.objects.create(scheme=scheme, name="Igneous", permanent_uri="http://vocabs.example.org/shared")
 
 
+def _create_with_permanent_uri(model: type[Model], scheme: ConceptScheme, uri: str):
+    """Create a saved record of ``model`` carrying ``uri`` as its ``permanent_uri``."""
+    if model is ConceptScheme:
+        return ConceptScheme.objects.create(name=f"External scheme {uri}", permanent_uri=uri)
+    if model is Concept:
+        return Concept.objects.create(scheme=scheme, label=f"External concept {uri}", permanent_uri=uri)
+    return Collection.objects.create(scheme=scheme, name=f"External collection {uri}", permanent_uri=uri)
+
+
+def _create_without_permanent_uri(model: type[Model], scheme: ConceptScheme):
+    """Create a saved, provisional (no ``permanent_uri``) record of ``model``."""
+    if model is ConceptScheme:
+        return ConceptScheme.objects.create(name="Provisional scheme")
+    if model is Concept:
+        return Concept.objects.create(scheme=scheme, label="Provisional concept")
+    return Collection.objects.create(scheme=scheme, name="Provisional collection")
+
+
+class TestPermanentUriIsFixed:
+    """US-1 — a stored permanent URI can never be rewritten or cleared (FR-002,
+    FR-013). Fixedness moves one way only: a record loaded from the database
+    refuses a save that changes or clears its stored ``permanent_uri``, the
+    refusal is a translatable ``ValidationError`` on the ``permanent_uri`` key,
+    and re-saving with the identifier unchanged still succeeds. A record that has
+    never been loaded from the database — freshly constructed, or reloaded with
+    ``permanent_uri`` deferred — has no snapshot to compare against and is
+    unconstrained, so setting an identifier for the first time (the path R4's
+    publish action will use) is allowed."""
+
+    @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
+    @pytest.mark.django_db
+    def test_loaded_record_refuses_a_save_that_changes_the_stored_uri(self, model, scheme):
+        record = _create_with_permanent_uri(model, scheme, "http://vocabs.example.org/original")
+        reloaded = model.objects.get(pk=record.pk)
+        reloaded.permanent_uri = "http://vocabs.example.org/rewritten"
+        with pytest.raises(ValidationError) as excinfo:
+            reloaded.save()
+        err = _inner_error(excinfo.value, "permanent_uri")
+        assert isinstance(err.message, Promise), "rewrite-refusal message is not lazily translatable"
+        assert "%(uri)s" in str(err.message), "rewrite-refusal msgid lacks a named %(uri)s placeholder"
+        record.refresh_from_db()
+        assert record.permanent_uri == "http://vocabs.example.org/original"
+
+    @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
+    @pytest.mark.django_db
+    def test_loaded_record_refuses_a_save_that_clears_the_stored_uri(self, model, scheme):
+        record = _create_with_permanent_uri(model, scheme, "http://vocabs.example.org/original")
+        reloaded = model.objects.get(pk=record.pk)
+        reloaded.permanent_uri = None
+        with pytest.raises(ValidationError) as excinfo:
+            reloaded.save()
+        err = _inner_error(excinfo.value, "permanent_uri")
+        assert isinstance(err.message, Promise), "clear-refusal message is not lazily translatable"
+        record.refresh_from_db()
+        assert record.permanent_uri == "http://vocabs.example.org/original"
+
+    @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
+    @pytest.mark.django_db
+    def test_full_clean_also_refuses_a_rewrite(self, model, scheme):
+        record = _create_with_permanent_uri(model, scheme, "http://vocabs.example.org/original")
+        reloaded = model.objects.get(pk=record.pk)
+        reloaded.permanent_uri = "http://vocabs.example.org/rewritten"
+        with pytest.raises(ValidationError):
+            reloaded.full_clean()
+
+    @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
+    @pytest.mark.django_db
+    def test_loaded_record_may_be_resaved_with_the_identifier_unchanged(self, model, scheme):
+        record = _create_with_permanent_uri(model, scheme, "http://vocabs.example.org/original")
+        reloaded = model.objects.get(pk=record.pk)
+        reloaded.save()
+        reloaded.refresh_from_db()
+        assert reloaded.permanent_uri == "http://vocabs.example.org/original"
+
+    @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
+    @pytest.mark.django_db
+    def test_record_created_with_an_identifier_keeps_it(self, model, scheme):
+        record = _create_with_permanent_uri(model, scheme, "http://vocabs.example.org/original")
+        assert record.permanent_uri == "http://vocabs.example.org/original"
+
+    @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
+    @pytest.mark.django_db
+    def test_record_created_without_an_identifier_may_have_one_set_once(self, model, scheme):
+        record = _create_without_permanent_uri(model, scheme)
+        assert record.permanent_uri is None
+        record.permanent_uri = "http://vocabs.example.org/published"
+        record.save()
+        assert record.permanent_uri == "http://vocabs.example.org/published"
+
+    @pytest.mark.django_db
+    def test_deferred_permanent_uri_is_unconstrained(self, scheme):
+        concept = Concept.objects.create(
+            scheme=scheme, label="Granite", permanent_uri="http://vocabs.example.org/rock/granite"
+        )
+        deferred = Concept.objects.only("label").get(pk=concept.pk)
+        # permanent_uri was never loaded, so there is no snapshot to compare
+        # against — the guard skips rather than firing on a phantom change.
+        deferred.permanent_uri = "http://vocabs.example.org/rock/other"
+        deferred.save()
+        deferred.refresh_from_db()
+        assert deferred.permanent_uri == "http://vocabs.example.org/rock/other"
+
+
 def _editable_fields(model: type[Model]):
     """The model's own, user-editable, concrete fields (excludes the auto pk
     and reverse relations) — every one must meet the metadata standard."""
