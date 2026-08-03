@@ -7,9 +7,10 @@ composed from a configured base address and the slug exactly as R1 did.
 """
 
 import urllib.parse
+from typing import TypeVar
 
 from django.conf import settings
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.core.validators import validate_unicode_slug
 from django.db import models
 from django.db.models import F, Max, Q
@@ -139,6 +140,55 @@ def _configured_language_codes() -> set[str]:
     return {code for code, _label in settings.LANGUAGES}
 
 
+_PermanentUriModel = TypeVar("_PermanentUriModel", bound=models.Model)
+
+
+class PermanentUriLookupMixin(models.Manager[_PermanentUriModel]):
+    """Adds :meth:`get_by_uri` to a manager (research R6).
+
+    Shared by the ``ConceptScheme``, ``Concept``, and ``Collection`` managers so
+    #50's importer can upsert a vocabulary or a collection by identifier the same
+    way it already can a concept, without three drifting implementations.
+    """
+
+    def get_by_uri(self, uri: str) -> _PermanentUriModel:
+        """Return the record identified by ``uri``, fixed or provisional (FR-007).
+
+        An exact match on the stored ``permanent_uri`` is tried first, so a fixed
+        identifier resolves correctly even when it happens to sit under this
+        site's own configured base address (FR-003, research R6). On no match
+        this falls back to :meth:`_get_by_local_parse`, the model's
+        base-relative composition, which raises the model's ``DoesNotExist``
+        when nothing resolves either way.
+        """
+        try:
+            return self.get(permanent_uri=uri)
+        except ObjectDoesNotExist:
+            return self._get_by_local_parse(uri)
+
+    def _get_by_local_parse(self, uri: str) -> _PermanentUriModel:
+        """Resolve a provisional, base-relative identifier. Implemented per model."""
+        raise NotImplementedError
+
+
+class ConceptSchemeManager(PermanentUriLookupMixin["ConceptScheme"]):
+    """Default manager for :class:`ConceptScheme`, adding permanent-URI-based lookup."""
+
+    def _get_by_local_parse(self, uri: str) -> "ConceptScheme":
+        """Resolve ``{base}/{slug}`` — R1's scheme URI composition, unchanged.
+
+        A remainder containing a further ``/`` belongs to a concept or a
+        collection, not a scheme, and is refused rather than mistaken for one.
+        """
+        prefix = f"{conf.get_base_uri()}/"
+        if not uri.startswith(prefix):
+            raise self.model.DoesNotExist(f"No vocabulary matches the URI {uri!r}.")
+        slug = uri[len(prefix) :].strip("/")
+        if not slug or "/" in slug:
+            raise self.model.DoesNotExist(f"No vocabulary matches the URI {uri!r}.")
+        return self.get(slug=slug)
+
+
 class ConceptScheme(models.Model):
     """A controlled vocabulary — a named container for concepts (a SKOS concept scheme).
 
@@ -192,6 +242,8 @@ class ConceptScheme(models.Model):
         ),
         validators=[validate_permanent_uri],
     )
+
+    objects = ConceptSchemeManager()
 
     class Meta:
         verbose_name = _("vocabulary")
@@ -315,23 +367,25 @@ class ConceptScheme(models.Model):
         super().save(*args, **kwargs)
 
 
-class ConceptManager(models.Manager["Concept"]):
-    """Default manager for :class:`Concept`, adding URI-based lookup.
+class ConceptManager(PermanentUriLookupMixin["Concept"]):
+    """Default manager for :class:`Concept`, adding permanent-URI-based lookup.
 
     Subclasses the standard manager so ``Concept.objects`` keeps all default
-    behaviour and gains :meth:`get_by_uri`.
+    behaviour and gains :meth:`~PermanentUriLookupMixin.get_by_uri`, which keeps
+    its existing name and exact local behaviour (FR-014) and additionally
+    resolves an externally assigned identifier.
     """
 
-    def get_by_uri(self, uri: str) -> "Concept":
-        """Return the concept identified by ``uri``.
+    def _get_by_local_parse(self, uri: str) -> "Concept":
+        """Resolve ``{base}/{scheme-slug}/{concept-slug}`` — R1's concept URI
+        composition, unchanged.
 
-        Requires ``uri`` to sit under the configured base address, strips that
-        base, splits the remainder into its ``scheme-slug/concept-slug`` parts
-        and resolves the concept by scheme slug and slug. The URI — not the
-        primary key — is the identity (Article IX); a URI outside the base or a
-        well-formed URI with no matching concept raises
-        :class:`Concept.DoesNotExist`, the standard ORM lookup behaviour.
-        Unicode slugs resolve the same as ASCII ones.
+        Splits the remainder below the configured base into its
+        ``scheme-slug/concept-slug`` parts and resolves by scheme slug and
+        slug. The URI — not the primary key — is the identity (Article IX); a
+        URI outside the base or a well-formed URI with no matching concept
+        raises :class:`Concept.DoesNotExist`, the standard ORM lookup
+        behaviour. Unicode slugs resolve the same as ASCII ones.
         """
         # Match on a '/'-terminated base so a sibling path that merely shares the
         # base as a raw prefix (e.g. '<base>X/a/b') is not treated as in-base.
@@ -1118,6 +1172,27 @@ class ConceptRelation(models.Model):
         super().save(*args, **kwargs)
 
 
+class CollectionManager(PermanentUriLookupMixin["Collection"]):
+    """Default manager for :class:`Collection`, adding permanent-URI-based lookup."""
+
+    def _get_by_local_parse(self, uri: str) -> "Collection":
+        """Resolve ``{base}/{scheme-slug}/collection/{slug}`` — R1's collection
+        URI composition, unchanged.
+
+        The literal ``collection`` segment is required, so a concept's identifier
+        (``{base}/{scheme-slug}/{slug}``, two segments) is never mistaken for one.
+        """
+        prefix = f"{conf.get_base_uri()}/"
+        if not uri.startswith(prefix):
+            raise self.model.DoesNotExist(f"No collection matches the URI {uri!r}.")
+        remainder = uri[len(prefix) :].strip("/")
+        parts = remainder.split("/")
+        if len(parts) != 3 or parts[1] != "collection":
+            raise self.model.DoesNotExist(f"No collection matches the URI {uri!r}.")
+        scheme_slug, _collection_segment, collection_slug = parts
+        return self.get(scheme__slug=scheme_slug, slug=collection_slug)
+
+
 class Collection(models.Model):
     """A named grouping of concepts within one vocabulary (a SKOS collection).
 
@@ -1176,6 +1251,8 @@ class Collection(models.Model):
         ),
         validators=[validate_permanent_uri],
     )
+
+    objects = CollectionManager()
 
     class Meta:
         verbose_name = _("collection")
