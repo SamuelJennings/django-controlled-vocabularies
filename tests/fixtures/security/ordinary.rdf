@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:skos="http://www.w3.org/2004/02/skos/core#">
+  <skos:Concept rdf:about="http://example.org/rocks/granite">
+    <skos:prefLabel xml:lang="en">Granite</skos:prefLabel>
+  </skos:Concept>
+</rdf:RDF>

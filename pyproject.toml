@@ -31,6 +31,7 @@ django = ">=5.2"
 # boundary, django-parler for translations) are declared alongside the v0.1 code
 # that imports them — deptry fails a declared-but-unused dependency, so the
 # born-green scaffold stays lean.
+defusedxml = "^0.7.1"
 
 [tool.poetry.group.dev.dependencies]
 # Family toolchain bundle; the pin tag is the family-standard version. Ships

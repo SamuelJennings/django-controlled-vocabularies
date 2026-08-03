@@ -197,3 +197,22 @@ wagging the dog, and the actual fix costs one redundant config line.
 
 **Revisit if:** a future module inside `controlled_vocabularies/` needs `MYPYPATH`-style resolution
 that `files` alone does not give it — none of the existing modules do, and `io/` does not either.
+
+## D11 — `rdflib` is not declared with T001/T004; only `defusedxml` is (Implementer US0)
+
+Tasks.md's T001 reads as declaring both `rdflib` and `defusedxml` together, landing in the same
+commit as T004. But T004's own scope is `safety.py` alone — the `defusedxml.sax` pre-flight scan —
+and Phase 0 explicitly stops before `skos.py`/`mapping.py` (T006, Phase US-1), which is the code
+that actually imports `rdflib`. Declaring `rdflib` now, with nothing in the codebase importing it
+yet, is exactly the declared-but-unused case Article VII and T001's own rationale name: `poetry run
+deptry .` failed immediately with `DEP002 'rdflib' defined as a dependency but not used`.
+
+Chosen: declare only `defusedxml` in this commit, since `safety.py` is the only Phase 0 module that
+imports a new dependency. `rdflib` is left undeclared until the task that first imports it (T006)
+adds it in the same commit — the identical discipline T001 states, applied to the dependency whose
+importing code has actually landed. Adding a `deptry` per-rule ignore for `rdflib` instead was
+considered and rejected: it would suppress the exact gate T001 was written to rely on, for no
+returned safety.
+
+**Revisit if:** T006 turns out not to be the first task that imports `rdflib`, though nothing in
+Phase 0 does, and no other phase precedes it.
