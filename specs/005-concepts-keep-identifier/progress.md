@@ -251,3 +251,32 @@ the human-readable trail.
   on the same two files → already formatted.
 - **Deviation**: none.
 - **Commit**: see below.
+
+## 2026-08-03 — Phase 6 (T020) implementation
+
+- **Did**: T020. Added `test_permanent_uri_is_covered_only_by_its_partial_unique_constraint`
+  (parametrised over `ConceptScheme`/`Concept`/`Collection`, so 3 test ids) to `tests/test_standards.py`,
+  asserting
+  each model's `permanent_uri` field carries `db_index=False`, appears in no explicit `Meta.indexes`
+  entry, and is covered by exactly the partial `UniqueConstraint` (`<model>_permanent_uri_unique`,
+  fields `("permanent_uri",)`, non-null `condition`) the earlier phases already wired. Added
+  `test_local_url_and_has_permanent_uri_are_properties_not_indexable_columns`, asserting `local_url`
+  and `has_permanent_uri` are plain Python `property` objects on all three models, not entries in
+  `_meta.get_fields()` — so neither could carry an index even by mistake.
+  Checked `data-model.md`'s "Indexing decision" section (Article XIII) against the delivered code:
+  it already states exactly this — `permanent_uri` indexed only via its partial unique constraint,
+  `local_url`/`uri`/`has_permanent_uri` uncounted because they are properties, not columns — so no
+  doc correction was needed.
+- **Verified with**: both new tests passed green on first run (the indexing decision was already
+  correctly implemented in Phase 1–5b). Non-vacuousness proven by mutation: temporarily added
+  `db_index=True` to `ConceptScheme.permanent_uri`'s field definition, reran
+  `pytest tests/test_standards.py -k permanent_uri_is_covered`, confirmed
+  `test_permanent_uri_is_covered_only_by_its_partial_unique_constraint[ConceptScheme]` failed for the
+  stated reason (`field.db_index is False` → `AssertionError`), then restored the original file from a
+  pre-mutation copy and reran the full `test_standards.py` suite — 41 passed, `git diff` on
+  `controlled_vocabularies/models.py` empty. `poetry run pytest -q` → 281 passed (277 + 3 parametrized
+  + 1 new). `ruff format` reflowed two lines in the new tests to the project's line-length rule
+  (auto-fixed, no logic change); `poetry run ruff check .` / `ruff format --check .` → clean after.
+- **Deviation**: none — no production or doc change was needed; the decision was already correctly
+  implemented and documented.
+- **Commit**: see below.

@@ -134,7 +134,7 @@ provisional identity. This is a planning omission, not an implementer failure.
 - [x] T019 [P] [US5] Add an `external` trait to `ConceptSchemeFactory`, `ConceptFactory`, and
       `CollectionFactory` in `tests/factories.py` producing a record with a plausible externally
       assigned identifier; cover it in `tests/test_factories.py`.
-- [ ] T020 [US5] Assert the indexing decision in `tests/test_standards.py`: `permanent_uri` is covered
+- [x] T020 [US5] Assert the indexing decision in `tests/test_standards.py`: `permanent_uri` is covered
       by its partial unique constraint, and record in `data-model.md` that nothing else gains an index
       (already written — verify it still matches the code).
 

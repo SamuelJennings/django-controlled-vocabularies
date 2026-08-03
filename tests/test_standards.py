@@ -377,3 +377,38 @@ def test_collection_member_fks_are_indexed():
     # FKs are auto-indexed; the reverse read (a concept's collections) rides the concept FK index.
     assert CollectionMember._meta.get_field("collection").db_index is True
     assert CollectionMember._meta.get_field("concept").db_index is True
+
+
+# --- FS-005: permanent_uri's indexing decision (data-model.md "Indexing decision") ---
+# permanent_uri is indexed by its own partial unique constraint, and nothing else in this
+# feature gains an index: local_url, uri, and has_permanent_uri are properties, not columns,
+# composed from slug fields R1 already indexed and constrained.
+
+
+@pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
+def test_permanent_uri_is_covered_only_by_its_partial_unique_constraint(model):
+    field = model._meta.get_field("permanent_uri")
+    assert field.db_index is False, f"{model.__name__}.permanent_uri must not carry a plain db_index"
+    for index in model._meta.indexes:
+        assert "permanent_uri" not in index.fields, (
+            f"{model.__name__}.permanent_uri must not appear in any explicit Meta.indexes entry"
+        )
+    constraint_name = f"{model.__name__.lower()}_permanent_uri_unique"
+    constraint = next(
+        (c for c in model._meta.constraints if isinstance(c, UniqueConstraint) and c.name == constraint_name),
+        None,
+    )
+    assert constraint is not None, f"missing {constraint_name} partial unique constraint"
+    assert tuple(constraint.fields) == ("permanent_uri",)
+    assert constraint.condition is not None, "permanent_uri's uniqueness must be a *partial* constraint"
+
+
+def test_local_url_and_has_permanent_uri_are_properties_not_indexable_columns():
+    # Neither local_url nor has_permanent_uri is a model field, so neither can carry an
+    # index; they compose from slug fields already indexed/constrained by R1.
+    for model in (ConceptScheme, Concept, Collection):
+        field_names = {field.name for field in model._meta.get_fields()}
+        assert "local_url" not in field_names, f"{model.__name__}.local_url must not be a model field"
+        assert "has_permanent_uri" not in field_names, f"{model.__name__}.has_permanent_uri must not be a model field"
+        assert isinstance(model.local_url, property)
+        assert isinstance(model.has_permanent_uri, property)
