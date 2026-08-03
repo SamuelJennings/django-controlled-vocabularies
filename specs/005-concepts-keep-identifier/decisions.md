@@ -238,3 +238,27 @@ clear (FR-002, FR-013) rather than slipping through as a no-op.
 inverts the problem — the partial constraint would need `condition=~Q(permanent_uri="")`, which is
 the same rule expressed less portably, and it would break every existing `permanent_uri__isnull`
 query already written into the tests and `get_by_uri`.
+
+## D14 — An externally assigned identifier cannot shadow a local record's own address; the reverse direction is a residual limitation
+
+**Context**: a three-lens review found a verified hijack. With the base address
+`https://example.org/vocabularies`, a local concept whose `local_url` is
+`https://example.org/vocabularies/colours/red` was displaced when another record was saved with
+`permanent_uri` set to that exact string. `get_by_uri` tries a stored match first — correctly, per
+FR-003/R6 — so once stored it resolved to the imposter, and the victim was no longer reachable by
+its own identity. #50's importer would then write into the wrong record.
+
+**Chosen (T034)**: on save, when a `permanent_uri` is being stored (assigned and different from what
+is already stored) and it sits under this site's configured base address, it is resolved through the
+same local-parse machinery `get_by_uri` uses across all three models. If it resolves to a *different*
+existing record, the save is refused (`permanent_uri_shadows_local_url`). If it resolves to nothing,
+or to this same record, it is accepted — an external identifier that legitimately sits under this
+site's address is still externally assigned (spec.md Edge Case 1); nothing here contradicts that.
+
+**Residual limitation, not fixed here**: the reverse direction — a later slug or base-address change
+that moves a local record's *own* composed address onto an identifier some other record already has
+stored — is not defended against. By the time that collision would occur, the stored identifier is
+already fixed (D6: fixedness moves one way only), so the only correct response would be refusing the
+rename or address change that creates the collision. That responsibility belongs with R4's
+publication lifecycle, which owns freezing and renaming policy, not with the save path this feature
+adds. Recorded here rather than silently left, per the review's instruction.

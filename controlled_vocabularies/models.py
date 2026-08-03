@@ -151,6 +151,67 @@ def _reject_permanent_uri_held_by_another_model(instance: "PermanentUriModel") -
         )
 
 
+def _resolve_as_local_url(uri: str) -> "PermanentUriModel | None":
+    """Resolve ``uri`` as a local address of any of the three models, or
+    ``None`` when it matches none of them. Used only by the shadow check
+    (T034) below — the three models' local address spaces are structurally
+    disjoint (research R4: one, two, or three path segments, the latter with
+    a literal ``collection`` marker), so at most one model's parse can ever
+    match a given value.
+    """
+    for model in _permanent_uri_models():
+        manager = model._default_manager
+        try:
+            # mypy/django-stubs types _default_manager as the generic base
+            # Manager, which does not declare _get_by_local_parse — the same
+            # generic-vs-concrete gap as decisions.md D11 and T033's DoesNotExist.
+            return manager._get_by_local_parse(uri)  # type: ignore[attr-defined,no-any-return]
+        except ObjectDoesNotExist:
+            continue
+    return None
+
+
+def _reject_permanent_uri_shadowing_local_url(instance: "PermanentUriModel") -> None:
+    """Refuse an externally assigned identifier that collides with a
+    *different* record's own local address (T034).
+
+    Verified hijack: with the base address ``https://example.org/vocabularies``,
+    a local concept whose ``local_url`` is
+    ``https://example.org/vocabularies/colours/red`` was displaced when another
+    record was saved with ``permanent_uri`` set to that exact string —
+    ``get_by_uri`` tries a stored match first (correctly, per FR-003/R6), so it
+    then returned the imposter, and the victim was no longer reachable by its
+    own identity; #50's importer would then write into the wrong record.
+
+    Only runs when the value sits under this site's configured base address;
+    resolving to nothing (an external identifier that legitimately lands
+    there, spec.md Edge Case 1) or to this same record is accepted.
+
+    The reverse direction — a later slug change moving a local record's own
+    address onto an identifier already stored elsewhere — is not handled here
+    (decisions.md, residual limitation): the identifier is fixed by then, so
+    the only correct response would be refusing the rename, which belongs
+    with R4's publication lifecycle.
+    """
+    uri = instance.permanent_uri
+    if not uri or not uri.startswith(conf.get_base_uri()):
+        return
+    resolved = _resolve_as_local_url(uri)
+    if resolved is None:
+        return
+    if type(resolved) is type(instance) and resolved.pk == instance.pk:
+        return
+    raise ValidationError(
+        {
+            "permanent_uri": ValidationError(
+                _("'%(uri)s' is already this site's own address for a different record."),
+                params={"uri": uri},
+                code="permanent_uri_shadows_local_url",
+            )
+        }
+    )
+
+
 def _normalise_blank_permanent_uri(instance: "PermanentUriModel") -> None:
     """Store the *absence* of an identifier as ``None``, never as ``""``.
 
@@ -212,8 +273,10 @@ def _check_permanent_uri(instance: "PermanentUriModel", *, validate_format: bool
             raise ValidationError({"permanent_uri": exc}) from exc
     if instance.permanent_uri == stored:
         # Nothing about the value changed, so nothing that depends on it could
-        # have either — skip the cross-model probe's wasted queries (T029).
+        # have either — skip the shadow and cross-model probes' wasted
+        # queries (T029, extended to the shadow check by T034).
         return
+    _reject_permanent_uri_shadowing_local_url(instance)
     _reject_permanent_uri_held_by_another_model(instance)
 
 

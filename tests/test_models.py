@@ -1111,6 +1111,64 @@ class TestLocalUrl:
         assert not collection.uri.startswith("http://vocabs.example.org")
 
 
+class TestPermanentUriDoesNotShadowALocalRecordsAddress:
+    """US-1 — T034. Verified hijack: an externally assigned ``permanent_uri``
+    that happens to collide with a *different* record's own ``local_url`` used
+    to be accepted. ``get_by_uri`` tries a stored match first (correctly, per
+    FR-003/R6), so once stored it returned the imposter, and the victim was no
+    longer reachable by its own identity — #50's importer would then upsert
+    into the wrong record. Refused when the value resolves, through the same
+    local-parse machinery ``get_by_uri`` uses, to a DIFFERENT existing record;
+    accepted when it resolves to nothing (an externally assigned identifier
+    that legitimately sits under this site's address, spec.md Edge Case 1) or
+    to this same record."""
+
+    @pytest.mark.django_db
+    def test_a_new_records_permanent_uri_cannot_shadow_a_different_concepts_local_url(self, scheme):
+        victim = Concept.objects.create(scheme=scheme, label="Red")
+        with pytest.raises(ValidationError):
+            Concept.objects.create(scheme=scheme, label="Crimson", permanent_uri=victim.local_url)
+        assert Concept.objects.get_by_uri(victim.local_url) == victim
+
+    @pytest.mark.django_db
+    def test_an_existing_provisional_records_permanent_uri_cannot_be_set_to_shadow_a_different_concept(self, scheme):
+        victim = Concept.objects.create(scheme=scheme, label="Red")
+        other = Concept.objects.create(scheme=scheme, label="Crimson")
+        other.permanent_uri = victim.local_url
+        with pytest.raises(ValidationError):
+            other.save()
+        assert Concept.objects.get_by_uri(victim.local_url) == victim
+
+    @pytest.mark.django_db
+    def test_a_collections_permanent_uri_cannot_shadow_a_concepts_local_url(self, scheme):
+        victim = Concept.objects.create(scheme=scheme, label="Red")
+        with pytest.raises(ValidationError):
+            Collection.objects.create(scheme=scheme, name="Reds", permanent_uri=victim.local_url)
+
+    @pytest.mark.django_db
+    def test_a_concepts_permanent_uri_cannot_shadow_a_schemes_local_url(self):
+        victim_scheme = ConceptScheme.objects.create(name="Rocks")
+        other_scheme = ConceptScheme.objects.create(name="Minerals")
+        with pytest.raises(ValidationError):
+            Concept.objects.create(scheme=other_scheme, label="Quartz", permanent_uri=victim_scheme.local_url)
+
+    @pytest.mark.django_db
+    def test_an_external_identifier_under_the_base_address_is_accepted_when_nothing_occupies_it(self, scheme):
+        # spec.md Edge Case 1: legitimately sits under this site's address but
+        # resolves to no existing record.
+        made_up = f"{conf.get_base_uri()}/{scheme.slug}/no-such-slug"
+        concept = Concept.objects.create(scheme=scheme, label="Red", permanent_uri=made_up)
+        assert concept.permanent_uri == made_up
+
+    @pytest.mark.django_db
+    def test_a_records_permanent_uri_may_equal_its_own_local_url(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Red")
+        concept.permanent_uri = concept.local_url
+        concept.save()
+        concept.refresh_from_db()
+        assert concept.permanent_uri == concept.local_url
+
+
 def _editable_fields(model: type[Model]):
     """The model's own, user-editable, concrete fields (excludes the auto pk
     and reverse relations) — every one must meet the metadata standard."""
