@@ -191,3 +191,47 @@ success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. 
 created/updated/target-mismatch/no-target handling.
 
 **Watch**: none.
+
+## 2026-08-03T21:50:00Z · Implementer US1 · T007
+
+**Did**: `import_skos(file, *, serialization=None, scheme=None)` — the public entry point,
+wrapping the whole run in `transaction.atomic()`. `_resolve_scheme()` reads the file's declared
+`skos:ConceptScheme` (deterministically the lexicographically-first when a file somehow declared
+more than one — not itself a tested case), matches or creates the `ConceptScheme` via
+`get_by_uri` (research.md R6), and writes its `name`/`static_uri`. A caller-named `scheme` target
+is used directly when the file agrees with it, or is fatal (`VOCABULARY_TARGET_MISMATCH`) when it
+does not; a file declaring none at all is fatal (`VOCABULARY_UNDETERMINED`, subject = the file's
+own path, since there is no RDF node to name) unless a target was given, in which case that
+target is used untouched.
+
+`report.py` gains `FatalReason`/`FatalFinding` (mirrors `SetAsideReason`/`SetAsideEntry`'s shape,
+kept as a separate closed vocabulary per decisions.md D3/D8 — a fatal finding is never a
+set-aside reason) and `ImportReport.fatal`/`add_fatal()`. `SkosImportFailed` (skos.py) is the
+exception a fatal run raises — it carries the run's (partial) `ImportReport` so a caller can
+inspect exactly what was wrong, per FR-004's "MUST fail the run and be named in the report",
+even though `transaction.atomic()` has already rolled back everything written before the raise.
+
+`_identify()` checks any RDF node's usable identity: a `BNode` is always fatal
+(`MISSING_IDENTITY`, decisions.md D3), a `URIRef` is checked through the models' own
+`validate_static_uri` (`REFUSED_IDENTITY` on failure — the same rule the models enforce on save,
+reused rather than reimplemented). `_first_literal()` picks a literal deterministically
+(lexicographically first), never "whichever rdflib yields first" — needed here for the scheme's
+`name` and reused by T008/T009. New fixture `tests/fixtures/skos/no_scheme_declared.ttl`: two
+concepts, no `skos:ConceptScheme` at all, for the "declares no vocabulary" fatal/succeeds-with-a-
+target pair.
+
+**Verified**: `poetry run pytest -q` — 373 passed (351 + 22 new: 12 in `test_skos.py`'s new
+`TestImportSkosVocabulary`, 10 in `test_report.py`'s new fatal-reason coverage). `poetry run ruff
+check .` — all checks passed. `poetry run ruff format --check .` — 23 files formatted. `poetry
+run mypy` — success, 9 source files (two rounds of fixes: `rdflib.term.Node` rather than
+`Identifier` as the RDF-term type hint — `graph.subjects()`'s actual return type — and `sorted(...,
+key=str)` rather than bare `sorted(...)` over a mixed node iterable). `poetry run deptry .` — no
+issues, 15 files scanned. `poetry run python -m django makemigrations --check --dry-run
+--settings=tests.settings` — no changes detected. `poetry run pre-commit run --all-files` — all
+hooks passed.
+
+**Next**: T008 — the imported vocabulary's default language (FR-005): declared language, else
+commonest preferred-label language, else site default.
+
+**Watch**: the concept walk (T009) is not wired into `import_skos()` yet — a successful T007-era
+call writes at most the one `ConceptScheme` row and never touches `Concept`.
