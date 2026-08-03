@@ -112,7 +112,7 @@ provisional identity. This is a planning omission, not an implementer failure.
       identifier under *this site's* address, not the publisher's. Until T017 lands, `Concept.uri`
       still reads through `self.scheme.uri` and this case composes under the publisher's domain, so
       this test fails before the change and passes after — it is the evidence T017 closed it.
-- [ ] T017 [US4] Add `local_url` to all three models, composing from the parent's `local_url` — never
+- [x] T017 [US4] Add `local_url` to all three models, composing from the parent's `local_url` — never
       from `uri`, which would put a concept of an imported vocabulary on the publisher's domain. Move
       R1's composition into it and leave `conf.get_base_uri()` as the single read site for the address.
 

@@ -328,11 +328,18 @@ class ConceptScheme(models.Model):
         """The scheme's permanent URI: its identity.
 
         The externally assigned identifier when one is held (fixed, held
-        verbatim), otherwise the value composed from the configured base
-        address and its slug (provisional, follows a rename or a change to
-        the configured address).
+        verbatim), otherwise :attr:`local_url` (provisional, follows a rename
+        or a change to the configured address).
         """
-        return self.permanent_uri or f"{conf.get_base_uri()}/{self.slug}"
+        return self.permanent_uri or self.local_url
+
+    @property
+    def local_url(self) -> str:
+        """Where this scheme is viewed on this site (FR-008), always this
+        site's own — the configured base address and its slug — regardless of
+        who assigned :attr:`permanent_uri`.
+        """
+        return f"{conf.get_base_uri()}/{self.slug}"
 
     @property
     def has_permanent_uri(self) -> bool:
@@ -543,10 +550,22 @@ class Concept(models.Model):
         """The concept's permanent URI: its identity.
 
         The externally assigned identifier when one is held (fixed, held
-        verbatim, and never derived from its scheme's), otherwise its scheme's
-        URI plus its own slug (provisional, follows a rename).
+        verbatim, and never derived from its scheme's), otherwise
+        :attr:`local_url` (provisional, follows a rename).
         """
-        return self.permanent_uri or f"{self.scheme.uri}/{self.slug}"
+        return self.permanent_uri or self.local_url
+
+    @property
+    def local_url(self) -> str:
+        """Where this concept is viewed on this site (FR-008), always this
+        site's own regardless of who assigned :attr:`permanent_uri`.
+
+        Composed from the *scheme's* :attr:`~ConceptScheme.local_url`, never
+        from its ``uri`` — a concept added locally to a vocabulary whose own
+        identifier is externally fixed still needs a place on this site, not
+        one on the publisher's domain (spec.md Edge Cases §4).
+        """
+        return f"{self.scheme.local_url}/{self.slug}"
 
     @property
     def has_permanent_uri(self) -> bool:
@@ -1332,13 +1351,25 @@ class Collection(models.Model):
         """The collection's permanent URI: its identity.
 
         The externally assigned identifier when one is held (fixed, held
-        verbatim), otherwise its scheme's URI, a ``collection`` segment, and its
-        own slug (provisional, follows a rename). The ``/collection/`` segment
-        keeps a collection's identity space disjoint from a concept's (whose URI
-        is ``{scheme.uri}/{slug}``), so the two can never mint the same URI when
-        RDF projection lands (research R4).
+        verbatim), otherwise :attr:`local_url` (provisional, follows a
+        rename). The ``/collection/`` segment keeps a collection's identity
+        space disjoint from a concept's (whose local URL is
+        ``{scheme.local_url}/{slug}``), so the two can never mint the same
+        address when RDF projection lands (research R4).
         """
-        return self.permanent_uri or f"{self.scheme.uri}/collection/{self.slug}"
+        return self.permanent_uri or self.local_url
+
+    @property
+    def local_url(self) -> str:
+        """Where this collection is viewed on this site (FR-008), always this
+        site's own regardless of who assigned :attr:`permanent_uri`.
+
+        Composed from the *scheme's* :attr:`~ConceptScheme.local_url`, never
+        from its ``uri`` — a collection added locally to a vocabulary whose own
+        identifier is externally fixed still needs a place on this site, not
+        one on the publisher's domain (spec.md Edge Cases §4).
+        """
+        return f"{self.scheme.local_url}/collection/{self.slug}"
 
     @property
     def has_permanent_uri(self) -> bool:
