@@ -16,11 +16,19 @@ folded here and grouped by subject into classes:
 import pytest
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.db.models import Model, UniqueConstraint
 from django.utils.functional import Promise
 
 from controlled_vocabularies import conf
-from controlled_vocabularies.models import Collection, Concept, ConceptLabel, ConceptNote, ConceptScheme
+from controlled_vocabularies.models import (
+    Collection,
+    Concept,
+    ConceptLabel,
+    ConceptNote,
+    ConceptScheme,
+    validate_static_uri,
+)
 from tests.factories import ConceptSchemeFactory
 
 
@@ -272,6 +280,661 @@ class TestConceptIdentity:
         # so a string outside the configured base is not an identity.
         with pytest.raises(Concept.DoesNotExist):
             Concept.objects.get_by_uri(f"{scheme.slug}/{concept.slug}")
+
+
+class TestStaticUri:
+    """US-1 — a record keeps the identifier it arrived with (FR-001/FR-002/FR-003/
+    FR-004/FR-006/FR-013). An externally assigned ``static_uri`` is read back
+    verbatim from ``uri``, survives a rename and a configured-base-address change,
+    is never derived from another record's, and is refused up front when
+    malformed, unsafe, too long, or already held by a record of another model."""
+
+    @pytest.mark.django_db
+    def test_static_uri_reads_back_verbatim_from_uri(self, scheme):
+        concept = Concept.objects.create(
+            scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/rock/granite"
+        )
+        assert concept.uri == "http://vocabs.example.org/rock/granite"
+        assert concept.has_static_uri is True
+
+    @pytest.mark.django_db
+    def test_static_uri_survives_a_rename(self, scheme):
+        concept = Concept.objects.create(
+            scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/rock/granite"
+        )
+        concept.label = "Granite (coarse-grained)"
+        concept.save()
+        assert concept.uri == "http://vocabs.example.org/rock/granite"
+
+    @pytest.mark.django_db
+    def test_static_uri_survives_a_base_address_change(self, scheme, settings):
+        concept = Concept.objects.create(
+            scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/rock/granite"
+        )
+        settings.CONTROLLED_VOCABULARIES_BASE_URI = "https://elsewhere.example.org/vocab"
+        assert concept.uri == "http://vocabs.example.org/rock/granite"
+
+    @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
+    @pytest.mark.django_db
+    def test_static_uri_case_round_trips_byte_identical_through_save_and_reload(self, model, scheme):
+        """T036. US-1 scenario 5 / FR-002: an arrived identifier is "not...
+        re-cased". The code never touches case, so this was a coverage gap
+        rather than a defect — locks in that a mixed-case identifier survives
+        save and reload byte-identical, on all three models."""
+        mixed_case = "http://Vocabs.Example.ORG/Rock/GRANITE"
+        record = _create_with_static_uri(model, scheme, mixed_case)
+        assert record.static_uri == mixed_case
+        record.refresh_from_db()
+        assert record.static_uri == mixed_case
+        assert record.uri == mixed_case
+
+    @pytest.mark.django_db
+    def test_scheme_and_collection_keep_their_own_static_uri(self):
+        scheme = ConceptScheme.objects.create(name="Rocks", static_uri="http://vocabs.example.org/rocks")
+        collection = Collection.objects.create(
+            scheme=scheme, name="Igneous", static_uri="http://vocabs.example.org/rocks/igneous"
+        )
+        assert scheme.uri == "http://vocabs.example.org/rocks"
+        assert scheme.has_static_uri is True
+        assert collection.uri == "http://vocabs.example.org/rocks/igneous"
+        assert collection.has_static_uri is True
+
+    @pytest.mark.django_db
+    def test_concepts_static_uri_is_not_derived_from_its_schemes(self):
+        scheme = ConceptScheme.objects.create(name="Rocks", static_uri="http://vocabs.example.org/rocks")
+        concept = Concept.objects.create(
+            scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/rock/granite"
+        )
+        assert concept.uri == "http://vocabs.example.org/rock/granite"
+        assert concept.uri != scheme.uri
+
+    @pytest.mark.django_db
+    def test_has_static_uri_false_while_provisional(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Basalt")
+        assert concept.static_uri is None
+        assert concept.has_static_uri is False
+        assert concept.uri == f"{conf.get_base_uri()}/{scheme.slug}/{concept.slug}"
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "not-absolute",
+            "javascript:alert(1)",
+            "JavaScript:alert(1)",
+            "data:text/html,x",
+            "vbscript:msgbox(1)",
+        ],
+    )
+    def test_refuses_non_absolute_and_script_bearing_schemes(self, value):
+        with pytest.raises(ValidationError):
+            validate_static_uri(value)
+
+    def test_refuses_overlong_identifier(self):
+        with pytest.raises(ValidationError):
+            validate_static_uri("http://example.org/" + "x" * 500)
+
+    def test_overlong_identifier_message_does_not_echo_the_full_raw_value(self):
+        """T032. The too-long refusal used to interpolate the raw value
+        untruncated: a 2028-character hostile value produced a ~2086-character
+        error message, because the length check ran last (after checks that
+        also echo the raw value) and nothing bounded the echoed value. The
+        true length must still be reported; only the echoed value is bounded."""
+        hostile = "http://example.org/" + "x" * 2008  # 2028 characters
+        with pytest.raises(ValidationError) as excinfo:
+            validate_static_uri(hostile)
+        message = excinfo.value.messages[0]
+        assert len(message) < 200, f"error message is {len(message)} chars — echoes the raw value untruncated"
+        assert str(len(hostile)) in message, "the true length must still be reported"
+
+    def test_length_is_checked_before_parsing_so_a_malformed_overlong_value_reports_length(self):
+        """T032. The length check now runs first, so a value that is both
+        malformed (no scheme) and overlong is refused for its length, not
+        echoed untruncated in the not-absolute message."""
+        hostile = "not-absolute-" + "x" * 3000
+        with pytest.raises(ValidationError) as excinfo:
+            validate_static_uri(hostile)
+        assert excinfo.value.code == "static_uri_too_long"
+
+    def test_accepts_urn_identifier(self):
+        validate_static_uri("urn:uuid:9f6c1e2a-1234-4a12-9abc-1234567890ab")
+
+    def test_a_value_urlsplit_cannot_parse_raises_validation_error_not_value_error(self):
+        """T031. ``urllib.parse.urlsplit`` raises a bare ``ValueError`` — not a
+        ``ValidationError`` — for some malformed input, e.g. a netloc with
+        characters invalid under NFKC normalization. Left uncaught, one crafted
+        ``rdf:about`` aborts an import with an exception no caller expects, and
+        in a form/admin/DRF context surfaces as a 500 instead of a field error."""
+        with pytest.raises(ValidationError):
+            validate_static_uri("http://exa℀mple.com/x")
+
+    def test_a_malformed_ipv6_netloc_raises_validation_error_not_value_error(self):
+        """T031, the second verified ``urlsplit``-raises-``ValueError`` shape."""
+        with pytest.raises(ValidationError):
+            validate_static_uri("http://[fe80::1")
+
+    @pytest.mark.django_db
+    def test_concept_save_with_an_unparseable_static_uri_raises_validation_error(self, scheme):
+        with pytest.raises(ValidationError):
+            Concept(scheme=scheme, label="Red", static_uri="http://exa℀mple.com/x").save()
+
+    @pytest.mark.django_db
+    def test_concept_full_clean_with_an_unparseable_static_uri_raises_validation_error(self, scheme):
+        with pytest.raises(ValidationError):
+            Concept(scheme=scheme, label="Red", static_uri="http://[fe80::1").full_clean()
+
+    @pytest.mark.django_db
+    def test_bare_create_with_bad_static_uri_raises_and_does_not_store(self, scheme):
+        with pytest.raises(ValidationError):
+            Concept.objects.create(scheme=scheme, label="Granite", static_uri="not-absolute")
+        assert not Concept.objects.filter(label="Granite").exists()
+
+    @pytest.mark.django_db
+    def test_case_folding_for_cross_model_uniqueness_does_not_fold_the_path(self, scheme):
+        """The path is case-sensitive (RFC 3986 §3.3): a same-scheme,
+        same-host pair whose paths differ only in case are different
+        identifiers and may each be held by a different model."""
+        Concept.objects.create(scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/Shared")
+        Collection.objects.create(scheme=scheme, name="Igneous", static_uri="http://vocabs.example.org/shared")
+
+
+class TestStaticUriSchemeAllowlist:
+    """US-1 — T035, widened round 4. FR-004's original denylist refused only
+    ``javascript``, ``data``, and ``vbscript``, and let everything else
+    through — including ``file:``, ``about:``, ``blob:``, ``jar:``,
+    ``filesystem:``, and ``view-source:`` — for a field the code says will be
+    rendered as a link. A denylist is the wrong shape for a rendering hazard:
+    the accepted set is unbounded, the legitimate set is small and stable.
+    ``http``, ``https``, ``urn``, ``doi``, ``info``, ``ark``, ``tag``,
+    ``hdl``, and ``oai`` are accepted by default — ``tag``, ``hdl``, and
+    ``oai`` added in review round 4, real schemes published vocabularies use
+    that the first allowlist round left out (the objection that killed the
+    very first, ``http``/``https``-only allowlist, decisions.md D5/D15) —
+    overridable via ``CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES``. The
+    explicit denylist stays as a second gate even inside an overridden
+    allowlist."""
+
+    @pytest.mark.parametrize("scheme", ["http", "https", "urn", "doi", "info", "ark", "tag", "hdl", "oai"])
+    def test_the_default_schemes_are_accepted(self, scheme):
+        validate_static_uri(f"{scheme}:something-or-other/x")
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "file:///etc/passwd",
+            "about:blank",
+            "blob:https://example.org/9f6c1e2a-uuid",
+            "jar:http://example.org/x.jar!/",
+        ],
+    )
+    def test_schemes_outside_the_default_allowlist_are_refused(self, value):
+        with pytest.raises(ValidationError):
+            validate_static_uri(value)
+
+    def test_the_setting_override_is_honoured(self, settings):
+        settings.CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES = ["http", "https", "myscheme"]
+        validate_static_uri("myscheme:something")
+        with pytest.raises(ValidationError):
+            validate_static_uri("urn:uuid:9f6c1e2a-1234-4a12-9abc-1234567890ab")
+
+    def test_the_denylist_still_refuses_a_scheme_within_an_overridden_allowlist(self, settings):
+        settings.CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES = ["http", "https", "javascript"]
+        with pytest.raises(ValidationError):
+            validate_static_uri("javascript:alert(1)")
+
+
+def _create_with_static_uri(model: type[Model], scheme: ConceptScheme, uri: str):
+    """Create a saved record of ``model`` carrying ``uri`` as its ``static_uri``."""
+    if model is ConceptScheme:
+        return ConceptScheme.objects.create(name=f"External scheme {uri}", static_uri=uri)
+    if model is Concept:
+        return Concept.objects.create(scheme=scheme, label=f"External concept {uri}", static_uri=uri)
+    return Collection.objects.create(scheme=scheme, name=f"External collection {uri}", static_uri=uri)
+
+
+def _create_without_static_uri(model: type[Model], scheme: ConceptScheme):
+    """Create a saved, provisional (no ``static_uri``) record of ``model``."""
+    if model is ConceptScheme:
+        return ConceptScheme.objects.create(name="Provisional scheme")
+    if model is Concept:
+        return Concept.objects.create(scheme=scheme, label="Provisional concept")
+    return Collection.objects.create(scheme=scheme, name="Provisional collection")
+
+
+class TestStaticUriUpdateFieldsExclusion:
+    """US-1 — T030. ``static_uri``'s validation, fixedness, and cross-model
+    checks must run only on a save that actually writes that column. Verified
+    gap: assigning a bad or conflicting value to ``static_uri`` in memory
+    and then saving with ``update_fields`` that excludes it ran full
+    validation against a value that was never going to reach the database,
+    incorrectly blocking an otherwise unrelated save."""
+
+    @pytest.mark.django_db
+    def test_an_invalid_value_in_an_excluded_column_does_not_block_the_save(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Local")
+        concept.static_uri = "not-absolute"
+        concept.save(update_fields=["label"])
+        concept.refresh_from_db()
+        assert concept.static_uri is None
+
+    @pytest.mark.django_db
+    def test_a_would_be_rewrite_conflict_in_an_excluded_column_does_not_block_the_save(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Local", static_uri="http://ex.org/fixed")
+        reloaded = Concept.objects.get(pk=concept.pk)
+        reloaded.static_uri = "http://ex.org/rewritten"
+        reloaded.save(update_fields=["label"])
+        reloaded.refresh_from_db()
+        assert reloaded.static_uri == "http://ex.org/fixed"
+
+    @pytest.mark.django_db
+    def test_assigning_and_saving_excluding_the_column_leaves_the_record_provisional_and_still_storable(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Local")
+        concept.static_uri = "http://ex.org/never-written"
+        concept.save(update_fields=["label"])
+        concept.refresh_from_db()
+        assert concept.static_uri is None
+        concept.static_uri = "http://ex.org/right"
+        concept.save()
+        concept.refresh_from_db()
+        assert concept.static_uri == "http://ex.org/right"
+
+
+class TestGetByUri:
+    """US-2 — a record is found by its identifier wherever it points (FR-007).
+    ``get_by_uri`` tries an exact match on the stored ``static_uri`` first,
+    falling back to the model's base-relative parse (R1's behaviour, unchanged)
+    for a provisional identifier, and raises the model's ``DoesNotExist`` when
+    neither resolves. ``ConceptScheme`` and ``Collection`` gain the method for
+    the first time; ``Concept.objects.get_by_uri`` keeps its existing name and
+    exact local behaviour (FR-014)."""
+
+    @pytest.mark.django_db
+    def test_concept_resolves_by_external_static_uri(self, scheme):
+        concept = Concept.objects.create(
+            scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/rock/granite"
+        )
+        assert Concept.objects.get_by_uri("http://vocabs.example.org/rock/granite") == concept
+
+    @pytest.mark.django_db
+    def test_concept_resolves_by_its_own_local_identifier(self, scheme):
+        # FR-014: unchanged from R1 — a locally authored concept still resolves
+        # by the identifier composed from the configured base and its slugs.
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        assert Concept.objects.get_by_uri(concept.uri) == concept
+
+    @pytest.mark.django_db
+    def test_concept_unheld_identifier_raises_does_not_exist(self, scheme):
+        Concept.objects.create(scheme=scheme, label="Heat Flow")
+        with pytest.raises(Concept.DoesNotExist):
+            Concept.objects.get_by_uri("http://vocabs.example.org/nothing")
+        with pytest.raises(Concept.DoesNotExist):
+            Concept.objects.get_by_uri(f"{conf.get_base_uri()}/{scheme.slug}/no-such-concept")
+
+    @pytest.mark.django_db
+    def test_imported_and_local_concept_do_not_answer_to_each_others_identifier(self, scheme):
+        imported = Concept.objects.create(
+            scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/rock/granite"
+        )
+        local = Concept.objects.create(scheme=scheme, label="Basalt")
+        # Each is found by its own identifier — the imported concept's external
+        # static_uri, the local concept's composed base-relative one — and not
+        # by an identifier held by neither.
+        assert Concept.objects.get_by_uri(imported.uri) == imported
+        assert Concept.objects.get_by_uri(local.uri) == local
+        with pytest.raises(Concept.DoesNotExist):
+            Concept.objects.get_by_uri("http://vocabs.example.org/rock/nothing-here")
+
+    @pytest.mark.django_db
+    def test_scheme_resolves_by_external_static_uri(self):
+        scheme = ConceptScheme.objects.create(name="Rocks", static_uri="http://vocabs.example.org/rocks")
+        assert ConceptScheme.objects.get_by_uri("http://vocabs.example.org/rocks") == scheme
+
+    @pytest.mark.django_db
+    def test_scheme_resolves_by_its_own_local_identifier(self):
+        scheme = ConceptScheme.objects.create(name="Geothermics")
+        assert ConceptScheme.objects.get_by_uri(scheme.uri) == scheme
+
+    @pytest.mark.django_db
+    def test_scheme_unheld_identifier_raises_does_not_exist(self):
+        ConceptScheme.objects.create(name="Geothermics")
+        with pytest.raises(ConceptScheme.DoesNotExist):
+            ConceptScheme.objects.get_by_uri("http://vocabs.example.org/nothing")
+        with pytest.raises(ConceptScheme.DoesNotExist):
+            ConceptScheme.objects.get_by_uri(f"{conf.get_base_uri()}/no-such-scheme")
+
+    @pytest.mark.django_db
+    def test_scheme_does_not_resolve_a_concepts_identifier(self, scheme):
+        # A concept's local identifier has two path segments below the base; a
+        # scheme's has one — the scheme parse must not mistake one for the other.
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        with pytest.raises(ConceptScheme.DoesNotExist):
+            ConceptScheme.objects.get_by_uri(concept.uri)
+
+    @pytest.mark.django_db
+    def test_concept_does_not_resolve_a_schemes_identifier(self, scheme):
+        with pytest.raises(Concept.DoesNotExist):
+            Concept.objects.get_by_uri(scheme.uri)
+
+    @pytest.mark.django_db
+    def test_collection_resolves_by_external_static_uri(self, scheme):
+        collection = Collection.objects.create(
+            scheme=scheme, name="Igneous", static_uri="http://vocabs.example.org/rocks/igneous"
+        )
+        assert Collection.objects.get_by_uri("http://vocabs.example.org/rocks/igneous") == collection
+
+    @pytest.mark.django_db
+    def test_collection_resolves_by_its_own_local_identifier(self, scheme):
+        collection = Collection.objects.create(scheme=scheme, name="Igneous")
+        assert Collection.objects.get_by_uri(collection.uri) == collection
+
+    @pytest.mark.django_db
+    def test_collection_unheld_identifier_raises_does_not_exist(self, scheme):
+        Collection.objects.create(scheme=scheme, name="Igneous")
+        with pytest.raises(Collection.DoesNotExist):
+            Collection.objects.get_by_uri("http://vocabs.example.org/nothing")
+
+    @pytest.mark.django_db
+    def test_collection_does_not_resolve_a_concepts_identifier(self, scheme):
+        # A collection's local identifier carries a literal "collection" segment
+        # that a concept's never does — the collection parse must require it.
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        with pytest.raises(Collection.DoesNotExist):
+            Collection.objects.get_by_uri(concept.uri)
+
+    @pytest.mark.django_db
+    def test_concept_does_not_resolve_a_collections_identifier(self, scheme):
+        collection = Collection.objects.create(scheme=scheme, name="Igneous")
+        with pytest.raises(Concept.DoesNotExist):
+            Concept.objects.get_by_uri(collection.uri)
+
+
+class TestGetByUriRejectsAbsentIdentifiers:
+    """US-2 — T033. ``self.get(static_uri=uri)`` with ``uri=None`` compiles to
+    ``static_uri IS NULL``, which matches *every* provisional record —
+    verified: with one provisional record in the table, ``get_by_uri(None)``
+    returns that unrelated record; with two, it raises
+    ``MultipleObjectsReturned``. #50's importer idiom ``node.get("about")``
+    yields ``None`` when the source omits an identifier, so this would upsert
+    into an arbitrary unrelated record. A falsy or non-``str`` ``uri`` now
+    raises the model's ``DoesNotExist`` up front, on all three managers."""
+
+    @pytest.mark.django_db
+    def test_concept_get_by_uri_none_does_not_return_an_unrelated_provisional_record(self, scheme):
+        Concept.objects.create(scheme=scheme, label="Heat Flow")
+        with pytest.raises(Concept.DoesNotExist):
+            Concept.objects.get_by_uri(None)
+
+    @pytest.mark.django_db
+    def test_concept_get_by_uri_none_does_not_raise_multiple_objects_returned(self, scheme):
+        Concept.objects.create(scheme=scheme, label="Heat Flow")
+        Concept.objects.create(scheme=scheme, label="Basalt")
+        with pytest.raises(Concept.DoesNotExist):
+            Concept.objects.get_by_uri(None)
+
+    @pytest.mark.django_db
+    def test_concept_get_by_uri_empty_string_does_not_return_an_unrelated_provisional_record(self, scheme):
+        Concept.objects.create(scheme=scheme, label="Heat Flow")
+        with pytest.raises(Concept.DoesNotExist):
+            Concept.objects.get_by_uri("")
+
+    @pytest.mark.django_db
+    def test_scheme_get_by_uri_none_does_not_return_an_unrelated_provisional_record(self):
+        ConceptScheme.objects.create(name="Geothermics")
+        with pytest.raises(ConceptScheme.DoesNotExist):
+            ConceptScheme.objects.get_by_uri(None)
+
+    @pytest.mark.django_db
+    def test_scheme_get_by_uri_empty_string_does_not_return_an_unrelated_provisional_record(self):
+        ConceptScheme.objects.create(name="Geothermics")
+        with pytest.raises(ConceptScheme.DoesNotExist):
+            ConceptScheme.objects.get_by_uri("")
+
+    @pytest.mark.django_db
+    def test_collection_get_by_uri_none_does_not_return_an_unrelated_provisional_record(self, scheme):
+        Collection.objects.create(scheme=scheme, name="Igneous")
+        with pytest.raises(Collection.DoesNotExist):
+            Collection.objects.get_by_uri(None)
+
+    @pytest.mark.django_db
+    def test_collection_get_by_uri_empty_string_does_not_return_an_unrelated_provisional_record(self, scheme):
+        Collection.objects.create(scheme=scheme, name="Igneous")
+        with pytest.raises(Collection.DoesNotExist):
+            Collection.objects.get_by_uri("")
+
+
+class TestProvisionalUri:
+    """US-3 — a record authored here shows the identifier it will publish under
+    (FR-005). A record with no ``static_uri`` reports the value R1's
+    composition produces; that value follows a rename and a change to the
+    configured base address; ``static_uri`` stays ``None`` and
+    ``has_static_uri`` is ``False`` throughout."""
+
+    @pytest.mark.django_db
+    def test_scheme_with_no_static_uri_reports_the_composed_value(self):
+        scheme = ConceptScheme.objects.create(name="Geothermics")
+        assert scheme.static_uri is None
+        assert scheme.has_static_uri is False
+        assert scheme.uri == f"{conf.get_base_uri()}/{scheme.slug}"
+
+    @pytest.mark.django_db
+    def test_scheme_provisional_uri_follows_a_rename(self):
+        scheme = ConceptScheme.objects.create(name="Geothermics")
+        scheme.name = "Geothermal Science"
+        scheme.save()
+        assert scheme.uri == f"{conf.get_base_uri()}/geothermal-science"
+
+    @pytest.mark.django_db
+    def test_scheme_provisional_uri_follows_a_base_address_change(self, settings):
+        scheme = ConceptScheme.objects.create(name="Geothermics")
+        settings.CONTROLLED_VOCABULARIES_BASE_URI = "https://elsewhere.example.org/vocab"
+        assert scheme.uri == "https://elsewhere.example.org/vocab/geothermics"
+
+    @pytest.mark.django_db
+    def test_concept_with_no_static_uri_reports_the_composed_value(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        assert concept.static_uri is None
+        assert concept.has_static_uri is False
+        assert concept.uri == f"{conf.get_base_uri()}/{scheme.slug}/{concept.slug}"
+
+    @pytest.mark.django_db
+    def test_concept_provisional_uri_follows_a_rename(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        concept.label = "Surface Heat Flow"
+        concept.save()
+        assert concept.uri == f"{conf.get_base_uri()}/{scheme.slug}/surface-heat-flow"
+
+    @pytest.mark.django_db
+    def test_concept_provisional_uri_follows_a_base_address_change(self, scheme, settings):
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        settings.CONTROLLED_VOCABULARIES_BASE_URI = "https://elsewhere.example.org/vocab"
+        assert concept.uri == f"https://elsewhere.example.org/vocab/{scheme.slug}/{concept.slug}"
+
+    @pytest.mark.django_db
+    def test_collection_with_no_static_uri_reports_the_composed_value(self, scheme):
+        collection = Collection.objects.create(scheme=scheme, name="Igneous")
+        assert collection.static_uri is None
+        assert collection.has_static_uri is False
+        assert collection.uri == f"{conf.get_base_uri()}/{scheme.slug}/collection/{collection.slug}"
+
+    @pytest.mark.django_db
+    def test_collection_provisional_uri_follows_a_rename(self, scheme):
+        collection = Collection.objects.create(scheme=scheme, name="Igneous")
+        collection.name = "Igneous Rocks"
+        collection.save()
+        assert collection.uri == f"{conf.get_base_uri()}/{scheme.slug}/collection/igneous-rocks"
+
+    @pytest.mark.django_db
+    def test_collection_provisional_uri_follows_a_base_address_change(self, scheme, settings):
+        collection = Collection.objects.create(scheme=scheme, name="Igneous")
+        settings.CONTROLLED_VOCABULARIES_BASE_URI = "https://elsewhere.example.org/vocab"
+        assert collection.uri == f"https://elsewhere.example.org/vocab/{scheme.slug}/collection/{collection.slug}"
+
+
+class TestPreExistingRecordsUpgrade:
+    """US-3 — FR-009 / Article IX: a record from before this feature landed has
+    ``static_uri`` left ``NULL`` by the migration (no backfill, data-model.md),
+    so it reports exactly the identifier R1's composition produced for it before
+    this feature existed, and every existing reference to it still resolves."""
+
+    @pytest.mark.django_db
+    def test_pre_existing_scheme_reports_its_previous_identifier_and_resolves(self):
+        scheme = ConceptScheme.objects.create(name="Geothermics")
+        assert scheme.static_uri is None
+        assert scheme.uri == "https://example.org/vocabularies/geothermics"
+        assert ConceptScheme.objects.get_by_uri(scheme.uri) == scheme
+
+    @pytest.mark.django_db
+    def test_pre_existing_concept_reports_its_previous_identifier_and_resolves(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        assert concept.static_uri is None
+        assert concept.uri == f"https://example.org/vocabularies/{scheme.slug}/heat-flow"
+        assert Concept.objects.get_by_uri(concept.uri) == concept
+
+    @pytest.mark.django_db
+    def test_pre_existing_collection_reports_its_previous_identifier_and_resolves(self, scheme):
+        collection = Collection.objects.create(scheme=scheme, name="Igneous")
+        assert collection.static_uri is None
+        assert collection.uri == f"https://example.org/vocabularies/{scheme.slug}/collection/igneous"
+        assert Collection.objects.get_by_uri(collection.uri) == collection
+
+
+class TestStaticUriDatabaseUniqueness:
+    """US-3 — FR-006/SC-005: two records of the same model cannot hold the same
+    ``static_uri``, and the refusal is the database constraint itself, not
+    application validation — ``bulk_create`` bypasses ``save()``/``clean()`` so
+    this reaches the constraint directly. Many records holding none coexist
+    freely, since the constraint is partial (``condition=Q(static_uri__isnull=False)``)."""
+
+    @pytest.mark.django_db
+    def test_two_schemes_with_the_same_static_uri_hit_the_database_constraint(self):
+        ConceptScheme.objects.create(name="Rocks", static_uri="http://vocabs.example.org/dup")
+        with pytest.raises(IntegrityError), transaction.atomic():
+            ConceptScheme.objects.bulk_create(
+                [ConceptScheme(name="Other rocks", slug="other-rocks", static_uri="http://vocabs.example.org/dup")]
+            )
+
+    @pytest.mark.django_db
+    def test_two_concepts_with_the_same_static_uri_hit_the_database_constraint(self, scheme):
+        Concept.objects.create(scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/dup")
+        with pytest.raises(IntegrityError), transaction.atomic():
+            Concept.objects.bulk_create(
+                [Concept(scheme=scheme, label="Basalt", slug="basalt", static_uri="http://vocabs.example.org/dup")]
+            )
+
+    @pytest.mark.django_db
+    def test_two_collections_with_the_same_static_uri_hit_the_database_constraint(self, scheme):
+        Collection.objects.create(scheme=scheme, name="Igneous", static_uri="http://vocabs.example.org/dup")
+        with pytest.raises(IntegrityError), transaction.atomic():
+            Collection.objects.bulk_create(
+                [
+                    Collection(
+                        scheme=scheme,
+                        name="Metamorphic",
+                        slug="metamorphic",
+                        static_uri="http://vocabs.example.org/dup",
+                    )
+                ]
+            )
+
+    @pytest.mark.django_db
+    def test_many_records_holding_no_static_uri_coexist_freely(self, scheme):
+        Concept.objects.create(scheme=scheme, label="A")
+        Concept.objects.create(scheme=scheme, label="B")
+        Concept.objects.create(scheme=scheme, label="C")
+        assert Concept.objects.filter(static_uri__isnull=True).count() == 3
+
+
+class TestLocalUrl:
+    """US-4 — every record has a place on this site, whoever owns its identifier
+    (FR-008). ``local_url`` is this site's own address for a record — composed
+    from *local_url* up the chain, never from ``uri`` — so it names a place on
+    this site even when a parent's identifier points elsewhere. Equal to ``uri``
+    for local unpublished work, different for anything imported, and a
+    collection's can never collide with a concept's."""
+
+    @pytest.mark.django_db
+    def test_local_unpublished_schemes_local_url_equals_its_uri(self):
+        scheme = ConceptScheme.objects.create(name="Geothermics")
+        assert scheme.local_url == scheme.uri
+        assert scheme.local_url == f"{conf.get_base_uri()}/{scheme.slug}"
+
+    @pytest.mark.django_db
+    def test_local_unpublished_concepts_local_url_equals_its_uri(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        assert concept.local_url == concept.uri
+        assert concept.local_url == f"{conf.get_base_uri()}/{scheme.slug}/{concept.slug}"
+
+    @pytest.mark.django_db
+    def test_local_unpublished_collections_local_url_equals_its_uri(self, scheme):
+        collection = Collection.objects.create(scheme=scheme, name="Igneous")
+        assert collection.local_url == collection.uri
+        assert collection.local_url == f"{conf.get_base_uri()}/{scheme.slug}/collection/{collection.slug}"
+
+    @pytest.mark.django_db
+    def test_imported_concepts_local_url_differs_from_its_static_uri(self, scheme):
+        concept = Concept.objects.create(
+            scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/rock/granite"
+        )
+        assert concept.uri == "http://vocabs.example.org/rock/granite"
+        assert concept.local_url == f"{conf.get_base_uri()}/{scheme.slug}/{concept.slug}"
+        assert concept.local_url != concept.uri
+        assert concept.local_url.startswith(conf.get_base_uri())
+
+    @pytest.mark.django_db
+    def test_imported_schemes_local_url_differs_from_its_static_uri(self):
+        scheme = ConceptScheme.objects.create(name="Rocks", static_uri="http://vocabs.example.org/rocks")
+        assert scheme.uri == "http://vocabs.example.org/rocks"
+        assert scheme.local_url == f"{conf.get_base_uri()}/{scheme.slug}"
+        assert scheme.local_url != scheme.uri
+        assert scheme.local_url.startswith(conf.get_base_uri())
+
+    @pytest.mark.django_db
+    def test_imported_collections_local_url_differs_from_its_static_uri(self, scheme):
+        collection = Collection.objects.create(
+            scheme=scheme, name="Igneous", static_uri="http://vocabs.example.org/rocks/igneous"
+        )
+        assert collection.uri == "http://vocabs.example.org/rocks/igneous"
+        assert collection.local_url == f"{conf.get_base_uri()}/{scheme.slug}/collection/{collection.slug}"
+        assert collection.local_url != collection.uri
+        assert collection.local_url.startswith(conf.get_base_uri())
+
+    @pytest.mark.django_db
+    def test_a_collections_local_url_can_never_equal_a_concepts(self, scheme):
+        # Same slugifiable name, so only the '/collection/' segment tells them apart.
+        concept = Concept.objects.create(scheme=scheme, label="Igneous")
+        collection = Collection.objects.create(scheme=scheme, name="Igneous")
+        assert concept.slug == collection.slug
+        assert concept.local_url != collection.local_url
+
+    @pytest.mark.django_db
+    def test_local_url_follows_a_rename(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        concept.label = "Surface Heat Flow"
+        concept.save()
+        assert concept.local_url == f"{conf.get_base_uri()}/{scheme.slug}/surface-heat-flow"
+
+    @pytest.mark.django_db
+    def test_local_concept_of_an_externally_fixed_scheme_composes_under_this_sites_address(self):
+        """spec.md Edge Cases §4 (raised in the US-1 report). A concept authored
+        locally inside a vocabulary whose own identifier is externally fixed
+        must compose its provisional identifier under *this site's* address,
+        not the publisher's — composing from ``self.scheme.uri`` instead of
+        ``self.scheme.local_url`` would put it on the publisher's domain."""
+        scheme = ConceptScheme.objects.create(name="Rocks", static_uri="http://vocabs.example.org/rocks")
+        concept = Concept.objects.create(scheme=scheme, label="Granite")
+        assert concept.static_uri is None
+        assert concept.local_url == f"{conf.get_base_uri()}/{scheme.slug}/{concept.slug}"
+        assert concept.uri == concept.local_url
+        assert not concept.uri.startswith("http://vocabs.example.org")
+
+    @pytest.mark.django_db
+    def test_local_collection_of_an_externally_fixed_scheme_composes_under_this_sites_address(self):
+        """The same hole as above, for a collection (spec.md Edge Cases §4)."""
+        scheme = ConceptScheme.objects.create(name="Rocks", static_uri="http://vocabs.example.org/rocks")
+        collection = Collection.objects.create(scheme=scheme, name="Igneous")
+        assert collection.static_uri is None
+        assert collection.local_url == f"{conf.get_base_uri()}/{scheme.slug}/collection/{collection.slug}"
+        assert collection.uri == collection.local_url
+        assert not collection.uri.startswith("http://vocabs.example.org")
 
 
 def _editable_fields(model: type[Model]):
@@ -1330,3 +1993,53 @@ class TestMembershipIntegrity:
         # the pre-existing broader/narrower link is untouched
         assert igneous_rock in granite.broader()
         assert granite in igneous_rock.narrower()
+
+
+class TestBlankStaticUriIsAbsent:
+    """US-1 — an empty string is *absence* of an identifier, not an identifier.
+
+    ``static_uri`` is nullable so that the partial ``UniqueConstraint``
+    (``static_uri__isnull=False``) exempts provisional records. An empty
+    string is not null, so it falls *inside* the constraint while
+    ``uri``/``has_static_uri`` both read it as absent — the second such
+    record fails at the database with an opaque error. Assigning ``""``
+    instead of ``None`` is the ordinary shape of importer and serializer code
+    (``node.get("about") or ""``), so the models normalise it on the way in.
+    """
+
+    @pytest.mark.django_db
+    def test_two_schemes_assigned_a_blank_static_uri_coexist(self):
+        first = ConceptScheme.objects.create(name="First", static_uri="")
+        second = ConceptScheme.objects.create(name="Second", static_uri="")
+        assert first.static_uri is None
+        assert second.static_uri is None
+        assert first.uri == first.local_url
+        assert second.uri == second.local_url
+
+    @pytest.mark.django_db
+    def test_two_concepts_assigned_a_blank_static_uri_coexist(self, scheme):
+        first = Concept.objects.create(scheme=scheme, label="First", static_uri="")
+        second = Concept.objects.create(scheme=scheme, label="Second", static_uri="")
+        assert first.static_uri is None
+        assert second.static_uri is None
+
+    @pytest.mark.django_db
+    def test_two_collections_assigned_a_blank_static_uri_coexist(self, scheme):
+        first = Collection.objects.create(scheme=scheme, name="First", static_uri="")
+        second = Collection.objects.create(scheme=scheme, name="Second", static_uri="")
+        assert first.static_uri is None
+        assert second.static_uri is None
+
+    @pytest.mark.django_db
+    def test_a_blank_static_uri_is_stored_as_null_not_an_empty_string(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow", static_uri="")
+        concept.refresh_from_db()
+        assert concept.static_uri is None
+        assert concept.has_static_uri is False
+        assert Concept.objects.filter(static_uri__isnull=True).count() == 1
+
+    @pytest.mark.django_db
+    def test_full_clean_also_normalises_a_blank_static_uri(self, scheme):
+        concept = Concept(scheme=scheme, label="Heat Flow", static_uri="")
+        concept.full_clean(exclude=["slug"])
+        assert concept.static_uri is None

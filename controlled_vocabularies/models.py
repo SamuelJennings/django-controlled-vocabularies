@@ -1,19 +1,160 @@
 """Models for controlled_vocabularies.
 
 The relational models are the source of truth for a vocabulary and its concepts.
-In this slice a vocabulary is a :class:`ConceptScheme`; its identifier (URI) is
-computed from a configured base address and the slug, never stored (research R1).
+A record's ``uri`` is its identity, always present. It is static — held
+verbatim, exactly as assigned by an external publisher or frozen at
+publication (``static_uri``, FS-005) — once one has been assigned; until then
+it is dynamic, composed from a configured base address and the slug exactly as
+R1 did.
 """
 
+import urllib.parse
+from typing import TYPE_CHECKING, TypeVar
+
 from django.conf import settings
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.core.validators import validate_unicode_slug
 from django.db import models
 from django.db.models import F, Max, Q
-from django.utils.text import slugify
+from django.utils.text import Truncator, slugify
 from django.utils.translation import gettext_lazy as _
 
 from controlled_vocabularies import conf
+
+if TYPE_CHECKING:
+    # Stub-only (django-stubs); not importable at runtime, only used to type
+    # _static_uri_field's help_text parameter, which is always a gettext_lazy() proxy.
+    from django.utils.functional import _StrPromise
+
+#: Schemes that can carry executable content and must never be accepted as an
+#: externally assigned static URI (FR-004) — a stored identifier is later
+#: rendered as a link by the browsing interface, so a hostile scheme accepted
+#: here becomes a hazard there. None of these sit in the default allowlist
+#: (:data:`~controlled_vocabularies.conf.DEFAULT_ALLOWED_URI_SCHEMES`), so this
+#: is belt-and-braces (T035): a second gate that still applies even if a
+#: downstream project's overridden allowlist includes one of them.
+_UNSAFE_STATIC_URI_SCHEMES = frozenset({"javascript", "data", "vbscript"})
+
+#: The length bound for a static URI (FR-004, decisions.md D5): far beyond any
+#: identifier real SKOS vocabularies use, and inside the unique-index limit of
+#: every mainstream database, including MySQL's 3072-byte cap on ``utf8mb4``.
+STATIC_URI_MAX_LENGTH = 500
+
+#: How much of an offending value a validation message echoes (T032). A
+#: hostile value can be arbitrarily long; bounding the echo keeps the message
+#: itself from becoming another hazard, independent of the true length always
+#: reported via %(length)s/%(max_length)s in the too-long message.
+_STATIC_URI_MESSAGE_ECHO_CHARS = 80
+
+
+def _echoed_uri(value: str) -> str:
+    """The value as it appears inside a validation message: bounded, never the
+    unbounded raw value (T032)."""
+    return str(Truncator(value).chars(_STATIC_URI_MESSAGE_ECHO_CHARS))
+
+
+def validate_static_uri(value: str) -> None:
+    """Validate an externally assigned static URI (FR-004).
+
+    Checks length first — before parsing even runs — so an arbitrarily long
+    hostile value is refused with a short, bounded message rather than one
+    that runs `urlsplit` on it and then echoes it in full (T032). Requires a
+    well-formed absolute identifier — a non-empty scheme and a non-empty
+    remainder, so a bare relative path is refused — and refuses a scheme not
+    on the configured allowlist (T035). Used both as a field validator (so
+    ``full_clean()`` catches it) and called from
+    :func:`_prepare_static_uri` on the ``save()`` path, because Django's
+    ``save()`` never calls ``full_clean()`` and the import path this feature
+    exists to serve writes through ``save()`` directly (research R5).
+
+    The allowlist is the one static-URI rule that survived the round-5 cut
+    (decisions.md D18). It stays because this is a reusable package: a
+    downstream project may let its users upload SKOS files, and a stored
+    ``javascript:`` identifier rendered as a link by R6's browsing interface
+    is an injection route Django's template escaping does not close. It costs
+    one in-memory parse and no queries.
+
+    ``urllib.parse.urlsplit`` itself raises a bare ``ValueError`` — not a
+    ``ValidationError`` — for some malformed input (e.g. a netloc with
+    characters invalid under NFKC normalization, or a malformed IPv6 netloc).
+    Left uncaught, one crafted ``rdf:about`` would abort an import with an
+    exception no caller expects, and surface as a 500 rather than a field
+    error in a form/admin/DRF context (T031).
+    """
+    if len(value) > STATIC_URI_MAX_LENGTH:
+        raise ValidationError(
+            _("A static URI cannot exceed %(max_length)s characters; '%(uri)s' has %(length)s."),
+            params={"max_length": STATIC_URI_MAX_LENGTH, "uri": _echoed_uri(value), "length": len(value)},
+            code="static_uri_too_long",
+        )
+    try:
+        parsed = urllib.parse.urlsplit(value)
+    except ValueError as exc:
+        raise ValidationError(
+            _("'%(uri)s' could not be parsed as a URI."),
+            params={"uri": _echoed_uri(value)},
+            code="static_uri_unparseable",
+        ) from exc
+    if not parsed.scheme or not (parsed.netloc or parsed.path):
+        raise ValidationError(
+            _("'%(uri)s' is not a well-formed absolute identifier with a scheme."),
+            params={"uri": _echoed_uri(value)},
+            code="static_uri_not_absolute",
+        )
+    scheme = parsed.scheme.lower()
+    if scheme not in conf.get_allowed_uri_schemes():
+        raise ValidationError(
+            _("'%(uri)s' uses the scheme '%(scheme)s', which is not one of the accepted schemes."),
+            params={"uri": _echoed_uri(value), "scheme": parsed.scheme},
+            code="static_uri_scheme_not_allowed",
+        )
+    if scheme in _UNSAFE_STATIC_URI_SCHEMES:
+        # Belt and braces (T035): refused even if a downstream project's
+        # overridden allowlist includes it.
+        raise ValidationError(
+            _("'%(uri)s' uses the scheme '%(scheme)s', which is not permitted."),
+            params={"uri": _echoed_uri(value), "scheme": parsed.scheme},
+            code="static_uri_unsafe_scheme",
+        )
+
+
+def _prepare_static_uri(instance: "StaticUriModel") -> None:
+    """Normalise and validate ``static_uri`` ahead of a write.
+
+    Two things only, both in memory and neither costing a query:
+
+    *Absence is ``None``, never ``""``.* ``static_uri`` is nullable so the
+    partial ``UniqueConstraint`` — which covers non-null values only — leaves
+    provisional records unconstrained. An empty string is not null, so it
+    falls inside that constraint while :attr:`uri` and
+    :attr:`has_static_uri` both read it as absent: the record behaves as
+    provisional yet occupies the unique slot, and the second one saved fails
+    at the database with an opaque ``IntegrityError``. Assigning ``""``
+    rather than ``None`` is the ordinary shape of importer and serializer
+    code (``node.get("about") or ""``), which is exactly the path this
+    feature exists to serve.
+
+    *Format is checked here as well as on the field.*
+    :func:`validate_static_uri` is a field validator, so ``full_clean()``
+    runs it — but ``save()`` never calls ``full_clean()``, and #50's importer
+    writes through ``save()`` directly (research R5). Without this call the
+    scheme allowlist would not apply on the one path that matters.
+
+    What this deliberately does **not** do is defend a stored identifier
+    against later modification. Keeping an identifier stable is a data
+    concern and a UI concern — the field is made non-editable once the record
+    is published, wherever it is exposed — not something the model enforces
+    against every write path (decisions.md D18, superseding FR-002/FR-013's
+    earlier framing).
+    """
+    if instance.static_uri == "":
+        instance.static_uri = None
+    if not instance.static_uri:
+        return
+    try:
+        validate_static_uri(instance.static_uri)
+    except ValidationError as exc:
+        raise ValidationError({"static_uri": exc}) from exc
 
 
 def _configured_language_codes() -> set[str]:
@@ -28,7 +169,179 @@ def _configured_language_codes() -> set[str]:
     return {code for code, _label in settings.LANGUAGES}
 
 
-class ConceptScheme(models.Model):
+_ModelT = TypeVar("_ModelT", bound=models.Model)
+
+
+class StaticUriLookupMixin(models.Manager[_ModelT]):
+    """Adds :meth:`get_by_uri` to a manager (research R6).
+
+    Shared by the ``ConceptScheme``, ``Concept``, and ``Collection`` managers so
+    #50's importer can upsert a vocabulary or a collection by identifier the same
+    way it already can a concept, without three drifting implementations.
+    """
+
+    def get_by_uri(self, uri: str) -> _ModelT:
+        """Return the record identified by ``uri``, fixed or provisional (FR-007).
+
+        A falsy or non-``str`` ``uri`` raises ``DoesNotExist`` immediately
+        (T033): ``self.get(static_uri=None)`` compiles to
+        ``static_uri IS NULL``, which matches *every* provisional record —
+        with one in the table it would return that unrelated record, with two
+        it would raise ``MultipleObjectsReturned``. #50's importer idiom
+        ``node.get("about")`` yields ``None`` when the source omits an
+        identifier, so without this guard it would upsert into an arbitrary
+        unrelated record.
+
+        Otherwise, an exact match on the stored ``static_uri`` is tried
+        first, so a fixed identifier resolves correctly even when it happens
+        to sit under this site's own configured base address (FR-003,
+        research R6). On no match this falls back to
+        :meth:`_get_by_local_parse`, the model's base-relative composition,
+        which raises the model's ``DoesNotExist`` when nothing resolves
+        either way.
+        """
+        if not uri or not isinstance(uri, str):
+            # mypy/django-stubs cannot resolve .DoesNotExist off a still-generic
+            # type[_ModelT] (decisions.md D11) — only off a concrete model class.
+            raise self.model.DoesNotExist(  # type: ignore[attr-defined]
+                f"No {self.model.__name__} matches the URI {uri!r}."
+            )
+        try:
+            return self.get(static_uri=uri)
+        except ObjectDoesNotExist:
+            return self._get_by_local_parse(uri)
+
+    def _get_by_local_parse(self, uri: str) -> _ModelT:
+        """Resolve a provisional, base-relative identifier. Implemented per model."""
+        raise NotImplementedError
+
+
+def _static_uri_field(help_text: "str | _StrPromise") -> models.CharField:
+    """Build a ``static_uri`` field, owning every attribute the three
+    concrete models (:class:`ConceptScheme`, :class:`Concept`,
+    :class:`Collection`) must agree on (review round 4).
+
+    Before this, each subclass hand-copied the whole field — ``max_length``,
+    ``null``, ``blank``, ``verbose_name``, and ``validators`` byte-identical,
+    only ``help_text`` legitimately differing per model — and nothing
+    checked the copies stayed in step: one model's ``max_length`` could
+    drift and every one of the 336 tests already in the suite would still
+    pass (see ``tests/test_standards.py::TestStaticUriFieldAttributesAgree``,
+    which now catches it). Called once per concrete model — and once for the
+    abstract base itself, below — with only that model's own ``help_text``.
+    """
+    return models.CharField(
+        max_length=STATIC_URI_MAX_LENGTH,
+        null=True,
+        blank=True,
+        verbose_name=_("static URI"),
+        help_text=help_text,
+        validators=[validate_static_uri],
+    )
+
+
+class StaticUriModel(models.Model):
+    """Abstract base for a model carrying an externally assigned identifier (T028).
+
+    ``ConceptScheme``, ``Concept``, and ``Collection`` each subclass this rather
+    than repeating the ``uri``, ``has_static_uri``, ``clean()``, and ``save()``
+    byte-identically three times. A concrete subclass supplies only its own
+    ``local_url`` composition, its ``Meta.constraints`` entry name, and its own
+    call to :func:`_static_uri_field` — the one place every ``static_uri``
+    field's shared attributes are defined, with only ``help_text`` wording
+    varying per model.
+
+    Uniqueness is per model, a database ``UniqueConstraint`` on the column and
+    nothing more (decisions.md D18). The identity that actually needs
+    protecting — a record's place in the vocabulary — is already unique by
+    construction, because ``ConceptScheme.slug`` is unique app-wide and
+    ``Concept`` and ``Collection`` each carry a unique ``(scheme, slug)``
+    constraint from R1. A composed URI cannot collide, because the parts it is
+    built from cannot.
+    """
+
+    static_uri = _static_uri_field(
+        _(
+            "The identifier once it is fixed — assigned by this record's publisher, "
+            "or frozen when this vocabulary is published — held exactly as given and "
+            "never recomputed. Leave blank while this record is authored here: its "
+            "identifier is computed from this site's address until then. Editing this "
+            "after publication breaks references to the record and should be prevented "
+            "wherever the field is exposed."
+        )
+    )
+
+    class Meta:
+        abstract = True
+
+    @property
+    def uri(self) -> str:
+        """The record's URI: its identity, always present.
+
+        Static — the externally assigned identifier, held verbatim — when one
+        is held (:attr:`static_uri` is set); otherwise dynamic,
+        :attr:`local_url` (composed from the configured address, follows a
+        rename).
+        """
+        return self.static_uri or self.local_url
+
+    @property
+    def local_url(self) -> str:
+        """Where this record is viewed on this site (FR-008). Implemented per model."""
+        raise NotImplementedError
+
+    @property
+    def has_static_uri(self) -> bool:
+        """Whether this record's URI is static (fixed) rather than dynamic (research R2).
+
+        Recorded by the presence of :attr:`static_uri`, never inferred by
+        comparing it against the configured base address (FR-003).
+        """
+        return bool(self.static_uri)
+
+    def clean(self):
+        """Normalise a blank ``static_uri`` to ``None`` and check its format."""
+        super().clean()
+        _prepare_static_uri(self)
+
+    def save(self, *args, **kwargs):
+        """Normalise and validate ``static_uri``, then write.
+
+        Skipped when ``update_fields`` is given and excludes ``static_uri``:
+        that save is never going to touch the column, so an in-memory value
+        assigned but not meant to be written must not block an otherwise
+        unrelated save. Skipped too when the column was deferred at load and
+        never assigned since, because reading it to check it would fetch the
+        column the caller deliberately left behind.
+        """
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None and "static_uri" not in update_fields:
+            super().save(*args, **kwargs)
+            return
+        if "static_uri" not in self.get_deferred_fields():
+            _prepare_static_uri(self)
+        super().save(*args, **kwargs)
+
+
+class ConceptSchemeManager(StaticUriLookupMixin["ConceptScheme"]):
+    """Default manager for :class:`ConceptScheme`, adding static-URI-based lookup."""
+
+    def _get_by_local_parse(self, uri: str) -> "ConceptScheme":
+        """Resolve ``{base}/{slug}`` — R1's scheme URI composition, unchanged.
+
+        A remainder containing a further ``/`` belongs to a concept or a
+        collection, not a scheme, and is refused rather than mistaken for one.
+        """
+        prefix = f"{conf.get_base_uri()}/"
+        if not uri.startswith(prefix):
+            raise self.model.DoesNotExist(f"No vocabulary matches the URI {uri!r}.")
+        slug = uri[len(prefix) :].strip("/")
+        if not slug or "/" in slug:
+            raise self.model.DoesNotExist(f"No vocabulary matches the URI {uri!r}.")
+        return self.get(slug=slug)
+
+
+class ConceptScheme(StaticUriModel):
     """A controlled vocabulary — a named container for concepts (a SKOS concept scheme).
 
     The ``slug`` is derived from ``name`` on every save (dynamic while unpublished,
@@ -64,17 +377,39 @@ class ConceptScheme(models.Model):
             "Must be one of the application's configured languages."
         ),
     )
+    static_uri = _static_uri_field(
+        _(
+            "The identifier once it is fixed — assigned by this vocabulary's publisher, "
+            "or frozen when this vocabulary is published — held exactly as given and "
+            "never recomputed. Leave blank while this vocabulary is authored here: its identifier "
+            "is computed from this site's address until then. Editing this after "
+            "publication breaks references to the record and should be prevented "
+            "wherever the field is exposed."
+        )
+    )
+
+    objects = ConceptSchemeManager()
 
     class Meta:
         verbose_name = _("vocabulary")
         verbose_name_plural = _("vocabularies")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["static_uri"],
+                condition=Q(static_uri__isnull=False),
+                name="conceptscheme_static_uri_unique",
+            ),
+        ]
 
     def __str__(self) -> str:
         return self.name
 
     @property
-    def uri(self) -> str:
-        """The scheme's URI: the configured base address plus its slug."""
+    def local_url(self) -> str:
+        """Where this scheme is viewed on this site (FR-008), always this
+        site's own — the configured base address and its slug — regardless of
+        who assigned :attr:`static_uri`.
+        """
         return f"{conf.get_base_uri()}/{self.slug}"
 
     @property
@@ -136,23 +471,25 @@ class ConceptScheme(models.Model):
         super().save(*args, **kwargs)
 
 
-class ConceptManager(models.Manager["Concept"]):
-    """Default manager for :class:`Concept`, adding URI-based lookup.
+class ConceptManager(StaticUriLookupMixin["Concept"]):
+    """Default manager for :class:`Concept`, adding static-URI-based lookup.
 
     Subclasses the standard manager so ``Concept.objects`` keeps all default
-    behaviour and gains :meth:`get_by_uri`.
+    behaviour and gains :meth:`~StaticUriLookupMixin.get_by_uri`, which keeps
+    its existing name and exact local behaviour (FR-014) and additionally
+    resolves an externally assigned identifier.
     """
 
-    def get_by_uri(self, uri: str) -> "Concept":
-        """Return the concept identified by ``uri``.
+    def _get_by_local_parse(self, uri: str) -> "Concept":
+        """Resolve ``{base}/{scheme-slug}/{concept-slug}`` — R1's concept URI
+        composition, unchanged.
 
-        Requires ``uri`` to sit under the configured base address, strips that
-        base, splits the remainder into its ``scheme-slug/concept-slug`` parts
-        and resolves the concept by scheme slug and slug. The URI — not the
-        primary key — is the identity (Article IX); a URI outside the base or a
-        well-formed URI with no matching concept raises
-        :class:`Concept.DoesNotExist`, the standard ORM lookup behaviour.
-        Unicode slugs resolve the same as ASCII ones.
+        Splits the remainder below the configured base into its
+        ``scheme-slug/concept-slug`` parts and resolves by scheme slug and
+        slug. The URI — not the primary key — is the identity (Article IX); a
+        URI outside the base or a well-formed URI with no matching concept
+        raises :class:`Concept.DoesNotExist`, the standard ORM lookup
+        behaviour. Unicode slugs resolve the same as ASCII ones.
         """
         # Match on a '/'-terminated base so a sibling path that merely shares the
         # base as a raw prefix (e.g. '<base>X/a/b') is not treated as in-base.
@@ -167,7 +504,7 @@ class ConceptManager(models.Manager["Concept"]):
         return self.get(scheme__slug=scheme_slug, slug=concept_slug)
 
 
-class Concept(models.Model):
+class Concept(StaticUriModel):
     """A single term within a vocabulary (a SKOS concept).
 
     The ``slug`` is derived from ``label`` on every save (dynamic while
@@ -209,6 +546,17 @@ class Concept(models.Model):
             "A manual slug is left untouched when the label later changes."
         ),
     )
+    static_uri = _static_uri_field(
+        _(
+            "The identifier once it is fixed — assigned by this concept's publisher, or "
+            "frozen when its vocabulary is published — held exactly as given and never "
+            "recomputed. "
+            "Leave blank while this concept is authored here: its identifier is "
+            "computed from this site's address until then. Editing this after "
+            "publication breaks references to the record and should be prevented "
+            "wherever the field is exposed."
+        )
+    )
 
     objects = ConceptManager()
 
@@ -217,15 +565,27 @@ class Concept(models.Model):
         verbose_name_plural = _("concepts")
         constraints = [
             models.UniqueConstraint(fields=["scheme", "slug"], name="unique_concept_slug_per_scheme"),
+            models.UniqueConstraint(
+                fields=["static_uri"],
+                condition=Q(static_uri__isnull=False),
+                name="concept_static_uri_unique",
+            ),
         ]
 
     def __str__(self) -> str:
         return self.label
 
     @property
-    def uri(self) -> str:
-        """The concept's URI: its scheme's URI plus its slug."""
-        return f"{self.scheme.uri}/{self.slug}"
+    def local_url(self) -> str:
+        """Where this concept is viewed on this site (FR-008), always this
+        site's own regardless of who assigned :attr:`static_uri`.
+
+        Composed from the *scheme's* :attr:`~ConceptScheme.local_url`, never
+        from its ``uri`` — a concept added locally to a vocabulary whose own
+        identifier is externally fixed still needs a place on this site, not
+        one on the publisher's domain (spec.md Edge Cases §4).
+        """
+        return f"{self.scheme.local_url}/{self.slug}"
 
     def set_slug(self, slug: str) -> None:
         """Set an explicit slug that survives later relabels (FR-010).
@@ -874,7 +1234,28 @@ class ConceptRelation(models.Model):
         super().save(*args, **kwargs)
 
 
-class Collection(models.Model):
+class CollectionManager(StaticUriLookupMixin["Collection"]):
+    """Default manager for :class:`Collection`, adding static-URI-based lookup."""
+
+    def _get_by_local_parse(self, uri: str) -> "Collection":
+        """Resolve ``{base}/{scheme-slug}/collection/{slug}`` — R1's collection
+        URI composition, unchanged.
+
+        The literal ``collection`` segment is required, so a concept's identifier
+        (``{base}/{scheme-slug}/{slug}``, two segments) is never mistaken for one.
+        """
+        prefix = f"{conf.get_base_uri()}/"
+        if not uri.startswith(prefix):
+            raise self.model.DoesNotExist(f"No collection matches the URI {uri!r}.")
+        remainder = uri[len(prefix) :].strip("/")
+        parts = remainder.split("/")
+        if len(parts) != 3 or parts[1] != "collection":
+            raise self.model.DoesNotExist(f"No collection matches the URI {uri!r}.")
+        scheme_slug, _collection_segment, collection_slug = parts
+        return self.get(scheme__slug=scheme_slug, slug=collection_slug)
+
+
+class Collection(StaticUriModel):
     """A named grouping of concepts within one vocabulary (a SKOS collection).
 
     A collection captures a grouping the ``broader``/``narrower`` hierarchy does not
@@ -915,26 +1296,49 @@ class Collection(models.Model):
             "An unordered collection is a plain set."
         ),
     )
+    static_uri = _static_uri_field(
+        _(
+            "The identifier once it is fixed — assigned by this collection's publisher, "
+            "or frozen when its vocabulary is published — held exactly as given and "
+            "never recomputed. Leave blank while this collection is authored here: its identifier "
+            "is computed from this site's address until then. Editing this after "
+            "publication breaks references to the record and should be prevented "
+            "wherever the field is exposed."
+        )
+    )
+
+    objects = CollectionManager()
 
     class Meta:
         verbose_name = _("collection")
         verbose_name_plural = _("collections")
         constraints = [
             models.UniqueConstraint(fields=["scheme", "slug"], name="unique_collection_slug_per_scheme"),
+            models.UniqueConstraint(
+                fields=["static_uri"],
+                condition=Q(static_uri__isnull=False),
+                name="collection_static_uri_unique",
+            ),
         ]
 
     def __str__(self) -> str:
         return self.name
 
     @property
-    def uri(self) -> str:
-        """The collection's URI: its scheme's URI, a ``collection`` segment, and its slug.
+    def local_url(self) -> str:
+        """Where this collection is viewed on this site (FR-008), always this
+        site's own regardless of who assigned :attr:`static_uri`.
 
-        The ``/collection/`` segment keeps a collection's identity space disjoint from a
-        concept's (whose URI is ``{scheme.uri}/{slug}``), so the two can never mint the same
-        URI when RDF projection lands (research R4).
+        Composed from the *scheme's* :attr:`~ConceptScheme.local_url`, never
+        from its ``uri`` — a collection added locally to a vocabulary whose own
+        identifier is externally fixed still needs a place on this site, not
+        one on the publisher's domain (spec.md Edge Cases §4). The
+        ``/collection/`` segment keeps a collection's identity space disjoint
+        from a concept's (whose local URL is ``{scheme.local_url}/{slug}``),
+        so the two can never mint the same address when RDF projection lands
+        (research R4).
         """
-        return f"{self.scheme.uri}/collection/{self.slug}"
+        return f"{self.scheme.local_url}/collection/{self.slug}"
 
     def save(self, *args, **kwargs):
         """Derive the slug from ``name`` and refuse an empty or colliding slug.
