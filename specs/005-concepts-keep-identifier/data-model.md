@@ -42,7 +42,8 @@ from `save()`:
 
 1. Parses with `urllib.parse.urlsplit`.
 2. Requires a non-empty scheme and a non-empty remainder (absolute, not a bare path).
-3. Refuses `javascript`, `data`, `vbscript` (case-insensitive).
+3. Requires a scheme on the configured allowlist, and refuses `javascript`, `data`, `vbscript`
+   outright even if a downstream override adds one of them.
 4. Refuses anything over 500 characters.
 
 Every refusal raises `ValidationError` with a translatable message and named placeholders (FR-010).
@@ -51,22 +52,22 @@ Every refusal raises `ValidationError` with a translatable message and named pla
 field-only validator would leave the import path — the path this feature exists to serve — accepting
 values the specification says can never be stored. R1 defended `Concept.slug` from the same trap.
 
-`clean()` and `save()` additionally refuse a `static_uri` already held by a record of a *different*
-model. Within one model the database constraint is the guarantee; across the three tables no portable
-constraint exists (research R4), so this check covers it. Two indexed `.exists()` queries, and only
-when the column is set — so nothing is paid for a still-provisional, locally authored record.
+`clean()` and `save()` do nothing beyond this validation and normalising `""` to `None`
+(decisions.md D18). Uniqueness is per model, a database `UniqueConstraint` and nothing else. There
+is no cross-model probe, no read-back of the stored value, no row lock, and no refusal of a later
+change to a stored identifier — the guard that did all of that was removed after four review rounds
+each found a further way past it.
 
-**The real cost, corrected (T037)**: that last clause is true but was incomplete as originally
-written — it says nothing is paid for a locally-authored record with no identifier, but says nothing
-about a record that *does* hold one. Before T029, those two queries ran on *every* save of a record
-that already carried an identifier, including a plain re-save that changed nothing about it at all —
-paid on every save, not once at publication. T029's database-read-back redesign (closing the
-rewrite-guard gaps a snapshot left open) reads the stored value back regardless, and once it holds
-that value, T029 folds in skipping this cross-model probe — and the shadow check T034 added alongside
-it — whenever the value being saved is unchanged from what is already stored, since nothing that
-depends on the value could have changed either. A re-save of an already-fixed record now pays only the
-one read-back query these checks already needed; the two `.exists()` queries run only when the value
-is actually being set or changed.
+The reason it was never needed is that identity is already unique by construction. R1 gives
+`ConceptScheme.slug` a site-wide unique constraint and gives `Concept` and `Collection` a unique
+`(scheme, slug)` each, so a composed URI cannot collide: the parts it is built from cannot. A
+collision between two *stored* identifiers across models needs a source file that declares the same
+URI for a `skos:Concept` and a `skos:Collection`, which is malformed RDF, and #50's importer reports
+it while reading the file.
+
+Keeping a published identifier still is an interface concern: make the field non-editable wherever
+it is exposed once the record is published. That belongs with whichever feature adds the admin, since
+this package has no `admin.py` yet.
 
 ## Manager lookup
 

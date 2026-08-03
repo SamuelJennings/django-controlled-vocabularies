@@ -54,9 +54,9 @@ identifiers · vocabulary-as-data over vocabulary-as-code · SKOS fidelity over 
 ## Configuration
 
 Every vocabulary, concept, and collection has a URI — its identity, always present. It is static,
-held exactly as given and never recomputed, once it is fixed: a record imported from an external
-vocabulary keeps the identifier its publisher assigned it. A record authored here instead has a
-dynamic URI, composed from a base address, until it is published, at which point that becomes
+held exactly as given and never recomputed by the app, once it is fixed: a record imported from an
+external vocabulary keeps the identifier its publisher assigned it. A record authored here instead
+has a dynamic URI, composed from a base address, until it is published, at which point that becomes
 static too. Set the base address in your Django settings:
 
 ```python
@@ -69,12 +69,16 @@ address for viewing a record is always composed from this base and the record's 
 is `{base}/{scheme-slug}/{concept-slug}` — even when that record's static URI points elsewhere, and
 the slugs follow the labels while a vocabulary is unpublished.
 
-That guarantee holds when a record is saved the normal way, through `save()` or validated with
-`full_clean()`. Django's bulk write paths — `QuerySet.update()`, `bulk_create()`, `bulk_update()`,
-and raw SQL — skip it, the same way they skip every other model-level rule. This matters most when
-you import a vocabulary at scale: a bulk write is the natural choice there for speed, and it is also
-the one path where a static URI can be rewritten or duplicated without a validation error to stop
-it. Use `save()` for any record whose URI needs to stay fixed.
+A record's place in its vocabulary is what keeps its URI distinct, and the database enforces that:
+a vocabulary's slug is unique across the site, and a concept's or collection's slug is unique
+within its vocabulary. A composed URI therefore cannot collide, because the parts it is built from
+cannot. A stored `static_uri` carries its own unique index per model on top of that.
+
+Nothing stops you changing a `static_uri` once it is set. That is deliberate — a published
+identifier is not supposed to move, but keeping it still is a matter of not editing it, not of the
+model refusing every write path. Make the field non-editable wherever you expose it once a record
+is published, and treat a value that differs between two imports of the same vocabulary as a
+problem with the source file.
 
 An externally assigned static URI must use one of a small set of accepted schemes — `http`,
 `https`, `urn`, `doi`, `info`, `ark`, `tag`, `hdl`, and `oai` by default, since those are what real

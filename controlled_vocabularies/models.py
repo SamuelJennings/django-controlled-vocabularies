@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, TypeVar
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.core.validators import validate_unicode_slug
-from django.db import DEFAULT_DB_ALIAS, connections, models, transaction
+from django.db import models
 from django.db.models import F, Max, Q
 from django.utils.text import Truncator, slugify
 from django.utils.translation import gettext_lazy as _
@@ -34,17 +34,6 @@ if TYPE_CHECKING:
 #: is belt-and-braces (T035): a second gate that still applies even if a
 #: downstream project's overridden allowlist includes one of them.
 _UNSAFE_STATIC_URI_SCHEMES = frozenset({"javascript", "data", "vbscript"})
-
-#: C0 controls, DEL, and C1 controls — refused anywhere in a static URI
-#: (review round 4): a stored identifier is later rendered as a link, and a
-#: control character (e.g. a raw newline splitting an HTTP header, or a
-#: bidi-override character disguising the visible URL) is a hazard there that
-#: no scheme allowlist catches. Checked on the raw value, before
-#: ``urllib.parse.urlsplit`` runs: ``urlsplit`` silently strips a bare ``\t``,
-#: ``\r``, or ``\n`` from the value (WHATWG URL parsing behaviour it
-#: inherited), so checking the parsed result instead would miss exactly the
-#: characters most worth catching.
-_CONTROL_CHARACTERS = frozenset(chr(c) for c in (*range(0x00, 0x20), 0x7F, *range(0x80, 0xA0)))
 
 #: The length bound for a static URI (FR-004, decisions.md D5): far beyond any
 #: identifier real SKOS vocabularies use, and inside the unique-index limit of
@@ -69,17 +58,21 @@ def validate_static_uri(value: str) -> None:
 
     Checks length first — before parsing even runs — so an arbitrarily long
     hostile value is refused with a short, bounded message rather than one
-    that runs `urlsplit` on it and then echoes it in full (T032). Refuses any
-    C0, DEL, or C1 control character next, checked on the raw value because
-    `urlsplit` silently strips some of them before a post-parse check would
-    ever see them (review round 4). Requires a well-formed absolute
-    identifier — a non-empty scheme and a non-empty remainder, so a bare
-    relative path is refused — and refuses a scheme not on the configured
-    allowlist (T035). Used both as a field validator (so
-    ``full_clean()`` catches it) and called directly from each model's
-    ``save()``, because Django's ``save()`` never calls ``full_clean()`` and
-    the import path this feature exists to serve writes through ``save()``
-    directly (research R5).
+    that runs `urlsplit` on it and then echoes it in full (T032). Requires a
+    well-formed absolute identifier — a non-empty scheme and a non-empty
+    remainder, so a bare relative path is refused — and refuses a scheme not
+    on the configured allowlist (T035). Used both as a field validator (so
+    ``full_clean()`` catches it) and called from
+    :func:`_prepare_static_uri` on the ``save()`` path, because Django's
+    ``save()`` never calls ``full_clean()`` and the import path this feature
+    exists to serve writes through ``save()`` directly (research R5).
+
+    The allowlist is the one static-URI rule that survived the round-5 cut
+    (decisions.md D18). It stays because this is a reusable package: a
+    downstream project may let its users upload SKOS files, and a stored
+    ``javascript:`` identifier rendered as a link by R6's browsing interface
+    is an injection route Django's template escaping does not close. It costs
+    one in-memory parse and no queries.
 
     ``urllib.parse.urlsplit`` itself raises a bare ``ValueError`` — not a
     ``ValidationError`` — for some malformed input (e.g. a netloc with
@@ -93,12 +86,6 @@ def validate_static_uri(value: str) -> None:
             _("A static URI cannot exceed %(max_length)s characters; '%(uri)s' has %(length)s."),
             params={"max_length": STATIC_URI_MAX_LENGTH, "uri": _echoed_uri(value), "length": len(value)},
             code="static_uri_too_long",
-        )
-    if not _CONTROL_CHARACTERS.isdisjoint(value):
-        raise ValidationError(
-            _("'%(uri)s' contains a control character, which is not permitted."),
-            params={"uri": _echoed_uri(value)},
-            code="static_uri_control_character",
         )
     try:
         parsed = urllib.parse.urlsplit(value)
@@ -131,283 +118,43 @@ def validate_static_uri(value: str) -> None:
         )
 
 
-def _static_uri_still_deferred(instance: "StaticUriModel") -> bool:
-    """True when the column was never loaded and has not been assigned since.
+def _prepare_static_uri(instance: "StaticUriModel") -> None:
+    """Normalise and validate ``static_uri`` ahead of a write.
 
-    Nothing about the identifier can have changed in that case, so every check
-    below can be skipped — and must be, because merely reading
-    ``instance.static_uri`` to check it would fetch the column that was
-    deliberately left behind.
-    """
-    return "static_uri" in instance.get_deferred_fields()
+    Two things only, both in memory and neither costing a query:
 
+    *Absence is ``None``, never ``""``.* ``static_uri`` is nullable so the
+    partial ``UniqueConstraint`` — which covers non-null values only — leaves
+    provisional records unconstrained. An empty string is not null, so it
+    falls inside that constraint while :attr:`uri` and
+    :attr:`has_static_uri` both read it as absent: the record behaves as
+    provisional yet occupies the unique slot, and the second one saved fails
+    at the database with an opaque ``IntegrityError``. Assigning ``""``
+    rather than ``None`` is the ordinary shape of importer and serializer
+    code (``node.get("about") or ""``), which is exactly the path this
+    feature exists to serve.
 
-def _select_for_update_is_supported(using: str) -> bool:
-    """Whether the ``using`` database connection can lock a row with
-    ``SELECT ... FOR UPDATE`` (review round 4, the read-compare-write race).
+    *Format is checked here as well as on the field.*
+    :func:`validate_static_uri` is a field validator, so ``full_clean()``
+    runs it — but ``save()`` never calls ``full_clean()``, and #50's importer
+    writes through ``save()`` directly (research R5). Without this call the
+    scheme allowlist would not apply on the one path that matters.
 
-    SQLite reports ``features.has_select_for_update = False``; there,
-    :func:`_stored_static_uri`'s locking read degrades to the previous,
-    unlocked read rather than raising ``NotSupportedError``.
-    """
-    return connections[using].features.has_select_for_update
-
-
-def _stored_static_uri(instance: "StaticUriModel", *, lock: bool = False) -> str | None:
-    """The identifier the database currently holds for ``instance``.
-
-    ``None`` both for a row holding no identifier and for one that does not
-    exist in the database yet (``instance.pk is None``) — a new row cannot
-    rewrite anything stored, so there is nothing to read back for it.
-
-    ``lock=True`` issues this as ``SELECT ... FOR UPDATE`` (review round 4).
-    Only :meth:`StaticUriModel.save` ever passes it, and only from inside the
-    transaction that also performs the write: read-then-write with no lock
-    held let two concurrent saves of the same row both read "nothing
-    stored" before either wrote, so the second silently replaced an
-    identifier the first believed fixed. Holding the row locked from the
-    read through the write closes that window on a backend that supports it
-    (:func:`_select_for_update_is_supported`).
-    """
-    if instance.pk is None:
-        return None
-    qs = type(instance)._base_manager.filter(pk=instance.pk)
-    if lock:
-        qs = qs.select_for_update()
-    return qs.values_list("static_uri", flat=True).first()
-
-
-def _static_uri_models() -> tuple[type["StaticUriModel"], ...]:
-    """Every concrete model that carries a ``static_uri`` column (T028).
-
-    Derived from :class:`StaticUriModel`'s live subclasses rather than a
-    hardcoded tuple, so a fourth model enrols itself in the cross-model
-    uniqueness check the moment it subclasses the abstract base — forgetting to
-    add it to a hand-maintained list is no longer possible.
-    """
-    return tuple(model for model in StaticUriModel.__subclasses__() if not model._meta.abstract)
-
-
-def _normalise_uri_authority(uri: str) -> str:
-    """``uri`` with its scheme and authority (host, and port if given)
-    lower-cased, for comparison purposes only — never used to mutate a
-    stored value (review round 4).
-
-    RFC 3986 §3.1/§3.2.2: the scheme and the authority are case-insensitive;
-    the path, query, and fragment are not, so those are left exactly as
-    given. Both static-URI guards that compare against another address —
-    :func:`_reject_static_uri_shadowing_local_url` and
-    :func:`_reject_static_uri_held_by_another_model` — used to compare in
-    plain Python, which folds no case at all. The lookup each one defends
-    (``get_by_uri``'s ``self.get(static_uri=uri)``, and every plain
-    ``static_uri=...`` filter) is a database query following the
-    deployment's collation, and MySQL's default collation is
-    case-insensitive: a value the Python guard saw as distinct could still
-    resolve, in production, to the very record it was meant to be refused
-    against. Folding scheme/host here brings the guard back in line with
-    that lookup regardless of which backend is deployed.
-
-    ``urllib.parse.urlsplit`` raises a bare ``ValueError`` for some malformed
-    input (T031); returning ``uri`` unfolded on that path leaves the two
-    comparisons above unable to find a match, which is fine, because
-    :func:`validate_static_uri` is the authority on refusing an unparseable
-    value and does so with a proper ``ValidationError`` on the ``clean()``
-    path (:meth:`StaticUriModel.clean`) that runs it first.
-    """
-    try:
-        parsed = urllib.parse.urlsplit(uri)
-    except ValueError:
-        return uri
-    return urllib.parse.urlunsplit(
-        (parsed.scheme.lower(), parsed.netloc.lower(), parsed.path, parsed.query, parsed.fragment)
-    )
-
-
-def _reject_static_uri_held_by_another_model(instance: "StaticUriModel") -> None:
-    """Refuse a ``static_uri`` already held by a record of a *different* model.
-
-    Uniqueness within one model is a database constraint (FR-006, per-model
-    ``UniqueConstraint``). No portable constraint spans the three tables, so this
-    covers the cross-model case (research R4): a concept and a collection, say,
-    must not hold the same externally assigned identifier. Only runs when the
-    column is actually set, so nothing is paid for a still-provisional record.
-
-    Compared with scheme/host folded per :func:`_normalise_uri_authority`
-    (review round 4), so this does not depend on the deployment database's
-    collation to catch a case-differing duplicate. ``__iexact`` is used to
-    narrow the query first: it folds the *whole* value, which is a superset
-    of the scheme/host-only fold below (two values equal under the narrower
-    fold are always equal under ``__iexact`` too), so it cannot miss a real
-    match; it can only over-match a candidate whose *path* differs by case,
-    which the precise check below then discards, because the path stays
-    case-sensitive per RFC 3986 §3.3.
-    """
-    if not instance.static_uri:
-        return
-    model = type(instance)
-    normalised = _normalise_uri_authority(instance.static_uri)
-    others = [candidate for candidate in _static_uri_models() if candidate is not model]
-    for candidate in others:
-        stored_values = candidate._default_manager.filter(static_uri__iexact=instance.static_uri).values_list(
-            "static_uri", flat=True
-        )
-        if any(_normalise_uri_authority(stored) == normalised for stored in stored_values):
-            raise ValidationError(
-                {
-                    "static_uri": ValidationError(
-                        _("The static URI '%(uri)s' is already held by another record."),
-                        params={"uri": instance.static_uri},
-                        code="static_uri_held_elsewhere",
-                    )
-                }
-            )
-
-
-def _resolve_as_local_url(uri: str) -> "StaticUriModel | None":
-    """Resolve ``uri`` as a local address of any of the three models, or
-    ``None`` when it matches none of them. Used only by the shadow check
-    (T034) below — the three models' local address spaces are structurally
-    disjoint (research R4: one, two, or three path segments, the latter with
-    a literal ``collection`` marker), so at most one model's parse can ever
-    match a given value.
-    """
-    for model in _static_uri_models():
-        manager = model._default_manager
-        try:
-            # mypy/django-stubs types _default_manager as the generic base
-            # Manager, which does not declare _get_by_local_parse — the same
-            # generic-vs-concrete gap as decisions.md D11 and T033's DoesNotExist.
-            return manager._get_by_local_parse(uri)  # type: ignore[attr-defined,no-any-return]
-        except ObjectDoesNotExist:
-            continue
-    return None
-
-
-def _reject_static_uri_shadowing_local_url(instance: "StaticUriModel") -> None:
-    """Refuse an externally assigned identifier that collides with a
-    *different* record's own local address (T034).
-
-    Verified hijack: with the base address ``https://example.org/vocabularies``,
-    a local concept whose ``local_url`` is
-    ``https://example.org/vocabularies/colours/red`` was displaced when another
-    record was saved with ``static_uri`` set to that exact string —
-    ``get_by_uri`` tries a stored match first (correctly, per FR-003/R6), so it
-    then returned the imposter, and the victim was no longer reachable by its
-    own identity; #50's importer would then write into the wrong record.
-
-    Only runs when the value sits under this site's configured base address;
-    resolving to nothing (an external identifier that legitimately lands
-    there, spec.md Edge Case 1) or to this same record is accepted.
-
-    The reverse direction — a later slug change moving a local record's own
-    address onto an identifier already stored elsewhere — is not handled here
-    (decisions.md, residual limitation): the identifier is fixed by then, so
-    the only correct response would be refusing the rename, which belongs
-    with R4's publication lifecycle.
-
-    Compared with scheme/host folded per :func:`_normalise_uri_authority`
-    (review round 4): this check used to compare in plain Python, which is
-    case-sensitive, while the ``get_by_uri`` lookup it defends is a database
-    query, and MySQL's default collation is case-insensitive. A
-    ``static_uri`` differing from a victim's ``local_url`` only by
-    scheme/host case used to be accepted here and then still resolved to the
-    victim under that collation — the same hijack, reopened through case.
-    """
-    uri = instance.static_uri
-    if not uri:
-        return
-    normalised_uri = _normalise_uri_authority(uri)
-    if not normalised_uri.startswith(_normalise_uri_authority(conf.get_base_uri())):
-        return
-    resolved = _resolve_as_local_url(normalised_uri)
-    if resolved is None:
-        return
-    if type(resolved) is type(instance) and resolved.pk == instance.pk:
-        return
-    raise ValidationError(
-        {
-            "static_uri": ValidationError(
-                _("'%(uri)s' is already this site's own address for a different record."),
-                params={"uri": uri},
-                code="static_uri_shadows_local_url",
-            )
-        }
-    )
-
-
-def _normalise_blank_static_uri(instance: "StaticUriModel") -> None:
-    """Store the *absence* of an identifier as ``None``, never as ``""``.
-
-    ``static_uri`` is nullable so the partial ``UniqueConstraint`` — which
-    only covers non-null values — leaves provisional records unconstrained. An
-    empty string is not null, so it falls inside that constraint while
-    :attr:`uri` and :attr:`has_static_uri` both read it as absent: the record
-    behaves as provisional yet occupies the unique slot, and the second one
-    saved fails at the database with an opaque ``IntegrityError``. Assigning
-    ``""`` rather than ``None`` is the ordinary shape of importer and serializer
-    code (``node.get("about") or ""``), which is exactly the path this feature
-    exists to serve, so it is normalised here rather than left to every caller.
+    What this deliberately does **not** do is defend a stored identifier
+    against later modification. Keeping an identifier stable is a data
+    concern and a UI concern — the field is made non-editable once the record
+    is published, wherever it is exposed — not something the model enforces
+    against every write path (decisions.md D18, superseding FR-002/FR-013's
+    earlier framing).
     """
     if instance.static_uri == "":
         instance.static_uri = None
-
-
-def _check_static_uri(instance: "StaticUriModel", *, validate_format: bool, lock: bool = False) -> None:
-    """Every ``static_uri`` invariant a ``save()`` or ``full_clean()`` owes, in
-    one place.
-
-    The single authority for "is an identifier already stored" is the database,
-    read back here with :func:`_stored_static_uri` — never an in-memory
-    snapshot taken at some earlier load. A snapshot goes stale the moment a
-    second instance of the same row is saved, refreshed, or constructed with an
-    explicit ``pk``: a three-lens review found all three bypass a
-    snapshot-based guard and let a save rewrite or silently clear an identifier
-    a *different* instance had already stored (T029). A read-back cannot go
-    stale, at the cost of one indexed query per save of an existing row whose
-    column is loaded; an insert pays nothing, since :func:`_stored_static_uri`
-    short-circuits on ``instance.pk is None``.
-
-    ``validate_format`` is ``False`` from ``clean()``, called only under
-    ``full_clean()``, where the field validator already ran
-    :func:`validate_static_uri`; it is ``True`` from ``save()``, which never
-    calls ``full_clean()`` and is the path the import work this feature exists
-    to serve actually uses (research R5).
-
-    ``lock=True`` (review round 4) makes the read above a locking one —
-    passed only by :meth:`StaticUriModel.save`, and only when it has also
-    wrapped this call and its own write in the same transaction: a read and
-    a write that are each individually correct can still race each other
-    when two instances interleave between them (the read-compare-write
-    race), which no per-call correctness fixes.
-    """
-    if _static_uri_still_deferred(instance):
-        return
-    _normalise_blank_static_uri(instance)
-    stored = _stored_static_uri(instance, lock=lock)
-    if stored is not None and instance.static_uri != stored:
-        raise ValidationError(
-            {
-                "static_uri": ValidationError(
-                    _("The static URI '%(uri)s' is fixed and cannot be changed or cleared once stored."),
-                    params={"uri": stored},
-                    code="static_uri_fixed",
-                )
-            }
-        )
     if not instance.static_uri:
         return
-    if validate_format:
-        try:
-            validate_static_uri(instance.static_uri)
-        except ValidationError as exc:
-            raise ValidationError({"static_uri": exc}) from exc
-    if instance.static_uri == stored:
-        # Nothing about the value changed, so nothing that depends on it could
-        # have either — skip the shadow and cross-model probes' wasted
-        # queries (T029, extended to the shadow check by T034).
-        return
-    _reject_static_uri_shadowing_local_url(instance)
-    _reject_static_uri_held_by_another_model(instance)
+    try:
+        validate_static_uri(instance.static_uri)
+    except ValidationError as exc:
+        raise ValidationError({"static_uri": exc}) from exc
 
 
 def _configured_language_codes() -> set[str]:
@@ -497,22 +244,30 @@ class StaticUriModel(models.Model):
     """Abstract base for a model carrying an externally assigned identifier (T028).
 
     ``ConceptScheme``, ``Concept``, and ``Collection`` each subclass this rather
-    than repeating the ``uri``, ``has_static_uri``, the static-URI half of
-    ``clean()``, and the save-tail validation hook byte-identically three times.
-    A concrete subclass supplies only its own ``local_url`` composition, its
-    ``Meta.constraints`` entry name, and its own call to
-    :func:`_static_uri_field` — the one place every ``static_uri`` field's
-    shared attributes are defined, with only ``help_text`` wording varying
-    per model.
+    than repeating the ``uri``, ``has_static_uri``, ``clean()``, and ``save()``
+    byte-identically three times. A concrete subclass supplies only its own
+    ``local_url`` composition, its ``Meta.constraints`` entry name, and its own
+    call to :func:`_static_uri_field` — the one place every ``static_uri``
+    field's shared attributes are defined, with only ``help_text`` wording
+    varying per model.
+
+    Uniqueness is per model, a database ``UniqueConstraint`` on the column and
+    nothing more (decisions.md D18). The identity that actually needs
+    protecting — a record's place in the vocabulary — is already unique by
+    construction, because ``ConceptScheme.slug`` is unique app-wide and
+    ``Concept`` and ``Collection`` each carry a unique ``(scheme, slug)``
+    constraint from R1. A composed URI cannot collide, because the parts it is
+    built from cannot.
     """
 
     static_uri = _static_uri_field(
         _(
             "The identifier once it is fixed — assigned by this record's publisher, "
             "or frozen when this vocabulary is published — held exactly as given and "
-            "never recomputed by save() after that; a bulk queryset write bypasses "
-            "this. Leave blank while this record is authored here: its identifier is "
-            "computed from this site's address until then."
+            "never recomputed. Leave blank while this record is authored here: its "
+            "identifier is computed from this site's address until then. Editing this "
+            "after publication breaks references to the record and should be prevented "
+            "wherever the field is exposed."
         )
     )
 
@@ -545,48 +300,26 @@ class StaticUriModel(models.Model):
         return bool(self.static_uri)
 
     def clean(self):
-        """Refuse a ``static_uri`` that rewrites or clears a stored one, or is
-        already held by a record of a different model.
-
-        Field validators (:func:`validate_static_uri`) already cover format on the
-        ``full_clean()`` path; the checks here need a query beyond one field so they
-        live here rather than on the field itself (research R4).
-        """
+        """Normalise a blank ``static_uri`` to ``None`` and check its format."""
         super().clean()
-        _check_static_uri(self, validate_format=False)
+        _prepare_static_uri(self)
 
     def save(self, *args, **kwargs):
-        """Validate ``static_uri`` — reading the database, never a stale
-        snapshot — before the write.
+        """Normalise and validate ``static_uri``, then write.
 
-        Skipped entirely when ``update_fields`` is given and excludes
-        ``static_uri`` (T030): that save is never going to touch the
-        column, so an in-memory value assigned but not meant to be written —
-        malformed, or conflicting with what another instance already stored —
-        must not block an otherwise unrelated save.
-
-        On an update whose column is loaded, the read and the write are
-        wrapped in one transaction with the read as ``SELECT ... FOR UPDATE``
-        (review round 4), on a backend that supports it: without a lock held
-        across both, two concurrent saves of the same row can each read
-        "nothing stored" before either writes, and both then write — the
-        second silently replacing an identifier the first believed fixed,
-        with no error from either. An insert has no row to lock, and a save
-        that never reads the column back (excluded by ``update_fields``, or
-        never even loaded) has nothing that needs locking either — neither
-        pays for it.
+        Skipped when ``update_fields`` is given and excludes ``static_uri``:
+        that save is never going to touch the column, so an in-memory value
+        assigned but not meant to be written must not block an otherwise
+        unrelated save. Skipped too when the column was deferred at load and
+        never assigned since, because reading it to check it would fetch the
+        column the caller deliberately left behind.
         """
         update_fields = kwargs.get("update_fields")
         if update_fields is not None and "static_uri" not in update_fields:
             super().save(*args, **kwargs)
             return
-        using = kwargs.get("using") or self._state.db or DEFAULT_DB_ALIAS
-        if self.pk is not None and not _static_uri_still_deferred(self) and _select_for_update_is_supported(using):
-            with transaction.atomic(using=using):
-                _check_static_uri(self, validate_format=True, lock=True)
-                super().save(*args, **kwargs)
-            return
-        _check_static_uri(self, validate_format=True)
+        if "static_uri" not in self.get_deferred_fields():
+            _prepare_static_uri(self)
         super().save(*args, **kwargs)
 
 
@@ -648,9 +381,10 @@ class ConceptScheme(StaticUriModel):
         _(
             "The identifier once it is fixed — assigned by this vocabulary's publisher, "
             "or frozen when this vocabulary is published — held exactly as given and "
-            "never recomputed by save() after that; a bulk queryset write bypasses "
-            "this. Leave blank while this vocabulary is authored here: its identifier "
-            "is computed from this site's address until then."
+            "never recomputed. Leave blank while this vocabulary is authored here: its identifier "
+            "is computed from this site's address until then. Editing this after "
+            "publication breaks references to the record and should be prevented "
+            "wherever the field is exposed."
         )
     )
 
@@ -816,9 +550,11 @@ class Concept(StaticUriModel):
         _(
             "The identifier once it is fixed — assigned by this concept's publisher, or "
             "frozen when its vocabulary is published — held exactly as given and never "
-            "recomputed by save() after that; a bulk queryset write bypasses this. "
+            "recomputed. "
             "Leave blank while this concept is authored here: its identifier is "
-            "computed from this site's address until then."
+            "computed from this site's address until then. Editing this after "
+            "publication breaks references to the record and should be prevented "
+            "wherever the field is exposed."
         )
     )
 
@@ -1564,9 +1300,10 @@ class Collection(StaticUriModel):
         _(
             "The identifier once it is fixed — assigned by this collection's publisher, "
             "or frozen when its vocabulary is published — held exactly as given and "
-            "never recomputed by save() after that; a bulk queryset write bypasses "
-            "this. Leave blank while this collection is authored here: its identifier "
-            "is computed from this site's address until then."
+            "never recomputed. Leave blank while this collection is authored here: its identifier "
+            "is computed from this site's address until then. Editing this after "
+            "publication breaks references to the record and should be prevented "
+            "wherever the field is exposed."
         )
     )
 

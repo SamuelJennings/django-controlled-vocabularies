@@ -363,3 +363,55 @@ the mirror-the-source-tree rule.
 
 **Cleared** on that evidence, per the tamper-check contract, which allows a legitimate change to be
 approved with a recorded decision rather than escalated.
+
+## D18 — The identity guard is removed: uniqueness is per model, immutability is a UI concern
+
+**Supersedes** D12 (deferred loads and when fixedness starts), D13's refusal half (clearing a
+stored identifier with a blank), D14 (shadowing a local record's address, and its reverse), the
+cross-model half of research R4, and the case-folding and row-locking work added in review
+round 4. It narrows FR-002, FR-006, FR-011 and FR-013.
+
+**Decided by Sam**, 2026-08-03, after four review rounds each found a further way past the
+save-time guard.
+
+**What was built and is now gone.** Roughly 250 lines enforcing two rules in Python on every
+save: that no two records anywhere hold the same stored identifier, and that a stored identifier
+can never be rewritten or cleared. Between them they needed a database read-back on every save, a
+`SELECT ... FOR UPDATE` inside a transaction, a probe of the two other models, a check that a
+stored identifier did not collide with a local record's composed address, its mirror, a
+scheme-and-host case-folding helper so those comparisons matched what the database would match,
+and a subclass registry to keep the probe complete. Three reviewers found a defect in some part of
+that machinery in each of rounds 2, 3, 4 and 5.
+
+**Why it goes — the uniqueness half.** It was never needed. R1 already gives `ConceptScheme.slug`
+a site-wide unique constraint and `Concept` and `Collection` a unique `(scheme, slug)` each, so a
+*composed* URI cannot collide: the parts it is built from cannot. Every guard defending composed
+identifiers was re-proving a database constraint that predates this feature. For two *stored*
+identifiers to collide across models, a source file would have to give a `skos:Concept` and a
+`skos:Collection` the same URI, which in RDF asserts they are the same resource. No real published
+vocabulary does this, and #50's importer catches such a file while reading it, naming the offending
+statement — a better error than an `IntegrityError` from a constraint the caller never touched.
+What remains is a per-model unique index on the column, which is the index the lookup needs anyway
+and costs nothing beyond it.
+
+**Why it goes — the immutability half.** An imported vocabulary's identifiers are stable across
+imports because the publisher keeps them stable. Where they are not, that is a defect in the source
+data, not something the model layer should be spending a query and a row lock per save to detect.
+The place to stop a curator editing a published record's identifier is the interface that exposes
+the field, by making it non-editable once the record is published — recorded here as a requirement
+on whichever feature adds the admin, since this package currently has no `admin.py`, no `urls.py`
+and no views.
+
+**What survives**: the field, its per-model unique index, `uri`, `local_url`, `has_static_uri`,
+`get_by_uri` (including its refusal of a falsy identifier, which otherwise matched an arbitrary
+provisional record), normalising `""` to `None` on the way in, and `validate_static_uri`.
+
+**Why the validator survives when nothing else does.** It is one declarative field validator with
+no queries and no state. This is a reusable package, and a downstream project may let its users
+upload SKOS files, so a stored `javascript:` identifier rendered as a link by R6's browsing
+interface is an injection route Django's template autoescaping does not close. The control-character
+check went with the rest of the round-4 work; the scheme allowlist stayed.
+
+**Revisit if** a real vocabulary is found that gives two different kinds of record the same URI, or
+if R4's publication action turns out to need a stronger guarantee than "the application never
+overwrites a stored value" when it freezes identifiers at import scale.

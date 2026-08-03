@@ -65,45 +65,39 @@ property does the resolving.
   and every downstream consumer to say what the name already said, and breaks a published package's API
   for no behavioural gain.
 
-## R4 — Uniqueness is a per-model database constraint plus a cross-model validation check
+## R4 — Uniqueness is a per-model database constraint, and nothing else
 
-**Decision**: each model gets a `UniqueConstraint` on its stored identifier column. A cross-model check
-at validation refuses an externally assigned identifier already held by a record of a different type.
+**Superseded 2026-08-03 by decisions.md D18.** This section originally paired the per-model
+constraint with a cross-model validation check, and recorded the race that check loses to a
+concurrent write as an accepted cost. Both the check and the acceptance are gone.
 
-**Rationale**: FR-006 wants no two records to share an identifier, enforced by the database. Within a
-table that is a single constraint. *Across* the three tables no portable database constraint exists —
-cross-table uniqueness would need a shared identity table with a one-to-one from each model, which is a
-substantial architectural addition to prevent a collision that requires a source file to assign one URI
-to both a concept and a collection. The per-model constraints cover the case that actually occurs (the
-same concept identifier twice), and the validation check covers the rest.
+**Decision**: each model gets a `UniqueConstraint` on its stored identifier column. Uniqueness
+across the three models is not enforced at all.
 
-Provisional identifiers need no constraint at all: composition is structurally unique already. A scheme
-composes one segment below the base, a concept two, and a collection three with a literal `collection`
-segment in the middle, and slugs cannot contain a separator — so no two provisional identifiers can
-collide, which is the same argument R1 used to justify not storing a URI in the first place.
+**Rationale**: identity is already unique by construction, and was before this feature existed. R1
+gives `ConceptScheme.slug` a site-wide unique constraint and gives `Concept` and `Collection` a
+unique `(scheme, slug)` each. A composed identifier therefore cannot collide, because the parts it
+is built from cannot — the same argument R1 used to justify not storing a URI in the first place,
+and the reason the composition is structurally unambiguous besides (a scheme composes one segment
+below the base, a concept two, a collection three with a literal `collection` segment between).
 
-**The race, stated plainly (T037)**: the *cross-model* half of this decision — the validation check
-that covers "the rest" above — is exactly the "no constraint, application checks only" alternative
-rejected two paragraphs below, for exactly the reason given there: it loses to a concurrent write. Two
-saves for a concept and a collection carrying the same externally assigned identifier, committed
-concurrently, can each run the cross-model `.exists()` probe before the other's row commits, each see
-nothing held elsewhere, and both succeed — the per-model constraint cannot catch this because the
-collision is *across* tables. This is not a new risk introduced later; it was already true of R4 as
-designed and is accepted for the reason given above (a substantial architectural addition to close a
-collision that requires a source file to deliberately assign one URI to both a concept and a
-collection). Recorded here rather than left implicit, since the alternatives list otherwise reads as
-though the rejected shape and the chosen one differ in this respect, when for the cross-model case they
-do not.
+For two *stored* identifiers to collide across models, a source file would have to declare the same
+URI for a `skos:Concept` and a `skos:Collection`. In RDF that asserts the two are the same resource,
+so the file is malformed rather than merely awkward, and no real published vocabulary does it.
+#50's importer reads the file and can report the offending statement, which is a better error than
+an `IntegrityError` naming a constraint the caller never knowingly touched.
+
+The per-model constraint is kept because the column needs an index for `get_by_uri` regardless, and
+a unique index is that index.
 
 **Alternatives**:
-- *A shared `Identifier` table with a one-to-one from each model* — rejected as premature. It buys true
-  cross-table uniqueness and costs a join on every identity read, a third table in every fixture, and a
-  migration that has to move data if it is ever removed. Revisit if a real vocabulary produces a
-  cross-type collision.
-- *No constraint, application checks only* — rejected: FR-006 requires the database to enforce it, and
-  application-only uniqueness loses to concurrent writes. (Adopted anyway for the cross-model half
-  specifically, per the race noted above — the per-model constraints still give the database the last
-  word on the case that actually occurs.)
+- *A cross-model validation check* — built, then removed (D18). It cost two indexed queries on every
+  save that set an identifier, could not be made race-free without a lock, and defended against a
+  malformed source file that the importer catches better.
+- *A shared `Identifier` table with a one-to-one from each model* — rejected, and now moot. It buys
+  true cross-table uniqueness and costs a join on every identity read, a third table in every
+  fixture, and a migration that has to move data if it is ever removed. With the requirement itself
+  withdrawn there is nothing left for it to buy.
 
 ## R5 — Accepting an identifier: absolute, no script-bearing scheme, 500 characters
 

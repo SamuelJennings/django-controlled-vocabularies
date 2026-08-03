@@ -72,15 +72,15 @@ validate_static_uri("urn:uuid:9f6c...")                # accepted — real vocab
 
 ## Guarantees the tests assert
 
-- An externally assigned identifier is never rewritten, normalised, re-cased, or recomputed by
-  `save()` or `full_clean()`, including a re-import that matched the record by it (FR-002, FR-013).
-  `QuerySet.update()`, `bulk_create()`, `bulk_update()`, and raw SQL bypass this, as they bypass
-  every `save()`-based rule in the package (decisions.md, "Not covered, deliberately") — an
-  importer that reaches for one of these at scale gets no error to stop a rewrite or a duplicate.
-- A static permanent URI never becomes dynamic again: nothing turns a record holding one back
-  (FR-013).
+- The application never rewrites, normalises, re-cases, recomputes, or clears an externally assigned
+  identifier, including on a re-import that matched the record by it (FR-002, FR-013). This is a
+  statement about what the package does, not a guarantee enforced against a caller who assigns a
+  different value deliberately: no write path is defended, and that is the decision, not a gap
+  (decisions.md D18). Make the field non-editable wherever it is exposed once a record is published.
+- A static URI never becomes dynamic again through anything the application does (FR-013).
 - No two records of the same model may hold the same `static_uri`, and the refusal comes from the
-  database constraint (FR-006). Across models the refusal comes from validation (research R4).
+  database constraint (FR-006). Across models there is no constraint and none is wanted (research
+  R4, decisions.md D18).
 - A collection's `local_url` can never equal a concept's, because the `collection` segment separates
   them — the R1 rule, preserved (FR-008).
 - Records created before this feature report exactly the identifiers they reported before, because they

@@ -579,3 +579,43 @@ substitute a different design). No other deviations across T028–T037.
   orchestrator's correction explicitly asked for "every test and docstring you have written so far,"
   which by T038 spans the whole feature, not just US-1.
 - **Commit**: `T038: rename permanent_uri to static_uri`.
+
+## Round 5 — the identity guard removed (2026-08-03, orchestrator, no implementer dispatched)
+
+- **Instruction**: Sam, after reading the round-4 report, asked what real situation the reviewers'
+  findings actually described. The answer was that most of them described the guard defending
+  itself. He ruled that uniqueness across the three models is not a requirement, and that keeping a
+  published identifier still is a UI concern — make the field non-editable once published — not
+  something the model should enforce against every write path. Recorded as `decisions.md` D18.
+- **Removed from `models.py`** (443 lines changed, most of them deletions):
+  `_static_uri_still_deferred`, `_select_for_update_is_supported`, `_stored_static_uri`,
+  `_static_uri_models`, `_normalise_uri_authority`, `_reject_static_uri_held_by_another_model`,
+  `_resolve_as_local_url`, `_reject_static_uri_shadowing_local_url`, `_check_static_uri`, the
+  `_CONTROL_CHARACTERS` set and its validator branch, and the transaction/`select_for_update`
+  machinery in `StaticUriModel.save`. Replaced by `_prepare_static_uri`: normalise `""` to `None`,
+  run `validate_static_uri`, nothing else. No queries, no locks, no read-back.
+- **Kept**: the field and its per-model `UniqueConstraint`, `uri`, `local_url`, `has_static_uri`,
+  `get_by_uri` including its refusal of a falsy identifier, and `validate_static_uri` with the
+  scheme allowlist — the one rule that survived, because a stored `javascript:` identifier rendered
+  as a link by R6 is an injection route in a package downstream projects may expose to user uploads,
+  and it costs one in-memory parse.
+- **Tests removed**: `TestStaticUriIsFixed`, `TestStaticUriRewriteGuardReadsTheDatabase`,
+  `TestStaticUriConcurrentSaveLocking`, `TestStaticUriDoesNotShadowALocalRecordsAddress`,
+  `TestStaticUriModelRegistry`, and six individual tests covering the deleted rules. Suite 336 → 285.
+  Verified that only those definitions went: diffing the top-level `def`/`class` lists against
+  `HEAD` shows exactly the five intended classes removed and nothing else. One module-level helper
+  (`_editable_fields`) was caught by the class-deletion pass and restored.
+- **Docs updated**: `spec.md` FR-002/FR-004/FR-006/FR-011/FR-013, `research.md` R4 rewritten,
+  `data-model.md`'s validation section, `contracts/python-api.md`'s guarantees, ADR 0001, README,
+  and CHANGELOG. The README and CHANGELOG previously promised an identifier was never changed once
+  set, with no qualification; both now say the application never changes it and that stopping a
+  person from changing it is the interface's job.
+- **Migration**: the help-text change was folded into `0005` rather than layered as `0006`. The
+  field has never shipped. `makemigrations --check` → No changes detected, and the branch still adds
+  exactly one migration.
+- **Verified with**: `pytest -q` → 285 passed, coverage 97% on `controlled_vocabularies`.
+  `ruff check`, `ruff format --check`, `mypy`, `makemigrations --check --dry-run` all clean.
+  Mutation-checked the three surviving rules rather than trusting the green suite: disabling the
+  scheme allowlist fails 6 tests, removing the blank-to-null normalisation fails 5, and dropping the
+  `save()`-path validation call fails 6 — each for the right reason, each restored afterwards.
+- **Net**: 226 insertions, 975 deletions.

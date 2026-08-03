@@ -14,17 +14,17 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='collection',
             name='static_uri',
-            field=models.CharField(blank=True, help_text="The identifier once it is fixed — assigned by this collection's publisher, or frozen when its vocabulary is published — held exactly as given and never recomputed by save() after that; a bulk queryset write bypasses this. Leave blank while this collection is authored here: its identifier is computed from this site's address until then.", max_length=500, null=True, validators=[controlled_vocabularies.models.validate_static_uri], verbose_name='static URI'),
+            field=models.CharField(blank=True, help_text="The identifier once it is fixed — assigned by this collection's publisher, or frozen when its vocabulary is published — held exactly as given and never recomputed. Leave blank while this collection is authored here: its identifier is computed from this site's address until then. Editing this after publication breaks references to the record and should be prevented wherever the field is exposed.", max_length=500, null=True, validators=[controlled_vocabularies.models.validate_static_uri], verbose_name='static URI'),
         ),
         migrations.AddField(
             model_name='concept',
             name='static_uri',
-            field=models.CharField(blank=True, help_text="The identifier once it is fixed — assigned by this concept's publisher, or frozen when its vocabulary is published — held exactly as given and never recomputed by save() after that; a bulk queryset write bypasses this. Leave blank while this concept is authored here: its identifier is computed from this site's address until then.", max_length=500, null=True, validators=[controlled_vocabularies.models.validate_static_uri], verbose_name='static URI'),
+            field=models.CharField(blank=True, help_text="The identifier once it is fixed — assigned by this concept's publisher, or frozen when its vocabulary is published — held exactly as given and never recomputed. Leave blank while this concept is authored here: its identifier is computed from this site's address until then. Editing this after publication breaks references to the record and should be prevented wherever the field is exposed.", max_length=500, null=True, validators=[controlled_vocabularies.models.validate_static_uri], verbose_name='static URI'),
         ),
         migrations.AddField(
             model_name='conceptscheme',
             name='static_uri',
-            field=models.CharField(blank=True, help_text="The identifier once it is fixed — assigned by this vocabulary's publisher, or frozen when this vocabulary is published — held exactly as given and never recomputed by save() after that; a bulk queryset write bypasses this. Leave blank while this vocabulary is authored here: its identifier is computed from this site's address until then.", max_length=500, null=True, validators=[controlled_vocabularies.models.validate_static_uri], verbose_name='static URI'),
+            field=models.CharField(blank=True, help_text="The identifier once it is fixed — assigned by this vocabulary's publisher, or frozen when this vocabulary is published — held exactly as given and never recomputed. Leave blank while this vocabulary is authored here: its identifier is computed from this site's address until then. Editing this after publication breaks references to the record and should be prevented wherever the field is exposed.", max_length=500, null=True, validators=[controlled_vocabularies.models.validate_static_uri], verbose_name='static URI'),
         ),
         migrations.AddConstraint(
             model_name='collection',

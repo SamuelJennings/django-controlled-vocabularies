@@ -183,32 +183,6 @@ class TestStaticUriValidationMessages:
         assert all(placeholder in str(err.message) for placeholder in ("%(max_length)s", "%(uri)s", "%(length)s"))
         assert err.params == {"max_length": 500, "uri": str(Truncator(overlong).chars(80)), "length": len(overlong)}
 
-    @pytest.mark.django_db
-    def test_static_uri_held_elsewhere_message_uses_named_placeholder(self, scheme):
-        # FR-006: two different models cannot hold the same externally assigned identifier;
-        # the refusal names the identifier via a placeholder.
-        Concept.objects.create(scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/shared")
-        with pytest.raises(ValidationError) as excinfo:
-            Collection.objects.create(scheme=scheme, name="Igneous", static_uri="http://vocabs.example.org/shared")
-        err = _inner_error(excinfo.value, "static_uri")
-        assert isinstance(err.message, Promise), "held-elsewhere message is not lazily translatable"
-        assert "%(uri)s" in str(err.message), "message lacks a named %(uri)s placeholder"
-        assert err.params == {"uri": "http://vocabs.example.org/shared"}
-
-    @pytest.mark.django_db
-    def test_static_uri_fixed_rewrite_message_uses_named_placeholder(self, scheme):
-        # FR-002/FR-013: a stored identifier is fixed; the refusal names the identifier
-        # that was rejected as unchangeable.
-        concept = Concept.objects.create(scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/fixed")
-        reloaded = Concept.objects.get(pk=concept.pk)
-        reloaded.static_uri = "http://vocabs.example.org/rewritten"
-        with pytest.raises(ValidationError) as excinfo:
-            reloaded.save()
-        err = _inner_error(excinfo.value, "static_uri")
-        assert isinstance(err.message, Promise), "fixed-rewrite message is not lazily translatable"
-        assert "%(uri)s" in str(err.message), "message lacks a named %(uri)s placeholder"
-        assert err.params == {"uri": "http://vocabs.example.org/fixed"}
-
     def test_static_uri_unparseable_message_uses_named_placeholder(self):
         # T031: urllib.parse.urlsplit raises a bare ValueError for some malformed input
         # (e.g. a netloc invalid under NFKC normalization); caught and re-raised as a
@@ -444,32 +418,6 @@ class TestStaticUriIndexing:
             assert "has_static_uri" not in field_names, f"{model.__name__}.has_static_uri must not be a model field"
             assert isinstance(model.local_url, property)
             assert isinstance(model.has_static_uri, property)
-
-
-class TestStaticUriModelRegistry:
-    """T028 — the cross-model uniqueness check's registry stays complete on its own.
-
-    ``_reject_static_uri_held_by_another_model`` used to consult a hardcoded
-    ``(ConceptScheme, Concept, Collection)`` tuple — an untested single point
-    of failure: a fourth model that forgot to be added to that tuple would
-    silently lose the cross-model invariant, with nothing to notice. It now
-    derives the set from ``StaticUriModel``'s live subclasses. This asserts
-    that set against Django's own app registry — a source independent of the
-    helper's own implementation — so a regression back to a hardcoded,
-    incomplete list would still be caught even if it reused the same helper
-    name.
-    """
-
-    def test_every_concrete_static_uri_model_is_registered_for_the_cross_model_check(self):
-        from django.apps import apps
-
-        from controlled_vocabularies.models import StaticUriModel, _static_uri_models
-
-        expected = {
-            model for model in apps.get_models() if issubclass(model, StaticUriModel) and not model._meta.abstract
-        }
-        assert expected, "no concrete StaticUriModel subclasses found — the registry has nothing to check"
-        assert set(_static_uri_models()) == expected
 
 
 class TestStaticUriFieldAttributesAgree:

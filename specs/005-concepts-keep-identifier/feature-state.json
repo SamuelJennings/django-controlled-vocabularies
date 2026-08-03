@@ -52,7 +52,7 @@
       "self_resolved": [
         "Stored column holds a static identifier only; a dynamic identifier composes on read (research R1)",
         "Fixedness is the presence of the stored value, not a companion boolean (research R2)",
-        "Per-model unique constraint plus a cross-model validation check; a shared identity table rejected as premature (research R4)",
+        "Per-model unique constraint only. Cross-model uniqueness withdrawn as a requirement and the whole save-time identity guard removed; identity is unique by construction via R1's slug constraints (research R4, decisions.md D18)",
         "Validation runs in save() as well as on the field, because save() never calls full_clean() (research R5)",
         "No data migration or backfill: pre-existing rows compose exactly as before (FR-009 satisfied by construction)",
         "Superseded in review: the snapshot-based rewrite guard was replaced by a database read-back (D12 -> T029)",
