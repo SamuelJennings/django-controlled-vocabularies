@@ -192,6 +192,19 @@ def test_permanent_uri_fixed_rewrite_message_uses_named_placeholder(scheme):
     assert err.params == {"uri": "http://vocabs.example.org/fixed"}
 
 
+def test_permanent_uri_unparseable_message_uses_named_placeholder():
+    # T031: urllib.parse.urlsplit raises a bare ValueError for some malformed input
+    # (e.g. a netloc invalid under NFKC normalization); caught and re-raised as a
+    # translatable ValidationError naming the offending value.
+    with pytest.raises(ValidationError) as excinfo:
+        validate_permanent_uri("http://exa℀mple.com/x")
+    err = excinfo.value
+    assert isinstance(err.message, Promise), "unparseable message is not lazily translatable"
+    assert "%(uri)s" in str(err.message), "message lacks a named %(uri)s placeholder"
+    assert err.params == {"uri": "http://exa℀mple.com/x"}
+    assert err.code == "permanent_uri_unparseable"
+
+
 # --- Article XIII: indexing is deliberate on the two new models ---
 
 

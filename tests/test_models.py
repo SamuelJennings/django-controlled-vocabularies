@@ -362,6 +362,30 @@ class TestPermanentUri:
     def test_accepts_urn_identifier(self):
         validate_permanent_uri("urn:uuid:9f6c1e2a-1234-4a12-9abc-1234567890ab")
 
+    def test_a_value_urlsplit_cannot_parse_raises_validation_error_not_value_error(self):
+        """T031. ``urllib.parse.urlsplit`` raises a bare ``ValueError`` — not a
+        ``ValidationError`` — for some malformed input, e.g. a netloc with
+        characters invalid under NFKC normalization. Left uncaught, one crafted
+        ``rdf:about`` aborts an import with an exception no caller expects, and
+        in a form/admin/DRF context surfaces as a 500 instead of a field error."""
+        with pytest.raises(ValidationError):
+            validate_permanent_uri("http://exa℀mple.com/x")
+
+    def test_a_malformed_ipv6_netloc_raises_validation_error_not_value_error(self):
+        """T031, the second verified ``urlsplit``-raises-``ValueError`` shape."""
+        with pytest.raises(ValidationError):
+            validate_permanent_uri("http://[fe80::1")
+
+    @pytest.mark.django_db
+    def test_concept_save_with_an_unparseable_permanent_uri_raises_validation_error(self, scheme):
+        with pytest.raises(ValidationError):
+            Concept(scheme=scheme, label="Red", permanent_uri="http://exa℀mple.com/x").save()
+
+    @pytest.mark.django_db
+    def test_concept_full_clean_with_an_unparseable_permanent_uri_raises_validation_error(self, scheme):
+        with pytest.raises(ValidationError):
+            Concept(scheme=scheme, label="Red", permanent_uri="http://[fe80::1").full_clean()
+
     @pytest.mark.django_db
     def test_bare_create_with_bad_permanent_uri_raises_and_does_not_store(self, scheme):
         with pytest.raises(ValidationError):

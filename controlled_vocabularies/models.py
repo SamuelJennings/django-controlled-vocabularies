@@ -41,8 +41,22 @@ def validate_permanent_uri(value: str) -> None:
     it) and called directly from each model's ``save()``, because Django's
     ``save()`` never calls ``full_clean()`` and the import path this feature
     exists to serve writes through ``save()`` directly (research R5).
+
+    ``urllib.parse.urlsplit`` itself raises a bare ``ValueError`` — not a
+    ``ValidationError`` — for some malformed input (e.g. a netloc with
+    characters invalid under NFKC normalization, or a malformed IPv6 netloc).
+    Left uncaught, one crafted ``rdf:about`` would abort an import with an
+    exception no caller expects, and surface as a 500 rather than a field
+    error in a form/admin/DRF context (T031).
     """
-    parsed = urllib.parse.urlsplit(value)
+    try:
+        parsed = urllib.parse.urlsplit(value)
+    except ValueError as exc:
+        raise ValidationError(
+            _("'%(uri)s' could not be parsed as a URI."),
+            params={"uri": value},
+            code="permanent_uri_unparseable",
+        ) from exc
     if not parsed.scheme or not (parsed.netloc or parsed.path):
         raise ValidationError(
             _("'%(uri)s' is not a well-formed absolute identifier with a scheme."),
