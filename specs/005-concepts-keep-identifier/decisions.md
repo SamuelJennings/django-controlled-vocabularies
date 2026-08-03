@@ -208,3 +208,33 @@ Each of the three parts is covered by tests that fail when that part alone is re
 **Not covered, deliberately**: `QuerySet.update()` and raw SQL bypass this, as they bypass every
 `save()`-based rule in Django, including the slug and default-language rules this app already relies
 on. Nothing portable defends against that at the database level for a conditional invariant.
+
+## D13 — An empty string is the absence of an identifier, and is stored as null
+
+**Context**: `permanent_uri` is `null=True` so the partial `UniqueConstraint`
+(`condition=Q(permanent_uri__isnull=False)`) leaves provisional records unconstrained — any number
+of them may coexist holding nothing. An empty string is not null, so it falls *inside* that
+constraint, while `uri` returns `self.permanent_uri or self.local_url` and `has_permanent_uri`
+returns `bool(self.permanent_uri)`: both read `""` as absent. A record assigned `""` therefore
+behaves as provisional in every observable way and still occupies the unique slot, and the second
+such record fails at the database.
+
+**Chosen**: `""` normalises to `None` on the way in, in each model's `clean()` and in the shared
+save-path checks.
+
+**Why**: probing the delivered code showed two vocabularies created with `permanent_uri=""` raise
+`IntegrityError: UNIQUE constraint failed` on the second, with a message naming a constraint the
+caller never knowingly engaged. `""` rather than `None` is the ordinary shape of importer and
+serializer code — `node.get("about") or ""` — and #50's importer is the first caller this feature
+exists to serve, so leaving it to every caller to remember guarantees the bug arrives there. Django
+already normalises the form path (`CharField.formfield` passes `empty_value=None` when the field is
+nullable), so this only closes the direct-assignment path, which is the one the importer uses.
+
+**Placement**: after the deferred guard, so an untouched deferred column is still never fetched, and
+before the rewrite guard, so clearing a *stored* identifier by assigning `""` is still refused as a
+clear (FR-002, FR-013) rather than slipping through as a no-op.
+
+**Alternative rejected**: dropping `null=True` and making `""` the sentinel for absence. That
+inverts the problem — the partial constraint would need `condition=~Q(permanent_uri="")`, which is
+the same rule expressed less portably, and it would break every existing `permanent_uri__isnull`
+query already written into the tests and `get_by_uri`.

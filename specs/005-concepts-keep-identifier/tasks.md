@@ -116,6 +116,16 @@ provisional identity. This is a planning omission, not an implementer failure.
       from `uri`, which would put a concept of an imported vocabulary on the publisher's domain. Move
       R1's composition into it and leave `conf.get_base_uri()` as the single read site for the address.
 
+## Phase 5b: User Story 1 — a blank identifier is absence, not an identifier (P1)
+
+- [x] T027 [US1] Close the hole probing the delivered code found (decisions.md D13). `permanent_uri`
+      is nullable so the partial `UniqueConstraint` exempts provisional records, but `""` is not
+      null: it sits inside the constraint while `uri` and `has_permanent_uri` both read it as
+      absent, so the second record assigned `""` fails at the database with an opaque
+      `IntegrityError`. Normalise `""` to `None` in each `clean()` and in the shared save-path
+      checks, after the deferred guard and before the rewrite guard so clearing a *stored*
+      identifier with `""` is still refused. Tests in `TestBlankPermanentUriIsAbsent`.
+
 ## Phase 6: User Story 5 — Translatable metadata, indexing, factories (P3)
 
 - [ ] T018 [P] [US5] Extend `tests/test_standards.py` so the metadata walk covers the three new
