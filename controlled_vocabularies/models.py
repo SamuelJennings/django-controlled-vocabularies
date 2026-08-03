@@ -161,6 +161,23 @@ def _reject_permanent_uri_held_by_another_model(instance: "ConceptScheme | Conce
         )
 
 
+def _normalise_blank_permanent_uri(instance: "ConceptScheme | Concept | Collection") -> None:
+    """Store the *absence* of an identifier as ``None``, never as ``""``.
+
+    ``permanent_uri`` is nullable so the partial ``UniqueConstraint`` — which
+    only covers non-null values — leaves provisional records unconstrained. An
+    empty string is not null, so it falls inside that constraint while
+    :attr:`uri` and :attr:`has_permanent_uri` both read it as absent: the record
+    behaves as provisional yet occupies the unique slot, and the second one
+    saved fails at the database with an opaque ``IntegrityError``. Assigning
+    ``""`` rather than ``None`` is the ordinary shape of importer and serializer
+    code (``node.get("about") or ""``), which is exactly the path this feature
+    exists to serve, so it is normalised here rather than left to every caller.
+    """
+    if instance.permanent_uri == "":
+        instance.permanent_uri = None
+
+
 def _validate_permanent_uri_on_save(instance: "ConceptScheme | Concept | Collection") -> None:
     """Every ``permanent_uri`` check a ``save()`` owes, in one place.
 
@@ -171,6 +188,7 @@ def _validate_permanent_uri_on_save(instance: "ConceptScheme | Concept | Collect
     """
     if _permanent_uri_still_deferred(instance):
         return
+    _normalise_blank_permanent_uri(instance)
     _reject_permanent_uri_rewrite(instance)
     if not instance.permanent_uri:
         return
@@ -371,6 +389,7 @@ class ConceptScheme(models.Model):
         super().clean()
         if _permanent_uri_still_deferred(self):
             return
+        _normalise_blank_permanent_uri(self)
         _reject_permanent_uri_rewrite(self)
         _reject_permanent_uri_held_by_another_model(self)
 
@@ -655,6 +674,7 @@ class Concept(models.Model):
         super().clean()
         if _permanent_uri_still_deferred(self):
             return
+        _normalise_blank_permanent_uri(self)
         _reject_permanent_uri_rewrite(self)
         _reject_permanent_uri_held_by_another_model(self)
 
@@ -1390,6 +1410,7 @@ class Collection(models.Model):
         super().clean()
         if _permanent_uri_still_deferred(self):
             return
+        _normalise_blank_permanent_uri(self)
         _reject_permanent_uri_rewrite(self)
         _reject_permanent_uri_held_by_another_model(self)
 

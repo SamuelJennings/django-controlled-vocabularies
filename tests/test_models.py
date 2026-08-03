@@ -1978,9 +1978,7 @@ class TestBlankPermanentUriIsAbsent:
 
     @pytest.mark.django_db
     def test_clearing_a_stored_permanent_uri_with_a_blank_is_still_refused(self, scheme):
-        concept = Concept.objects.create(
-            scheme=scheme, label="Heat Flow", permanent_uri="http://vocab.example.org/hf"
-        )
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow", permanent_uri="http://vocab.example.org/hf")
         reloaded = Concept.objects.get(pk=concept.pk)
         reloaded.permanent_uri = ""
         with pytest.raises(ValidationError) as excinfo:
