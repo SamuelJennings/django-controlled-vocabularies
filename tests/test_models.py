@@ -782,6 +782,100 @@ class TestPermanentUriDatabaseUniqueness:
         assert Concept.objects.filter(permanent_uri__isnull=True).count() == 3
 
 
+class TestLocalUrl:
+    """US-4 — every record has a place on this site, whoever owns its identifier
+    (FR-008). ``local_url`` is this site's own address for a record — composed
+    from *local_url* up the chain, never from ``uri`` — so it names a place on
+    this site even when a parent's identifier points elsewhere. Equal to ``uri``
+    for local unpublished work, different for anything imported, and a
+    collection's can never collide with a concept's."""
+
+    @pytest.mark.django_db
+    def test_local_unpublished_schemes_local_url_equals_its_uri(self):
+        scheme = ConceptScheme.objects.create(name="Geothermics")
+        assert scheme.local_url == scheme.uri
+        assert scheme.local_url == f"{conf.get_base_uri()}/{scheme.slug}"
+
+    @pytest.mark.django_db
+    def test_local_unpublished_concepts_local_url_equals_its_uri(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        assert concept.local_url == concept.uri
+        assert concept.local_url == f"{conf.get_base_uri()}/{scheme.slug}/{concept.slug}"
+
+    @pytest.mark.django_db
+    def test_local_unpublished_collections_local_url_equals_its_uri(self, scheme):
+        collection = Collection.objects.create(scheme=scheme, name="Igneous")
+        assert collection.local_url == collection.uri
+        assert collection.local_url == f"{conf.get_base_uri()}/{scheme.slug}/collection/{collection.slug}"
+
+    @pytest.mark.django_db
+    def test_imported_concepts_local_url_differs_from_its_permanent_uri(self, scheme):
+        concept = Concept.objects.create(
+            scheme=scheme, label="Granite", permanent_uri="http://vocabs.example.org/rock/granite"
+        )
+        assert concept.uri == "http://vocabs.example.org/rock/granite"
+        assert concept.local_url == f"{conf.get_base_uri()}/{scheme.slug}/{concept.slug}"
+        assert concept.local_url != concept.uri
+        assert concept.local_url.startswith(conf.get_base_uri())
+
+    @pytest.mark.django_db
+    def test_imported_schemes_local_url_differs_from_its_permanent_uri(self):
+        scheme = ConceptScheme.objects.create(name="Rocks", permanent_uri="http://vocabs.example.org/rocks")
+        assert scheme.uri == "http://vocabs.example.org/rocks"
+        assert scheme.local_url == f"{conf.get_base_uri()}/{scheme.slug}"
+        assert scheme.local_url != scheme.uri
+        assert scheme.local_url.startswith(conf.get_base_uri())
+
+    @pytest.mark.django_db
+    def test_imported_collections_local_url_differs_from_its_permanent_uri(self, scheme):
+        collection = Collection.objects.create(
+            scheme=scheme, name="Igneous", permanent_uri="http://vocabs.example.org/rocks/igneous"
+        )
+        assert collection.uri == "http://vocabs.example.org/rocks/igneous"
+        assert collection.local_url == f"{conf.get_base_uri()}/{scheme.slug}/collection/{collection.slug}"
+        assert collection.local_url != collection.uri
+        assert collection.local_url.startswith(conf.get_base_uri())
+
+    @pytest.mark.django_db
+    def test_a_collections_local_url_can_never_equal_a_concepts(self, scheme):
+        # Same slugifiable name, so only the '/collection/' segment tells them apart.
+        concept = Concept.objects.create(scheme=scheme, label="Igneous")
+        collection = Collection.objects.create(scheme=scheme, name="Igneous")
+        assert concept.slug == collection.slug
+        assert concept.local_url != collection.local_url
+
+    @pytest.mark.django_db
+    def test_local_url_follows_a_rename(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        concept.label = "Surface Heat Flow"
+        concept.save()
+        assert concept.local_url == f"{conf.get_base_uri()}/{scheme.slug}/surface-heat-flow"
+
+    @pytest.mark.django_db
+    def test_local_concept_of_an_externally_fixed_scheme_composes_under_this_sites_address(self):
+        """spec.md Edge Cases §4 (raised in the US-1 report). A concept authored
+        locally inside a vocabulary whose own identifier is externally fixed
+        must compose its provisional identifier under *this site's* address,
+        not the publisher's — composing from ``self.scheme.uri`` instead of
+        ``self.scheme.local_url`` would put it on the publisher's domain."""
+        scheme = ConceptScheme.objects.create(name="Rocks", permanent_uri="http://vocabs.example.org/rocks")
+        concept = Concept.objects.create(scheme=scheme, label="Granite")
+        assert concept.permanent_uri is None
+        assert concept.local_url == f"{conf.get_base_uri()}/{scheme.slug}/{concept.slug}"
+        assert concept.uri == concept.local_url
+        assert not concept.uri.startswith("http://vocabs.example.org")
+
+    @pytest.mark.django_db
+    def test_local_collection_of_an_externally_fixed_scheme_composes_under_this_sites_address(self):
+        """The same hole as above, for a collection (spec.md Edge Cases §4)."""
+        scheme = ConceptScheme.objects.create(name="Rocks", permanent_uri="http://vocabs.example.org/rocks")
+        collection = Collection.objects.create(scheme=scheme, name="Igneous")
+        assert collection.permanent_uri is None
+        assert collection.local_url == f"{conf.get_base_uri()}/{scheme.slug}/collection/{collection.slug}"
+        assert collection.uri == collection.local_url
+        assert not collection.uri.startswith("http://vocabs.example.org")
+
+
 def _editable_fields(model: type[Model]):
     """The model's own, user-editable, concrete fields (excludes the auto pk
     and reverse relations) — every one must meet the metadata standard."""

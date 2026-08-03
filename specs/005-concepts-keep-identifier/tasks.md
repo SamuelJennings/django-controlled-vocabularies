@@ -104,7 +104,7 @@ provisional identity. This is a planning omission, not an implementer failure.
 
 ## Phase 5: User Story 4 — Every record has a place on this site (P2)
 
-- [ ] T016 [US4] Write failing tests (class `TestLocalUrl`): a local unpublished record's `local_url`
+- [x] T016 [US4] Write failing tests (class `TestLocalUrl`): a local unpublished record's `local_url`
       and `uri` are equal; an imported record's differ and its `local_url` is on this site; a
       collection's `local_url` can never equal a concept's; `local_url` follows a rename. **Include
       spec.md Edge Cases §4 explicitly** (raised in the US-1 report): a concept authored locally
