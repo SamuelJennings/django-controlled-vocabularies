@@ -209,3 +209,25 @@ the human-readable trail.
   migration squashing).
 - **Next**: Phase 6 (T018–T020, US-5 metadata/indexing/factories) and Phase 7 (T021–T023, docs/polish) are
   out of this implementer's scope — not started.
+
+## 2026-08-03 — Phase 6 (T018) implementation
+
+- **Did**: T018. `test_every_editable_field_has_metadata` in `tests/test_standards.py` already walks
+  `_meta.get_fields()` generically over `ALL_MODELS`, which already includes `ConceptScheme`, `Concept`,
+  and `Collection` — so `permanent_uri`'s `verbose_name`/`help_text` were already covered by that walk
+  with no change needed; confirmed by mutation (temporarily changing `permanent_uri`'s `help_text` on
+  one model to a non-lazy value made that test fail for the right reason, then reverted — no diff left
+  from that probe). What the generic walk cannot see is message translatability, so five new tests were
+  added following the file's existing per-message pattern (Promise check + named-placeholder check +
+  `params` check): `validate_permanent_uri`'s three refusals (not-absolute, unsafe-scheme, too-long) and
+  the two save-path refusals (held-elsewhere, fixed-rewrite).
+- **Verified with**: all five new tests passed green on first run, since the messages they check were
+  already delivered translatable in earlier phases. Non-vacuousness proven by mutation: temporarily
+  replaced all five messages with plain non-lazy strings with no placeholders, reran
+  `pytest tests/test_standards.py -k permanent_uri`, confirmed all five failed for the stated reason
+  (`isinstance(err.message, Promise)` false), then restored the original file from a pre-mutation copy
+  and reran the full `test_standards.py` suite — 37 passed (32 baseline + 5 new), `git diff` on
+  `controlled_vocabularies/models.py` empty.
+- **Deviation**: none — T018 needed no production change, matching the fact that Phase 6 lands after
+  every model change (Phase 1–5b) that could touch metadata or messages.
+- **Commit**: see below.

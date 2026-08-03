@@ -128,7 +128,7 @@ provisional identity. This is a planning omission, not an implementer failure.
 
 ## Phase 6: User Story 5 — Translatable metadata, indexing, factories (P3)
 
-- [ ] T018 [P] [US5] Extend `tests/test_standards.py` so the metadata walk covers the three new
+- [x] T018 [P] [US5] Extend `tests/test_standards.py` so the metadata walk covers the three new
       columns: non-empty lazily translatable `verbose_name` and `help_text`, and every refusal message
       this feature introduces translatable with named placeholders.
 - [ ] T019 [P] [US5] Add an `external` trait to `ConceptSchemeFactory`, `ConceptFactory`, and

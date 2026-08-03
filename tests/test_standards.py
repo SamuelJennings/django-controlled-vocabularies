@@ -30,6 +30,7 @@ from controlled_vocabularies.models import (
     ConceptNote,
     ConceptRelation,
     ConceptScheme,
+    validate_permanent_uri,
 )
 
 ALL_MODELS = [ConceptScheme, Concept, ConceptLabel, ConceptNote, ConceptRelation, Collection, CollectionMember]
@@ -118,6 +119,77 @@ def test_duplicate_preferred_label_message_uses_named_placeholder(scheme):
     assert "%(language)s" in str(err.message), "message lacks a named %(language)s placeholder"
     assert err.params == {"language": "de"}
     assert "de" in excinfo.value.messages[0]
+
+
+# --- Article XII: the FS-005 permanent_uri metadata and validation messages ---
+# `permanent_uri` is added identically to ConceptScheme, Concept, and Collection, all
+# three already in ALL_MODELS above, so test_every_editable_field_has_metadata already
+# holds its verbose_name and help_text to the standard. What that generic walk cannot
+# see is whether each refusal this feature introduces is itself translatable and named
+# — that is asserted explicitly below, one test per refusal, following the pattern above.
+
+
+def test_permanent_uri_not_absolute_message_uses_named_placeholder():
+    # FR-004/FR-010: a bare relative value is refused, naming the offending value.
+    with pytest.raises(ValidationError) as excinfo:
+        validate_permanent_uri("not-absolute")
+    err = excinfo.value
+    assert isinstance(err.message, Promise), "not-absolute message is not lazily translatable"
+    assert "%(uri)s" in str(err.message), "message lacks a named %(uri)s placeholder"
+    assert err.params == {"uri": "not-absolute"}
+    assert "not-absolute" in excinfo.value.messages[0]
+
+
+def test_permanent_uri_unsafe_scheme_message_uses_named_placeholders():
+    # FR-004/FR-010: a scheme that can carry executable content is refused, naming
+    # both the value and the offending scheme.
+    with pytest.raises(ValidationError) as excinfo:
+        validate_permanent_uri("javascript:alert(1)")
+    err = excinfo.value
+    assert isinstance(err.message, Promise), "unsafe-scheme message is not lazily translatable"
+    assert "%(uri)s" in str(err.message) and "%(scheme)s" in str(err.message)
+    assert err.params == {"uri": "javascript:alert(1)", "scheme": "javascript"}
+    assert "javascript" in excinfo.value.messages[0]
+
+
+def test_permanent_uri_too_long_message_uses_named_placeholders():
+    # FR-004/FR-010: an over-length identifier is refused, naming the bound and the
+    # offending value's actual length.
+    overlong = "http://example.org/" + "x" * 500
+    with pytest.raises(ValidationError) as excinfo:
+        validate_permanent_uri(overlong)
+    err = excinfo.value
+    assert isinstance(err.message, Promise), "too-long message is not lazily translatable"
+    assert all(placeholder in str(err.message) for placeholder in ("%(max_length)s", "%(uri)s", "%(length)s"))
+    assert err.params == {"max_length": 500, "uri": overlong, "length": len(overlong)}
+
+
+@pytest.mark.django_db
+def test_permanent_uri_held_elsewhere_message_uses_named_placeholder(scheme):
+    # FR-006: two different models cannot hold the same externally assigned identifier;
+    # the refusal names the identifier via a placeholder.
+    Concept.objects.create(scheme=scheme, label="Granite", permanent_uri="http://vocabs.example.org/shared")
+    with pytest.raises(ValidationError) as excinfo:
+        Collection.objects.create(scheme=scheme, name="Igneous", permanent_uri="http://vocabs.example.org/shared")
+    err = _inner_error(excinfo.value, "permanent_uri")
+    assert isinstance(err.message, Promise), "held-elsewhere message is not lazily translatable"
+    assert "%(uri)s" in str(err.message), "message lacks a named %(uri)s placeholder"
+    assert err.params == {"uri": "http://vocabs.example.org/shared"}
+
+
+@pytest.mark.django_db
+def test_permanent_uri_fixed_rewrite_message_uses_named_placeholder(scheme):
+    # FR-002/FR-013: a stored identifier is fixed; the refusal names the identifier
+    # that was rejected as unchangeable.
+    concept = Concept.objects.create(scheme=scheme, label="Granite", permanent_uri="http://vocabs.example.org/fixed")
+    reloaded = Concept.objects.get(pk=concept.pk)
+    reloaded.permanent_uri = "http://vocabs.example.org/rewritten"
+    with pytest.raises(ValidationError) as excinfo:
+        reloaded.save()
+    err = _inner_error(excinfo.value, "permanent_uri")
+    assert isinstance(err.message, Promise), "fixed-rewrite message is not lazily translatable"
+    assert "%(uri)s" in str(err.message), "message lacks a named %(uri)s placeholder"
+    assert err.params == {"uri": "http://vocabs.example.org/fixed"}
 
 
 # --- Article XIII: indexing is deliberate on the two new models ---
