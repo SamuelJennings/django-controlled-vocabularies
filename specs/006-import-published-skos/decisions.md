@@ -216,3 +216,52 @@ returned safety.
 
 **Revisit if:** T006 turns out not to be the first task that imports `rdflib`, though nothing in
 Phase 0 does, and no other phase precedes it.
+
+## D12 — `rdflib` lands as a dev dependency at T005, ahead of T006 making it a runtime one
+
+T005's fixtures need something to parse them with, to satisfy its own "each fixture is discoverable
+from the suite and parses" test — and the natural tool is `rdflib` itself, the library the whole
+feature is built around. But D11 just established that `rdflib` cannot be declared as a *runtime*
+dependency until code under `controlled_vocabularies/` actually imports it (T006), on pain of
+`deptry`'s `DEP002`.
+
+Chosen: declare `rdflib` under `[tool.poetry.group.dev.dependencies]` now, used only by
+`tests/test_io/test_fixtures.py`. Verified this does not trip `deptry`: `tests/` is already in
+`[tool.deptry] extend_exclude`, and `poetry run deptry .` passes with `rdflib` present in the dev
+group and nothing outside `tests/` importing it — the existing dev-toolchain packages (`pytest`,
+`ruff`, `mypy`, …) already establish that pattern; a dev-only dependency used solely by the test
+suite is not what `DEP002` is checking for. This is not a workaround: a test-only need for a parsing
+library ahead of that library becoming a production dependency of the feature itself is an
+ordinary, legitimate shape, distinct from Article VII's rule about *runtime* deps.
+
+T006 moves the `rdflib = "^7.6.0"` line from the dev group to `[tool.poetry.dependencies]` in the
+same commit as `skos.py`/`mapping.py` — the point at which it becomes a genuine runtime dependency
+of the package. Flagged in `progress.md` so it isn't missed at that stage exit.
+
+## D13 — the third fatal fixture is a blank-node *collection*, not a separate "missing identifier" case
+
+The brief for this task named three malformed fixtures: "blank-node concept, missing identifier,
+refused URI scheme." Read literally against FR-004's own wording — "identifier is absent, is a
+blank node, or is refused by the identity rules" — "absent" and "blank node" look like they might be
+two different things worth two different fixtures. They are not, in RDF: every asserted subject is
+either a URI or a blank node, so "no identifier" and "a blank node" are the same shape read from two
+angles, and the spec's own D3 clarification treats them as one condition ("a concept or collection
+identified only by a blank node").
+
+Confirmed empirically before committing to a fixture: an RDF/XML `rdf:about=""` (or Turtle/JSON-LD's
+equivalent empty-relative-IRI forms) does **not** produce a literal empty identifier when `rdflib`
+parses from a file — it resolves the empty reference against the parse call's base, which defaults
+to the file's own path (`file:///…/tests/fixtures/skos/…`) unless the future importer (T006) passes
+an explicit `publicID` override. A fixture built on this would have a meaning that shifts with a
+parsing decision that has not been made yet — not a stable, portable fatal-path fixture.
+
+Chosen: build `blank_node_collection.ttl` as the third fixture instead — the same blank-node-identity
+mechanism `blank_node_concept.ttl` exercises, applied to a `skos:Collection` rather than a
+`skos:Concept`. This is directly named in the spec (US-5 acceptance 5) and tasks.md (T030: "the same
+rule that governs concepts"), so it is real, spec-grounded fatal-path material rather than a
+substitution of convenience. `refused_uri_scheme.ttl` (an `ftp://` identifier, outside
+`conf.DEFAULT_ALLOWED_URI_SCHEMES`) covers FR-004's separate "refused by the identity rules" clause.
+
+**Revisit if:** T006 fixes the parse call's `publicID` to something stable (e.g. an empty string)
+independent of the file's own path, at which point a genuine "absent identifier" fixture distinct
+from the blank-node case becomes buildable and meaningful.
