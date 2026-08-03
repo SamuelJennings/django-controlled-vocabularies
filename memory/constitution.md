@@ -130,3 +130,7 @@ Read at plan and review; applies to every change.
 
 **Package bar:** the package builds and its metadata is valid; the README renders on the package
 index (absolute URLs); the public API honours the deprecation policy (Article VIII).
+
+---
+
+**Version**: 1.2.0 | **Ratified**: 2026-07-22 | **Last Amended**: 2026-07-24
