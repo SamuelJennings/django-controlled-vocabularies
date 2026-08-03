@@ -245,3 +245,53 @@ class TestConceptSlugs:
         # rock". If the slug tracked the identifier it would read "igneous",
         # not "igneous-rock".
         assert igneous.slug == "igneous-rock"
+
+
+class TestFatalFindingsAndAtomicity:
+    """T011 — FR-003/FR-004, decisions.md D3/D8, research.md R7: a missing or
+    refused identity fails the whole run; a file with more than one such
+    problem reports all of them in one run; the transaction rolls back so
+    the database is exactly as it was before the run started."""
+
+    def test_a_blank_node_concept_fails_the_run_and_writes_nothing(self, db):
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(FIXTURES / "blank_node_concept.ttl")
+        assert exc_info.value.report.fatal[0].reason is FatalReason.MISSING_IDENTITY
+        assert ConceptScheme.objects.count() == 0
+        assert Concept.objects.count() == 0
+
+    def test_a_refused_uri_scheme_concept_fails_the_run_and_writes_nothing(self, db):
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(FIXTURES / "refused_uri_scheme.ttl")
+        assert exc_info.value.report.fatal[0].reason is FatalReason.REFUSED_IDENTITY
+        assert ConceptScheme.objects.count() == 0
+        assert Concept.objects.count() == 0
+
+    def test_every_fatal_problem_in_one_file_is_collected_not_just_the_first(self, db):
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(FIXTURES / "multiple_fatal_problems.ttl")
+        reasons = {finding.reason for finding in exc_info.value.report.fatal}
+        assert reasons == {FatalReason.MISSING_IDENTITY, FatalReason.REFUSED_IDENTITY}
+        assert len(exc_info.value.report.fatal) == 2
+
+    def test_a_multi_problem_file_rolls_back_even_its_ordinary_concept(self, db):
+        with pytest.raises(SkosImportFailed):
+            import_skos(FIXTURES / "multiple_fatal_problems.ttl")
+        # The scheme and the one perfectly valid concept alongside the two
+        # fatal ones must not survive either — the run is all-or-nothing.
+        assert ConceptScheme.objects.count() == 0
+        assert not Concept.objects.filter(static_uri="http://example.org/mixed/ordinary").exists()
+
+    def test_a_fatal_reimport_rolls_back_a_scheme_field_update_too(self, db):
+        # The scheme row is written to (its name set to the file's own) before
+        # the fatal concepts are even reached — proving the rollback undoes
+        # that write, not just the concept creation, is the point here.
+        existing = ConceptSchemeFactory(name="Original name", static_uri="http://example.org/mixed/")
+        concept_count_before = Concept.objects.count()
+
+        with pytest.raises(SkosImportFailed):
+            import_skos(FIXTURES / "multiple_fatal_problems.ttl")
+
+        existing.refresh_from_db()
+        assert existing.name == "Original name"
+        assert Concept.objects.count() == concept_count_before
