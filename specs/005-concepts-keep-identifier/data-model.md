@@ -27,7 +27,7 @@ fixed and never recomputed. That presence *is* the explicit record of fixedness 
 |---|---|---|
 | `uri` | property (existing name, existing meaning) | `self.permanent_uri` when set, otherwise `self.local_url`. This is the permanent URI: the publisher's when there is one, the provisional composition otherwise. |
 | `local_url` | property (new) | The R1 composition, always: `{base}/{slug}` for a scheme, `{scheme.local_url}/{slug}` for a concept, `{scheme.local_url}/collection/{slug}` for a collection. Always this site's own address. |
-| `has_permanent_uri` | property (new) | `bool(self.permanent_uri)` — whether the identifier is fixed. |
+| `has_permanent_uri` | property (new) | `bool(self.permanent_uri)` — whether an identifier is *stored* at all. An unpublished local record has none stored and this is `False`; presence of the stored value is the fixedness signal (decisions.md D2, corrected T037), not a separate flag. |
 
 `local_url` composes from `local_url` up the chain rather than from `uri`, so a concept in an imported
 vocabulary still gets a local address on this site even though its scheme's identifier points elsewhere.
@@ -52,8 +52,20 @@ values the specification says can never be stored. R1 defended `Concept.slug` fr
 
 `clean()` and `save()` additionally refuse a `permanent_uri` already held by a record of a *different*
 model. Within one model the database constraint is the guarantee; across the three tables no portable
-constraint exists (research R4), so this check covers it. Two indexed `.exists()` queries, and only when
-the column is set, so nothing is paid for locally authored records.
+constraint exists (research R4), so this check covers it. Two indexed `.exists()` queries, and only
+when the column is set — so nothing is paid for a still-provisional, locally authored record.
+
+**The real cost, corrected (T037)**: that last clause is true but was incomplete as originally
+written — it says nothing is paid for a locally-authored record with no identifier, but says nothing
+about a record that *does* hold one. Before T029, those two queries ran on *every* save of a record
+that already carried an identifier, including a plain re-save that changed nothing about it at all —
+paid on every save, not once at publication. T029's database-read-back redesign (closing the
+rewrite-guard gaps a snapshot left open) reads the stored value back regardless, and once it holds
+that value, T029 folds in skipping this cross-model probe — and the shadow check T034 added alongside
+it — whenever the value being saved is unchanged from what is already stored, since nothing that
+depends on the value could have changed either. A re-save of an already-fixed record now pays only the
+one read-back query these checks already needed; the two `.exists()` queries run only when the value
+is actually being set or changed.
 
 ## Manager lookup
 

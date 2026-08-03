@@ -19,20 +19,31 @@ the code today.
 identified and locally viewable, and it matches how SKOS itself treats a concept's URI (a global
 identifier, not a site path). Established in the intake discussion, not inferred.
 
-## D2 — "Permanent" is a promise earned at publication, not a field that is sometimes empty
+## D2 — Presence of a *stored* `permanent_uri` is the distinction; the `uri` accessor always answers
 
 **Ambiguous**: whether an unpublished, locally authored record has a permanent URI at all.
 
-**Chosen**: every record always has one. For an unpublished local record it holds the value the
-record will publish under and follows the record's slugs; for anything imported or published it is
-fixed. The difference between the two states is **fixedness**, never presence.
+**Chosen**: an unpublished local record has none stored — `permanent_uri` is `None` and
+`has_permanent_uri` is `False` — and its `uri` accessor composes and reports the identifier it will
+publish under in the meantime, following the record's slugs. Once a record is imported or published,
+`permanent_uri` holds a value and `uri` returns it verbatim. The distinguishing state between the two
+is **presence** of the stored identifier — exactly what `has_permanent_uri` reads (`bool(self.
+permanent_uri)`) — not a separate fixedness concept layered on top of an always-present value.
 
-**Why defensible**: the maintainer's position is that an unpublished vocabulary has no permanent URI
-in the promise sense, and that populating the field with the eventual value is still right. A single
-always-present value keeps one rule for the whole system, avoids every caller special-casing an
-absent identity, and preserves R1's behaviour exactly, so this feature is not a breaking change.
-The alternative — no identifier until publication — would have made lookup fail for unpublished
-local records and forced a null check into every consumer for no gain.
+**Why defensible**: this matches the maintainer's stated position at the spec gate — an unpublished
+vocabulary has no permanent URI — and is what the shipped code does. A single, always-answering `uri`
+accessor still keeps one rule for the whole system, avoids every caller special-casing an absent
+identity on the read path, and preserves R1's behaviour exactly, so this feature is not a breaking
+change; that part of the original reasoning stands. The alternative — no identifier until publication,
+with `uri` itself raising or returning `None` — would have made lookup fail for unpublished local
+records and forced a null check into every consumer for no gain.
+
+**Correction (T037)**: an earlier version of this entry said "every record always has one... the
+difference between the two states is fixedness, never presence," which conflates the `uri`
+*accessor* — which does always return something, composed or stored — with the `permanent_uri`
+*column*, which does not. That wording contradicted the shipped `has_permanent_uri` and the
+maintainer's own words above. `data-model.md`'s description of `has_permanent_uri` carried the same
+drift and is corrected alongside this entry.
 
 ## D3 — Fixedness is recorded, never inferred from the configured base address
 
@@ -208,6 +219,17 @@ Each of the three parts is covered by tests that fail when that part alone is re
 **Not covered, deliberately**: `QuerySet.update()` and raw SQL bypass this, as they bypass every
 `save()`-based rule in Django, including the slug and default-language rules this app already relies
 on. Nothing portable defends against that at the database level for a conditional invariant.
+
+**Also not covered (T037, added on review — verified, not merely inferred)**: `QuerySet.bulk_create()`
+bypasses `save()`/`clean()` entirely and issues the `INSERT`s directly — confirmed by probing it
+against a scheme and an unsafe scheme, a blank string, and a cross-model duplicate, all three of which
+it accepts (the per-model partial `UniqueConstraint` still catches a same-model duplicate at the
+database, which is exactly what `TestPermanentUriDatabaseUniqueness` deliberately uses `bulk_create`
+to exercise). Django's fixture loader (`loaddata`) and the raw deserializer path it uses
+(`django.core.serializers`) bypass `save()`/`clean()` the same way fixtures always have for every other
+model-level rule in this app. Both are the same class of gap as `QuerySet.update()` and raw SQL above:
+nothing portable defends against a conditional, cross-row invariant at the database level for a write
+path Django itself designed to skip per-instance validation.
 
 ## D13 — An empty string is the absence of an identifier, and is stored as null
 

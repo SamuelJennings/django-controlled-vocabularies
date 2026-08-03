@@ -147,6 +147,44 @@ provisional identity. This is a planning omission, not an implementer failure.
 - [x] T023 Run `forge verify` (lint, typecheck, tests, build) and confirm green across the matrix.
       Confirm `makemigrations --check` is clean and a migrate-from-zero reaches the same state.
 
+## Phase 8: Review fix cycle (three-lens review: correctness+spec, security, architecture)
+
+- [x] T028 Refactor first: collapse the three-way `permanent_uri` duplication across
+      `ConceptScheme`/`Concept`/`Collection` into an abstract `PermanentUriModel` base, and replace the
+      hardcoded cross-model-check tuple with a registry derived from the base's live subclasses. Pure
+      structural refactor — migration 0005 unchanged, all pre-existing tests pass unmodified.
+- [x] T029 Headline fix: delete the snapshot-based rewrite guard (`_loaded_permanent_uri`,
+      `_permanent_uri_deferred`, `from_db`, `_note_permanent_uri_saved`) and read the stored value back
+      from the database at save time instead. Closes four verified bypasses: a stale second instance
+      rewriting a concurrently stored identifier; a refreshed stale instance clearing one; a stale
+      provisional instance's plain save nulling one; and explicit-`pk` construction rewriting or
+      clearing one outright. Folds in skipping the cross-model probe when the value is unchanged.
+- [x] T030 Skip `permanent_uri` validation entirely on a `save(update_fields=...)` that excludes the
+      column, so an in-memory value not meant to be written cannot block an unrelated save.
+- [x] T031 Catch `urllib.parse.urlsplit`'s bare `ValueError` (e.g. NFKC-invalid netloc, malformed
+      IPv6) and re-raise as a translatable `ValidationError` (`permanent_uri_unparseable`).
+- [x] T032 Move the length check to the top of `validate_permanent_uri` and bound every echoed value
+      to 80 characters (`django.utils.text.Truncator`), so a hostile arbitrarily-long value cannot
+      inflate the error message itself; the true length still reports via `%(length)s`.
+- [x] T033 Guard `get_by_uri` against a falsy or non-`str` `uri` — `get(permanent_uri=None)` compiled
+      to `IS NULL`, matching every provisional record.
+- [x] T034 Refuse an externally assigned `permanent_uri` that resolves, through the same local-parse
+      machinery `get_by_uri` uses, to a *different* record's own `local_url`. The reverse direction (a
+      rename displacing an already-stored identifier) is a residual limitation, recorded in
+      decisions.md D14, belonging to R4's publication lifecycle.
+- [x] T035 Replace the three-scheme denylist with a small allowlist (`http`, `https`, `urn`, `doi`,
+      `info`, `ark`), overridable via `CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES`. The original
+      denylist stays as a belt-and-braces check inside the allowlist branch. Supersedes D5's shape,
+      not its content (decisions.md D15).
+- [x] T036 Close a coverage gap: a mixed-case identifier round-trips byte-identical through save and
+      reload (US-1 scenario 5 / FR-002) — the code never touched case, so no fix was needed.
+- [x] T037 Documentation honesty pass: `CHANGELOG.md` `[Unreleased]` entry for this feature's public
+      surface, amending the stale R1 URI-composition claim; `decisions.md` D2 corrected (presence, not
+      a separate fixedness concept) with the same fix in `data-model.md`; D12's "not covered"
+      list extended with `bulk_create` and the fixture/raw-deserializer path (verified, not inferred);
+      `research.md` R4's cross-model race stated plainly; `data-model.md`'s cross-model-probe cost
+      description corrected and the record of T029's skip-when-unchanged optimisation added.
+
 ## Dependencies and parallelism
 
 - Phase 1 is strictly first: every story needs the column to exist.

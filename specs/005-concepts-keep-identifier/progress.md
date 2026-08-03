@@ -330,3 +330,216 @@ the human-readable trail.
 - **Deviation**: none.
 - **Phase 6/7 complete**: T018–T023 all done. This closes out FS-005's implementation task list
   (Phases 1 through 7, including 2b and 5b).
+
+## 2026-08-03 — Phase 8 (T028) refactor: PermanentUriModel abstract base
+
+- **Did**: T028. Introduced `class PermanentUriModel(models.Model)` (`Meta.abstract = True`) carrying
+  the `permanent_uri` field, `uri`, `has_permanent_uri`, the permanent-URI half of `clean()`, and a
+  `save()` that brackets `super().save()` with the validation hook — byte-identical across
+  `ConceptScheme`/`Concept`/`Collection` before this task. Each concrete model now keeps only its own
+  `local_url` property, its `Meta.constraints` entry name, and its `permanent_uri` field redeclaration
+  (an ordinary Django abstract-field override, changing only `help_text` wording). Replaced the
+  hardcoded `(ConceptScheme, Concept, Collection)` tuple in `_reject_permanent_uri_held_by_another_model`
+  with `_permanent_uri_models()`, derived from `PermanentUriModel.__subclasses__()`. Added
+  `test_every_concrete_permanent_uri_model_is_registered_for_the_cross_model_check` to
+  `tests/test_standards.py`, asserting the registry against Django's own `apps.get_models()` — a source
+  independent of the registry helper's own implementation, so a regression to a hardcoded, incomplete
+  list is still caught.
+- **Verified with**: `poetry run pytest -q` → 282 passed (281 baseline + 1 new registry test), no
+  behavioural change. `poetry run ruff check .` / `ruff format --check .` → clean.
+  `poetry run mypy controlled_vocabularies` → one error (`candidate.objects.filter` on a
+  `type[PermanentUriModel]` the stubs can't resolve `.objects` off) fixed by switching to
+  `candidate._default_manager.filter(...)`, which the stubs do type; then clean.
+  `DJANGO_SETTINGS_MODULE=tests.settings python -m django makemigrations --check --dry-run` → No
+  changes detected — migration 0005 unchanged, confirming the field's deconstructed form is identical
+  whether declared directly or inherited-then-overridden. Mutation-tested the new registry test by
+  temporarily hardcoding `_permanent_uri_models()` to return `(ConceptScheme, Concept)` (forgetting
+  `Collection`) — the test failed for exactly that reason — then restored from a pre-mutation copy and
+  reran the full suite green.
+- **Deviation**: none — implemented as prescribed.
+- **Commit**: `refactor(FS-005): T028 collapse permanent_uri duplication into PermanentUriModel`.
+
+## 2026-08-03 — Phase 8 (T029) headline fix: database read-back replaces the rewrite-guard snapshot
+
+- **Did**: T029. Wrote the four repro cases as tests first, in
+  `TestPermanentUriRewriteGuardReadsTheDatabase`: (a) a stale second instance of the same row rewriting
+  a concurrently stored identifier; (b) a refreshed stale instance clearing one, plus a stale
+  provisional instance's plain `.save()` nulling one stored meanwhile; (c) explicit-`pk` construction
+  rewriting or clearing one outright; (d) is the same underlying gap as (b)'s `refresh_from_db()` case.
+  Confirmed all 11 parametrised cases red against the pre-fix code (3 sanity-check cases already
+  green). Deleted `_loaded_permanent_uri`, `_permanent_uri_deferred`, the `from_db` override, and
+  `_note_permanent_uri_saved` (~60 lines) from `PermanentUriModel`. Replaced
+  `_validate_permanent_uri_on_save`/`_reject_permanent_uri_rewrite` with a single `_check_permanent_uri`
+  that reads `_stored_permanent_uri(instance)` back from the database (short-circuiting on
+  `instance.pk is None`) and refuses when the in-memory value differs from what is stored — no state to
+  go stale. Folded in, while already holding `stored`: skip `_reject_permanent_uri_held_by_another_model`
+  when the in-memory value equals `stored`, removing two wasted queries from every unchanged re-save.
+- **Verified with**: all 11 previously-red cases green; `poetry run pytest -q` → 296 passed (282 + 14
+  new). `ruff check`/`format --check` clean after one auto-reformat. `mypy` clean.
+  `makemigrations --check --dry-run` → No changes detected.
+- **Deviation**: none.
+- **Commit**: `fix(FS-005): T029 replace the rewrite-guard snapshot with a database read-back`.
+
+## 2026-08-03 — Phase 8 (T030) skip validation on a save that excludes permanent_uri
+
+- **Did**: T030. Wrote the literal repro from the review write-up first
+  (`test_assigning_and_saving_excluding_the_column_leaves_the_record_provisional_and_still_storable`)
+  and it was already green — T029's read-back redesign incidentally closed that specific narrative,
+  since fixedness is no longer adopted from an unwritten in-memory value. Probed further and found the
+  underlying defect the review was pointing at was still live: `_check_permanent_uri` ran full format
+  validation and the fixedness/cross-model checks against `permanent_uri` even on a
+  `save(update_fields=[...])` that never writes that column, so an invalid or would-be-conflicting
+  in-memory value blocked an unrelated, valid save (e.g. a label-only update). Wrote two more repro
+  tests for that (malformed value; would-be rewrite conflict), confirmed red. Fixed by making
+  `PermanentUriModel.save()` skip `_check_permanent_uri` entirely when `update_fields` is given and
+  excludes `"permanent_uri"`.
+- **Verified with**: all 4 tests in `TestPermanentUriUpdateFieldsExclusion` green (2 confirmed red
+  beforehand). `poetry run pytest -q` → 300 passed. `ruff`/`mypy`/`makemigrations --check` clean.
+- **Deviation (logged, not silent)**: the review's literal repro turned out to already be fixed by
+  T029; implemented the prescribed fix anyway, against the real underlying defect the repro was
+  gesturing at, per the task brief's instruction not to silently substitute a different design.
+- **Commit**: `fix(FS-005): T030 skip permanent_uri validation on a save that excludes it`.
+
+## 2026-08-03 — Phase 8 (T031) catch urlsplit's ValueError
+
+- **Did**: T031. Confirmed both verified repros raise a bare `ValueError` from
+  `urllib.parse.urlsplit` in a plain Python REPL check first (`http://exa℀mple.com/x` → NFKC
+  normalization error; `http://[fe80::1` → invalid IPv6 URL), then wrote them as tests at the
+  validator, `save()`, and `full_clean()` layers and confirmed all four red. Wrapped the `urlsplit`
+  call in `try/except ValueError`, re-raising as `ValidationError` with a new code
+  `permanent_uri_unparseable`, lazily translated with a named `%(uri)s` placeholder matching its
+  siblings. Added a sixth Article XII translatability test to `test_standards.py` alongside the
+  existing five.
+- **Verified with**: all 4 repro tests green; `poetry run pytest -q` → 305 passed. `ruff`/`mypy`/
+  `makemigrations --check` clean.
+- **Deviation**: none.
+- **Commit**: `fix(FS-005): T031 catch urlsplit's ValueError and re-raise as ValidationError`.
+
+## 2026-08-03 — Phase 8 (T032) length check first, echoed value bounded
+
+- **Did**: T032. Wrote two repro tests first: a 2028-character well-formed-but-overlong value
+  producing a 2085-character message (raw value echoed untruncated), and a value that is both
+  malformed (no scheme) and overlong being refused with code `permanent_uri_not_absolute` rather than
+  `permanent_uri_too_long` (proving the order defect directly). Confirmed both red. Moved the length
+  check to the top of `validate_permanent_uri`, before `urlsplit` runs at all, and added an
+  `_echoed_uri()` helper (`django.utils.text.Truncator(value).chars(80)`) used in every message's
+  `%(uri)s` slot; the too-long message's `%(length)s`/`%(max_length)s` params still report the true,
+  untruncated length. Adjusted the pre-existing `test_permanent_uri_too_long_message_uses_named_placeholders`
+  in `test_standards.py`, which had asserted `err.params["uri"] == overlong` (the full raw value).
+- **Verified with**: both repros green; `poetry run pytest -q` → 307 passed. `ruff`/`mypy`/
+  `makemigrations --check` clean.
+- **Deviation**: none.
+- **Commit**: `fix(FS-005): T032 check length first and bound every echoed value`.
+
+## 2026-08-03 — Phase 8 (T033) guard get_by_uri against a falsy or non-str identifier
+
+- **Did**: T033. Wrote repro tests first for all three managers (`None` and `""`, plus the
+  two-provisional-records `MultipleObjectsReturned` case for `Concept`) and confirmed the `None` cases
+  red — `Concept.objects.get_by_uri(None)` returned an unrelated provisional concept with one in the
+  table, and raised `MultipleObjectsReturned` with two; the `""` cases were already green (an empty
+  string does not compile to `IS NULL`). Added a guard at the top of
+  `PermanentUriLookupMixin.get_by_uri`: a falsy or non-`str` `uri` raises `self.model.DoesNotExist`
+  immediately, before the ORM query runs.
+- **Verified with**: all 7 tests in `TestGetByUriRejectsAbsentIdentifiers` green (4 confirmed red
+  beforehand). `poetry run pytest -q` → 314 passed. `ruff`/`makemigrations --check` clean. `mypy`
+  needed `# type: ignore[attr-defined]` on `self.model.DoesNotExist` — the same generic-vs-concrete gap
+  decisions.md D11 already documents (django-stubs' plugin only re-attaches `.DoesNotExist` to a
+  *concrete* model class, not a still-generic `type[_ModelT]`) — annotated with a comment pointing at
+  D11 rather than left bare.
+- **Deviation**: none.
+- **Commit**: `fix(FS-005): T033 guard get_by_uri against a falsy or non-str identifier`.
+
+## 2026-08-03 — Phase 8 (T034) refuse an identifier that shadows a local record's own address
+
+- **Did**: T034. Wrote six tests first in `TestPermanentUriDoesNotShadowALocalRecordsAddress`: same-
+  model shadowing (a new concept's `permanent_uri` set to a different concept's `local_url`), the same
+  against an existing provisional record's later single set, cross-model shadowing (a collection
+  against a concept's address, a concept against a scheme's address), and the two accepted cases
+  (resolves to nothing under the base address; resolves to the record's own address). Confirmed the
+  four refusal cases red, the two acceptance cases already green. Added `_resolve_as_local_url(uri)`,
+  trying each of the three models' `_get_by_local_parse` in turn (their local address spaces are
+  structurally disjoint per research R4, so at most one can ever match), and
+  `_reject_permanent_uri_shadowing_local_url`, called from `_check_permanent_uri` alongside the
+  cross-model probe and skipped under the same unchanged-value condition. Recorded the reverse-
+  direction residual limitation (a rename later displacing an already-stored identifier) in
+  decisions.md D14, per the task brief's explicit instruction not to fix it here.
+- **Verified with**: all 6 tests green (4 confirmed red beforehand). `poetry run pytest -q` → 320
+  passed. `ruff`/`makemigrations --check` clean. `mypy` needed
+  `# type: ignore[attr-defined,no-any-return]` on the dynamic `manager._get_by_local_parse(uri)` call
+  inside `_resolve_as_local_url` — the same generic-vs-concrete stub gap as T033/D11, annotated
+  accordingly.
+- **Deviation**: none.
+- **Commit**: `fix(FS-005): T034 refuse an externally assigned identifier that shadows a local record's own address`.
+
+## 2026-08-03 — Phase 8 (T035) allowlist accepted URI schemes
+
+- **Did**: T035. Wrote 12 tests first in `TestPermanentUriSchemeAllowlist` (the six default schemes
+  accepted; four denylisted-by-example values — `file:`, `about:`, `blob:`, `jar:` — refused; the
+  setting override honoured; the original denylist still firing inside an overridden allowlist).
+  Confirmed the refusal and override cases red (5 of 12; the denylist-inside-override case was already
+  green by construction of the test). Added `conf.DEFAULT_ALLOWED_URI_SCHEMES` and
+  `conf.get_allowed_uri_schemes()` (same style as `get_base_uri()`), and a new
+  `CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES` setting. `validate_permanent_uri` now checks scheme
+  membership in the allowlist before the original three-scheme denylist, which stays as a second gate
+  reachable even inside an overridden allowlist (new code `permanent_uri_scheme_not_allowed`). Adjusted
+  the pre-existing `test_permanent_uri_unsafe_scheme_message_uses_named_placeholders` in
+  `test_standards.py` to override the allowlist to include `javascript`, so it exercises the denylist's
+  own message rather than the allowlist's (which now fires first for a scheme outside the default six);
+  added a matching translatability test for the new code. Updated README's Configuration section and
+  logged decisions.md D15, explicit that this supersedes D5's *shape* (denylist → allowlist) but not
+  its *content* — D5's own reasoning for including `urn:` is why the allowlist carries `urn`/`doi`/
+  `info`/`ark`, not just `http`/`https`.
+- **Verified with**: all 12 new tests green; full suite `poetry run pytest -q` → 333 passed, no
+  regressions from tightening the default scheme set. `ruff`/`mypy`/`makemigrations --check` clean.
+- **Deviation**: none.
+- **Commit**: `fix(FS-005): T035 allowlist accepted permanent_uri schemes instead of denylisting three`.
+
+## 2026-08-03 — Phase 8 (T036) case-preservation coverage
+
+- **Did**: T036. Confirmed this is a coverage gap, not a defect — nothing in `validate_permanent_uri`,
+  `_check_permanent_uri`, or the field itself touches case. Added
+  `test_permanent_uri_case_round_trips_byte_identical_through_save_and_reload`, parametrised over all
+  three models, asserting a mixed-case identifier survives `.create()`, `refresh_from_db()`, and `.uri`
+  byte-identical.
+- **Verified with**: green on first run (as expected — no code change). `poetry run pytest -q` → 336
+  passed.
+- **Deviation**: none.
+- **Commit**: `test(FS-005): T036 lock in permanent_uri case preservation`.
+
+## 2026-08-03 — Phase 8 (T037) documentation honesty
+
+- **Did**: T037. `CHANGELOG.md`: added an `[Unreleased]` entry covering the three `permanent_uri`
+  fields, `local_url`, `has_permanent_uri`, `get_by_uri` gaining `ConceptScheme`/`Collection` managers,
+  the exported `validate_permanent_uri`, and the new `CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES`
+  setting; amended the surviving R1 "Stable concept identity" entry to scope its unconditional URI-
+  composition claim to a locally authored record. `decisions.md` D2 corrected: the original wording
+  ("every record always has one... the difference... is fixedness, never presence") conflated the
+  always-answering `uri` *accessor* with the `permanent_uri` *column*, which is genuinely absent for an
+  unpublished record — contradicted both the shipped `has_permanent_uri` and Sam's own words at the
+  spec gate. Rewrote D2 to state presence as the distinction, with a correction note; fixed the same
+  drift in `data-model.md`'s `has_permanent_uri` row. `decisions.md` D12's "not covered, deliberately"
+  list extended with `bulk_create` and the fixture/raw-deserializer path — verified empirically (not
+  merely inferred) with a probe script: `bulk_create` accepted an unsafe scheme, a raw blank string
+  (not normalised to `None`), and a cross-model duplicate. `research.md` R4 now states plainly that its
+  cross-model validation check is exactly the "application checks only" alternative R4 itself rejects
+  two paragraphs below, for the same concurrent-write race, adopted anyway because closing it needs the
+  shared-identity-table alternative R4 already found premature. `data-model.md`'s cross-model-probe
+  cost description corrected: it previously said nothing is paid for a locally authored record (true
+  but silent that every record *with* an identifier paid two queries on *every* save before T029); now
+  records the real pre-T029 cost and that T029's skip-when-unchanged optimisation (extended to the
+  shadow check by T034) closes it. `tasks.md` updated with a new Phase 8 (T028–T037) marked done; this
+  entry is the corresponding `progress.md` log.
+- **Verified with**: `poetry run pytest -q` → 336 passed (no code touched by this task).
+  `ruff check .` / `ruff format --check .` clean (docs excluded from ruff's scope; no `.py` files
+  touched). `mypy controlled_vocabularies` clean (unchanged). `makemigrations --check --dry-run` → No
+  changes detected.
+- **Deviation**: none.
+- **Commit**: see below.
+
+## 2026-08-03 — Phase 8 complete
+
+T028–T037 all done: the three-lens review's prescribed fixes are landed, each with red-then-green
+regression-test evidence where a repro was given, and the documentation drift the review found is
+corrected. One disagreement logged (T030's literal repro was already closed by T029; the prescribed
+fix was implemented anyway against the real underlying defect, per instruction not to silently
+substitute a different design). No other deviations across T028–T037.

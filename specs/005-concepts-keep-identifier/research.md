@@ -82,13 +82,28 @@ composes one segment below the base, a concept two, and a collection three with 
 segment in the middle, and slugs cannot contain a separator — so no two provisional identifiers can
 collide, which is the same argument R1 used to justify not storing a URI in the first place.
 
+**The race, stated plainly (T037)**: the *cross-model* half of this decision — the validation check
+that covers "the rest" above — is exactly the "no constraint, application checks only" alternative
+rejected two paragraphs below, for exactly the reason given there: it loses to a concurrent write. Two
+saves for a concept and a collection carrying the same externally assigned identifier, committed
+concurrently, can each run the cross-model `.exists()` probe before the other's row commits, each see
+nothing held elsewhere, and both succeed — the per-model constraint cannot catch this because the
+collision is *across* tables. This is not a new risk introduced later; it was already true of R4 as
+designed and is accepted for the reason given above (a substantial architectural addition to close a
+collision that requires a source file to deliberately assign one URI to both a concept and a
+collection). Recorded here rather than left implicit, since the alternatives list otherwise reads as
+though the rejected shape and the chosen one differ in this respect, when for the cross-model case they
+do not.
+
 **Alternatives**:
 - *A shared `Identifier` table with a one-to-one from each model* — rejected as premature. It buys true
   cross-table uniqueness and costs a join on every identity read, a third table in every fixture, and a
   migration that has to move data if it is ever removed. Revisit if a real vocabulary produces a
   cross-type collision.
 - *No constraint, application checks only* — rejected: FR-006 requires the database to enforce it, and
-  application-only uniqueness loses to concurrent writes.
+  application-only uniqueness loses to concurrent writes. (Adopted anyway for the cross-model half
+  specifically, per the race noted above — the per-model constraints still give the database the last
+  word on the case that actually occurs.)
 
 ## R5 — Accepting an identifier: absolute, no script-bearing scheme, 500 characters
 
