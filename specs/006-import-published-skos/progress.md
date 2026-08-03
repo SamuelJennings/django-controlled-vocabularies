@@ -161,3 +161,284 @@ files. `poetry run pytest -q` — 339 passed. `poetry run ruff check .` — all 
 `poetry run ruff format --check .` — 20 files already formatted. `poetry run deptry .` — no issues.
 
 **Watch**: plan.md and tasks.md now say `exchange/`; any brief quoting `io/` is stale.
+
+## 2026-08-03T21:30:00Z · Implementer US1 · T006
+
+**Did**: `controlled_vocabularies/exchange/skos.py` — `_read_graph(file, *, serialization=None)`:
+resolves the serialization from the caller or `rdflib.util.guess_format`, restricted to the
+three FR-002 names (`turtle`/`xml`/`json-ld` — an explicit but unsupported format, e.g. `n3`, is
+refused just as an undetermined one is); routes RDF/XML through T004's `scan_rdf_xml` pre-flight
+before rdflib reads the file itself. Raises the new `SkosImportError` (a `ValidationError`
+subclass, translatable, named placeholders) for a missing file, an undetermined/unsupported
+serialization, or an unparseable one. `mapping.py` lands alongside it per decisions.md D11/D12 —
+currently just the `SKOS` namespace constant; no predicate table yet, since Phase US-1 reads
+fixed predicates directly and nothing yet needs a lookup table (Article II — no speculative
+abstraction). `rdflib` moved from `[tool.poetry.group.dev.dependencies]` to
+`[tool.poetry.dependencies]` in this commit, ran `poetry lock`.
+
+**Deviation** (renamed a parameter, no decisions.md entry needed — mechanical): tasks.md/plan.md
+never fixed the caller-stated-serialization parameter's name; `format` was the natural first
+choice but `ruff` (`A002`) flags it as shadowing the builtin, so it is `serialization` instead.
+
+**Verified**: `poetry run pytest -q` — 351 passed (339 + 12 new). `poetry run ruff check .` — all
+checks passed. `poetry run ruff format --check .` — 23 files formatted. `poetry run mypy` —
+success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python
+-m django makemigrations --check --dry-run --settings=tests.settings` — no changes detected.
+`poetry run pre-commit run --all-files` — all hooks passed (after `poetry lock`, required once
+`rdflib` moved dependency groups).
+
+**Next**: T007 — the vocabulary: `import_skos()`'s public entry point, matched via `get_by_uri`,
+created/updated/target-mismatch/no-target handling.
+
+**Watch**: none.
+
+## 2026-08-03T21:50:00Z · Implementer US1 · T007
+
+**Did**: `import_skos(file, *, serialization=None, scheme=None)` — the public entry point,
+wrapping the whole run in `transaction.atomic()`. `_resolve_scheme()` reads the file's declared
+`skos:ConceptScheme` (deterministically the lexicographically-first when a file somehow declared
+more than one — not itself a tested case), matches or creates the `ConceptScheme` via
+`get_by_uri` (research.md R6), and writes its `name`/`static_uri`. A caller-named `scheme` target
+is used directly when the file agrees with it, or is fatal (`VOCABULARY_TARGET_MISMATCH`) when it
+does not; a file declaring none at all is fatal (`VOCABULARY_UNDETERMINED`, subject = the file's
+own path, since there is no RDF node to name) unless a target was given, in which case that
+target is used untouched.
+
+`report.py` gains `FatalReason`/`FatalFinding` (mirrors `SetAsideReason`/`SetAsideEntry`'s shape,
+kept as a separate closed vocabulary per decisions.md D3/D8 — a fatal finding is never a
+set-aside reason) and `ImportReport.fatal`/`add_fatal()`. `SkosImportFailed` (skos.py) is the
+exception a fatal run raises — it carries the run's (partial) `ImportReport` so a caller can
+inspect exactly what was wrong, per FR-004's "MUST fail the run and be named in the report",
+even though `transaction.atomic()` has already rolled back everything written before the raise.
+
+`_identify()` checks any RDF node's usable identity: a `BNode` is always fatal
+(`MISSING_IDENTITY`, decisions.md D3), a `URIRef` is checked through the models' own
+`validate_static_uri` (`REFUSED_IDENTITY` on failure — the same rule the models enforce on save,
+reused rather than reimplemented). `_first_literal()` picks a literal deterministically
+(lexicographically first), never "whichever rdflib yields first" — needed here for the scheme's
+`name` and reused by T008/T009. New fixture `tests/fixtures/skos/no_scheme_declared.ttl`: two
+concepts, no `skos:ConceptScheme` at all, for the "declares no vocabulary" fatal/succeeds-with-a-
+target pair.
+
+**Verified**: `poetry run pytest -q` — 373 passed (351 + 22 new: 12 in `test_skos.py`'s new
+`TestImportSkosVocabulary`, 10 in `test_report.py`'s new fatal-reason coverage). `poetry run ruff
+check .` — all checks passed. `poetry run ruff format --check .` — 23 files formatted. `poetry
+run mypy` — success, 9 source files (two rounds of fixes: `rdflib.term.Node` rather than
+`Identifier` as the RDF-term type hint — `graph.subjects()`'s actual return type — and `sorted(...,
+key=str)` rather than bare `sorted(...)` over a mixed node iterable). `poetry run deptry .` — no
+issues, 15 files scanned. `poetry run python -m django makemigrations --check --dry-run
+--settings=tests.settings` — no changes detected. `poetry run pre-commit run --all-files` — all
+hooks passed.
+
+**Next**: T008 — the imported vocabulary's default language (FR-005): declared language, else
+commonest preferred-label language, else site default.
+
+**Watch**: the concept walk (T009) is not wired into `import_skos()` yet — a successful T007-era
+call writes at most the one `ConceptScheme` row and never touches `Concept`.
+
+## 2026-08-03T22:05:00Z · Implementer US1 · T008
+
+**Did**: `_determine_default_language()` (decisions.md D4, FR-005): the vocabulary's own declared
+language when its `skos:prefLabel` carries exactly one and the site is configured for it; else
+the commonest language among `concept_nodes`' own `skos:prefLabel` values (ties broken by
+language code, for a result that doesn't depend on graph iteration order); else `""`, which
+`ConceptScheme.default_language` already treats as "fall back to `effective_default_language`" —
+R1's own mechanism, reused rather than reimplemented (D4 names this explicitly). `import_skos()`
+now also computes `concept_nodes` (sorted, deterministic) ahead of T009's own use of it, since
+T008's algorithm needs to see the concepts' labels too. `_resolve_scheme()`'s scheme-`name`
+selection now prefers the resolved default language's own label, falling back to any language
+when the scheme carries none in it (unchanged outcome for `rocks.ttl`, since English is both
+declared and configured).
+
+New fixtures: `french_vocabulary.ttl` (declares itself in French, a configured non-default
+language) and `unconfigured_language_vocabulary.ttl` (declares itself in Spanish, which the test
+site's `LANGUAGES` does not include at all — falls back to the site default).
+
+**Verified**: `poetry run pytest -q` — 375 passed (373 + 2 new in `test_skos.py`'s new
+`TestImportedVocabularyDefaultLanguage`). `poetry run ruff check .` — all checks passed. `poetry
+run ruff format --check .` — 23 files formatted. `poetry run mypy` — success, 9 source files
+(one round of fixes: `graph.objects()` yields the general `rdflib.term.Node`, which has no
+`.language` attribute — only `rdflib.Literal` does; added `_label_languages()` as the one place
+that narrows with `isinstance`, rather than repeating the check at each call site). `poetry run
+deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations --check
+--dry-run --settings=tests.settings` — no changes detected. `poetry run pre-commit run
+--all-files` — all hooks passed.
+
+**Next**: T009 — concepts: created inside the vocabulary, each holding its published identifier
+and its default-language preferred label; scheme membership via `inScheme`/`topConceptOf`/
+`hasTopConcept`; a concept claiming a different vocabulary set aside and reported.
+
+**Watch**: none.
+
+## 2026-08-03T22:25:00Z · Implementer US1 · T009
+
+**Did**: `_import_concepts()` wired into `import_skos()`, walking `concept_nodes` (already computed
+at T008) in the same deterministic order. Each concept's identity is checked with the same
+`_identify()`/`_FatalIdentity` the vocabulary itself uses (D3 applies identically to a concept).
+`_conflicting_scheme_ref()` checks all three SKOS scheme-membership predicates
+(`skos:inScheme`/`skos:topConceptOf` on the concept, `skos:hasTopConcept` from the scheme) against
+the target scheme's own URI; a concept with no scheme reference at all is read as belonging to the
+vocabulary being imported (decisions.md D16 — new, since neither the spec nor tasks.md said what
+"no reference at all" should do), and one naming a *different* scheme is set aside
+(`VOCABULARY_MISMATCH`) rather than imported. `_preferred_label_in()` picks the default-language
+`skos:prefLabel` deterministically. A matched or new `Concept` is written through the model's own
+`save()` (slug auto-derives from `label` for now; T010 layers deterministic disambiguation on top).
+
+**Deviation** (decisions.md D17, new): implemented "a concept with no preferred label in the
+default language is set aside" now, rather than leaving it for T022 (Phase US-3) as `tasks.md`'s
+phase split implies. FR-006 — T009's own governing requirement — states this in the same sentence
+as concept creation itself, and the alternative was an unhandled crash on ordinary real-world
+input. One fixture/test added (`no_default_language_label.ttl`); T022 is free to extend without
+needing new implementation.
+
+Also recorded, retroactively, two decisions this task's work exposed as unsettled but that were
+actually taken back at T006/T007: **D14** (`serialization`, not `format`, as the parameter name —
+`ruff` `A002`) and **D15** (`import_skos`'s target-vocabulary parameter takes a `ConceptScheme`
+instance, not a string — `#52` resolves whatever a curator types before calling in).
+
+Tightened two `TestImportSkosVocabulary` assertions from T007 (`report.created ==
+[ROCKS_URI]`/`report.updated == [ROCKS_URI]`) to membership checks (`ROCKS_URI in report.created`),
+since those buckets now also carry the concepts this task's `_import_concepts()` adds — the same
+report object, exercised further by the next task in the same phase, not a behaviour regression on
+what T007 itself asserts.
+
+New fixtures: `mixed_scheme_membership.ttl` (exercises all three scheme-membership predicates plus
+a concept explicitly claiming a different vocabulary) and `no_default_language_label.ttl` (a
+concept with no preferred label in the vocabulary's declared default language, "en").
+
+**Verified**: `poetry run pytest -q` — 380 passed (375 + 5 new in `test_skos.py`'s new
+`TestImportConcepts`, all four gate commands re-run clean afterward too). `poetry run ruff check .`
+— all checks passed. `poetry run ruff format --check .` — 23 files formatted. `poetry run mypy` —
+success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m
+django makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry
+run pre-commit run --all-files` — all hooks passed.
+
+**Next**: T010 — slugs: derived by the model's own rule, disambiguated by a deterministic suffix
+within the vocabulary.
+
+**Watch**: none.
+
+## 2026-08-03T22:40:00Z · Implementer US1 · T010
+
+**Did**: `_assign_unique_slug()` (FR-007, decisions.md D6): computes `slugify(label)` and appends a
+deterministic numeric suffix (`-2`, `-3`, …) only when that value already belongs to a *different*
+concept in the same scheme — `Concept.save()`'s own auto-derivation only refuses a collision, never
+disambiguates it, which is correct for curator-authored content but not for a published file where
+two source concepts commonly share a preferred label. `slug_is_manual` is set so a later plain
+`save()` never silently re-derives over the computed value; the importer itself recomputes it fresh
+on every re-import, so a slug still moves on a rename (D6) — it is importer-managed, not
+curator-pinned the way a curator's own manual slug is. `concept_nodes`' stable, URI-sorted
+processing order (already established at T008/T009) is what makes which of two colliding concepts
+gets the plain slug deterministic and stable across repeated imports of the identical file.
+
+New fixture: `duplicate_slug.ttl` — two concepts, distinct identifiers (`quartz-a`/`quartz-b`,
+alphabetically ordered on purpose), both preferring "Quartz".
+
+**Verified**: `poetry run pytest -q` — 383 passed (380 + 3 new in `test_skos.py`'s new
+`TestConceptSlugs`). `poetry run ruff check .` — all checks passed. `poetry run ruff format
+--check .` — 23 files formatted. `poetry run mypy` — success, 9 source files. `poetry run deptry .`
+— no issues, 15 files scanned. `poetry run python -m django makemigrations --check --dry-run
+--settings=tests.settings` — no changes detected. `poetry run pre-commit run --all-files` — all
+hooks passed.
+
+**Next**: T011 — fatal findings and atomicity: an absent identifier, a blank-node concept, and an
+identifier the identity rules refuse each fail the run; every problem in a file is collected rather
+than raised at the first; the transaction rolls back.
+
+**Watch**: none.
+
+## 2026-08-03T22:55:00Z · Implementer US1 · T011
+
+**Did**: no new production code. `_resolve_scheme()`/`_import_concepts()` already collect every
+fatal finding into `report.fatal` rather than raising at the first (T007/T009), and `import_skos()`
+already raises `SkosImportFailed` only once nothing further can be checked, inside
+`transaction.atomic()` (T007) — the collect-then-raise-once, roll-back-on-raise pattern
+research.md R7 calls for was built in from the start rather than deferred to this task. T011 is
+therefore pure test coverage: a blank-node concept and a refused-URI-scheme concept each proven to
+fail the run and write nothing; `multiple_fatal_problems.ttl` (new fixture — a blank-node concept,
+a refused-scheme concept, and one perfectly ordinary concept together) proving both fatal findings
+are reported in one run rather than stopping at the first, and that the rollback undoes a scheme
+field write made *before* the fatal concepts were even reached (an existing scheme's `name` is
+provably unchanged after the failed run), not only concept creation.
+
+**Verified**: `poetry run pytest -q` — 388 passed (383 + 5 new in `test_skos.py`'s new
+`TestFatalFindingsAndAtomicity`). `poetry run ruff check .` — all checks passed. `poetry run ruff
+format --check .` — 23 files formatted. `poetry run mypy` — success, 9 source files. `poetry run
+deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations --check
+--dry-run --settings=tests.settings` — no changes detected. `poetry run pre-commit run
+--all-files` — all hooks passed.
+
+**Next**: T012 — the report, populated by a real run: created and updated records and set-aside
+entries all present with their reasons, as data.
+
+**Watch**: none.
+
+## 2026-08-03T23:00:00Z · Implementer US1 · T012
+
+**Did**: `TestReportPopulatedByARealRun` — a first import against an empty database reports every
+record (scheme + concepts) as created and nothing as updated, with no duplicate URIs in the
+bucket; a re-import reverses that (everything updated, nothing created); a set-aside entry
+(`no_default_language_label.ttl`) carries its reason/subject/params directly, groupable via
+`set_aside_by_reason()` without ever rendering a message; a single run against a pre-seeded
+partial state (`mixed_scheme_membership.ttl`, one concept already present under the file's
+scheme) produces created, updated, *and* set-aside entries together correctly.
+
+**Deviation** (decisions.md D18, new): writing the last of those tests surfaced a real bug, not a
+test-authoring accident. `_resolve_scheme` (T008) unconditionally recomputed and assigned
+`default_language` on *every* matched scheme, including one that already had concepts from an
+earlier run — colliding with `ConceptScheme.save()`'s own R1 guard, which refuses to change
+`default_language` once a scheme has concepts (it anchors their identity). The collision raised an
+undecorated `django.core.exceptions.ValidationError` straight out of the transaction, bypassing
+this feature's own translatable-report contract entirely (FR-003/FR-015) — not a set-aside, not a
+fatal finding, just a crash. Fixed: `default_language` is now set from the file only when the
+scheme is being freshly created (`row.pk is None`, so it provably has no concepts yet); an
+existing scheme's already-frozen value is left untouched, which is also the only reading of D4's
+algorithm consistent with R1's own guard (that value cannot legitimately have changed since first
+frozen). The scheme-name language selection now reads `row.effective_default_language` instead of
+a value this function only computes on create. One dedicated regression test added directly
+(`test_default_language_is_not_recomputed_for_a_scheme_that_already_has_concepts`) alongside the
+`TestReportPopulatedByARealRun` coverage.
+
+**Verified**: `poetry run pytest -q` — 393 passed (388 + 5 new: 4 in `test_skos.py`'s new
+`TestReportPopulatedByARealRun`, 1 regression test in `TestImportedVocabularyDefaultLanguage`).
+`poetry run ruff check .` — all checks passed. `poetry run ruff format --check .` — 23 files
+formatted. `poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15
+files scanned. `poetry run python -m django makemigrations --check --dry-run
+--settings=tests.settings` — no changes detected. `poetry run pre-commit run --all-files` — all
+hooks passed.
+
+**Phase US-1 complete (T006–T012).** `import_skos()` reads a Turtle/RDF-XML/JSON-LD file, resolves
+or refuses the vocabulary it declares, imports its concepts with deterministic slugs, collects
+every fatal and set-aside finding, and rolls back the whole transaction on any fatal one. `models.py`
+was not touched. T013+ (US-2, re-import behaviour) is the next Implementer's scope — this
+Implementer stops here.
+
+**Watch**: US-2's re-import work should read decisions.md D18 before touching `_resolve_scheme`
+again — the guard it works around (R1's frozen-`default_language`-once-populated rule) is exactly
+the kind of thing US-2's "the file is authoritative for what it contains" (D5) could collide with
+a second time if a vocabulary's *declared* default language genuinely changes between two
+publications of the same file. That scenario is not handled here (D18's own "Revisit if").
+
+## Phase US-1 review (orchestrator)
+
+**Did**: reviewed T006–T012 and re-ran the full gate independently — 393 passed, mypy/ruff/deptry
+clean, `models.py` confirmed untouched against the phase base. D14–D18 accepted as written; D18's
+fix (default language frozen once a scheme has concepts) is correct against R1's own guard.
+
+One defect fixed, recorded as D19: the file's vocabulary was chosen as the lexicographically-first
+declared `skos:ConceptScheme`, so a file naming a foreign vocabulary whose identifier sorted first
+would have imported the wrong one. Now chosen by which declared vocabulary the file's own concepts
+belong to, with a genuine tie and no named target fatal (`VOCABULARY_AMBIGUOUS`). New fixture
+`two_vocabularies.ttl`; the order-independence test fails against the old rule.
+
+Also made `tests/test_exchange/test_fixtures.py` discover fixtures by walking the directory rather
+than a hand-kept list — six fixtures added during US-1 were not in it — with a guard test so an
+empty directory cannot parametrize to nothing and read as a pass.
+
+**Verified**: `poetry run pytest -q` — 409 passed. ruff check, ruff format --check, mypy (9 source
+files), deptry, `makemigrations --check --dry-run`, `pre-commit run --all-files` — all clean.
+
+**Carried to US-2**: D18's open question is now required work, not a suggestion. A re-imported file
+whose declared default language differs from the one frozen on the existing vocabulary must be
+reported as set aside, not silently ignored — silence is what D1 forbids. D17's `NO_PREFERRED_LABEL`
+set-aside is minimal and belongs to T022 to finish.

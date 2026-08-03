@@ -1,0 +1,17 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+# FR-005/D4: a vocabulary published in French, a language the test site is
+# configured for (LANGUAGES = en/de/fr) but is not the site's own default
+# (en). The vocabulary declares itself in French — a single language on its
+# own skos:prefLabel — so its default language must be taken from the file,
+# not the site.
+
+<http://example.org/geology/>
+    a skos:ConceptScheme ;
+    skos:prefLabel "Types de roches"@fr .
+
+<http://example.org/geology/igneous>
+    a skos:Concept ;
+    skos:inScheme <http://example.org/geology/> ;
+    skos:prefLabel "Roche ignée"@fr .

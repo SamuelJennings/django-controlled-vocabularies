@@ -32,6 +32,10 @@ django = ">=5.2"
 # that imports them — deptry fails a declared-but-unused dependency, so the
 # born-green scaffold stays lean.
 defusedxml = "^0.7.1"
+# The RDF parsing boundary (research.md R1). Moved here from the dev group in
+# this same commit — T006/skos.py is the first code that imports it at
+# runtime (decisions.md D12).
+rdflib = "^7.6.0"
 
 [tool.poetry.group.dev.dependencies]
 # Family toolchain bundle; the pin tag is the family-standard version. Ships
@@ -39,11 +43,6 @@ defusedxml = "^0.7.1"
 # python marker: the bundle needs >=3.12; the package floor stays 3.11 for
 # consumers — dev tooling never ships to them.
 mvp-shared = { git = "https://github.com/django-mvp/shared.git", tag = "v0.2.0", extras = ["dev", "test"], python = ">=3.12" }
-# Test-only for now (FS-006 T005): the fixture vocabularies need something to parse
-# them with, ahead of the reader (T006) that makes rdflib a genuine runtime
-# dependency of the package itself. Moves to [tool.poetry.dependencies] in the same
-# commit as the code that first imports it at runtime (decisions.md D12).
-rdflib = "^7.6.0"
 
 [build-system]
 requires = ["poetry-core"]

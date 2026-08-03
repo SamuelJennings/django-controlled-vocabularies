@@ -109,21 +109,92 @@ class SetAsideEntry:
         return str(self.reason.template) % {"subject": self.subject, **self.params}
 
 
+class FatalReason(TextChoices):
+    """The closed vocabulary of reasons a run fails outright (FR-004, decisions.md D3/D8).
+
+    Deliberately separate from :class:`SetAsideReason`: everything in that
+    vocabulary lets the rest of the file still import; everything here means
+    the whole run fails and the transaction rolls back (T011,
+    ``research.md`` R7). Covers the small fatal set decisions.md D8 names —
+    a missing or refused record identity — plus the two ways the vocabulary
+    itself cannot be resolved (FR-005): the file names none and the caller
+    named no target, or the caller's named target contradicts the file's own.
+    """
+
+    MISSING_IDENTITY = "missing_identity", _("identifier missing or blank")
+    REFUSED_IDENTITY = "refused_identity", _("identifier refused by the identity rules")
+    VOCABULARY_UNDETERMINED = "vocabulary_undetermined", _("vocabulary not declared and no target named")
+    VOCABULARY_TARGET_MISMATCH = "vocabulary_target_mismatch", _("declared vocabulary does not match the named target")
+    VOCABULARY_AMBIGUOUS = "vocabulary_ambiguous", _("the file declares more than one vocabulary and none was named")
+
+    @property
+    def template(self) -> Promise:
+        """The translatable, named-placeholder message template for this reason.
+
+        Every template declares ``%(subject)s``, the same shape
+        :class:`SetAsideReason.template` uses (Article XII).
+        """
+        return _FATAL_TEMPLATES[self]
+
+
+_FATAL_TEMPLATES: dict[FatalReason, Promise] = {
+    FatalReason.MISSING_IDENTITY: _(
+        "'%(subject)s' has no identifier that survives re-serialization (a blank node); the run was refused."
+    ),
+    FatalReason.REFUSED_IDENTITY: _("'%(subject)s' is not an identifier the application accepts; the run was refused."),
+    FatalReason.VOCABULARY_UNDETERMINED: _(
+        "'%(subject)s' declares no vocabulary of its own, and no target vocabulary was named; the run was refused."
+    ),
+    FatalReason.VOCABULARY_TARGET_MISMATCH: _(
+        "'%(subject)s' is not the vocabulary named as the import's target ('%(target)s'); the run was refused."
+    ),
+    FatalReason.VOCABULARY_AMBIGUOUS: _(
+        "'%(subject)s' declares more than one vocabulary (%(declared)s) and none was named as the import's "
+        "target; the run was refused."
+    ),
+}
+
+
+@dataclass(frozen=True)
+class FatalFinding:
+    """One reason a run failed outright, with what it was and why (FR-004/FR-015).
+
+    The fatal counterpart of :class:`SetAsideEntry`, with the same shape —
+    ``subject`` names the record or file at fault, ``params`` carries whatever
+    else the reason's template needs — kept as a distinct type because a
+    fatal finding is never one of :class:`SetAsideReason`'s reasons
+    (decisions.md's report.py docstring: fatal findings "are not part of
+    this vocabulary").
+    """
+
+    reason: FatalReason
+    subject: str
+    params: dict[str, str] = field(default_factory=dict)
+
+    def render(self) -> str:
+        """This entry's message in the caller's active language (Article XII)."""
+        return str(self.reason.template) % {"subject": self.subject, **self.params}
+
+
 @dataclass
 class ImportReport:
     """The structured outcome of one import run (FR-015, decisions.md D7).
 
-    Four buckets, each a plain list a caller reads directly rather than parsing:
+    Five buckets, each a plain list a caller reads directly rather than parsing:
     :attr:`created` and :attr:`updated` hold the URIs of records the run wrote,
     :attr:`set_aside` holds a :class:`SetAsideEntry` per value the run could not
-    store, and :attr:`absent_from_source` holds the URIs of records the file no
-    longer mentions (FR-013) — left untouched, only named.
+    store, :attr:`absent_from_source` holds the URIs of records the file no
+    longer mentions (FR-013) — left untouched, only named — and :attr:`fatal`
+    holds a :class:`FatalFinding` per reason the whole run was refused
+    (FR-004): non-empty only on a failed run, and always empty on one that
+    returned successfully.
     """
 
     created: list[str] = field(default_factory=list)
     updated: list[str] = field(default_factory=list)
     set_aside: list[SetAsideEntry] = field(default_factory=list)
     absent_from_source: list[str] = field(default_factory=list)
+    fatal: list[FatalFinding] = field(default_factory=list)
 
     def add_created(self, subject: str) -> None:
         """Record that ``subject`` was created by this run."""
@@ -141,6 +212,13 @@ class ImportReport:
         """Record that ``subject`` was not stored, for ``reason``, with any extra ``params``
         its message template needs."""
         self.set_aside.append(SetAsideEntry(reason=reason, subject=subject, params=params))
+
+    def add_fatal(self, reason: FatalReason, subject: str, **params: str) -> None:
+        """Record that ``subject`` is why the whole run was refused, for ``reason``, with any
+        extra ``params`` its message template needs (FR-004). A run with anything in
+        :attr:`fatal` raises rather than returning; the caller reads this bucket from the
+        raised exception, not from a normal return value."""
+        self.fatal.append(FatalFinding(reason=reason, subject=subject, params=params))
 
     def set_aside_by_reason(self) -> dict[SetAsideReason, list[SetAsideEntry]]:
         """Group :attr:`set_aside` entries by reason, for a curator-facing count per reason

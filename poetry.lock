@@ -1501,11 +1501,12 @@ version = "3.3.2"
 description = "pyparsing - Classes and methods to define and execute parsing grammars"
 optional = false
 python-versions = ">=3.9"
-groups = ["dev"]
+groups = ["main", "dev"]
 files = [
     {file = "pyparsing-3.3.2-py3-none-any.whl", hash = "sha256:850ba148bd908d7e2411587e247a1e4f0327839c40e2e5e6d05a007ecc69911d"},
     {file = "pyparsing-3.3.2.tar.gz", hash = "sha256:c777f4d763f140633dcb6d8a3eda953bf7a214dc4eff598413c070bcdc117cbc"},
 ]
+markers = {dev = "python_version >= \"3.12\""}
 
 [package.extras]
 diagrams = ["jinja2", "railroad-diagrams"]
@@ -1730,7 +1731,7 @@ version = "7.6.0"
 description = "RDFLib is a Python library for working with RDF, a simple yet powerful language for representing information."
 optional = false
 python-versions = ">=3.8.1"
-groups = ["dev"]
+groups = ["main"]
 files = [
     {file = "rdflib-7.6.0-py3-none-any.whl", hash = "sha256:30c0a3ebf4c0e09215f066be7246794b6492e054e782d7ac2a34c9f70a15e0dd"},
     {file = "rdflib-7.6.0.tar.gz", hash = "sha256:6c831288d5e4a5a7ece85d0ccde9877d512a3d0f02d7c06455d00d6d0ea379df"},
@@ -2427,4 +2428,4 @@ dev = ["pytest", "setuptools"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<4.0"
-content-hash = "01c821903bf60297bada4d879792ec89765b21c4e16e2bbfcd5f48738f0b6783"
+content-hash = "37e4914e748fa7b725dbf1364078a15ecc91570bb4d1fba98ba37eca97c3fedc"
