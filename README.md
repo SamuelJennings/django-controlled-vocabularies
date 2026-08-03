@@ -69,6 +69,17 @@ address for viewing a record is always composed from this base and the record's 
 is `{base}/{scheme-slug}/{concept-slug}` — even when that record's permanent URI points elsewhere, and
 the slugs follow the labels while a vocabulary is unpublished.
 
+An externally assigned permanent URI must use one of a small set of accepted schemes — `http`,
+`https`, `urn`, `doi`, `info`, and `ark` by default, since those are what real SKOS vocabularies
+actually use. If your vocabularies carry identifiers in another scheme, add it explicitly:
+
+```python
+CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES = ["http", "https", "urn", "doi", "info", "ark", "hdl"]
+```
+
+A stored identifier is later rendered as a link, so schemes that can carry executable content
+(`javascript`, `data`, `vbscript`) are refused even if you add them to this setting.
+
 ## Relationship to other packages
 
 Supersedes and retires `skos-builder` and `django-research-vocabs`, consolidating vocabulary

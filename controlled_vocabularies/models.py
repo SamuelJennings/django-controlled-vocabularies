@@ -22,7 +22,10 @@ from controlled_vocabularies import conf
 #: Schemes that can carry executable content and must never be accepted as an
 #: externally assigned permanent URI (FR-004) — a stored identifier is later
 #: rendered as a link by the browsing interface, so a hostile scheme accepted
-#: here becomes a hazard there.
+#: here becomes a hazard there. None of these sit in the default allowlist
+#: (:data:`~controlled_vocabularies.conf.DEFAULT_ALLOWED_URI_SCHEMES`), so this
+#: is belt-and-braces (T035): a second gate that still applies even if a
+#: downstream project's overridden allowlist includes one of them.
 _UNSAFE_PERMANENT_URI_SCHEMES = frozenset({"javascript", "data", "vbscript"})
 
 #: The length bound for a permanent URI (FR-004, decisions.md D5): far beyond any
@@ -50,8 +53,8 @@ def validate_permanent_uri(value: str) -> None:
     hostile value is refused with a short, bounded message rather than one
     that runs `urlsplit` on it and then echoes it in full (T032). Requires a
     well-formed absolute identifier — a non-empty scheme and a non-empty
-    remainder, so a bare relative path is refused — and refuses a scheme that
-    can carry executable content. Used both as a field validator (so
+    remainder, so a bare relative path is refused — and refuses a scheme not
+    on the configured allowlist (T035). Used both as a field validator (so
     ``full_clean()`` catches it) and called directly from each model's
     ``save()``, because Django's ``save()`` never calls ``full_clean()`` and
     the import path this feature exists to serve writes through ``save()``
@@ -84,7 +87,16 @@ def validate_permanent_uri(value: str) -> None:
             params={"uri": _echoed_uri(value)},
             code="permanent_uri_not_absolute",
         )
-    if parsed.scheme.lower() in _UNSAFE_PERMANENT_URI_SCHEMES:
+    scheme = parsed.scheme.lower()
+    if scheme not in conf.get_allowed_uri_schemes():
+        raise ValidationError(
+            _("'%(uri)s' uses the scheme '%(scheme)s', which is not one of the accepted schemes."),
+            params={"uri": _echoed_uri(value), "scheme": parsed.scheme},
+            code="permanent_uri_scheme_not_allowed",
+        )
+    if scheme in _UNSAFE_PERMANENT_URI_SCHEMES:
+        # Belt and braces (T035): refused even if a downstream project's
+        # overridden allowlist includes it.
         raise ValidationError(
             _("'%(uri)s' uses the scheme '%(scheme)s', which is not permitted."),
             params={"uri": _echoed_uri(value), "scheme": parsed.scheme},

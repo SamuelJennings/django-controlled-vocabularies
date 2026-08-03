@@ -141,9 +141,12 @@ def test_permanent_uri_not_absolute_message_uses_named_placeholder():
     assert "not-absolute" in excinfo.value.messages[0]
 
 
-def test_permanent_uri_unsafe_scheme_message_uses_named_placeholders():
+def test_permanent_uri_unsafe_scheme_message_uses_named_placeholders(settings):
     # FR-004/FR-010: a scheme that can carry executable content is refused, naming
-    # both the value and the offending scheme.
+    # both the value and the offending scheme. "javascript" is outside the default
+    # allowlist (T035) so it would already be refused there; the allowlist is
+    # overridden to include it so this exercises the denylist's own message.
+    settings.CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES = ["http", "https", "javascript"]
     with pytest.raises(ValidationError) as excinfo:
         validate_permanent_uri("javascript:alert(1)")
     err = excinfo.value
@@ -151,6 +154,19 @@ def test_permanent_uri_unsafe_scheme_message_uses_named_placeholders():
     assert "%(uri)s" in str(err.message) and "%(scheme)s" in str(err.message)
     assert err.params == {"uri": "javascript:alert(1)", "scheme": "javascript"}
     assert "javascript" in excinfo.value.messages[0]
+    assert err.code == "permanent_uri_unsafe_scheme"
+
+
+def test_permanent_uri_scheme_not_allowed_message_uses_named_placeholders():
+    # T035: a scheme outside the configured allowlist is refused, naming both the
+    # value and the offending scheme.
+    with pytest.raises(ValidationError) as excinfo:
+        validate_permanent_uri("file:///etc/passwd")
+    err = excinfo.value
+    assert isinstance(err.message, Promise), "scheme-not-allowed message is not lazily translatable"
+    assert "%(uri)s" in str(err.message) and "%(scheme)s" in str(err.message)
+    assert err.params == {"uri": "file:///etc/passwd", "scheme": "file"}
+    assert err.code == "permanent_uri_scheme_not_allowed"
 
 
 def test_permanent_uri_too_long_message_uses_named_placeholders():

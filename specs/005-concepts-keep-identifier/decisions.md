@@ -262,3 +262,25 @@ already fixed (D6: fixedness moves one way only), so the only correct response w
 rename or address change that creates the collision. That responsibility belongs with R4's
 publication lifecycle, which owns freezing and renaming policy, not with the save path this feature
 adds. Recorded here rather than silently left, per the review's instruction.
+
+## D15 — Accepted URI schemes are an allowlist, not a denylist; this supersedes the D5 gate decision
+
+**Context**: D5 chose "refuse `javascript`/`data`/`vbscript`, accept everything else" — a denylist of
+three script-bearing schemes. A three-lens review found that shape wrong for the actual hazard: a
+stored `permanent_uri` is rendered as a link once the browsing interface exists, so the accepted set
+needs to be small and known-safe, not merely known-not-hostile. Under the denylist, `file:///etc/passwd`,
+`about:blank`, `blob:`, `jar:`, `filesystem:`, and `view-source:` were all accepted for that field.
+
+**Chosen (T035)**: accept only `http`, `https`, `urn`, `doi`, `info`, `ark` by default — the schemes
+real SKOS vocabularies actually use — overridable via the new
+`CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES` setting, read through `conf.get_allowed_uri_schemes()`
+in the same style as the base address (`conf.get_base_uri()`). The D5 denylist stays as a second,
+belt-and-braces gate inside the allowlist branch: even a downstream project that overrides the
+allowlist to include `javascript` is still refused it.
+
+**This supersedes D5's shape, not its content**: D5 explicitly rejected "a strict allowlist of `http`
+and `https`" because real vocabularies use `urn:` identifiers and refusing them would discard valid
+content. This allowlist is not that — it is `http`/`https` plus the non-http identifier schemes D5
+itself named as the reason not to restrict to `http`/`https` alone (`urn:`), extended with `doi`,
+`info`, and `ark`, the other non-http schemes real SKOS vocabularies carry. D5's own reasoning is why
+this allowlist is shaped the way it is; only the closed-vs-open shape of the check changes.

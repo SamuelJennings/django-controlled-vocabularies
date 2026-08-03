@@ -421,6 +421,47 @@ class TestPermanentUri:
             Collection.objects.create(scheme=scheme, name="Igneous", permanent_uri="http://vocabs.example.org/shared")
 
 
+class TestPermanentUriSchemeAllowlist:
+    """US-1 — T035. FR-004's original denylist refused only ``javascript``,
+    ``data``, and ``vbscript``, and let everything else through — including
+    ``file:``, ``about:``, ``blob:``, ``jar:``, ``filesystem:``, and
+    ``view-source:`` — for a field the code says will be rendered as a link.
+    A denylist is the wrong shape for a rendering hazard: the accepted set is
+    unbounded, the legitimate set is small and stable. Only ``http``,
+    ``https``, ``urn``, ``doi``, ``info``, and ``ark`` are accepted by
+    default, overridable via ``CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES``.
+    The explicit denylist stays as a second gate even inside an overridden
+    allowlist."""
+
+    @pytest.mark.parametrize("scheme", ["http", "https", "urn", "doi", "info", "ark"])
+    def test_the_six_default_schemes_are_accepted(self, scheme):
+        validate_permanent_uri(f"{scheme}:something-or-other/x")
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "file:///etc/passwd",
+            "about:blank",
+            "blob:https://example.org/9f6c1e2a-uuid",
+            "jar:http://example.org/x.jar!/",
+        ],
+    )
+    def test_schemes_outside_the_default_allowlist_are_refused(self, value):
+        with pytest.raises(ValidationError):
+            validate_permanent_uri(value)
+
+    def test_the_setting_override_is_honoured(self, settings):
+        settings.CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES = ["http", "https", "myscheme"]
+        validate_permanent_uri("myscheme:something")
+        with pytest.raises(ValidationError):
+            validate_permanent_uri("urn:uuid:9f6c1e2a-1234-4a12-9abc-1234567890ab")
+
+    def test_the_denylist_still_refuses_a_scheme_within_an_overridden_allowlist(self, settings):
+        settings.CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES = ["http", "https", "javascript"]
+        with pytest.raises(ValidationError):
+            validate_permanent_uri("javascript:alert(1)")
+
+
 def _create_with_permanent_uri(model: type[Model], scheme: ConceptScheme, uri: str):
     """Create a saved record of ``model`` carrying ``uri`` as its ``permanent_uri``."""
     if model is ConceptScheme:
