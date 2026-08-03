@@ -17,4 +17,7 @@ Append-only log of stage transitions and gate outcomes.
   place (intake paragraph preserved). Story sub-issues #61–#66 created and linked, no lifecycle
   labels, milestone `v0.1.0`. Draft PR #67 opened by the bot, title byte-identical to the epic,
   `Closes` block covering the epic and all six stories, milestone set. `check-issue-titles` green.
-- **Spec gate** — briefed, awaiting sign-off.
+- **Spec gate — APPROVED** by Sam (SamuelJennings), 2026-08-03, in session. Scope as specified,
+  including the four self-resolved decisions surfaced in the brief: escrow deferred, language
+  filtering landing here rather than in #51, blank-node identity fatal, and the imported
+  vocabulary's default language taken from the file. Proceeding to S3 PLAN.
