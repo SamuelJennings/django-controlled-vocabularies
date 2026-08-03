@@ -13,11 +13,12 @@ from django.conf import settings
 DEFAULT_BASE_URI = "http://localhost:8000/vocabularies"
 
 #: Default schemes accepted for an externally assigned static URI (FR-004,
-#: decisions.md D5/D14, T035): a small, stable allowlist rather than an
+#: decisions.md D5/D15, T035): a small, stable allowlist rather than an
 #: unbounded denylist. ``http``/``https`` are the overwhelming common case;
-#: ``urn``, ``doi``, ``info``, and ``ark`` are the non-http identifier schemes
-#: real SKOS vocabularies actually use.
-DEFAULT_ALLOWED_URI_SCHEMES = ("http", "https", "urn", "doi", "info", "ark")
+#: ``urn``, ``doi``, ``info``, ``ark``, ``tag``, ``hdl``, and ``oai`` are the
+#: non-http identifier schemes real SKOS vocabularies actually use (``tag``,
+#: ``hdl``, and ``oai`` added in review round 4, decisions.md D15).
+DEFAULT_ALLOWED_URI_SCHEMES = ("http", "https", "urn", "doi", "info", "ark", "tag", "hdl", "oai")
 
 
 def get_base_uri() -> str:
@@ -36,7 +37,7 @@ def get_allowed_uri_schemes() -> frozenset[str]:
 
     Reads ``settings.CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES`` and falls
     back to :data:`DEFAULT_ALLOWED_URI_SCHEMES`, so a downstream project with
-    an unusual scheme is not stuck with the default six (T035).
+    an unusual scheme is not stuck with the defaults (T035).
     """
     schemes = getattr(settings, "CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES", DEFAULT_ALLOWED_URI_SCHEMES)
     return frozenset(scheme.lower() for scheme in schemes)

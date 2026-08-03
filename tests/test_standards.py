@@ -470,3 +470,42 @@ class TestStaticUriModelRegistry:
         }
         assert expected, "no concrete StaticUriModel subclasses found — the registry has nothing to check"
         assert set(_static_uri_models()) == expected
+
+
+class TestStaticUriFieldAttributesAgree:
+    """Review round 4. ``ConceptScheme``, ``Concept``, and ``Collection`` each
+    redeclared the entire ``static_uri`` field — ``max_length``, ``null``,
+    ``blank``, ``verbose_name``, and ``validators`` byte-identical, only
+    ``help_text`` legitimately differing per model. Nothing asserted they
+    agreed, so one model's ``max_length`` (say) could drift silently and
+    every one of the existing tests would still pass. This walks the three
+    concrete models' own field and fails the moment one of the shared
+    attributes stops matching the others.
+    """
+
+    def test_the_three_concrete_models_static_uri_fields_agree_on_every_shared_attribute(self):
+        fields = {model: model._meta.get_field("static_uri") for model in (ConceptScheme, Concept, Collection)}
+        max_lengths = {model.__name__: field.max_length for model, field in fields.items()}
+        nulls = {model.__name__: field.null for model, field in fields.items()}
+        blanks = {model.__name__: field.blank for model, field in fields.items()}
+        verbose_names = {model.__name__: str(field.verbose_name) for model, field in fields.items()}
+
+        # Validators are compared by (type, limit_value) rather than identity or raw repr:
+        # Django gives every field its own MaxLengthValidator *instance* (derived from
+        # max_length), so instances that are equivalent are still distinct objects with
+        # distinct default reprs — comparing raw repr would report a false disagreement.
+        def _validator_signature(v):
+            return (type(v).__name__, getattr(v, "limit_value", None), getattr(v, "__qualname__", None))
+
+        validator_reprs = {
+            model.__name__: [_validator_signature(v) for v in field.validators] for model, field in fields.items()
+        }
+        assert len(set(max_lengths.values())) == 1, f"static_uri.max_length disagrees across models: {max_lengths}"
+        assert len(set(nulls.values())) == 1, f"static_uri.null disagrees across models: {nulls}"
+        assert len(set(blanks.values())) == 1, f"static_uri.blank disagrees across models: {blanks}"
+        assert len(set(verbose_names.values())) == 1, (
+            f"static_uri.verbose_name disagrees across models: {verbose_names}"
+        )
+        assert len({tuple(v) for v in validator_reprs.values()}) == 1, (
+            f"static_uri.validators disagrees across models: {validator_reprs}"
+        )

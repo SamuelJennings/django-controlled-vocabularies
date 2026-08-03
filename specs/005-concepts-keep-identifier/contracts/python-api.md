@@ -72,8 +72,11 @@ validate_static_uri("urn:uuid:9f6c...")                # accepted — real vocab
 
 ## Guarantees the tests assert
 
-- An externally assigned identifier is never rewritten, normalised, re-cased, or recomputed, by any
-  operation including a re-import that matched the record by it (FR-002, FR-013).
+- An externally assigned identifier is never rewritten, normalised, re-cased, or recomputed by
+  `save()` or `full_clean()`, including a re-import that matched the record by it (FR-002, FR-013).
+  `QuerySet.update()`, `bulk_create()`, `bulk_update()`, and raw SQL bypass this, as they bypass
+  every `save()`-based rule in the package (decisions.md, "Not covered, deliberately") — an
+  importer that reaches for one of these at scale gets no error to stop a rewrite or a duplicate.
 - A static permanent URI never becomes dynamic again: nothing turns a record holding one back
   (FR-013).
 - No two records of the same model may hold the same `static_uri`, and the refusal comes from the

@@ -369,6 +369,29 @@ class TestStaticUri:
         with pytest.raises(ValidationError):
             validate_static_uri(value)
 
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "http://example.org/\x00foo",  # NUL, C0
+            "http://example.org/\x1ffoo",  # unit separator, C0
+            "http://example.org/\x7ffoo",  # DEL
+            "http://example.org/\x85foo",  # NEL, C1
+            "http://example.org/\x9ffoo",  # APC, C1 (top of the C1 range)
+            "http://example.org/\nfoo",  # raw newline — could split an HTTP header
+            "http://example.org/\rfoo",
+            "http://example.org/\tfoo",
+        ],
+    )
+    def test_refuses_a_control_character_anywhere_in_the_value(self, value):
+        """Review round 4. A stored static URI is later rendered as a link;
+        an unescaped control character is a hazard the scheme allowlist does
+        not catch. Checked on the raw value: ``urlsplit`` silently strips a
+        bare ``\\t``/``\\r``/``\\n``, so a check on the parsed result would
+        miss exactly these."""
+        with pytest.raises(ValidationError) as excinfo:
+            validate_static_uri(value)
+        assert excinfo.value.code == "static_uri_control_character"
+
     def test_refuses_overlong_identifier(self):
         with pytest.raises(ValidationError):
             validate_static_uri("http://example.org/" + "x" * 500)
@@ -434,21 +457,44 @@ class TestStaticUri:
         with pytest.raises(ValidationError):
             Collection.objects.create(scheme=scheme, name="Igneous", static_uri="http://vocabs.example.org/shared")
 
+    @pytest.mark.django_db
+    def test_concept_and_collection_cannot_share_a_static_uri_differing_only_by_scheme_or_host_case(self, scheme):
+        """Review round 4. RFC 3986 §3.1/§3.2.2: scheme and authority are
+        case-insensitive, so 'HTTP://VOCABS.EXAMPLE.ORG/shared' and
+        'http://vocabs.example.org/shared' are the same identifier — MySQL's
+        default collation would already treat them as a match at the
+        database, so this must not depend on backend collation to catch it."""
+        Concept.objects.create(scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/shared")
+        with pytest.raises(ValidationError):
+            Collection.objects.create(scheme=scheme, name="Igneous", static_uri="HTTP://VOCABS.EXAMPLE.ORG/shared")
+
+    @pytest.mark.django_db
+    def test_case_folding_for_cross_model_uniqueness_does_not_fold_the_path(self, scheme):
+        """The path is case-sensitive (RFC 3986 §3.3): a same-scheme,
+        same-host pair whose paths differ only in case are different
+        identifiers and may each be held by a different model."""
+        Concept.objects.create(scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/Shared")
+        Collection.objects.create(scheme=scheme, name="Igneous", static_uri="http://vocabs.example.org/shared")
+
 
 class TestStaticUriSchemeAllowlist:
-    """US-1 — T035. FR-004's original denylist refused only ``javascript``,
-    ``data``, and ``vbscript``, and let everything else through — including
-    ``file:``, ``about:``, ``blob:``, ``jar:``, ``filesystem:``, and
-    ``view-source:`` — for a field the code says will be rendered as a link.
-    A denylist is the wrong shape for a rendering hazard: the accepted set is
-    unbounded, the legitimate set is small and stable. Only ``http``,
-    ``https``, ``urn``, ``doi``, ``info``, and ``ark`` are accepted by
-    default, overridable via ``CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES``.
-    The explicit denylist stays as a second gate even inside an overridden
+    """US-1 — T035, widened round 4. FR-004's original denylist refused only
+    ``javascript``, ``data``, and ``vbscript``, and let everything else
+    through — including ``file:``, ``about:``, ``blob:``, ``jar:``,
+    ``filesystem:``, and ``view-source:`` — for a field the code says will be
+    rendered as a link. A denylist is the wrong shape for a rendering hazard:
+    the accepted set is unbounded, the legitimate set is small and stable.
+    ``http``, ``https``, ``urn``, ``doi``, ``info``, ``ark``, ``tag``,
+    ``hdl``, and ``oai`` are accepted by default — ``tag``, ``hdl``, and
+    ``oai`` added in review round 4, real schemes published vocabularies use
+    that the first allowlist round left out (the objection that killed the
+    very first, ``http``/``https``-only allowlist, decisions.md D5/D15) —
+    overridable via ``CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES``. The
+    explicit denylist stays as a second gate even inside an overridden
     allowlist."""
 
-    @pytest.mark.parametrize("scheme", ["http", "https", "urn", "doi", "info", "ark"])
-    def test_the_six_default_schemes_are_accepted(self, scheme):
+    @pytest.mark.parametrize("scheme", ["http", "https", "urn", "doi", "info", "ark", "tag", "hdl", "oai"])
+    def test_the_default_schemes_are_accepted(self, scheme):
         validate_static_uri(f"{scheme}:something-or-other/x")
 
     @pytest.mark.parametrize(
@@ -714,6 +760,128 @@ class TestStaticUriRewriteGuardReadsTheDatabase:
         externally assigned identifier from the start must keep working."""
         record = _create_with_static_uri(model, scheme, "http://vocabs.example.org/new")
         assert record.static_uri == "http://vocabs.example.org/new"
+
+
+class TestStaticUriConcurrentSaveLocking:
+    """US-1 — review round 4. ``_check_static_uri`` reads the stored value with
+    :func:`_stored_static_uri`, compares, then the caller writes — with no
+    lock held. Two concurrent saves of the same row can both read "nothing
+    stored" before either writes, and both then write: the second silently
+    replaces an identifier the first believed fixed, with no
+    ``ValidationError`` from either. A real race is not something a single
+    test process can reproduce; instead this locks in the *wiring* — that
+    ``save()`` reads the stored value with ``SELECT ... FOR UPDATE`` inside a
+    transaction that also covers the write, on a backend that supports it,
+    and that it degrades to the previous unlocked read rather than raising on
+    one that does not (SQLite, ``features.has_select_for_update`` is
+    ``False``) — the paying tests for the invariant itself live above in
+    ``TestStaticUriRewriteGuardReadsTheDatabase``.
+    """
+
+    @pytest.mark.django_db
+    def test_an_existing_rows_save_locks_the_row_when_the_backend_supports_it(self, scheme):
+        from unittest.mock import patch
+
+        from controlled_vocabularies import models as cv_models
+
+        concept = Concept.objects.create(scheme=scheme, label="Granite")
+        with (
+            patch.object(cv_models, "_select_for_update_is_supported", return_value=True),
+            patch.object(
+                cv_models.models.QuerySet,
+                "select_for_update",
+                autospec=True,
+                side_effect=lambda self, *a, **k: self,
+            ) as locked,
+        ):
+            concept.static_uri = "http://vocabs.example.org/granite"
+            concept.save()
+        assert locked.called, "save() must issue a locking read when the backend supports SELECT ... FOR UPDATE"
+        concept.refresh_from_db()
+        assert concept.static_uri == "http://vocabs.example.org/granite"
+
+    @pytest.mark.django_db
+    def test_an_existing_rows_save_does_not_lock_on_a_backend_that_cannot(self, scheme):
+        """SQLite: ``_select_for_update_is_supported`` is not mocked here, so
+        this exercises the real (unsupported) backend — behaviour must be
+        unchanged from before this fix, not merely non-crashing."""
+        from unittest.mock import patch
+
+        from controlled_vocabularies import models as cv_models
+
+        concept = Concept.objects.create(scheme=scheme, label="Granite")
+        with patch.object(
+            cv_models.models.QuerySet, "select_for_update", autospec=True, side_effect=lambda self, *a, **k: self
+        ) as locked:
+            concept.static_uri = "http://vocabs.example.org/granite"
+            concept.save()
+        assert not locked.called
+        concept.refresh_from_db()
+        assert concept.static_uri == "http://vocabs.example.org/granite"
+
+    @pytest.mark.django_db
+    def test_an_insert_does_not_lock_even_when_the_backend_supports_it(self, scheme):
+        """A new row cannot rewrite anything stored, so it has nothing to
+        lock — an insert must not pay for a lock it does not need."""
+        from unittest.mock import patch
+
+        from controlled_vocabularies import models as cv_models
+
+        with (
+            patch.object(cv_models, "_select_for_update_is_supported", return_value=True),
+            patch.object(
+                cv_models.models.QuerySet,
+                "select_for_update",
+                autospec=True,
+                side_effect=lambda self, *a, **k: self,
+            ) as locked,
+        ):
+            Concept.objects.create(scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/granite")
+        assert not locked.called
+
+    @pytest.mark.django_db
+    def test_an_untouched_deferred_save_does_not_lock_even_when_the_backend_supports_it(self, scheme):
+        """A deferred save that never assigns ``static_uri`` never reads it
+        back at all (T029) — locking must not be paid for either."""
+        from unittest.mock import patch
+
+        from controlled_vocabularies import models as cv_models
+
+        concept = Concept.objects.create(scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/g")
+        deferred = Concept.objects.defer("static_uri").get(pk=concept.pk)
+        with (
+            patch.object(cv_models, "_select_for_update_is_supported", return_value=True),
+            patch.object(
+                cv_models.models.QuerySet,
+                "select_for_update",
+                autospec=True,
+                side_effect=lambda self, *a, **k: self,
+            ) as locked,
+        ):
+            deferred.save()
+        assert not locked.called
+
+    @pytest.mark.django_db
+    def test_a_save_excluding_static_uri_via_update_fields_does_not_lock(self, scheme):
+        """T030's exclusion still applies: a save that ``update_fields``
+        excludes ``static_uri`` from never runs the check at all."""
+        from unittest.mock import patch
+
+        from controlled_vocabularies import models as cv_models
+
+        concept = Concept.objects.create(scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/g")
+        with (
+            patch.object(cv_models, "_select_for_update_is_supported", return_value=True),
+            patch.object(
+                cv_models.models.QuerySet,
+                "select_for_update",
+                autospec=True,
+                side_effect=lambda self, *a, **k: self,
+            ) as locked,
+        ):
+            concept.label = "Renamed"
+            concept.save(update_fields=["label"])
+        assert not locked.called
 
 
 class TestStaticUriUpdateFieldsExclusion:
@@ -1206,6 +1374,26 @@ class TestStaticUriDoesNotShadowALocalRecordsAddress:
         other_scheme = ConceptScheme.objects.create(name="Minerals")
         with pytest.raises(ValidationError):
             Concept.objects.create(scheme=other_scheme, label="Quartz", static_uri=victim_scheme.local_url)
+
+    @pytest.mark.django_db
+    def test_a_static_uri_cannot_shadow_a_local_url_via_scheme_or_host_case_folding(self, scheme):
+        """Review round 4. The shadow check used to compare in plain Python,
+        which is case-sensitive; the lookup it defends (``get_by_uri``'s
+        ``self.get(static_uri=uri)``) is a database query, and MySQL's
+        default collation is case-insensitive. So a static URI differing
+        from a victim's local_url only by scheme/host case used to be
+        accepted here, then still resolved to the victim under a
+        case-insensitive deployment collation — the exact hijack T034
+        exists to prevent, reopened through the case a Python string
+        comparison does not fold. RFC 3986 says the scheme and the
+        authority are case-insensitive; the path is not, so only the
+        scheme/host of this repro are re-cased, never the path."""
+        victim = Concept.objects.create(scheme=scheme, label="Red")
+        assert victim.local_url == f"https://example.org/vocabularies/{scheme.slug}/{victim.slug}"
+        shadowing_uri = f"HTTPS://EXAMPLE.ORG/vocabularies/{scheme.slug}/{victim.slug}"
+        with pytest.raises(ValidationError):
+            Concept.objects.create(scheme=scheme, label="Crimson", static_uri=shadowing_uri)
+        assert Concept.objects.get_by_uri(victim.local_url) == victim
 
     @pytest.mark.django_db
     def test_an_external_identifier_under_the_base_address_is_accepted_when_nothing_occupies_it(self, scheme):

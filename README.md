@@ -69,12 +69,22 @@ address for viewing a record is always composed from this base and the record's 
 is `{base}/{scheme-slug}/{concept-slug}` — even when that record's static URI points elsewhere, and
 the slugs follow the labels while a vocabulary is unpublished.
 
+That guarantee holds when a record is saved the normal way, through `save()` or validated with
+`full_clean()`. Django's bulk write paths — `QuerySet.update()`, `bulk_create()`, `bulk_update()`,
+and raw SQL — skip it, the same way they skip every other model-level rule. This matters most when
+you import a vocabulary at scale: a bulk write is the natural choice there for speed, and it is also
+the one path where a static URI can be rewritten or duplicated without a validation error to stop
+it. Use `save()` for any record whose URI needs to stay fixed.
+
 An externally assigned static URI must use one of a small set of accepted schemes — `http`,
-`https`, `urn`, `doi`, `info`, and `ark` by default, since those are what real SKOS vocabularies
-actually use. If your vocabularies carry identifiers in another scheme, add it explicitly:
+`https`, `urn`, `doi`, `info`, `ark`, `tag`, `hdl`, and `oai` by default, since those are what real
+SKOS vocabularies actually use. If your vocabularies carry identifiers in another scheme, add it
+explicitly:
 
 ```python
-CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES = ["http", "https", "urn", "doi", "info", "ark", "hdl"]
+CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES = [
+    "http", "https", "urn", "doi", "info", "ark", "tag", "hdl", "oai", "my-custom-scheme",
+]
 ```
 
 A stored identifier is later rendered as a link, so schemes that can carry executable content

@@ -85,6 +85,14 @@ MySQL's 3072-byte cap on `utf8mb4` — a larger bound would leave the uniqueness
 unenforceable as an index on some deployments. Refusing hostile schemes on the way in does not
 relieve R6 of escaping what it renders; both are wanted.
 
+*(Superseded 2026-08-03. This entry's denylist shape — refuse three named schemes, accept every
+other one — was replaced by D15's allowlist: accept only a short, known-safe list of schemes, refuse
+everything else, with the three schemes named here kept as a second, belt-and-braces gate inside
+that allowlist. D15 keeps this entry's own reasoning for not restricting to `http`/`https` alone —
+`urn:` and the other non-http schemes real vocabularies carry — it only changes which values fail
+the check: not "on the three-scheme refusal list" but "not on the known-safe list." The 500-character
+bound and the reasoning for it are untouched by this correction.)*
+
 ## D6 — Fixedness moves one way only
 
 **Ambiguous**: whether a fixed identifier can become provisional again, and whether a re-import
@@ -302,6 +310,13 @@ content. This allowlist is not that — it is `http`/`https` plus the non-http i
 itself named as the reason not to restrict to `http`/`https` alone (`urn:`), extended with `doi`,
 `info`, and `ark`, the other non-http schemes real SKOS vocabularies carry. D5's own reasoning is why
 this allowlist is shaped the way it is; only the closed-vs-open shape of the check changes.
+
+*(Widened 2026-08-03, review round 4. `tag`, `hdl`, and `oai` added to the default allowlist:
+real published vocabularies use all three, and refusing them is exactly the objection that sank the
+first, `http`/`https`-only allowlist attempt above — applied a second time, this time against this
+entry's own list. `DEFAULT_ALLOWED_URI_SCHEMES` in `conf.py` is now `("http", "https", "urn", "doi",
+"info", "ark", "tag", "hdl", "oai")`; the setting override and the D5 denylist backstop are
+unchanged.)*
 
 ## D16 — The field is `static_uri`, not `permanent_uri`; "permanent" is reserved for the `uri` accessor
 

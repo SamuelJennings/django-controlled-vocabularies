@@ -10,17 +10,21 @@ All notable changes to this project are documented in this file. The format foll
 
 - Static, externally assigned identifiers: `ConceptScheme`, `Concept`, and `Collection` each gain a
   `static_uri` field holding an identifier assigned by an external publisher, held exactly as given
-  and never recomputed once stored; a locally authored, unpublished record's `uri` instead stays
-  dynamic — composed and reported live, following a rename — until one is assigned. `local_url` is a
-  new, separate accessor for this site's own address for a record, always composed from the configured
-  base address and the record's slugs regardless of what `static_uri` holds. `has_static_uri` reports
-  whether the identifier is static rather than dynamic.
+  and never recomputed once stored by `save()` or `full_clean()`. A bulk queryset write
+  (`QuerySet.update()`, `bulk_create()`, `bulk_update()`) skips this, the same way it skips every
+  other model-level rule. A locally authored, unpublished record's `uri` instead stays dynamic,
+  composed and reported live and following a rename, until one is assigned. `local_url` is a new,
+  separate accessor for this site's own address for a record, always composed from the configured
+  base address and the record's slugs regardless of what `static_uri` holds. `has_static_uri`
+  reports whether the identifier is static rather than dynamic.
   `get_by_uri()` — already on `Concept.objects` — is now shared by `ConceptScheme.objects` and
   `Collection.objects` too, resolving a stored identifier first and falling back to the site's own
   composition. `validate_static_uri` is exported for reuse: it requires an absolute identifier with
-  an accepted scheme and caps length at 500 characters.
+  an accepted scheme, refuses a value carrying a control character, and caps length at 500
+  characters.
 - `CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES` setting: the schemes an externally assigned
-  `static_uri` may use — `http`, `https`, `urn`, `doi`, `info`, `ark` by default (see the README).
+  `static_uri` may use — `http`, `https`, `urn`, `doi`, `info`, `ark`, `tag`, `hdl`, and `oai` by
+  default (see the README).
 - Collections: a vocabulary's concepts can be gathered into named collections, optionally ordered,
   held on the new `Collection` and `CollectionMember` models and reached through `Collection.add()`,
   `remove()`, `members()`, `set_member_order()`, and `Concept.collections()`. Membership is
