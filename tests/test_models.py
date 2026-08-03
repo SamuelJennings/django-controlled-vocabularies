@@ -749,11 +749,7 @@ class TestPermanentUriDatabaseUniqueness:
         Concept.objects.create(scheme=scheme, label="Granite", permanent_uri="http://vocabs.example.org/dup")
         with pytest.raises(IntegrityError), transaction.atomic():
             Concept.objects.bulk_create(
-                [
-                    Concept(
-                        scheme=scheme, label="Basalt", slug="basalt", permanent_uri="http://vocabs.example.org/dup"
-                    )
-                ]
+                [Concept(scheme=scheme, label="Basalt", slug="basalt", permanent_uri="http://vocabs.example.org/dup")]
             )
 
     @pytest.mark.django_db
