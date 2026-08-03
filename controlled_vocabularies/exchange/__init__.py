@@ -11,5 +11,6 @@ task at a time, each landing with the test that covers it.
 """
 
 from controlled_vocabularies.exchange.report import ImportReport, SetAsideEntry, SetAsideReason
+from controlled_vocabularies.exchange.skos import SkosImportError
 
-__all__ = ["ImportReport", "SetAsideEntry", "SetAsideReason"]
+__all__ = ["ImportReport", "SetAsideEntry", "SetAsideReason", "SkosImportError"]
