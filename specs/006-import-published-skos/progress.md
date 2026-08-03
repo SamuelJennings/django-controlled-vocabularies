@@ -98,3 +98,48 @@ edits, malformed fatal-path cases).
 
 **Watch**: T006 must declare `rdflib` in its own commit alongside `skos.py`/`mapping.py` — flagged
 here so it isn't missed at that stage exit.
+
+## 2026-08-03T21:00:00Z · Implementer US0 · T005
+
+**Did**: `tests/fixtures/skos/` — a "Rock types" vocabulary (`rocks.ttl` canonical, `rocks.rdf` and
+`rocks.jsonld` hand-written to the same triples, not auto-generated, for readability; verified
+isomorphic across all three via `rdflib.compare.isomorphic`, 53 triples each, including the ordered
+collection's member sequence). Carries multilingual preferred labels (en/de/fr), an alternative and
+a hidden label, all seven `ConceptNote.Kind` values spread across concepts, a broader/narrower pair,
+a symmetric related pair, and an unordered plus an ordered collection.
+
+`rocks_updated.ttl` — one edited copy carrying all four US-2 re-import edits at once (matching the
+spec's own Independent Test framing): granite's preferred label corrected, its alternative label
+removed, quartz dropped from the file entirely (its related edge and collection membership go with
+it), the ordered collection's member sequence changed. Edited copies are Turtle-only — format
+parsing correctness is already covered by the base vocabulary's three serializations.
+
+`blank_node_concept.ttl`, `blank_node_collection.ttl`, `refused_uri_scheme.ttl` — the fatal-path
+fixtures. **Deviation** (decisions.md D13): the brief named a third case, "missing identifier",
+distinct from "blank-node concept". Verified empirically that this isn't buildable as a stable,
+parser-context-independent fixture — `rdf:about=""` (and Turtle/JSON-LD's equivalent empty-relative-
+IRI forms) resolves against the parse call's default base (the file's own path) rather than to a
+literal empty identifier, unless a future `publicID` override changes that. Built
+`blank_node_collection.ttl` instead — the same blank-node rule applied to a `Collection`, which is
+directly named in the spec (US-5 acceptance 5) and tasks.md (T030) — so all three fatal fixtures are
+real, spec-grounded material rather than one being invented to round out a count.
+
+`rdflib` declared as a dev dependency (not runtime) for this task alone — decisions.md D12 — used
+only by `tests/test_io/test_fixtures.py`; confirmed `deptry` does not flag it (`tests/` is already
+excluded from its scan, and unused dev-group packages aren't what `DEP002` checks for, matching the
+existing `pytest`/`ruff`/`mypy` pattern). Also ran `makemigrations --check --dry-run`: no changes
+detected, confirming Phase 0 added no schema drift.
+
+**Verified**: `poetry run pytest -q` — 339 passed (321 + 18 new). `poetry run ruff check .` — all
+checks passed. `poetry run ruff format --check .` — 20 files already formatted. `poetry run mypy` —
+success, 7 source files (fixtures/tests untouched by mypy's `files` scope). `poetry run deptry .` —
+no issues, 13 files scanned. `poetry run python -m django makemigrations --check --dry-run
+--settings=tests.settings` — no changes detected. `poetry run pre-commit run --all-files` — all
+hooks passed.
+
+**Next**: Phase 0 complete. T006+ (Phase US-1, `skos.py`/`mapping.py`, the reader itself) is out of
+this Implementer's scope.
+
+**Watch**: T006 promotes `rdflib` from the dev group to `[tool.poetry.dependencies]` in the same
+commit as the code that first imports it at runtime (decisions.md D12, reiterated from the
+T001/T004 entry above).
