@@ -524,6 +524,97 @@ class TestPermanentUriIsFixed:
         assert record.permanent_uri == "http://vocabs.example.org/published"
 
 
+class TestPermanentUriRewriteGuardReadsTheDatabase:
+    """US-1 — T029. The rewrite guard used to trust an in-memory snapshot taken
+    at load time (T025/T026), and a three-lens review found four ordinary paths
+    that bypass a snapshot: a save from a second, differently-loaded instance of
+    the same row; a save from an instance refreshed via ``refresh_from_db()``
+    (which never re-snapshots); and constructing an instance with an explicit
+    ``pk`` (which is never loaded from the database at all, so it carries no
+    snapshot either). All four let a save rewrite or silently clear an
+    identifier a *different* instance had already stored. Fixed by deleting the
+    snapshot machinery entirely and reading the stored value back from the
+    database at save time instead — there is nothing left to go stale."""
+
+    @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
+    @pytest.mark.django_db
+    def test_a_stale_instance_cannot_rewrite_an_identifier_stored_by_another_instance(self, model, scheme):
+        """(a) Two instances of the same row: one stores an identifier, then the
+        other — loaded before that happened — tries to store a different one."""
+        record = _create_without_permanent_uri(model, scheme)
+        stale = model.objects.get(pk=record.pk)
+        fresh = model.objects.get(pk=record.pk)
+        fresh.permanent_uri = "http://publisher.example.org/original"
+        fresh.save()
+        stale.permanent_uri = "http://attacker.example.org/rewritten"
+        with pytest.raises(ValidationError):
+            stale.save()
+        record.refresh_from_db()
+        assert record.permanent_uri == "http://publisher.example.org/original"
+
+    @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
+    @pytest.mark.django_db
+    def test_a_refreshed_stale_instance_cannot_clear_an_identifier_stored_by_another_instance(self, model, scheme):
+        """(b) ``refresh_from_db()`` never re-snapshotted, so the refreshed
+        instance still carried its original (pre-refresh) snapshot and could
+        clear the identifier the refresh just picked up."""
+        record = _create_without_permanent_uri(model, scheme)
+        stale = model.objects.get(pk=record.pk)
+        fresh = model.objects.get(pk=record.pk)
+        fresh.permanent_uri = "http://publisher.example.org/original"
+        fresh.save()
+        stale.refresh_from_db()
+        stale.permanent_uri = None
+        with pytest.raises(ValidationError):
+            stale.save()
+        record.refresh_from_db()
+        assert record.permanent_uri == "http://publisher.example.org/original"
+
+    @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
+    @pytest.mark.django_db
+    def test_a_stale_provisional_instances_plain_save_does_not_null_an_identifier_stored_meanwhile(self, model, scheme):
+        """(b), second half: an instance loaded while provisional, doing a plain
+        ``.save()`` that never touches ``permanent_uri``, must not silently
+        write ``NULL`` over an identifier another instance stored meanwhile."""
+        record = _create_without_permanent_uri(model, scheme)
+        stale = model.objects.get(pk=record.pk)
+        fresh = model.objects.get(pk=record.pk)
+        fresh.permanent_uri = "http://publisher.example.org/original"
+        fresh.save()
+        with pytest.raises(ValidationError):
+            stale.save()
+        record.refresh_from_db()
+        assert record.permanent_uri == "http://publisher.example.org/original"
+
+    @pytest.mark.django_db
+    def test_explicit_pk_construction_cannot_rewrite_a_stored_identifier(self, scheme):
+        """(c) A freshly constructed instance carrying an existing row's ``pk``
+        was never loaded from the database, so it had no snapshot at all and
+        the old guard treated it as unconstrained."""
+        c = Concept.objects.create(scheme=scheme, label="Red", permanent_uri="http://good.example/red")
+        with pytest.raises(ValidationError):
+            Concept(pk=c.pk, scheme=scheme, label="Red", permanent_uri="http://evil.example/red").save()
+        c.refresh_from_db()
+        assert c.permanent_uri == "http://good.example/red"
+
+    @pytest.mark.django_db
+    def test_explicit_pk_construction_cannot_clear_a_stored_identifier(self, scheme):
+        """(c), the ``permanent_uri=None`` variant."""
+        c = Concept.objects.create(scheme=scheme, label="Red", permanent_uri="http://good.example/red")
+        with pytest.raises(ValidationError):
+            Concept(pk=c.pk, scheme=scheme, label="Red", permanent_uri=None).save()
+        c.refresh_from_db()
+        assert c.permanent_uri == "http://good.example/red"
+
+    @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
+    @pytest.mark.django_db
+    def test_a_new_row_may_still_be_created_with_an_identifier(self, model, scheme):
+        """A ``pk``-less new instance is unconstrained — creating a record with an
+        externally assigned identifier from the start must keep working."""
+        record = _create_with_permanent_uri(model, scheme, "http://vocabs.example.org/new")
+        assert record.permanent_uri == "http://vocabs.example.org/new"
+
+
 class TestGetByUri:
     """US-2 — a record is found by its identifier wherever it points (FR-007).
     ``get_by_uri`` tries an exact match on the stored ``permanent_uri`` first,

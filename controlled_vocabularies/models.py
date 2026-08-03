@@ -63,20 +63,6 @@ def validate_permanent_uri(value: str) -> None:
         )
 
 
-def _snapshot_permanent_uri(instance: "PermanentUriModel", field_names) -> None:
-    """Record the ``permanent_uri`` a record was loaded with, for the rewrite guard.
-
-    Called from :meth:`PermanentUriModel.from_db`. When ``.only()``/``.defer()``
-    excluded the column there is no value to snapshot, so the record is flagged
-    instead and :func:`_reject_permanent_uri_rewrite` reads the stored value back
-    if and only if the column is later assigned (T025, T026).
-    """
-    if "permanent_uri" in field_names:
-        instance._loaded_permanent_uri = instance.permanent_uri
-    else:
-        instance._permanent_uri_deferred = True
-
-
 def _permanent_uri_still_deferred(instance: "PermanentUriModel") -> bool:
     """True when the column was never loaded and has not been assigned since.
 
@@ -89,51 +75,15 @@ def _permanent_uri_still_deferred(instance: "PermanentUriModel") -> bool:
 
 
 def _stored_permanent_uri(instance: "PermanentUriModel") -> str | None:
-    """The identifier the database currently holds for ``instance``."""
+    """The identifier the database currently holds for ``instance``.
+
+    ``None`` both for a row holding no identifier and for one that does not
+    exist in the database yet (``instance.pk is None``) — a new row cannot
+    rewrite anything stored, so there is nothing to read back for it.
+    """
+    if instance.pk is None:
+        return None
     return type(instance)._base_manager.filter(pk=instance.pk).values_list("permanent_uri", flat=True).first()
-
-
-def _note_permanent_uri_saved(instance: "PermanentUriModel") -> None:
-    """Adopt the just-written identifier as the stored one.
-
-    Fixedness has to start at the save that first stores an identifier, not at
-    the next load: without this, the very instance R4's publish action holds
-    could be re-saved under a second identifier (T026).
-    """
-    if _permanent_uri_still_deferred(instance):
-        return
-    instance._loaded_permanent_uri = instance.permanent_uri
-    instance._permanent_uri_deferred = False
-
-
-def _reject_permanent_uri_rewrite(instance: "PermanentUriModel") -> None:
-    """Refuse a save that changes or clears an already-stored ``permanent_uri``.
-
-    Fixedness moves one way only (FR-002, FR-013): once a record holds a stored
-    identifier, no save may change or clear it. The comparison is against the
-    snapshot :func:`_snapshot_permanent_uri` took at load, or — when the column
-    was deferred and has since been assigned — against a read-back of the stored
-    value, so ``.only()``/``.defer()`` is not a way around the guard. A record
-    with nothing stored is unconstrained, so setting an identifier for the first
-    time is allowed (the path R4's publish action will use).
-    """
-    loaded = instance._loaded_permanent_uri
-    if loaded is None:
-        if not instance._permanent_uri_deferred or _permanent_uri_still_deferred(instance):
-            return
-        loaded = _stored_permanent_uri(instance)
-        if loaded is None:
-            return
-    if instance.permanent_uri != loaded:
-        raise ValidationError(
-            {
-                "permanent_uri": ValidationError(
-                    _("The permanent URI '%(uri)s' is fixed and cannot be changed or cleared once stored."),
-                    params={"uri": loaded},
-                    code="permanent_uri_fixed",
-                )
-            }
-        )
 
 
 def _permanent_uri_models() -> tuple[type["PermanentUriModel"], ...]:
@@ -189,24 +139,52 @@ def _normalise_blank_permanent_uri(instance: "PermanentUriModel") -> None:
         instance.permanent_uri = None
 
 
-def _validate_permanent_uri_on_save(instance: "PermanentUriModel") -> None:
-    """Every ``permanent_uri`` check a ``save()`` owes, in one place.
+def _check_permanent_uri(instance: "PermanentUriModel", *, validate_format: bool) -> None:
+    """Every ``permanent_uri`` invariant a ``save()`` or ``full_clean()`` owes, in
+    one place.
 
-    ``save()`` never calls ``full_clean()``, so the field validator alone would
-    leave the import path — the one this feature exists to serve — accepting a
-    value the specification says can never be stored (research R5, the same trap
-    the slug fields were defended against).
+    The single authority for "is an identifier already stored" is the database,
+    read back here with :func:`_stored_permanent_uri` — never an in-memory
+    snapshot taken at some earlier load. A snapshot goes stale the moment a
+    second instance of the same row is saved, refreshed, or constructed with an
+    explicit ``pk``: a three-lens review found all three bypass a
+    snapshot-based guard and let a save rewrite or silently clear an identifier
+    a *different* instance had already stored (T029). A read-back cannot go
+    stale, at the cost of one indexed query per save of an existing row whose
+    column is loaded; an insert pays nothing, since :func:`_stored_permanent_uri`
+    short-circuits on ``instance.pk is None``.
+
+    ``validate_format`` is ``False`` from ``clean()``, called only under
+    ``full_clean()``, where the field validator already ran
+    :func:`validate_permanent_uri`; it is ``True`` from ``save()``, which never
+    calls ``full_clean()`` and is the path the import work this feature exists
+    to serve actually uses (research R5).
     """
     if _permanent_uri_still_deferred(instance):
         return
     _normalise_blank_permanent_uri(instance)
-    _reject_permanent_uri_rewrite(instance)
+    stored = _stored_permanent_uri(instance)
+    if stored is not None and instance.permanent_uri != stored:
+        raise ValidationError(
+            {
+                "permanent_uri": ValidationError(
+                    _("The permanent URI '%(uri)s' is fixed and cannot be changed or cleared once stored."),
+                    params={"uri": stored},
+                    code="permanent_uri_fixed",
+                )
+            }
+        )
     if not instance.permanent_uri:
         return
-    try:
-        validate_permanent_uri(instance.permanent_uri)
-    except ValidationError as exc:
-        raise ValidationError({"permanent_uri": exc}) from exc
+    if validate_format:
+        try:
+            validate_permanent_uri(instance.permanent_uri)
+        except ValidationError as exc:
+            raise ValidationError({"permanent_uri": exc}) from exc
+    if instance.permanent_uri == stored:
+        # Nothing about the value changed, so nothing that depends on it could
+        # have either — skip the cross-model probe's wasted queries (T029).
+        return
     _reject_permanent_uri_held_by_another_model(instance)
 
 
@@ -265,15 +243,6 @@ class PermanentUriModel(models.Model):
     an ordinary Django abstract-base override, not a second column).
     """
 
-    #: The ``permanent_uri`` this instance was loaded from the database with, set
-    #: by :meth:`from_db`. Not a model field — bookkeeping for
-    #: :func:`_reject_permanent_uri_rewrite`.
-    _loaded_permanent_uri: str | None = None
-
-    #: True when this instance came from the database with ``permanent_uri``
-    #: deferred, so there is a stored value to read back if it is assigned.
-    _permanent_uri_deferred: bool = False
-
     permanent_uri = models.CharField(
         max_length=PERMANENT_URI_MAX_LENGTH,
         null=True,
@@ -289,13 +258,6 @@ class PermanentUriModel(models.Model):
 
     class Meta:
         abstract = True
-
-    @classmethod
-    def from_db(cls, db, field_names, values):
-        """Snapshot the loaded ``permanent_uri`` so a later save can detect a rewrite (T025)."""
-        instance = super().from_db(db, field_names, values)
-        _snapshot_permanent_uri(instance, field_names)
-        return instance
 
     @property
     def uri(self) -> str:
@@ -322,24 +284,21 @@ class PermanentUriModel(models.Model):
         return bool(self.permanent_uri)
 
     def clean(self):
-        """Refuse a ``permanent_uri`` already held by a record of a different model.
+        """Refuse a ``permanent_uri`` that rewrites or clears a stored one, or is
+        already held by a record of a different model.
 
         Field validators (:func:`validate_permanent_uri`) already cover format on the
-        ``full_clean()`` path; the cross-model check needs a query beyond one field
-        so it lives here rather than on the field itself (research R4).
+        ``full_clean()`` path; the checks here need a query beyond one field so they
+        live here rather than on the field itself (research R4).
         """
         super().clean()
-        if _permanent_uri_still_deferred(self):
-            return
-        _normalise_blank_permanent_uri(self)
-        _reject_permanent_uri_rewrite(self)
-        _reject_permanent_uri_held_by_another_model(self)
+        _check_permanent_uri(self, validate_format=False)
 
     def save(self, *args, **kwargs):
-        """Validate ``permanent_uri`` before the write and adopt it as stored after."""
-        _validate_permanent_uri_on_save(self)
+        """Validate ``permanent_uri`` — reading the database, never a stale
+        snapshot — before the write."""
+        _check_permanent_uri(self, validate_format=True)
         super().save(*args, **kwargs)
-        _note_permanent_uri_saved(self)
 
 
 class ConceptSchemeManager(PermanentUriLookupMixin["ConceptScheme"]):
