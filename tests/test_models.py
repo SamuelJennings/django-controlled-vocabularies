@@ -20,7 +20,14 @@ from django.db.models import Model, UniqueConstraint
 from django.utils.functional import Promise
 
 from controlled_vocabularies import conf
-from controlled_vocabularies.models import Collection, Concept, ConceptLabel, ConceptNote, ConceptScheme
+from controlled_vocabularies.models import (
+    Collection,
+    Concept,
+    ConceptLabel,
+    ConceptNote,
+    ConceptScheme,
+    validate_permanent_uri,
+)
 from tests.factories import ConceptSchemeFactory
 
 
@@ -272,6 +279,99 @@ class TestConceptIdentity:
         # so a string outside the configured base is not an identity.
         with pytest.raises(Concept.DoesNotExist):
             Concept.objects.get_by_uri(f"{scheme.slug}/{concept.slug}")
+
+
+class TestPermanentUri:
+    """US-1 — a record keeps the identifier it arrived with (FR-001/FR-002/FR-003/
+    FR-004/FR-006/FR-013). An externally assigned ``permanent_uri`` is read back
+    verbatim from ``uri``, survives a rename and a configured-base-address change,
+    is never derived from another record's, and is refused up front when
+    malformed, unsafe, too long, or already held by a record of another model."""
+
+    @pytest.mark.django_db
+    def test_permanent_uri_reads_back_verbatim_from_uri(self, scheme):
+        concept = Concept.objects.create(
+            scheme=scheme, label="Granite", permanent_uri="http://vocabs.example.org/rock/granite"
+        )
+        assert concept.uri == "http://vocabs.example.org/rock/granite"
+        assert concept.has_permanent_uri is True
+
+    @pytest.mark.django_db
+    def test_permanent_uri_survives_a_rename(self, scheme):
+        concept = Concept.objects.create(
+            scheme=scheme, label="Granite", permanent_uri="http://vocabs.example.org/rock/granite"
+        )
+        concept.label = "Granite (coarse-grained)"
+        concept.save()
+        assert concept.uri == "http://vocabs.example.org/rock/granite"
+
+    @pytest.mark.django_db
+    def test_permanent_uri_survives_a_base_address_change(self, scheme, settings):
+        concept = Concept.objects.create(
+            scheme=scheme, label="Granite", permanent_uri="http://vocabs.example.org/rock/granite"
+        )
+        settings.CONTROLLED_VOCABULARIES_BASE_URI = "https://elsewhere.example.org/vocab"
+        assert concept.uri == "http://vocabs.example.org/rock/granite"
+
+    @pytest.mark.django_db
+    def test_scheme_and_collection_keep_their_own_permanent_uri(self):
+        scheme = ConceptScheme.objects.create(name="Rocks", permanent_uri="http://vocabs.example.org/rocks")
+        collection = Collection.objects.create(
+            scheme=scheme, name="Igneous", permanent_uri="http://vocabs.example.org/rocks/igneous"
+        )
+        assert scheme.uri == "http://vocabs.example.org/rocks"
+        assert scheme.has_permanent_uri is True
+        assert collection.uri == "http://vocabs.example.org/rocks/igneous"
+        assert collection.has_permanent_uri is True
+
+    @pytest.mark.django_db
+    def test_concepts_permanent_uri_is_not_derived_from_its_schemes(self):
+        scheme = ConceptScheme.objects.create(name="Rocks", permanent_uri="http://vocabs.example.org/rocks")
+        concept = Concept.objects.create(
+            scheme=scheme, label="Granite", permanent_uri="http://vocabs.example.org/rock/granite"
+        )
+        assert concept.uri == "http://vocabs.example.org/rock/granite"
+        assert concept.uri != scheme.uri
+
+    @pytest.mark.django_db
+    def test_has_permanent_uri_false_while_provisional(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Basalt")
+        assert concept.permanent_uri is None
+        assert concept.has_permanent_uri is False
+        assert concept.uri == f"{conf.get_base_uri()}/{scheme.slug}/{concept.slug}"
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "not-absolute",
+            "javascript:alert(1)",
+            "JavaScript:alert(1)",
+            "data:text/html,x",
+            "vbscript:msgbox(1)",
+        ],
+    )
+    def test_refuses_non_absolute_and_script_bearing_schemes(self, value):
+        with pytest.raises(ValidationError):
+            validate_permanent_uri(value)
+
+    def test_refuses_overlong_identifier(self):
+        with pytest.raises(ValidationError):
+            validate_permanent_uri("http://example.org/" + "x" * 500)
+
+    def test_accepts_urn_identifier(self):
+        validate_permanent_uri("urn:uuid:9f6c1e2a-1234-4a12-9abc-1234567890ab")
+
+    @pytest.mark.django_db
+    def test_bare_create_with_bad_permanent_uri_raises_and_does_not_store(self, scheme):
+        with pytest.raises(ValidationError):
+            Concept.objects.create(scheme=scheme, label="Granite", permanent_uri="not-absolute")
+        assert not Concept.objects.filter(label="Granite").exists()
+
+    @pytest.mark.django_db
+    def test_concept_and_collection_cannot_share_a_permanent_uri(self, scheme):
+        Concept.objects.create(scheme=scheme, label="Granite", permanent_uri="http://vocabs.example.org/shared")
+        with pytest.raises(ValidationError):
+            Collection.objects.create(scheme=scheme, name="Igneous", permanent_uri="http://vocabs.example.org/shared")
 
 
 def _editable_fields(model: type[Model]):

@@ -132,3 +132,23 @@ land with this feature rather than after it.
 **Why defensible**: the shared vocabulary exists so specs, issues, and code use the same words. A
 glossary that still names one URI while the models carry two addresses would mislead the very next
 feature to read it, which is the import work in #50.
+
+## D10 — Implementer deviation: T006/T007/T008 landed with the T002/T003 foundational commit, ahead of T005's tests
+
+**What happened**: while implementing US-1 (T001–T008), the `uri`/`has_permanent_uri` rework (T006),
+the `save()` validation call (T007), and the cross-model duplicate check (T008) were written in the
+same pass as the foundational validator (T002) and field (T003), before `TestPermanentUri` (T005) was
+authored — inverting tasks.md's prescribed test-first order for Phase 2.
+
+**Remediation taken**: before writing `TestPermanentUri`, each test's discriminating power was verified
+directly against the already-written implementation by temporarily reverting the relevant code path
+(the `self.permanent_uri or` composition in all three `uri` properties, then separately the `save()`
+validation/cross-model-check calls), confirming the exact expected tests failed for the right reason,
+then restoring. All 15 tests in `TestPermanentUri` were confirmed non-vacuous this way before the
+final green run.
+
+**Why defensible, not swept under the rug**: the safety property test-first exists to protect — tests
+that actually exercise the code and would catch a real regression — was verified after the fact rather
+than by construction. It was not verified by the more reliable means (red before green, by construction)
+and is logged here so a reviewer can weigh it. No test was weakened, skipped, or written to match a
+bug; the mutation check above is the evidence.
