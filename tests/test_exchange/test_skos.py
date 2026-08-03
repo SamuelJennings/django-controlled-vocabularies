@@ -12,10 +12,10 @@ from pathlib import Path
 import pytest
 import rdflib
 
-from controlled_vocabularies.exchange.report import FatalReason
+from controlled_vocabularies.exchange.report import FatalReason, SetAsideReason
 from controlled_vocabularies.exchange.safety import UnsafeRdfXmlError
 from controlled_vocabularies.exchange.skos import SkosImportError, SkosImportFailed, _read_graph, import_skos
-from controlled_vocabularies.models import ConceptScheme
+from controlled_vocabularies.models import Concept, ConceptScheme
 from tests.factories import ConceptSchemeFactory
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "skos"
@@ -86,15 +86,16 @@ class TestReadGraph:
 class TestImportSkosVocabulary:
     """T007 — the vocabulary itself: created, updated, matched against a named
     target, or refused when neither the file nor the caller can settle which
-    one is being imported. The concept walk lands in T009; until then a
-    successful call here writes at most the one ``ConceptScheme`` row."""
+    one is being imported. These assert on the scheme's own bucket entry
+    only — the concept walk (T009) also populates ``created``/``updated``
+    for each concept, covered separately in ``TestImportConcepts``."""
 
     def test_a_declared_vocabulary_is_created_when_not_already_held(self, db):
         report = import_skos(FIXTURES / "rocks.ttl")
         scheme = ConceptScheme.objects.get(static_uri=ROCKS_URI)
         assert scheme.name == "Rock types"
-        assert report.created == [ROCKS_URI]
-        assert report.updated == []
+        assert ROCKS_URI in report.created
+        assert ROCKS_URI not in report.updated
         assert report.fatal == []
 
     def test_a_declared_vocabulary_already_held_is_updated_not_duplicated(self, db):
@@ -103,8 +104,8 @@ class TestImportSkosVocabulary:
         existing.refresh_from_db()
         assert existing.name == "Rock types"
         assert ConceptScheme.objects.filter(static_uri=ROCKS_URI).count() == 1
-        assert report.updated == [ROCKS_URI]
-        assert report.created == []
+        assert ROCKS_URI in report.updated
+        assert ROCKS_URI not in report.created
 
     def test_a_named_target_that_matches_the_file_succeeds(self, db):
         target = ConceptSchemeFactory(name="Old name", static_uri=ROCKS_URI)
@@ -152,3 +153,61 @@ class TestImportedVocabularyDefaultLanguage:
         # Neither "es" (declared) nor "es" (commonest concept label language)
         # is configured, so nothing overrides the site default.
         assert scheme.effective_default_language == "en"
+
+
+class TestImportConcepts:
+    """T009 — concepts land inside the vocabulary being imported, each
+    holding its published identifier and its default-language preferred
+    label; scheme membership is read via any of the three SKOS predicates;
+    a concept claiming a different vocabulary is set aside, not imported."""
+
+    def test_every_concept_in_the_base_vocabulary_is_created_with_its_identifier_and_label(self, db):
+        report = import_skos(FIXTURES / "rocks.ttl")
+        assert Concept.objects.count() == 5
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        assert granite.label == "Granite"
+        assert granite.scheme.static_uri == "http://example.org/rocks/"
+        assert set(report.created) >= {
+            "http://example.org/rocks/",
+            "http://example.org/rocks/granite",
+            "http://example.org/rocks/igneous",
+            "http://example.org/rocks/basalt",
+            "http://example.org/rocks/sedimentary",
+            "http://example.org/rocks/quartz",
+        }
+
+    def test_scheme_membership_via_hasTopConcept_inScheme_and_topConceptOf_all_attach_correctly(self, db):
+        import_skos(FIXTURES / "mixed_scheme_membership.ttl")
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/minerals/")
+        attached = set(Concept.objects.filter(scheme=scheme).values_list("static_uri", flat=True))
+        assert attached == {
+            "http://example.org/minerals/quartz",
+            "http://example.org/minerals/feldspar",
+            "http://example.org/minerals/mica",
+        }
+
+    def test_a_concept_claiming_a_different_vocabulary_is_set_aside_not_imported(self, db):
+        report = import_skos(FIXTURES / "mixed_scheme_membership.ttl")
+        assert not Concept.objects.filter(static_uri="http://example.org/minerals/foreign").exists()
+        mismatches = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VOCABULARY_MISMATCH]
+        assert len(mismatches) == 1
+        assert mismatches[0].subject == "http://example.org/minerals/foreign"
+        assert mismatches[0].params["other"] == "http://example.org/other/"
+
+    def test_a_concept_with_no_preferred_label_in_the_default_language_is_set_aside_and_the_rest_imports(self, db):
+        report = import_skos(FIXTURES / "no_default_language_label.ttl")
+        assert Concept.objects.filter(scheme__static_uri="http://example.org/quarry/").count() == 2
+        assert not Concept.objects.filter(static_uri="http://example.org/quarry/c").exists()
+        set_aside = [entry for entry in report.set_aside if entry.reason is SetAsideReason.NO_PREFERRED_LABEL]
+        assert len(set_aside) == 1
+        assert set_aside[0].subject == "http://example.org/quarry/c"
+        assert set_aside[0].params["language"] == "en"
+
+    def test_reimporting_the_identical_file_updates_rather_than_duplicates_concepts(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        granite_pk = Concept.objects.get(static_uri="http://example.org/rocks/granite").pk
+        report = import_skos(FIXTURES / "rocks.ttl")
+        assert Concept.objects.count() == 5
+        assert Concept.objects.get(static_uri="http://example.org/rocks/granite").pk == granite_pk
+        assert "http://example.org/rocks/granite" in report.updated
+        assert "http://example.org/rocks/granite" not in report.created

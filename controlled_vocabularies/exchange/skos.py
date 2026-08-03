@@ -23,9 +23,9 @@ from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 
 from controlled_vocabularies.exchange.mapping import SKOS
-from controlled_vocabularies.exchange.report import FatalReason, ImportReport
+from controlled_vocabularies.exchange.report import FatalReason, ImportReport, SetAsideReason
 from controlled_vocabularies.exchange.safety import scan_rdf_xml
-from controlled_vocabularies.models import ConceptScheme, validate_static_uri
+from controlled_vocabularies.models import Concept, ConceptScheme, validate_static_uri
 
 #: The three serializations FR-002 requires this feature to read. Anything
 #: else — an unrecognised extension with no explicit ``format``, or an
@@ -318,6 +318,92 @@ def _resolve_scheme(
     return row, declared_uri
 
 
+def _conflicting_scheme_ref(graph: rdflib.Graph, concept_node: rdflib.term.Node, target_scheme_uri: str) -> str | None:
+    """The URI of a *different* vocabulary this concept claims, if any (T009, FR-006).
+
+    Checked against all three ways a concept can declare scheme membership:
+    its own ``skos:inScheme``/``skos:topConceptOf``, and the scheme's
+    ``skos:hasTopConcept`` naming it. A concept with no scheme reference at
+    all is not a conflict — it is read as belonging to the vocabulary being
+    imported — so this returns ``None`` both when every reference agrees
+    with ``target_scheme_uri`` and when there is no reference to check.
+    """
+    refs = {str(obj) for obj in graph.objects(concept_node, SKOS.inScheme)}
+    refs |= {str(obj) for obj in graph.objects(concept_node, SKOS.topConceptOf)}
+    refs |= {str(subj) for subj in graph.subjects(SKOS.hasTopConcept, concept_node)}
+    others = refs - {target_scheme_uri}
+    return sorted(others)[0] if others else None
+
+
+def _preferred_label_in(graph: rdflib.Graph, node: rdflib.term.Node, language: str) -> str | None:
+    """The lexicographically-first ``skos:prefLabel`` value on ``node`` in ``language``, or ``None``."""
+    values = sorted(
+        str(literal)
+        for literal in graph.objects(node, SKOS.prefLabel)
+        if isinstance(literal, rdflib.Literal) and literal.language == language
+    )
+    return values[0] if values else None
+
+
+def _import_concepts(
+    graph: rdflib.Graph,
+    target_scheme: ConceptScheme,
+    target_scheme_uri: str,
+    concept_nodes: list[rdflib.term.Node],
+    report: ImportReport,
+) -> None:
+    """Create or update each of ``concept_nodes`` inside ``target_scheme`` (T009, FR-006).
+
+    For each concept node, in order: its identity is checked (a blank node or
+    a refused URI is fatal, D3, exactly as for the vocabulary itself); a
+    concept that explicitly claims a *different* vocabulary is set aside and
+    reported rather than imported (spec Edge Cases §1); a concept with no
+    preferred label in ``target_scheme``'s effective default language is set
+    aside and reported (FR-006) rather than crashing the run — required for
+    T009 to create concepts at all, even though the acceptance scenario
+    dedicated to this case is T022's (decisions.md D14). A matched or newly
+    created :class:`Concept` is written through the model's own ``save()``,
+    which derives its slug from ``label`` (T010 layers deterministic
+    disambiguation on top of that default).
+    """
+    for node in concept_nodes:
+        hint = _first_literal(graph, node, SKOS.prefLabel)
+        try:
+            uri = _identify(node, hint=hint)
+        except _FatalIdentity as exc:
+            report.add_fatal(exc.reason, exc.subject, **exc.params)
+            continue
+
+        other = _conflicting_scheme_ref(graph, node, target_scheme_uri)
+        if other is not None:
+            report.add_set_aside(SetAsideReason.VOCABULARY_MISMATCH, subject=uri, other=other)
+            continue
+
+        label = _preferred_label_in(graph, node, target_scheme.effective_default_language)
+        if label is None:
+            report.add_set_aside(
+                SetAsideReason.NO_PREFERRED_LABEL,
+                subject=uri,
+                language=target_scheme.effective_default_language,
+            )
+            continue
+
+        try:
+            concept = Concept.objects.get_by_uri(uri)
+            created = False
+        except Concept.DoesNotExist:
+            concept = Concept(scheme=target_scheme)
+            created = True
+        concept.scheme = target_scheme
+        concept.static_uri = uri
+        concept.label = label
+        concept.save()
+        if created:
+            report.add_created(uri)
+        else:
+            report.add_updated(uri)
+
+
 def import_skos(
     file: str | Path,
     *,
@@ -349,9 +435,11 @@ def import_skos(
         declared_node = declared_nodes[0] if declared_nodes else None
         concept_nodes = sorted(graph.subjects(rdflib.RDF.type, SKOS.Concept), key=str)
 
-        # The concept walk itself (T009) attaches here once it lands; T007/T008
-        # only resolve the vocabulary and its default language.
-        _resolve_scheme(graph, declared_node, concept_nodes, scheme, report, source_label=source_label)
+        target_scheme, declared_uri = _resolve_scheme(
+            graph, declared_node, concept_nodes, scheme, report, source_label=source_label
+        )
+        if target_scheme is not None and declared_uri is not None:
+            _import_concepts(graph, target_scheme, declared_uri, concept_nodes, report)
 
         if report.fatal:
             raise SkosImportFailed(report)
