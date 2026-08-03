@@ -21,3 +21,22 @@ Append-only log of stage transitions and gate outcomes.
   including the four self-resolved decisions surfaced in the brief: escrow deferred, language
   filtering landing here rather than in #51, blank-node identity fatal, and the imported
   vocabulary's default language taken from the file. Proceeding to S3 PLAN.
+
+## 2026-08-03T20:00:03Z · Implementer US0 · T002
+
+**Did**: Scaffolded the `controlled_vocabularies/io/` package (docstring-only `__init__.py`, no
+re-exports yet) and its mirroring `tests/test_io/` directory, with a failing-first test that the
+package imports and carries a module docstring. Created `tests/fixtures/` (empty; populated by
+T005). Dropped the redundant `mypy_path = "controlled_vocabularies/"` mypy config entry — it made
+the new `io/` package collide with the stdlib `io` module ("Source file found twice"); removing it
+changes nothing else (mini-ADR: `decisions.md` D10).
+
+**Verified**: `poetry run pytest -q` — 287 passed (285 baseline + 2 new). `poetry run ruff check .`
+— all checks passed. `poetry run ruff format --check .` — 15 files already formatted. `poetry run
+mypy` — success, 5 source files (baseline 4 + `io/__init__.py`). `poetry run deptry .` — no issues,
+11 files scanned. `poetry run pre-commit run --all-files` — all hooks passed.
+
+**Next**: T003 — `report.py` (`ImportReport`, `SetAsideEntry`, the reason vocabulary).
+
+**Watch**: the `mypy_path` removal is repo-wide config, not story-scoped — flag it in review since
+it touches the shared toolchain config rather than only this feature's new files.
