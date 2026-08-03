@@ -122,106 +122,104 @@ def test_duplicate_preferred_label_message_uses_named_placeholder(scheme):
     assert "de" in excinfo.value.messages[0]
 
 
-# --- Article XII: the FS-005 static_uri metadata and validation messages ---
-# `static_uri` is added identically to ConceptScheme, Concept, and Collection, all
-# three already in ALL_MODELS above, so test_every_editable_field_has_metadata already
-# holds its verbose_name and help_text to the standard. What that generic walk cannot
-# see is whether each refusal this feature introduces is itself translatable and named
-# — that is asserted explicitly below, one test per refusal, following the pattern above.
+class TestStaticUriValidationMessages:
+    """Article XII — the FS-005 ``static_uri`` metadata and validation messages.
 
+    ``static_uri`` is added identically to ``ConceptScheme``, ``Concept``, and
+    ``Collection``, all three already in ``ALL_MODELS`` above, so
+    ``test_every_editable_field_has_metadata`` already holds its
+    ``verbose_name`` and ``help_text`` to the standard. What that generic walk
+    cannot see is whether each refusal this feature introduces is itself
+    translatable and named — asserted explicitly below, one test per refusal,
+    following the pattern above.
+    """
 
-def test_static_uri_not_absolute_message_uses_named_placeholder():
-    # FR-004/FR-010: a bare relative value is refused, naming the offending value.
-    with pytest.raises(ValidationError) as excinfo:
-        validate_static_uri("not-absolute")
-    err = excinfo.value
-    assert isinstance(err.message, Promise), "not-absolute message is not lazily translatable"
-    assert "%(uri)s" in str(err.message), "message lacks a named %(uri)s placeholder"
-    assert err.params == {"uri": "not-absolute"}
-    assert "not-absolute" in excinfo.value.messages[0]
+    def test_static_uri_not_absolute_message_uses_named_placeholder(self):
+        # FR-004/FR-010: a bare relative value is refused, naming the offending value.
+        with pytest.raises(ValidationError) as excinfo:
+            validate_static_uri("not-absolute")
+        err = excinfo.value
+        assert isinstance(err.message, Promise), "not-absolute message is not lazily translatable"
+        assert "%(uri)s" in str(err.message), "message lacks a named %(uri)s placeholder"
+        assert err.params == {"uri": "not-absolute"}
+        assert "not-absolute" in excinfo.value.messages[0]
 
+    def test_static_uri_unsafe_scheme_message_uses_named_placeholders(self, settings):
+        # FR-004/FR-010: a scheme that can carry executable content is refused, naming
+        # both the value and the offending scheme. "javascript" is outside the default
+        # allowlist (T035) so it would already be refused there; the allowlist is
+        # overridden to include it so this exercises the denylist's own message.
+        settings.CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES = ["http", "https", "javascript"]
+        with pytest.raises(ValidationError) as excinfo:
+            validate_static_uri("javascript:alert(1)")
+        err = excinfo.value
+        assert isinstance(err.message, Promise), "unsafe-scheme message is not lazily translatable"
+        assert "%(uri)s" in str(err.message) and "%(scheme)s" in str(err.message)
+        assert err.params == {"uri": "javascript:alert(1)", "scheme": "javascript"}
+        assert "javascript" in excinfo.value.messages[0]
+        assert err.code == "static_uri_unsafe_scheme"
 
-def test_static_uri_unsafe_scheme_message_uses_named_placeholders(settings):
-    # FR-004/FR-010: a scheme that can carry executable content is refused, naming
-    # both the value and the offending scheme. "javascript" is outside the default
-    # allowlist (T035) so it would already be refused there; the allowlist is
-    # overridden to include it so this exercises the denylist's own message.
-    settings.CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES = ["http", "https", "javascript"]
-    with pytest.raises(ValidationError) as excinfo:
-        validate_static_uri("javascript:alert(1)")
-    err = excinfo.value
-    assert isinstance(err.message, Promise), "unsafe-scheme message is not lazily translatable"
-    assert "%(uri)s" in str(err.message) and "%(scheme)s" in str(err.message)
-    assert err.params == {"uri": "javascript:alert(1)", "scheme": "javascript"}
-    assert "javascript" in excinfo.value.messages[0]
-    assert err.code == "static_uri_unsafe_scheme"
+    def test_static_uri_scheme_not_allowed_message_uses_named_placeholders(self):
+        # T035: a scheme outside the configured allowlist is refused, naming both the
+        # value and the offending scheme.
+        with pytest.raises(ValidationError) as excinfo:
+            validate_static_uri("file:///etc/passwd")
+        err = excinfo.value
+        assert isinstance(err.message, Promise), "scheme-not-allowed message is not lazily translatable"
+        assert "%(uri)s" in str(err.message) and "%(scheme)s" in str(err.message)
+        assert err.params == {"uri": "file:///etc/passwd", "scheme": "file"}
+        assert err.code == "static_uri_scheme_not_allowed"
 
+    def test_static_uri_too_long_message_uses_named_placeholders(self):
+        # FR-004/FR-010: an over-length identifier is refused, naming the bound and the
+        # offending value's actual length. The echoed value itself is bounded to 80 chars
+        # (T032) — a hostile value can be arbitrarily long, and echoing it in full would
+        # make the message itself another hazard — but the true length is still reported.
+        overlong = "http://example.org/" + "x" * 500
+        with pytest.raises(ValidationError) as excinfo:
+            validate_static_uri(overlong)
+        err = excinfo.value
+        assert isinstance(err.message, Promise), "too-long message is not lazily translatable"
+        assert all(placeholder in str(err.message) for placeholder in ("%(max_length)s", "%(uri)s", "%(length)s"))
+        assert err.params == {"max_length": 500, "uri": str(Truncator(overlong).chars(80)), "length": len(overlong)}
 
-def test_static_uri_scheme_not_allowed_message_uses_named_placeholders():
-    # T035: a scheme outside the configured allowlist is refused, naming both the
-    # value and the offending scheme.
-    with pytest.raises(ValidationError) as excinfo:
-        validate_static_uri("file:///etc/passwd")
-    err = excinfo.value
-    assert isinstance(err.message, Promise), "scheme-not-allowed message is not lazily translatable"
-    assert "%(uri)s" in str(err.message) and "%(scheme)s" in str(err.message)
-    assert err.params == {"uri": "file:///etc/passwd", "scheme": "file"}
-    assert err.code == "static_uri_scheme_not_allowed"
+    @pytest.mark.django_db
+    def test_static_uri_held_elsewhere_message_uses_named_placeholder(self, scheme):
+        # FR-006: two different models cannot hold the same externally assigned identifier;
+        # the refusal names the identifier via a placeholder.
+        Concept.objects.create(scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/shared")
+        with pytest.raises(ValidationError) as excinfo:
+            Collection.objects.create(scheme=scheme, name="Igneous", static_uri="http://vocabs.example.org/shared")
+        err = _inner_error(excinfo.value, "static_uri")
+        assert isinstance(err.message, Promise), "held-elsewhere message is not lazily translatable"
+        assert "%(uri)s" in str(err.message), "message lacks a named %(uri)s placeholder"
+        assert err.params == {"uri": "http://vocabs.example.org/shared"}
 
+    @pytest.mark.django_db
+    def test_static_uri_fixed_rewrite_message_uses_named_placeholder(self, scheme):
+        # FR-002/FR-013: a stored identifier is fixed; the refusal names the identifier
+        # that was rejected as unchangeable.
+        concept = Concept.objects.create(scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/fixed")
+        reloaded = Concept.objects.get(pk=concept.pk)
+        reloaded.static_uri = "http://vocabs.example.org/rewritten"
+        with pytest.raises(ValidationError) as excinfo:
+            reloaded.save()
+        err = _inner_error(excinfo.value, "static_uri")
+        assert isinstance(err.message, Promise), "fixed-rewrite message is not lazily translatable"
+        assert "%(uri)s" in str(err.message), "message lacks a named %(uri)s placeholder"
+        assert err.params == {"uri": "http://vocabs.example.org/fixed"}
 
-def test_static_uri_too_long_message_uses_named_placeholders():
-    # FR-004/FR-010: an over-length identifier is refused, naming the bound and the
-    # offending value's actual length. The echoed value itself is bounded to 80 chars
-    # (T032) — a hostile value can be arbitrarily long, and echoing it in full would
-    # make the message itself another hazard — but the true length is still reported.
-    overlong = "http://example.org/" + "x" * 500
-    with pytest.raises(ValidationError) as excinfo:
-        validate_static_uri(overlong)
-    err = excinfo.value
-    assert isinstance(err.message, Promise), "too-long message is not lazily translatable"
-    assert all(placeholder in str(err.message) for placeholder in ("%(max_length)s", "%(uri)s", "%(length)s"))
-    assert err.params == {"max_length": 500, "uri": str(Truncator(overlong).chars(80)), "length": len(overlong)}
-
-
-@pytest.mark.django_db
-def test_static_uri_held_elsewhere_message_uses_named_placeholder(scheme):
-    # FR-006: two different models cannot hold the same externally assigned identifier;
-    # the refusal names the identifier via a placeholder.
-    Concept.objects.create(scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/shared")
-    with pytest.raises(ValidationError) as excinfo:
-        Collection.objects.create(scheme=scheme, name="Igneous", static_uri="http://vocabs.example.org/shared")
-    err = _inner_error(excinfo.value, "static_uri")
-    assert isinstance(err.message, Promise), "held-elsewhere message is not lazily translatable"
-    assert "%(uri)s" in str(err.message), "message lacks a named %(uri)s placeholder"
-    assert err.params == {"uri": "http://vocabs.example.org/shared"}
-
-
-@pytest.mark.django_db
-def test_static_uri_fixed_rewrite_message_uses_named_placeholder(scheme):
-    # FR-002/FR-013: a stored identifier is fixed; the refusal names the identifier
-    # that was rejected as unchangeable.
-    concept = Concept.objects.create(scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/fixed")
-    reloaded = Concept.objects.get(pk=concept.pk)
-    reloaded.static_uri = "http://vocabs.example.org/rewritten"
-    with pytest.raises(ValidationError) as excinfo:
-        reloaded.save()
-    err = _inner_error(excinfo.value, "static_uri")
-    assert isinstance(err.message, Promise), "fixed-rewrite message is not lazily translatable"
-    assert "%(uri)s" in str(err.message), "message lacks a named %(uri)s placeholder"
-    assert err.params == {"uri": "http://vocabs.example.org/fixed"}
-
-
-def test_static_uri_unparseable_message_uses_named_placeholder():
-    # T031: urllib.parse.urlsplit raises a bare ValueError for some malformed input
-    # (e.g. a netloc invalid under NFKC normalization); caught and re-raised as a
-    # translatable ValidationError naming the offending value.
-    with pytest.raises(ValidationError) as excinfo:
-        validate_static_uri("http://exa℀mple.com/x")
-    err = excinfo.value
-    assert isinstance(err.message, Promise), "unparseable message is not lazily translatable"
-    assert "%(uri)s" in str(err.message), "message lacks a named %(uri)s placeholder"
-    assert err.params == {"uri": "http://exa℀mple.com/x"}
-    assert err.code == "static_uri_unparseable"
+    def test_static_uri_unparseable_message_uses_named_placeholder(self):
+        # T031: urllib.parse.urlsplit raises a bare ValueError for some malformed input
+        # (e.g. a netloc invalid under NFKC normalization); caught and re-raised as a
+        # translatable ValidationError naming the offending value.
+        with pytest.raises(ValidationError) as excinfo:
+            validate_static_uri("http://exa℀mple.com/x")
+        err = excinfo.value
+        assert isinstance(err.message, Promise), "unparseable message is not lazily translatable"
+        assert "%(uri)s" in str(err.message), "message lacks a named %(uri)s placeholder"
+        assert err.params == {"uri": "http://exa℀mple.com/x"}
+        assert err.code == "static_uri_unparseable"
 
 
 # --- Article XIII: indexing is deliberate on the two new models ---
@@ -411,56 +409,64 @@ def test_collection_member_fks_are_indexed():
     assert CollectionMember._meta.get_field("concept").db_index is True
 
 
-# --- FS-005: static_uri's indexing decision (data-model.md "Indexing decision") ---
-# static_uri is indexed by its own partial unique constraint, and nothing else in this
-# feature gains an index: local_url, uri, and has_static_uri are properties, not columns,
-# composed from slug fields R1 already indexed and constrained.
+class TestStaticUriIndexing:
+    """FS-005 — ``static_uri``'s indexing decision (data-model.md "Indexing decision").
 
+    ``static_uri`` is indexed by its own partial unique constraint, and
+    nothing else in this feature gains an index: ``local_url``, ``uri``, and
+    ``has_static_uri`` are properties, not columns, composed from slug fields
+    R1 already indexed and constrained.
+    """
 
-@pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
-def test_static_uri_is_covered_only_by_its_partial_unique_constraint(model):
-    field = model._meta.get_field("static_uri")
-    assert field.db_index is False, f"{model.__name__}.static_uri must not carry a plain db_index"
-    for index in model._meta.indexes:
-        assert "static_uri" not in index.fields, (
-            f"{model.__name__}.static_uri must not appear in any explicit Meta.indexes entry"
+    @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
+    def test_static_uri_is_covered_only_by_its_partial_unique_constraint(self, model):
+        field = model._meta.get_field("static_uri")
+        assert field.db_index is False, f"{model.__name__}.static_uri must not carry a plain db_index"
+        for index in model._meta.indexes:
+            assert "static_uri" not in index.fields, (
+                f"{model.__name__}.static_uri must not appear in any explicit Meta.indexes entry"
+            )
+        constraint_name = f"{model.__name__.lower()}_static_uri_unique"
+        constraint = next(
+            (c for c in model._meta.constraints if isinstance(c, UniqueConstraint) and c.name == constraint_name),
+            None,
         )
-    constraint_name = f"{model.__name__.lower()}_static_uri_unique"
-    constraint = next(
-        (c for c in model._meta.constraints if isinstance(c, UniqueConstraint) and c.name == constraint_name),
-        None,
-    )
-    assert constraint is not None, f"missing {constraint_name} partial unique constraint"
-    assert tuple(constraint.fields) == ("static_uri",)
-    assert constraint.condition is not None, "static_uri's uniqueness must be a *partial* constraint"
+        assert constraint is not None, f"missing {constraint_name} partial unique constraint"
+        assert tuple(constraint.fields) == ("static_uri",)
+        assert constraint.condition is not None, "static_uri's uniqueness must be a *partial* constraint"
+
+    def test_local_url_and_has_static_uri_are_properties_not_indexable_columns(self):
+        # Neither local_url nor has_static_uri is a model field, so neither can carry an
+        # index; they compose from slug fields already indexed/constrained by R1.
+        for model in (ConceptScheme, Concept, Collection):
+            field_names = {field.name for field in model._meta.get_fields()}
+            assert "local_url" not in field_names, f"{model.__name__}.local_url must not be a model field"
+            assert "has_static_uri" not in field_names, f"{model.__name__}.has_static_uri must not be a model field"
+            assert isinstance(model.local_url, property)
+            assert isinstance(model.has_static_uri, property)
 
 
-def test_local_url_and_has_static_uri_are_properties_not_indexable_columns():
-    # Neither local_url nor has_static_uri is a model field, so neither can carry an
-    # index; they compose from slug fields already indexed/constrained by R1.
-    for model in (ConceptScheme, Concept, Collection):
-        field_names = {field.name for field in model._meta.get_fields()}
-        assert "local_url" not in field_names, f"{model.__name__}.local_url must not be a model field"
-        assert "has_static_uri" not in field_names, f"{model.__name__}.has_static_uri must not be a model field"
-        assert isinstance(model.local_url, property)
-        assert isinstance(model.has_static_uri, property)
+class TestStaticUriModelRegistry:
+    """T028 — the cross-model uniqueness check's registry stays complete on its own.
 
+    ``_reject_static_uri_held_by_another_model`` used to consult a hardcoded
+    ``(ConceptScheme, Concept, Collection)`` tuple — an untested single point
+    of failure: a fourth model that forgot to be added to that tuple would
+    silently lose the cross-model invariant, with nothing to notice. It now
+    derives the set from ``StaticUriModel``'s live subclasses. This asserts
+    that set against Django's own app registry — a source independent of the
+    helper's own implementation — so a regression back to a hardcoded,
+    incomplete list would still be caught even if it reused the same helper
+    name.
+    """
 
-# --- T028: the cross-model uniqueness check's registry stays complete on its own ---
-# _reject_static_uri_held_by_another_model used to consult a hardcoded
-# (ConceptScheme, Concept, Collection) tuple — an untested single point of failure: a
-# fourth model that forgot to be added to that tuple would silently lose the cross-model
-# invariant, with nothing to notice. It now derives the set from StaticUriModel's live
-# subclasses. This asserts that set against Django's own app registry — a source
-# independent of the helper's own implementation — so a regression back to a hardcoded,
-# incomplete list would still be caught even if it reused the same helper name.
+    def test_every_concrete_static_uri_model_is_registered_for_the_cross_model_check(self):
+        from django.apps import apps
 
+        from controlled_vocabularies.models import StaticUriModel, _static_uri_models
 
-def test_every_concrete_static_uri_model_is_registered_for_the_cross_model_check():
-    from django.apps import apps
-
-    from controlled_vocabularies.models import StaticUriModel, _static_uri_models
-
-    expected = {model for model in apps.get_models() if issubclass(model, StaticUriModel) and not model._meta.abstract}
-    assert expected, "no concrete StaticUriModel subclasses found — the registry has nothing to check"
-    assert set(_static_uri_models()) == expected
+        expected = {
+            model for model in apps.get_models() if issubclass(model, StaticUriModel) and not model._meta.abstract
+        }
+        assert expected, "no concrete StaticUriModel subclasses found — the registry has nothing to check"
+        assert set(_static_uri_models()) == expected

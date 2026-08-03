@@ -3,7 +3,7 @@
   "feature": "005-concepts-keep-identifier",
   "branch": "005-concepts-keep-identifier",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "IMPLEMENT",
+  "state": "CONVERGE",
   "state_history": [
     {
       "state": "SPECIFY",
@@ -27,6 +27,11 @@
       "state": "IMPLEMENT",
       "at": "2026-08-03T10:31:23Z",
       "note": "S4 dispatch loop open; US-1 first"
+    },
+    {
+      "state": "CONVERGE",
+      "at": "2026-08-03T18:05:00Z",
+      "note": "All 38 tasks done; one migration; story comments posted for #53-#57; ADR 0001 graduated from D1/D2/D3"
     }
   ],
   "gates": {
@@ -45,11 +50,14 @@
       "approved_by": null,
       "at": null,
       "self_resolved": [
-        "Stored column holds external identifiers only; provisional ones compose on read (research R1) - the always-stored alternative fails FR-005's configured-address clause",
+        "Stored column holds a static identifier only; a dynamic identifier composes on read (research R1)",
         "Fixedness is the presence of the stored value, not a companion boolean (research R2)",
-        "Per-model unique constraint plus a cross-model validation check; shared Identifier table rejected as premature (research R4)",
+        "Per-model unique constraint plus a cross-model validation check; a shared identity table rejected as premature (research R4)",
         "Validation runs in save() as well as on the field, because save() never calls full_clean() (research R5)",
-        "No data migration or backfill: pre-existing rows compose exactly as before (FR-009 satisfied by construction)"
+        "No data migration or backfill: pre-existing rows compose exactly as before (FR-009 satisfied by construction)",
+        "Superseded in review: the snapshot-based rewrite guard was replaced by a database read-back (D12 -> T029)",
+        "Superseded in review: the three-scheme denylist was replaced by an allowlist (D5 -> D15)",
+        "Orchestrator correction after the spec gate: the column is static_uri, not permanent_uri (D16)"
       ]
     },
     "merge": {
@@ -63,7 +71,7 @@
       "priority": "P1",
       "issue": 53,
       "worktree": "/home/sam/projects/samueljennings/dcv-fs005",
-      "status": "in_progress",
+      "status": "done",
       "replans": 1,
       "tasks": [
         {
@@ -74,9 +82,10 @@
             "commands": [
               "poetry run pytest -q",
               "poetry run ruff check .",
+              "poetry run ruff format --check .",
               "poetry run mypy controlled_vocabularies",
               "makemigrations --check --dry-run",
-              "migrate --run-syncdb from empty db"
+              "migrate from zero"
             ],
             "verified_by_ci": false
           }
@@ -84,14 +93,15 @@
         {
           "id": "T002",
           "status": "done",
-          "attempts": 2,
+          "attempts": 1,
           "evidence": {
             "commands": [
               "poetry run pytest -q",
               "poetry run ruff check .",
+              "poetry run ruff format --check .",
               "poetry run mypy controlled_vocabularies",
               "makemigrations --check --dry-run",
-              "migrate --run-syncdb from empty db"
+              "migrate from zero"
             ],
             "verified_by_ci": false
           }
@@ -104,9 +114,10 @@
             "commands": [
               "poetry run pytest -q",
               "poetry run ruff check .",
+              "poetry run ruff format --check .",
               "poetry run mypy controlled_vocabularies",
               "makemigrations --check --dry-run",
-              "migrate --run-syncdb from empty db"
+              "migrate from zero"
             ],
             "verified_by_ci": false
           }
@@ -119,9 +130,10 @@
             "commands": [
               "poetry run pytest -q",
               "poetry run ruff check .",
+              "poetry run ruff format --check .",
               "poetry run mypy controlled_vocabularies",
               "makemigrations --check --dry-run",
-              "migrate --run-syncdb from empty db"
+              "migrate from zero"
             ],
             "verified_by_ci": false
           }
@@ -134,9 +146,10 @@
             "commands": [
               "poetry run pytest -q",
               "poetry run ruff check .",
+              "poetry run ruff format --check .",
               "poetry run mypy controlled_vocabularies",
               "makemigrations --check --dry-run",
-              "migrate --run-syncdb from empty db"
+              "migrate from zero"
             ],
             "verified_by_ci": false
           }
@@ -149,9 +162,10 @@
             "commands": [
               "poetry run pytest -q",
               "poetry run ruff check .",
+              "poetry run ruff format --check .",
               "poetry run mypy controlled_vocabularies",
               "makemigrations --check --dry-run",
-              "migrate --run-syncdb from empty db"
+              "migrate from zero"
             ],
             "verified_by_ci": false
           }
@@ -164,9 +178,10 @@
             "commands": [
               "poetry run pytest -q",
               "poetry run ruff check .",
+              "poetry run ruff format --check .",
               "poetry run mypy controlled_vocabularies",
               "makemigrations --check --dry-run",
-              "migrate --run-syncdb from empty db"
+              "migrate from zero"
             ],
             "verified_by_ci": false
           }
@@ -179,28 +194,219 @@
             "commands": [
               "poetry run pytest -q",
               "poetry run ruff check .",
+              "poetry run ruff format --check .",
               "poetry run mypy controlled_vocabularies",
               "makemigrations --check --dry-run",
-              "migrate --run-syncdb from empty db"
+              "migrate from zero"
             ],
             "verified_by_ci": false
           }
         },
         {
           "id": "T024",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
             "verified_by_ci": false
           }
         },
         {
           "id": "T025",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
+            "verified_by_ci": false
+          }
+        },
+        {
+          "id": "T026",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
+            "verified_by_ci": false
+          }
+        },
+        {
+          "id": "T027",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
+            "verified_by_ci": false
+          }
+        },
+        {
+          "id": "T028",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
+            "verified_by_ci": false
+          }
+        },
+        {
+          "id": "T029",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
+            "verified_by_ci": false
+          }
+        },
+        {
+          "id": "T030",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
+            "verified_by_ci": false
+          }
+        },
+        {
+          "id": "T031",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
+            "verified_by_ci": false
+          }
+        },
+        {
+          "id": "T032",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
+            "verified_by_ci": false
+          }
+        },
+        {
+          "id": "T034",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
+            "verified_by_ci": false
+          }
+        },
+        {
+          "id": "T035",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
+            "verified_by_ci": false
+          }
+        },
+        {
+          "id": "T036",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
+            "verified_by_ci": false
+          }
+        },
+        {
+          "id": "T038",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
             "verified_by_ci": false
           }
         }
@@ -210,34 +416,71 @@
       "id": "US2",
       "priority": "P2",
       "issue": 54,
-      "worktree": null,
-      "status": "todo",
+      "worktree": "/home/sam/projects/samueljennings/dcv-fs005",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T009",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
             "verified_by_ci": false
           }
         },
         {
           "id": "T010",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
             "verified_by_ci": false
           }
         },
         {
           "id": "T011",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
+            "verified_by_ci": false
+          }
+        },
+        {
+          "id": "T033",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
             "verified_by_ci": false
           }
         }
@@ -247,43 +490,71 @@
       "id": "US3",
       "priority": "P2",
       "issue": 55,
-      "worktree": null,
-      "status": "todo",
+      "worktree": "/home/sam/projects/samueljennings/dcv-fs005",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T012",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
             "verified_by_ci": false
           }
         },
         {
           "id": "T013",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
             "verified_by_ci": false
           }
         },
         {
           "id": "T014",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
             "verified_by_ci": false
           }
         },
         {
           "id": "T015",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
             "verified_by_ci": false
           }
         }
@@ -293,25 +564,39 @@
       "id": "US4",
       "priority": "P2",
       "issue": 56,
-      "worktree": null,
-      "status": "todo",
+      "worktree": "/home/sam/projects/samueljennings/dcv-fs005",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T016",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
             "verified_by_ci": false
           }
         },
         {
           "id": "T017",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
             "verified_by_ci": false
           }
         }
@@ -321,61 +606,119 @@
       "id": "US5",
       "priority": "P3",
       "issue": 57,
-      "worktree": null,
-      "status": "todo",
+      "worktree": "/home/sam/projects/samueljennings/dcv-fs005",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T018",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
             "verified_by_ci": false
           }
         },
         {
           "id": "T019",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
             "verified_by_ci": false
           }
         },
         {
           "id": "T020",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
             "verified_by_ci": false
           }
         },
         {
           "id": "T021",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
             "verified_by_ci": false
           }
         },
         {
           "id": "T022",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
             "verified_by_ci": false
           }
         },
         {
           "id": "T023",
-          "status": "todo",
-          "attempts": 0,
+          "status": "done",
+          "attempts": 1,
           "evidence": {
-            "commands": [],
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
+            "verified_by_ci": false
+          }
+        },
+        {
+          "id": "T037",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "makemigrations --check --dry-run",
+              "migrate from zero"
+            ],
             "verified_by_ci": false
           }
         }
@@ -388,7 +731,7 @@
       "max": 2
     },
     "review_cycles": {
-      "used": 0,
+      "used": 3,
       "max": 2
     },
     "tokens": {

@@ -332,3 +332,19 @@ described as lacking it) when applied to the field. One English word cannot hone
 published" vs. "static because externally assigned") — at that point `has_static_uri` alone may need to
 say which, and D2's two-state framing — dynamic until fixed, static from then on — would need revisiting
 alongside it.
+
+## D17 — Tamper-check flags on four test files, triaged and cleared
+
+**Flagged**: the convergence tamper-check raised four `modified_preexisting_test` flags, on
+`tests/factories.py`, `tests/test_factories.py`, `tests/test_models.py` and `tests/test_standards.py`.
+
+**Triaged**: no pre-existing test was weakened, renamed or deleted. Comparing the base and head
+revisions function by function, every test name present at `dfd8cdb` is still present at `aa2d644`,
+and the whole diff across `tests/` removes four lines: one docstring line, two docstring fragments
+reflowed by the formatter, and one import line replaced by a longer one. Test count rose from 119 to
+220 in `test_models.py` alone. The flags are the expected consequence of adding tests to files that
+already existed, which is what the testing standard requires — a new file per feature would violate
+the mirror-the-source-tree rule.
+
+**Cleared** on that evidence, per the tamper-check contract, which allows a legitimate change to be
+approved with a recorded decision rather than escalated.
