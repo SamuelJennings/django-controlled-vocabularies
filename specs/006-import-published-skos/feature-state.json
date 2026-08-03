@@ -3,7 +3,7 @@
   "feature": "006-import-published-skos",
   "branch": "006-import-published-skos",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "PLAN",
+  "state": "IMPLEMENT",
   "state_history": [
     {
       "state": "INTAKE",
@@ -29,6 +29,11 @@
       "state": "PLAN",
       "at": "2026-08-03T11:00:00Z",
       "note": "research, plan, tasks"
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-03T11:15:00Z",
+      "note": "foundational phase dispatched"
     }
   ],
   "gates": {
@@ -47,8 +52,8 @@
       ]
     },
     "plan": {
-      "approved_by": null,
-      "at": null
+      "approved_by": "notified (veto window, not a gate)",
+      "at": "2026-08-03T11:15:00Z"
     },
     "merge": {
       "approved_by": null,
@@ -255,8 +260,8 @@
       "id": "US0",
       "priority": "P1",
       "issue": null,
-      "worktree": null,
-      "status": "todo",
+      "worktree": "/home/sam/projects/samueljennings/dcv-fs006-us0",
+      "status": "in_progress",
       "replans": 0,
       "tasks": [
         {
