@@ -293,3 +293,18 @@ the human-readable trail.
   No code change — documentation only.
 - **Deviation**: none.
 - **Commit**: see below.
+
+## 2026-08-03 — Phase 7 (T022) docs
+
+- **Did**: T022. `README.md`'s Configuration section stated "Concept and scheme URIs are composed from
+  a base address" and "A concept's URI is then `{base}/{scheme-slug}/{concept-slug}`" without
+  qualification — exactly the claim this task was written to catch, now stale since an externally
+  assigned `permanent_uri` is held verbatim instead. Reworded: the section now leads with the
+  permanent-URI/local-URL split (identity is stored and fixed; an imported record keeps its
+  publisher's identifier; a record authored here composes one from the base address until published),
+  then gives the same configuration steps and the same `{base}/{scheme-slug}/{concept-slug}` formula
+  for this site's own address, explicit that it holds "even when that record's permanent URI points
+  elsewhere." No other README section made the same claim (checked every remaining `URI` mention —
+  the rest describe stable/consumption-facing properties, not the composition rule). No code change.
+- **Deviation**: none.
+- **Commit**: see below.

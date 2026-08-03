@@ -53,16 +53,21 @@ identifiers · vocabulary-as-data over vocabulary-as-code · SKOS fidelity over 
 
 ## Configuration
 
-Concept and scheme URIs are composed from a base address. Set it in your Django settings:
+Every vocabulary, concept, and collection has a permanent URI — its identity, stored and never
+changed once it is set. A record imported from an external vocabulary keeps the identifier its
+publisher assigned it, held exactly as given. A record authored here instead reports an identifier
+composed from a base address, until it is published, at which point that becomes fixed too. Set the
+base address in your Django settings:
 
 ```python
 CONTROLLED_VOCABULARIES_BASE_URI = "https://vocab.example.org/vocabularies"
 ```
 
 If you leave it unset, the app falls back to `http://localhost:8000/vocabularies` so it still
-runs out of the box — set a real address before you rely on the URIs anywhere they are seen. A
-concept's URI is then `{base}/{scheme-slug}/{concept-slug}`, and the slugs follow the labels while
-a vocabulary is unpublished.
+runs out of the box — set a real address before you rely on it anywhere it is seen. This site's own
+address for viewing a record is always composed from this base and the record's slugs — a concept's
+is `{base}/{scheme-slug}/{concept-slug}` — even when that record's permanent URI points elsewhere, and
+the slugs follow the labels while a vocabulary is unpublished.
 
 ## Relationship to other packages
 
