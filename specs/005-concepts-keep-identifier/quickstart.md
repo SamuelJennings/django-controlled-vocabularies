@@ -31,13 +31,13 @@ address and its slugs.
 scheme = ConceptScheme.objects.create(name="Field methods")
 sampling = Concept.objects.create(scheme=scheme, name="Sampling")
 
-sampling.static_uri      # None — dynamic until it is published
+sampling.static_uri      # None — the identifier is still dynamic
 sampling.uri                # "https://mysite.org/vocabularies/field-methods/sampling"
 sampling.uri == sampling.local_url   # True
 ```
 
-Rename it and both follow. That is what makes the value provisional: it is a promise only once the
-vocabulary is published, which is a later feature (roadmap R4).
+Rename it and both follow. The identifier is dynamic at this stage and turns static when the
+vocabulary is published, which is a later feature (roadmap R4). From that moment it never moves again.
 
 ## Finding a record by its identifier
 
@@ -72,5 +72,5 @@ Concept.objects.create(scheme=scheme, name="Bad", static_uri="javascript:alert(1
 
 ## Upgrading
 
-Nothing to do. Records created before this change hold no static identifier yet — their `uri` is
-still dynamically composed exactly as before — and every reference to them still resolves.
+Nothing to do. Records created before this change hold no static identifier, so they compose exactly
+what they composed before and every reference to them still resolves.

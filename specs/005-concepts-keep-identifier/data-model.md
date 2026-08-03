@@ -13,21 +13,22 @@ Added identically to `ConceptScheme`, `Concept`, and `Collection`.
 | `null` | `True` | A nullable *unique* text column must use `NULL`, not `""`. Empty strings all collide under a unique constraint, so the usual "no `null=True` on char fields" convention is deliberately not followed here. |
 | `blank` | `True` | Nothing requires a curator to supply one; it arrives with imported content. |
 | `verbose_name` | `_("static URI")` | Article XII. |
-| `help_text` | translatable, states that it holds the identifier assigned by the vocabulary's publisher and is fixed once set | Article XII. |
+| `help_text` | translatable, states that it holds the record's permanent URI once that URI has turned static — assigned by an external publisher, or frozen at publication — and is never recomputed afterwards | Article XII. |
 | validators | `validate_static_uri` | FR-004. |
 | constraint | `UniqueConstraint(fields=["static_uri"], condition=Q(static_uri__isnull=False), name="<model>_static_uri_unique")` | FR-006. Partial so the index holds only real identifiers rather than a row per unpublished record. |
 
-**Empty means provisional.** A row with no value composes its identifier on read. A row with a value is
-fixed and never recomputed. That presence *is* the explicit record of fixedness FR-003 asks for
-(research R2) — no companion boolean, which could only ever disagree with the column.
+**Empty means the permanent URI is still dynamic.** A row with no value composes its identifier on
+read; a row with a value has turned static and is never recomputed. Every row has a permanent URI
+either way — the column records which of the two states it is in, which *is* the explicit record
+FR-003 asks for (research R2). No companion boolean, which could only ever disagree with the column.
 
 ## Accessors (all three models)
 
 | Name | Kind | Returns |
 |---|---|---|
-| `uri` | property (existing name, existing meaning) | `self.static_uri` when set, otherwise `self.local_url`. This is the static URI: the publisher's when there is one, the provisional composition otherwise. |
+| `uri` | property (existing name, existing meaning) | `self.static_uri` when set, otherwise `self.local_url`. This is the permanent URI, static or dynamic: the publisher's when there is one, the composition otherwise. |
 | `local_url` | property (new) | The R1 composition, always: `{base}/{slug}` for a scheme, `{scheme.local_url}/{slug}` for a concept, `{scheme.local_url}/collection/{slug}` for a collection. Always this site's own address. |
-| `has_static_uri` | property (new) | `bool(self.static_uri)` — whether an identifier is *stored* at all. An unpublished local record has none stored and this is `False`; presence of the stored value is the fixedness signal (decisions.md D2, corrected T037), not a separate flag. |
+| `has_static_uri` | property (new) | `bool(self.static_uri)` — whether the permanent URI has turned static. |
 
 `local_url` composes from `local_url` up the chain rather than from `uri`, so a concept in an imported
 vocabulary still gets a local address on this site even though its scheme's identifier points elsewhere.

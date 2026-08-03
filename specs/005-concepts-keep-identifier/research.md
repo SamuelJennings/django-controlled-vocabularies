@@ -29,16 +29,16 @@ invariant are satisfied by construction, with no data migration and nothing to g
   unpublished record's identifier accidentally static, which is exactly the distinction the feature
   exists to draw.
 
-## R2 — Fixedness is the presence of the stored value, not a separate flag
+## R2 — Static-versus-dynamic is the presence of the stored value, not a separate flag
 
-**Decision**: a record is fixed when its stored identifier column holds a value, and provisional when
-it does not. No boolean field is added.
+**Decision**: a record's permanent URI is static when `static_uri` holds a value and dynamic when it
+does not. Every record has a permanent URI either way. No boolean field is added.
 
-**Rationale**: FR-003 forbids inferring fixedness by testing the identifier against the configured base
+**Rationale**: FR-003 forbids inferring the state by testing the identifier against the configured base
 address, because the address can change and a publisher's address may resemble it. It does not require
 a dedicated flag — it requires the fact to be recorded rather than guessed. Column presence *is* a
 recorded fact, and it cannot disagree with the data the way a parallel boolean can: a flag says
-"fixed" while the column is empty, and now two fields describe one truth. Publication (R4) freezes a
+"static" while the column is empty, and now two fields describe one truth. Publication (R4) freezes a
 local record by writing the composed value into the same column, so the representation is already what
 the next feature needs.
 

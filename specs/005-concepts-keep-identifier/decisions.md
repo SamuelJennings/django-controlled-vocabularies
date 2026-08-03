@@ -19,31 +19,27 @@ the code today.
 identified and locally viewable, and it matches how SKOS itself treats a concept's URI (a global
 identifier, not a site path). Established in the intake discussion, not inferred.
 
-## D2 — Presence of a *stored* `static_uri` is the distinction; the `uri` accessor always answers
+## D2 — Every record has a permanent URI; the column holds it once it turns static
 
-**Ambiguous**: whether an unpublished, locally authored record has a static URI at all.
+**Ambiguous**: how a permanent URI behaves before the record is published.
 
-**Chosen**: an unpublished local record has none stored — `static_uri` is `None` and
-`has_static_uri` is `False` — and its `uri` accessor composes and reports the identifier it will
-publish under in the meantime, following the record's slugs. Once a record is imported or published,
-`static_uri` holds a value and `uri` returns it verbatim. The distinguishing state between the two
-is **presence** of the stored identifier — exactly what `has_static_uri` reads (`bool(self.
-static_uri)`) — not a separate fixedness concept layered on top of an always-present value.
+**Chosen**: every record always has one. It is **dynamic** while the record is authored here and
+unpublished, composed from the site's configured address and the record's slugs and free to move when
+those move. It turns **static** when the record arrives from an external publisher, or when its
+vocabulary is published, and never changes afterwards. The difference between the two states is
+whether the value can still move, never whether it exists.
 
-**Why defensible**: this matches the maintainer's stated position at the spec gate — an unpublished
-vocabulary holds no *stored* `static_uri` — and is what the shipped code does. A single, always-answering `uri`
-accessor still keeps one rule for the whole system, avoids every caller special-casing an absent
-identity on the read path, and preserves R1's behaviour exactly, so this feature is not a breaking
-change; that part of the original reasoning stands. The alternative — no identifier until publication,
-with `uri` itself raising or returning `None` — would have made lookup fail for unpublished local
-records and forced a null check into every consumer for no gain.
+**Why defensible**: the maintainer's position is that the identifier is dynamic until publication
+and static from then on, which is exactly these two states. An always-present value keeps one rule for
+the whole system, avoids every caller special-casing an absent identity, and preserves R1's behaviour
+exactly, so this feature is not a breaking change. The alternative — no identifier at all until
+publication — would have made lookup fail for unpublished local records and forced a null check into
+every consumer for no gain.
 
-**Correction (T037)**: an earlier version of this entry said "every record always has one... the
-difference between the two states is fixedness, never presence," which conflates the `uri`
-*accessor* — which does always return something, composed or stored — with the `static_uri`
-*column*, which does not. That wording contradicted the shipped `has_static_uri` and the
-maintainer's own words above. `data-model.md`'s description of `has_static_uri` carried the same
-drift and is corrected alongside this entry.
+*(Corrected 2026-08-03. An earlier draft of this entry claimed an unpublished record has no permanent
+URI. That was this run's wording, not the maintainer's, and it is wrong: the URI exists throughout and
+only its mutability changes. The column was renamed from `permanent_uri` to `static_uri` at the same
+time, because a column named for the whole concept implied records without one had no identity.)*
 
 ## D3 — Fixedness is recorded, never inferred from the configured base address
 
@@ -334,5 +330,5 @@ described as lacking it) when applied to the field. One English word cannot hone
 
 **Revisit if**: R4 introduces vocabulary-level publication and needs a third state (e.g. "static because
 published" vs. "static because externally assigned") — at that point `has_static_uri` alone may need to
-say which, and this decision's "presence is the only distinction" framing (D2) would need revisiting
+say which, and D2's two-state framing — dynamic until fixed, static from then on — would need revisiting
 alongside it.
