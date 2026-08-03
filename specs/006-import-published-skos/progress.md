@@ -317,3 +317,32 @@ run pre-commit run --all-files` — all hooks passed.
 within the vocabulary.
 
 **Watch**: none.
+
+## 2026-08-03T22:40:00Z · Implementer US1 · T010
+
+**Did**: `_assign_unique_slug()` (FR-007, decisions.md D6): computes `slugify(label)` and appends a
+deterministic numeric suffix (`-2`, `-3`, …) only when that value already belongs to a *different*
+concept in the same scheme — `Concept.save()`'s own auto-derivation only refuses a collision, never
+disambiguates it, which is correct for curator-authored content but not for a published file where
+two source concepts commonly share a preferred label. `slug_is_manual` is set so a later plain
+`save()` never silently re-derives over the computed value; the importer itself recomputes it fresh
+on every re-import, so a slug still moves on a rename (D6) — it is importer-managed, not
+curator-pinned the way a curator's own manual slug is. `concept_nodes`' stable, URI-sorted
+processing order (already established at T008/T009) is what makes which of two colliding concepts
+gets the plain slug deterministic and stable across repeated imports of the identical file.
+
+New fixture: `duplicate_slug.ttl` — two concepts, distinct identifiers (`quartz-a`/`quartz-b`,
+alphabetically ordered on purpose), both preferring "Quartz".
+
+**Verified**: `poetry run pytest -q` — 383 passed (380 + 3 new in `test_skos.py`'s new
+`TestConceptSlugs`). `poetry run ruff check .` — all checks passed. `poetry run ruff format
+--check .` — 23 files formatted. `poetry run mypy` — success, 9 source files. `poetry run deptry .`
+— no issues, 15 files scanned. `poetry run python -m django makemigrations --check --dry-run
+--settings=tests.settings` — no changes detected. `poetry run pre-commit run --all-files` — all
+hooks passed.
+
+**Next**: T011 — fatal findings and atomicity: an absent identifier, a blank-node concept, and an
+identifier the identity rules refuse each fail the run; every problem in a file is collected rather
+than raised at the first; the transaction rolls back.
+
+**Watch**: none.
