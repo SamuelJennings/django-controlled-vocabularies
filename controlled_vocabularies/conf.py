@@ -12,7 +12,7 @@ from django.conf import settings
 #: package usable standalone. Documented in the README.
 DEFAULT_BASE_URI = "http://localhost:8000/vocabularies"
 
-#: Default schemes accepted for an externally assigned permanent URI (FR-004,
+#: Default schemes accepted for an externally assigned static URI (FR-004,
 #: decisions.md D5/D14, T035): a small, stable allowlist rather than an
 #: unbounded denylist. ``http``/``https`` are the overwhelming common case;
 #: ``urn``, ``doi``, ``info``, and ``ark`` are the non-http identifier schemes
@@ -32,7 +32,7 @@ def get_base_uri() -> str:
 
 
 def get_allowed_uri_schemes() -> frozenset[str]:
-    """Return the configured, lower-cased set of accepted permanent-URI schemes.
+    """Return the configured, lower-cased set of accepted static-URI schemes.
 
     Reads ``settings.CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES`` and falls
     back to :data:`DEFAULT_ALLOWED_URI_SCHEMES`, so a downstream project with

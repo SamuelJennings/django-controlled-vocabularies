@@ -8,18 +8,19 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Added
 
-- Permanent, externally assigned identifiers: `ConceptScheme`, `Concept`, and `Collection` each gain a
-  `permanent_uri` field holding an identifier assigned by an external publisher, held exactly as given
-  and fixed once stored; a locally authored, unpublished record instead reports the identifier it will
-  compose and publish under. `local_url` is a new, separate accessor for this site's own address for a
-  record, always composed from the configured base address and the record's slugs regardless of who
-  assigned `permanent_uri`. `has_permanent_uri` reports whether the identifier is externally fixed.
+- Static, externally assigned identifiers: `ConceptScheme`, `Concept`, and `Collection` each gain a
+  `static_uri` field holding an identifier assigned by an external publisher, held exactly as given
+  and never recomputed once stored; a locally authored, unpublished record's `uri` instead stays
+  dynamic — composed and reported live, following a rename — until one is assigned. `local_url` is a
+  new, separate accessor for this site's own address for a record, always composed from the configured
+  base address and the record's slugs regardless of what `static_uri` holds. `has_static_uri` reports
+  whether the identifier is static rather than dynamic.
   `get_by_uri()` — already on `Concept.objects` — is now shared by `ConceptScheme.objects` and
   `Collection.objects` too, resolving a stored identifier first and falling back to the site's own
-  composition. `validate_permanent_uri` is exported for reuse: it requires an absolute identifier with
+  composition. `validate_static_uri` is exported for reuse: it requires an absolute identifier with
   an accepted scheme and caps length at 500 characters.
 - `CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES` setting: the schemes an externally assigned
-  `permanent_uri` may use — `http`, `https`, `urn`, `doi`, `info`, `ark` by default (see the README).
+  `static_uri` may use — `http`, `https`, `urn`, `doi`, `info`, `ark` by default (see the README).
 - Collections: a vocabulary's concepts can be gathered into named collections, optionally ordered,
   held on the new `Collection` and `CollectionMember` models and reached through `Collection.add()`,
   `remove()`, `members()`, `set_member_order()`, and `Concept.collections()`. Membership is
@@ -51,7 +52,7 @@ All notable changes to this project are documented in this file. The format foll
   vocabulary is unpublished.
 - Stable concept identity: a locally authored concept's URI composes from
   `CONTROLLED_VOCABULARIES_BASE_URI`, the scheme slug, and the concept slug, and stays resolvable when
-  a label is reworded. (An externally assigned identifier instead holds verbatim — see permanent,
+  a label is reworded. (An externally assigned identifier instead holds verbatim — see static,
   externally assigned identifiers, above.) `Concept.objects.get_by_uri()` resolves a URI back to its
   concept.
 - `CONTROLLED_VOCABULARIES_BASE_URI` setting for the URI base address (see the README).

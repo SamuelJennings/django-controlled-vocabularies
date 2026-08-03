@@ -8,12 +8,12 @@ recomputed.
 ```python
 scheme = ConceptScheme.objects.create(
     name="Rock types",
-    permanent_uri="http://vocabs.example.org/rock",
+    static_uri="http://vocabs.example.org/rock",
 )
 granite = Concept.objects.create(
     scheme=scheme,
     name="Granite",
-    permanent_uri="http://vocabs.example.org/rock/granite",
+    static_uri="http://vocabs.example.org/rock/granite",
 )
 
 granite.uri          # "http://vocabs.example.org/rock/granite"  — the publisher's
@@ -31,7 +31,7 @@ address and its slugs.
 scheme = ConceptScheme.objects.create(name="Field methods")
 sampling = Concept.objects.create(scheme=scheme, name="Sampling")
 
-sampling.permanent_uri      # None — nothing permanent until it is published
+sampling.static_uri      # None — dynamic until it is published
 sampling.uri                # "https://mysite.org/vocabularies/field-methods/sampling"
 sampling.uri == sampling.local_url   # True
 ```
@@ -66,11 +66,11 @@ An identifier has to be absolute and carry a scheme, cannot use `javascript:`, `
 and cannot exceed 500 characters. `urn:` identifiers are fine — published vocabularies do use them.
 
 ```python
-Concept.objects.create(scheme=scheme, name="Bad", permanent_uri="javascript:alert(1)")
+Concept.objects.create(scheme=scheme, name="Bad", static_uri="javascript:alert(1)")
 # ValidationError
 ```
 
 ## Upgrading
 
-Nothing to do. Records created before this change hold no permanent identifier, so they compose exactly
-what they composed before and every reference to them still resolves.
+Nothing to do. Records created before this change hold no static identifier yet — their `uri` is
+still dynamically composed exactly as before — and every reference to them still resolves.

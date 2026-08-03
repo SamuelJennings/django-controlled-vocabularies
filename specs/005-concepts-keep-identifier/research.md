@@ -26,7 +26,7 @@ invariant are satisfied by construction, with no data migration and nothing to g
   FR-005's configured-address clause, needs a resync command nobody asked for, and introduces a second
   source of truth for a value that is otherwise derivable.
 - *Stored for everything, with the base address frozen at first save* — rejected: it makes an
-  unpublished record's identifier accidentally permanent, which is exactly the distinction the feature
+  unpublished record's identifier accidentally static, which is exactly the distinction the feature
   exists to draw.
 
 ## R2 — Fixedness is the presence of the stored value, not a separate flag
@@ -50,18 +50,18 @@ the next feature needs.
 
 ## R3 — `uri` stays the accessor name; `local_url` is the new one
 
-**Decision**: `uri` remains the public accessor on all three models and now means the permanent URI —
+**Decision**: `uri` remains the public accessor on all three models and now means the static URI —
 stored value or composed fallback. `local_url` is added for this site's address. The stored column is
 named separately from the accessor so both can coexist.
 
 **Rationale**: FR-014 requires the published surface to keep its name and meaning. The existing `uri`
-has always denoted identity (Article IX, `CONTEXT.md`), which is exactly the permanent URI, so keeping
+has always denoted identity (Article IX, `CONTEXT.md`), which is exactly the static URI, so keeping
 the name is the honest choice rather than a compatibility concession. A field literally named `uri`
 would collide with the property of that name, which is why the column takes a distinct name and the
 property does the resolving.
 
 **Alternatives**:
-- *Rename the property to `permanent_uri` and make `uri` the column* — rejected: churns every call site
+- *Rename the property to `static_uri` and make `uri` the column* — rejected: churns every call site
   and every downstream consumer to say what the name already said, and breaks a published package's API
   for no behavioural gain.
 

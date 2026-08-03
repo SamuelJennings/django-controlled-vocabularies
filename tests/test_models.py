@@ -27,7 +27,7 @@ from controlled_vocabularies.models import (
     ConceptLabel,
     ConceptNote,
     ConceptScheme,
-    validate_permanent_uri,
+    validate_static_uri,
 )
 from tests.factories import ConceptSchemeFactory
 
@@ -282,77 +282,77 @@ class TestConceptIdentity:
             Concept.objects.get_by_uri(f"{scheme.slug}/{concept.slug}")
 
 
-class TestPermanentUri:
+class TestStaticUri:
     """US-1 — a record keeps the identifier it arrived with (FR-001/FR-002/FR-003/
-    FR-004/FR-006/FR-013). An externally assigned ``permanent_uri`` is read back
+    FR-004/FR-006/FR-013). An externally assigned ``static_uri`` is read back
     verbatim from ``uri``, survives a rename and a configured-base-address change,
     is never derived from another record's, and is refused up front when
     malformed, unsafe, too long, or already held by a record of another model."""
 
     @pytest.mark.django_db
-    def test_permanent_uri_reads_back_verbatim_from_uri(self, scheme):
+    def test_static_uri_reads_back_verbatim_from_uri(self, scheme):
         concept = Concept.objects.create(
-            scheme=scheme, label="Granite", permanent_uri="http://vocabs.example.org/rock/granite"
+            scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/rock/granite"
         )
         assert concept.uri == "http://vocabs.example.org/rock/granite"
-        assert concept.has_permanent_uri is True
+        assert concept.has_static_uri is True
 
     @pytest.mark.django_db
-    def test_permanent_uri_survives_a_rename(self, scheme):
+    def test_static_uri_survives_a_rename(self, scheme):
         concept = Concept.objects.create(
-            scheme=scheme, label="Granite", permanent_uri="http://vocabs.example.org/rock/granite"
+            scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/rock/granite"
         )
         concept.label = "Granite (coarse-grained)"
         concept.save()
         assert concept.uri == "http://vocabs.example.org/rock/granite"
 
     @pytest.mark.django_db
-    def test_permanent_uri_survives_a_base_address_change(self, scheme, settings):
+    def test_static_uri_survives_a_base_address_change(self, scheme, settings):
         concept = Concept.objects.create(
-            scheme=scheme, label="Granite", permanent_uri="http://vocabs.example.org/rock/granite"
+            scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/rock/granite"
         )
         settings.CONTROLLED_VOCABULARIES_BASE_URI = "https://elsewhere.example.org/vocab"
         assert concept.uri == "http://vocabs.example.org/rock/granite"
 
     @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
     @pytest.mark.django_db
-    def test_permanent_uri_case_round_trips_byte_identical_through_save_and_reload(self, model, scheme):
+    def test_static_uri_case_round_trips_byte_identical_through_save_and_reload(self, model, scheme):
         """T036. US-1 scenario 5 / FR-002: an arrived identifier is "not...
         re-cased". The code never touches case, so this was a coverage gap
         rather than a defect — locks in that a mixed-case identifier survives
         save and reload byte-identical, on all three models."""
         mixed_case = "http://Vocabs.Example.ORG/Rock/GRANITE"
-        record = _create_with_permanent_uri(model, scheme, mixed_case)
-        assert record.permanent_uri == mixed_case
+        record = _create_with_static_uri(model, scheme, mixed_case)
+        assert record.static_uri == mixed_case
         record.refresh_from_db()
-        assert record.permanent_uri == mixed_case
+        assert record.static_uri == mixed_case
         assert record.uri == mixed_case
 
     @pytest.mark.django_db
-    def test_scheme_and_collection_keep_their_own_permanent_uri(self):
-        scheme = ConceptScheme.objects.create(name="Rocks", permanent_uri="http://vocabs.example.org/rocks")
+    def test_scheme_and_collection_keep_their_own_static_uri(self):
+        scheme = ConceptScheme.objects.create(name="Rocks", static_uri="http://vocabs.example.org/rocks")
         collection = Collection.objects.create(
-            scheme=scheme, name="Igneous", permanent_uri="http://vocabs.example.org/rocks/igneous"
+            scheme=scheme, name="Igneous", static_uri="http://vocabs.example.org/rocks/igneous"
         )
         assert scheme.uri == "http://vocabs.example.org/rocks"
-        assert scheme.has_permanent_uri is True
+        assert scheme.has_static_uri is True
         assert collection.uri == "http://vocabs.example.org/rocks/igneous"
-        assert collection.has_permanent_uri is True
+        assert collection.has_static_uri is True
 
     @pytest.mark.django_db
-    def test_concepts_permanent_uri_is_not_derived_from_its_schemes(self):
-        scheme = ConceptScheme.objects.create(name="Rocks", permanent_uri="http://vocabs.example.org/rocks")
+    def test_concepts_static_uri_is_not_derived_from_its_schemes(self):
+        scheme = ConceptScheme.objects.create(name="Rocks", static_uri="http://vocabs.example.org/rocks")
         concept = Concept.objects.create(
-            scheme=scheme, label="Granite", permanent_uri="http://vocabs.example.org/rock/granite"
+            scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/rock/granite"
         )
         assert concept.uri == "http://vocabs.example.org/rock/granite"
         assert concept.uri != scheme.uri
 
     @pytest.mark.django_db
-    def test_has_permanent_uri_false_while_provisional(self, scheme):
+    def test_has_static_uri_false_while_provisional(self, scheme):
         concept = Concept.objects.create(scheme=scheme, label="Basalt")
-        assert concept.permanent_uri is None
-        assert concept.has_permanent_uri is False
+        assert concept.static_uri is None
+        assert concept.has_static_uri is False
         assert concept.uri == f"{conf.get_base_uri()}/{scheme.slug}/{concept.slug}"
 
     @pytest.mark.parametrize(
@@ -367,11 +367,11 @@ class TestPermanentUri:
     )
     def test_refuses_non_absolute_and_script_bearing_schemes(self, value):
         with pytest.raises(ValidationError):
-            validate_permanent_uri(value)
+            validate_static_uri(value)
 
     def test_refuses_overlong_identifier(self):
         with pytest.raises(ValidationError):
-            validate_permanent_uri("http://example.org/" + "x" * 500)
+            validate_static_uri("http://example.org/" + "x" * 500)
 
     def test_overlong_identifier_message_does_not_echo_the_full_raw_value(self):
         """T032. The too-long refusal used to interpolate the raw value
@@ -381,7 +381,7 @@ class TestPermanentUri:
         true length must still be reported; only the echoed value is bounded."""
         hostile = "http://example.org/" + "x" * 2008  # 2028 characters
         with pytest.raises(ValidationError) as excinfo:
-            validate_permanent_uri(hostile)
+            validate_static_uri(hostile)
         message = excinfo.value.messages[0]
         assert len(message) < 200, f"error message is {len(message)} chars — echoes the raw value untruncated"
         assert str(len(hostile)) in message, "the true length must still be reported"
@@ -392,11 +392,11 @@ class TestPermanentUri:
         echoed untruncated in the not-absolute message."""
         hostile = "not-absolute-" + "x" * 3000
         with pytest.raises(ValidationError) as excinfo:
-            validate_permanent_uri(hostile)
-        assert excinfo.value.code == "permanent_uri_too_long"
+            validate_static_uri(hostile)
+        assert excinfo.value.code == "static_uri_too_long"
 
     def test_accepts_urn_identifier(self):
-        validate_permanent_uri("urn:uuid:9f6c1e2a-1234-4a12-9abc-1234567890ab")
+        validate_static_uri("urn:uuid:9f6c1e2a-1234-4a12-9abc-1234567890ab")
 
     def test_a_value_urlsplit_cannot_parse_raises_validation_error_not_value_error(self):
         """T031. ``urllib.parse.urlsplit`` raises a bare ``ValueError`` — not a
@@ -405,37 +405,37 @@ class TestPermanentUri:
         ``rdf:about`` aborts an import with an exception no caller expects, and
         in a form/admin/DRF context surfaces as a 500 instead of a field error."""
         with pytest.raises(ValidationError):
-            validate_permanent_uri("http://exa℀mple.com/x")
+            validate_static_uri("http://exa℀mple.com/x")
 
     def test_a_malformed_ipv6_netloc_raises_validation_error_not_value_error(self):
         """T031, the second verified ``urlsplit``-raises-``ValueError`` shape."""
         with pytest.raises(ValidationError):
-            validate_permanent_uri("http://[fe80::1")
+            validate_static_uri("http://[fe80::1")
 
     @pytest.mark.django_db
-    def test_concept_save_with_an_unparseable_permanent_uri_raises_validation_error(self, scheme):
+    def test_concept_save_with_an_unparseable_static_uri_raises_validation_error(self, scheme):
         with pytest.raises(ValidationError):
-            Concept(scheme=scheme, label="Red", permanent_uri="http://exa℀mple.com/x").save()
+            Concept(scheme=scheme, label="Red", static_uri="http://exa℀mple.com/x").save()
 
     @pytest.mark.django_db
-    def test_concept_full_clean_with_an_unparseable_permanent_uri_raises_validation_error(self, scheme):
+    def test_concept_full_clean_with_an_unparseable_static_uri_raises_validation_error(self, scheme):
         with pytest.raises(ValidationError):
-            Concept(scheme=scheme, label="Red", permanent_uri="http://[fe80::1").full_clean()
+            Concept(scheme=scheme, label="Red", static_uri="http://[fe80::1").full_clean()
 
     @pytest.mark.django_db
-    def test_bare_create_with_bad_permanent_uri_raises_and_does_not_store(self, scheme):
+    def test_bare_create_with_bad_static_uri_raises_and_does_not_store(self, scheme):
         with pytest.raises(ValidationError):
-            Concept.objects.create(scheme=scheme, label="Granite", permanent_uri="not-absolute")
+            Concept.objects.create(scheme=scheme, label="Granite", static_uri="not-absolute")
         assert not Concept.objects.filter(label="Granite").exists()
 
     @pytest.mark.django_db
-    def test_concept_and_collection_cannot_share_a_permanent_uri(self, scheme):
-        Concept.objects.create(scheme=scheme, label="Granite", permanent_uri="http://vocabs.example.org/shared")
+    def test_concept_and_collection_cannot_share_a_static_uri(self, scheme):
+        Concept.objects.create(scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/shared")
         with pytest.raises(ValidationError):
-            Collection.objects.create(scheme=scheme, name="Igneous", permanent_uri="http://vocabs.example.org/shared")
+            Collection.objects.create(scheme=scheme, name="Igneous", static_uri="http://vocabs.example.org/shared")
 
 
-class TestPermanentUriSchemeAllowlist:
+class TestStaticUriSchemeAllowlist:
     """US-1 — T035. FR-004's original denylist refused only ``javascript``,
     ``data``, and ``vbscript``, and let everything else through — including
     ``file:``, ``about:``, ``blob:``, ``jar:``, ``filesystem:``, and
@@ -449,7 +449,7 @@ class TestPermanentUriSchemeAllowlist:
 
     @pytest.mark.parametrize("scheme", ["http", "https", "urn", "doi", "info", "ark"])
     def test_the_six_default_schemes_are_accepted(self, scheme):
-        validate_permanent_uri(f"{scheme}:something-or-other/x")
+        validate_static_uri(f"{scheme}:something-or-other/x")
 
     @pytest.mark.parametrize(
         "value",
@@ -462,31 +462,31 @@ class TestPermanentUriSchemeAllowlist:
     )
     def test_schemes_outside_the_default_allowlist_are_refused(self, value):
         with pytest.raises(ValidationError):
-            validate_permanent_uri(value)
+            validate_static_uri(value)
 
     def test_the_setting_override_is_honoured(self, settings):
         settings.CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES = ["http", "https", "myscheme"]
-        validate_permanent_uri("myscheme:something")
+        validate_static_uri("myscheme:something")
         with pytest.raises(ValidationError):
-            validate_permanent_uri("urn:uuid:9f6c1e2a-1234-4a12-9abc-1234567890ab")
+            validate_static_uri("urn:uuid:9f6c1e2a-1234-4a12-9abc-1234567890ab")
 
     def test_the_denylist_still_refuses_a_scheme_within_an_overridden_allowlist(self, settings):
         settings.CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES = ["http", "https", "javascript"]
         with pytest.raises(ValidationError):
-            validate_permanent_uri("javascript:alert(1)")
+            validate_static_uri("javascript:alert(1)")
 
 
-def _create_with_permanent_uri(model: type[Model], scheme: ConceptScheme, uri: str):
-    """Create a saved record of ``model`` carrying ``uri`` as its ``permanent_uri``."""
+def _create_with_static_uri(model: type[Model], scheme: ConceptScheme, uri: str):
+    """Create a saved record of ``model`` carrying ``uri`` as its ``static_uri``."""
     if model is ConceptScheme:
-        return ConceptScheme.objects.create(name=f"External scheme {uri}", permanent_uri=uri)
+        return ConceptScheme.objects.create(name=f"External scheme {uri}", static_uri=uri)
     if model is Concept:
-        return Concept.objects.create(scheme=scheme, label=f"External concept {uri}", permanent_uri=uri)
-    return Collection.objects.create(scheme=scheme, name=f"External collection {uri}", permanent_uri=uri)
+        return Concept.objects.create(scheme=scheme, label=f"External concept {uri}", static_uri=uri)
+    return Collection.objects.create(scheme=scheme, name=f"External collection {uri}", static_uri=uri)
 
 
-def _create_without_permanent_uri(model: type[Model], scheme: ConceptScheme):
-    """Create a saved, provisional (no ``permanent_uri``) record of ``model``."""
+def _create_without_static_uri(model: type[Model], scheme: ConceptScheme):
+    """Create a saved, provisional (no ``static_uri``) record of ``model``."""
     if model is ConceptScheme:
         return ConceptScheme.objects.create(name="Provisional scheme")
     if model is Concept:
@@ -494,11 +494,11 @@ def _create_without_permanent_uri(model: type[Model], scheme: ConceptScheme):
     return Collection.objects.create(scheme=scheme, name="Provisional collection")
 
 
-class TestPermanentUriIsFixed:
-    """US-1 — a stored permanent URI can never be rewritten or cleared (FR-002,
+class TestStaticUriIsFixed:
+    """US-1 — a stored static URI can never be rewritten or cleared (FR-002,
     FR-013). Fixedness moves one way only: a record loaded from the database
-    refuses a save that changes or clears its stored ``permanent_uri``, the
-    refusal is a translatable ``ValidationError`` on the ``permanent_uri`` key,
+    refuses a save that changes or clears its stored ``static_uri``, the
+    refusal is a translatable ``ValidationError`` on the ``static_uri`` key,
     and re-saving with the identifier unchanged still succeeds. Fixedness starts
     at the save that first stores an identifier, and a deferred load is no way
     around it. Only a record with nothing stored is unconstrained, so setting an
@@ -508,62 +508,62 @@ class TestPermanentUriIsFixed:
     @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
     @pytest.mark.django_db
     def test_loaded_record_refuses_a_save_that_changes_the_stored_uri(self, model, scheme):
-        record = _create_with_permanent_uri(model, scheme, "http://vocabs.example.org/original")
+        record = _create_with_static_uri(model, scheme, "http://vocabs.example.org/original")
         reloaded = model.objects.get(pk=record.pk)
-        reloaded.permanent_uri = "http://vocabs.example.org/rewritten"
+        reloaded.static_uri = "http://vocabs.example.org/rewritten"
         with pytest.raises(ValidationError) as excinfo:
             reloaded.save()
-        err = _inner_error(excinfo.value, "permanent_uri")
+        err = _inner_error(excinfo.value, "static_uri")
         assert isinstance(err.message, Promise), "rewrite-refusal message is not lazily translatable"
         assert "%(uri)s" in str(err.message), "rewrite-refusal msgid lacks a named %(uri)s placeholder"
         record.refresh_from_db()
-        assert record.permanent_uri == "http://vocabs.example.org/original"
+        assert record.static_uri == "http://vocabs.example.org/original"
 
     @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
     @pytest.mark.django_db
     def test_loaded_record_refuses_a_save_that_clears_the_stored_uri(self, model, scheme):
-        record = _create_with_permanent_uri(model, scheme, "http://vocabs.example.org/original")
+        record = _create_with_static_uri(model, scheme, "http://vocabs.example.org/original")
         reloaded = model.objects.get(pk=record.pk)
-        reloaded.permanent_uri = None
+        reloaded.static_uri = None
         with pytest.raises(ValidationError) as excinfo:
             reloaded.save()
-        err = _inner_error(excinfo.value, "permanent_uri")
+        err = _inner_error(excinfo.value, "static_uri")
         assert isinstance(err.message, Promise), "clear-refusal message is not lazily translatable"
         record.refresh_from_db()
-        assert record.permanent_uri == "http://vocabs.example.org/original"
+        assert record.static_uri == "http://vocabs.example.org/original"
 
     @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
     @pytest.mark.django_db
     def test_full_clean_also_refuses_a_rewrite(self, model, scheme):
-        record = _create_with_permanent_uri(model, scheme, "http://vocabs.example.org/original")
+        record = _create_with_static_uri(model, scheme, "http://vocabs.example.org/original")
         reloaded = model.objects.get(pk=record.pk)
-        reloaded.permanent_uri = "http://vocabs.example.org/rewritten"
+        reloaded.static_uri = "http://vocabs.example.org/rewritten"
         with pytest.raises(ValidationError):
             reloaded.full_clean()
 
     @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
     @pytest.mark.django_db
     def test_loaded_record_may_be_resaved_with_the_identifier_unchanged(self, model, scheme):
-        record = _create_with_permanent_uri(model, scheme, "http://vocabs.example.org/original")
+        record = _create_with_static_uri(model, scheme, "http://vocabs.example.org/original")
         reloaded = model.objects.get(pk=record.pk)
         reloaded.save()
         reloaded.refresh_from_db()
-        assert reloaded.permanent_uri == "http://vocabs.example.org/original"
+        assert reloaded.static_uri == "http://vocabs.example.org/original"
 
     @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
     @pytest.mark.django_db
     def test_record_created_with_an_identifier_keeps_it(self, model, scheme):
-        record = _create_with_permanent_uri(model, scheme, "http://vocabs.example.org/original")
-        assert record.permanent_uri == "http://vocabs.example.org/original"
+        record = _create_with_static_uri(model, scheme, "http://vocabs.example.org/original")
+        assert record.static_uri == "http://vocabs.example.org/original"
 
     @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
     @pytest.mark.django_db
     def test_record_created_without_an_identifier_may_have_one_set_once(self, model, scheme):
-        record = _create_without_permanent_uri(model, scheme)
-        assert record.permanent_uri is None
-        record.permanent_uri = "http://vocabs.example.org/published"
+        record = _create_without_static_uri(model, scheme)
+        assert record.static_uri is None
+        record.static_uri = "http://vocabs.example.org/published"
         record.save()
-        assert record.permanent_uri == "http://vocabs.example.org/published"
+        assert record.static_uri == "http://vocabs.example.org/published"
 
     @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
     @pytest.mark.django_db
@@ -574,40 +574,40 @@ class TestPermanentUriIsFixed:
         so the stored identifier is read back before the save is allowed
         through.
         """
-        record = _create_with_permanent_uri(model, scheme, "http://vocabs.example.org/original")
+        record = _create_with_static_uri(model, scheme, "http://vocabs.example.org/original")
         deferred = model.objects.only("id").get(pk=record.pk)
-        deferred.permanent_uri = "http://vocabs.example.org/rewritten"
+        deferred.static_uri = "http://vocabs.example.org/rewritten"
         with pytest.raises(ValidationError):
             deferred.save()
         record.refresh_from_db()
-        assert record.permanent_uri == "http://vocabs.example.org/original"
+        assert record.static_uri == "http://vocabs.example.org/original"
 
     @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
     @pytest.mark.django_db
     def test_a_deferred_load_still_refuses_a_clear(self, model, scheme):
-        record = _create_with_permanent_uri(model, scheme, "http://vocabs.example.org/original")
+        record = _create_with_static_uri(model, scheme, "http://vocabs.example.org/original")
         deferred = model.objects.only("id").get(pk=record.pk)
-        deferred.permanent_uri = None
+        deferred.static_uri = None
         with pytest.raises(ValidationError):
             deferred.save()
         record.refresh_from_db()
-        assert record.permanent_uri == "http://vocabs.example.org/original"
+        assert record.static_uri == "http://vocabs.example.org/original"
 
     @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
     @pytest.mark.django_db
     def test_a_deferred_load_that_leaves_the_identifier_alone_never_fetches_it(self, model, scheme):
         """The read-back is paid for only when the deferred column is assigned.
 
-        A record loaded without ``permanent_uri`` and saved untouched must not
+        A record loaded without ``static_uri`` and saved untouched must not
         fetch it, or every deferred save in the app pays for this guard. The
         column staying deferred afterwards is the evidence it was never read.
         """
-        record = _create_with_permanent_uri(model, scheme, "http://vocabs.example.org/original")
+        record = _create_with_static_uri(model, scheme, "http://vocabs.example.org/original")
         deferred = model.objects.only("id").get(pk=record.pk)
         deferred.save()
-        assert "permanent_uri" in deferred.get_deferred_fields()
+        assert "static_uri" in deferred.get_deferred_fields()
         record.refresh_from_db()
-        assert record.permanent_uri == "http://vocabs.example.org/original"
+        assert record.static_uri == "http://vocabs.example.org/original"
 
     @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
     @pytest.mark.django_db
@@ -615,17 +615,17 @@ class TestPermanentUriIsFixed:
         """Fixedness starts at the save that stores the identifier, not at the
         next load — otherwise the instance R4's publish action holds could
         publish the same record twice under different identifiers."""
-        record = _create_without_permanent_uri(model, scheme)
-        record.permanent_uri = "http://vocabs.example.org/published"
+        record = _create_without_static_uri(model, scheme)
+        record.static_uri = "http://vocabs.example.org/published"
         record.save()
-        record.permanent_uri = "http://vocabs.example.org/published-again"
+        record.static_uri = "http://vocabs.example.org/published-again"
         with pytest.raises(ValidationError):
             record.save()
         record.refresh_from_db()
-        assert record.permanent_uri == "http://vocabs.example.org/published"
+        assert record.static_uri == "http://vocabs.example.org/published"
 
 
-class TestPermanentUriRewriteGuardReadsTheDatabase:
+class TestStaticUriRewriteGuardReadsTheDatabase:
     """US-1 — T029. The rewrite guard used to trust an in-memory snapshot taken
     at load time (T025/T026), and a three-lens review found four ordinary paths
     that bypass a snapshot: a save from a second, differently-loaded instance of
@@ -642,16 +642,16 @@ class TestPermanentUriRewriteGuardReadsTheDatabase:
     def test_a_stale_instance_cannot_rewrite_an_identifier_stored_by_another_instance(self, model, scheme):
         """(a) Two instances of the same row: one stores an identifier, then the
         other — loaded before that happened — tries to store a different one."""
-        record = _create_without_permanent_uri(model, scheme)
+        record = _create_without_static_uri(model, scheme)
         stale = model.objects.get(pk=record.pk)
         fresh = model.objects.get(pk=record.pk)
-        fresh.permanent_uri = "http://publisher.example.org/original"
+        fresh.static_uri = "http://publisher.example.org/original"
         fresh.save()
-        stale.permanent_uri = "http://attacker.example.org/rewritten"
+        stale.static_uri = "http://attacker.example.org/rewritten"
         with pytest.raises(ValidationError):
             stale.save()
         record.refresh_from_db()
-        assert record.permanent_uri == "http://publisher.example.org/original"
+        assert record.static_uri == "http://publisher.example.org/original"
 
     @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
     @pytest.mark.django_db
@@ -659,67 +659,67 @@ class TestPermanentUriRewriteGuardReadsTheDatabase:
         """(b) ``refresh_from_db()`` never re-snapshotted, so the refreshed
         instance still carried its original (pre-refresh) snapshot and could
         clear the identifier the refresh just picked up."""
-        record = _create_without_permanent_uri(model, scheme)
+        record = _create_without_static_uri(model, scheme)
         stale = model.objects.get(pk=record.pk)
         fresh = model.objects.get(pk=record.pk)
-        fresh.permanent_uri = "http://publisher.example.org/original"
+        fresh.static_uri = "http://publisher.example.org/original"
         fresh.save()
         stale.refresh_from_db()
-        stale.permanent_uri = None
+        stale.static_uri = None
         with pytest.raises(ValidationError):
             stale.save()
         record.refresh_from_db()
-        assert record.permanent_uri == "http://publisher.example.org/original"
+        assert record.static_uri == "http://publisher.example.org/original"
 
     @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
     @pytest.mark.django_db
     def test_a_stale_provisional_instances_plain_save_does_not_null_an_identifier_stored_meanwhile(self, model, scheme):
         """(b), second half: an instance loaded while provisional, doing a plain
-        ``.save()`` that never touches ``permanent_uri``, must not silently
+        ``.save()`` that never touches ``static_uri``, must not silently
         write ``NULL`` over an identifier another instance stored meanwhile."""
-        record = _create_without_permanent_uri(model, scheme)
+        record = _create_without_static_uri(model, scheme)
         stale = model.objects.get(pk=record.pk)
         fresh = model.objects.get(pk=record.pk)
-        fresh.permanent_uri = "http://publisher.example.org/original"
+        fresh.static_uri = "http://publisher.example.org/original"
         fresh.save()
         with pytest.raises(ValidationError):
             stale.save()
         record.refresh_from_db()
-        assert record.permanent_uri == "http://publisher.example.org/original"
+        assert record.static_uri == "http://publisher.example.org/original"
 
     @pytest.mark.django_db
     def test_explicit_pk_construction_cannot_rewrite_a_stored_identifier(self, scheme):
         """(c) A freshly constructed instance carrying an existing row's ``pk``
         was never loaded from the database, so it had no snapshot at all and
         the old guard treated it as unconstrained."""
-        c = Concept.objects.create(scheme=scheme, label="Red", permanent_uri="http://good.example/red")
+        c = Concept.objects.create(scheme=scheme, label="Red", static_uri="http://good.example/red")
         with pytest.raises(ValidationError):
-            Concept(pk=c.pk, scheme=scheme, label="Red", permanent_uri="http://evil.example/red").save()
+            Concept(pk=c.pk, scheme=scheme, label="Red", static_uri="http://evil.example/red").save()
         c.refresh_from_db()
-        assert c.permanent_uri == "http://good.example/red"
+        assert c.static_uri == "http://good.example/red"
 
     @pytest.mark.django_db
     def test_explicit_pk_construction_cannot_clear_a_stored_identifier(self, scheme):
-        """(c), the ``permanent_uri=None`` variant."""
-        c = Concept.objects.create(scheme=scheme, label="Red", permanent_uri="http://good.example/red")
+        """(c), the ``static_uri=None`` variant."""
+        c = Concept.objects.create(scheme=scheme, label="Red", static_uri="http://good.example/red")
         with pytest.raises(ValidationError):
-            Concept(pk=c.pk, scheme=scheme, label="Red", permanent_uri=None).save()
+            Concept(pk=c.pk, scheme=scheme, label="Red", static_uri=None).save()
         c.refresh_from_db()
-        assert c.permanent_uri == "http://good.example/red"
+        assert c.static_uri == "http://good.example/red"
 
     @pytest.mark.parametrize("model", [ConceptScheme, Concept, Collection])
     @pytest.mark.django_db
     def test_a_new_row_may_still_be_created_with_an_identifier(self, model, scheme):
         """A ``pk``-less new instance is unconstrained — creating a record with an
         externally assigned identifier from the start must keep working."""
-        record = _create_with_permanent_uri(model, scheme, "http://vocabs.example.org/new")
-        assert record.permanent_uri == "http://vocabs.example.org/new"
+        record = _create_with_static_uri(model, scheme, "http://vocabs.example.org/new")
+        assert record.static_uri == "http://vocabs.example.org/new"
 
 
-class TestPermanentUriUpdateFieldsExclusion:
-    """US-1 — T030. ``permanent_uri``'s validation, fixedness, and cross-model
+class TestStaticUriUpdateFieldsExclusion:
+    """US-1 — T030. ``static_uri``'s validation, fixedness, and cross-model
     checks must run only on a save that actually writes that column. Verified
-    gap: assigning a bad or conflicting value to ``permanent_uri`` in memory
+    gap: assigning a bad or conflicting value to ``static_uri`` in memory
     and then saving with ``update_fields`` that excludes it ran full
     validation against a value that was never going to reach the database,
     incorrectly blocking an otherwise unrelated save."""
@@ -727,49 +727,49 @@ class TestPermanentUriUpdateFieldsExclusion:
     @pytest.mark.django_db
     def test_an_invalid_value_in_an_excluded_column_does_not_block_the_save(self, scheme):
         concept = Concept.objects.create(scheme=scheme, label="Local")
-        concept.permanent_uri = "not-absolute"
+        concept.static_uri = "not-absolute"
         concept.save(update_fields=["label"])
         concept.refresh_from_db()
-        assert concept.permanent_uri is None
+        assert concept.static_uri is None
 
     @pytest.mark.django_db
     def test_a_would_be_rewrite_conflict_in_an_excluded_column_does_not_block_the_save(self, scheme):
-        concept = Concept.objects.create(scheme=scheme, label="Local", permanent_uri="http://ex.org/fixed")
+        concept = Concept.objects.create(scheme=scheme, label="Local", static_uri="http://ex.org/fixed")
         reloaded = Concept.objects.get(pk=concept.pk)
-        reloaded.permanent_uri = "http://ex.org/rewritten"
+        reloaded.static_uri = "http://ex.org/rewritten"
         reloaded.save(update_fields=["label"])
         reloaded.refresh_from_db()
-        assert reloaded.permanent_uri == "http://ex.org/fixed"
+        assert reloaded.static_uri == "http://ex.org/fixed"
 
     @pytest.mark.django_db
     def test_assigning_and_saving_excluding_the_column_leaves_the_record_provisional_and_still_storable(self, scheme):
         concept = Concept.objects.create(scheme=scheme, label="Local")
-        concept.permanent_uri = "http://ex.org/never-written"
+        concept.static_uri = "http://ex.org/never-written"
         concept.save(update_fields=["label"])
         concept.refresh_from_db()
-        assert concept.permanent_uri is None
-        concept.permanent_uri = "http://ex.org/right"
+        assert concept.static_uri is None
+        concept.static_uri = "http://ex.org/right"
         concept.save()
         concept.refresh_from_db()
-        assert concept.permanent_uri == "http://ex.org/right"
+        assert concept.static_uri == "http://ex.org/right"
 
     @pytest.mark.django_db
     def test_saving_with_the_column_included_in_update_fields_still_fixes_it(self, scheme):
         concept = Concept.objects.create(scheme=scheme, label="Local")
-        concept.permanent_uri = "http://ex.org/fixed"
-        concept.save(update_fields=["label", "permanent_uri"])
+        concept.static_uri = "http://ex.org/fixed"
+        concept.save(update_fields=["label", "static_uri"])
         concept.refresh_from_db()
-        assert concept.permanent_uri == "http://ex.org/fixed"
-        concept.permanent_uri = "http://ex.org/rewritten"
+        assert concept.static_uri == "http://ex.org/fixed"
+        concept.static_uri = "http://ex.org/rewritten"
         with pytest.raises(ValidationError):
-            concept.save(update_fields=["permanent_uri"])
+            concept.save(update_fields=["static_uri"])
         concept.refresh_from_db()
-        assert concept.permanent_uri == "http://ex.org/fixed"
+        assert concept.static_uri == "http://ex.org/fixed"
 
 
 class TestGetByUri:
     """US-2 — a record is found by its identifier wherever it points (FR-007).
-    ``get_by_uri`` tries an exact match on the stored ``permanent_uri`` first,
+    ``get_by_uri`` tries an exact match on the stored ``static_uri`` first,
     falling back to the model's base-relative parse (R1's behaviour, unchanged)
     for a provisional identifier, and raises the model's ``DoesNotExist`` when
     neither resolves. ``ConceptScheme`` and ``Collection`` gain the method for
@@ -777,9 +777,9 @@ class TestGetByUri:
     exact local behaviour (FR-014)."""
 
     @pytest.mark.django_db
-    def test_concept_resolves_by_external_permanent_uri(self, scheme):
+    def test_concept_resolves_by_external_static_uri(self, scheme):
         concept = Concept.objects.create(
-            scheme=scheme, label="Granite", permanent_uri="http://vocabs.example.org/rock/granite"
+            scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/rock/granite"
         )
         assert Concept.objects.get_by_uri("http://vocabs.example.org/rock/granite") == concept
 
@@ -801,11 +801,11 @@ class TestGetByUri:
     @pytest.mark.django_db
     def test_imported_and_local_concept_do_not_answer_to_each_others_identifier(self, scheme):
         imported = Concept.objects.create(
-            scheme=scheme, label="Granite", permanent_uri="http://vocabs.example.org/rock/granite"
+            scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/rock/granite"
         )
         local = Concept.objects.create(scheme=scheme, label="Basalt")
         # Each is found by its own identifier — the imported concept's external
-        # permanent_uri, the local concept's composed base-relative one — and not
+        # static_uri, the local concept's composed base-relative one — and not
         # by an identifier held by neither.
         assert Concept.objects.get_by_uri(imported.uri) == imported
         assert Concept.objects.get_by_uri(local.uri) == local
@@ -813,8 +813,8 @@ class TestGetByUri:
             Concept.objects.get_by_uri("http://vocabs.example.org/rock/nothing-here")
 
     @pytest.mark.django_db
-    def test_scheme_resolves_by_external_permanent_uri(self):
-        scheme = ConceptScheme.objects.create(name="Rocks", permanent_uri="http://vocabs.example.org/rocks")
+    def test_scheme_resolves_by_external_static_uri(self):
+        scheme = ConceptScheme.objects.create(name="Rocks", static_uri="http://vocabs.example.org/rocks")
         assert ConceptScheme.objects.get_by_uri("http://vocabs.example.org/rocks") == scheme
 
     @pytest.mark.django_db
@@ -844,9 +844,9 @@ class TestGetByUri:
             Concept.objects.get_by_uri(scheme.uri)
 
     @pytest.mark.django_db
-    def test_collection_resolves_by_external_permanent_uri(self, scheme):
+    def test_collection_resolves_by_external_static_uri(self, scheme):
         collection = Collection.objects.create(
-            scheme=scheme, name="Igneous", permanent_uri="http://vocabs.example.org/rocks/igneous"
+            scheme=scheme, name="Igneous", static_uri="http://vocabs.example.org/rocks/igneous"
         )
         assert Collection.objects.get_by_uri("http://vocabs.example.org/rocks/igneous") == collection
 
@@ -877,8 +877,8 @@ class TestGetByUri:
 
 
 class TestGetByUriRejectsAbsentIdentifiers:
-    """US-2 — T033. ``self.get(permanent_uri=uri)`` with ``uri=None`` compiles to
-    ``permanent_uri IS NULL``, which matches *every* provisional record —
+    """US-2 — T033. ``self.get(static_uri=uri)`` with ``uri=None`` compiles to
+    ``static_uri IS NULL``, which matches *every* provisional record —
     verified: with one provisional record in the table, ``get_by_uri(None)``
     returns that unrelated record; with two, it raises
     ``MultipleObjectsReturned``. #50's importer idiom ``node.get("about")``
@@ -932,16 +932,16 @@ class TestGetByUriRejectsAbsentIdentifiers:
 
 class TestProvisionalUri:
     """US-3 — a record authored here shows the identifier it will publish under
-    (FR-005). A record with no ``permanent_uri`` reports the value R1's
+    (FR-005). A record with no ``static_uri`` reports the value R1's
     composition produces; that value follows a rename and a change to the
-    configured base address; ``permanent_uri`` stays ``None`` and
-    ``has_permanent_uri`` is ``False`` throughout."""
+    configured base address; ``static_uri`` stays ``None`` and
+    ``has_static_uri`` is ``False`` throughout."""
 
     @pytest.mark.django_db
-    def test_scheme_with_no_permanent_uri_reports_the_composed_value(self):
+    def test_scheme_with_no_static_uri_reports_the_composed_value(self):
         scheme = ConceptScheme.objects.create(name="Geothermics")
-        assert scheme.permanent_uri is None
-        assert scheme.has_permanent_uri is False
+        assert scheme.static_uri is None
+        assert scheme.has_static_uri is False
         assert scheme.uri == f"{conf.get_base_uri()}/{scheme.slug}"
 
     @pytest.mark.django_db
@@ -958,10 +958,10 @@ class TestProvisionalUri:
         assert scheme.uri == "https://elsewhere.example.org/vocab/geothermics"
 
     @pytest.mark.django_db
-    def test_concept_with_no_permanent_uri_reports_the_composed_value(self, scheme):
+    def test_concept_with_no_static_uri_reports_the_composed_value(self, scheme):
         concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
-        assert concept.permanent_uri is None
-        assert concept.has_permanent_uri is False
+        assert concept.static_uri is None
+        assert concept.has_static_uri is False
         assert concept.uri == f"{conf.get_base_uri()}/{scheme.slug}/{concept.slug}"
 
     @pytest.mark.django_db
@@ -978,10 +978,10 @@ class TestProvisionalUri:
         assert concept.uri == f"https://elsewhere.example.org/vocab/{scheme.slug}/{concept.slug}"
 
     @pytest.mark.django_db
-    def test_collection_with_no_permanent_uri_reports_the_composed_value(self, scheme):
+    def test_collection_with_no_static_uri_reports_the_composed_value(self, scheme):
         collection = Collection.objects.create(scheme=scheme, name="Igneous")
-        assert collection.permanent_uri is None
-        assert collection.has_permanent_uri is False
+        assert collection.static_uri is None
+        assert collection.has_static_uri is False
         assert collection.uri == f"{conf.get_base_uri()}/{scheme.slug}/collection/{collection.slug}"
 
     @pytest.mark.django_db
@@ -1000,58 +1000,58 @@ class TestProvisionalUri:
 
 class TestPreExistingRecordsUpgrade:
     """US-3 — FR-009 / Article IX: a record from before this feature landed has
-    ``permanent_uri`` left ``NULL`` by the migration (no backfill, data-model.md),
+    ``static_uri`` left ``NULL`` by the migration (no backfill, data-model.md),
     so it reports exactly the identifier R1's composition produced for it before
     this feature existed, and every existing reference to it still resolves."""
 
     @pytest.mark.django_db
     def test_pre_existing_scheme_reports_its_previous_identifier_and_resolves(self):
         scheme = ConceptScheme.objects.create(name="Geothermics")
-        assert scheme.permanent_uri is None
+        assert scheme.static_uri is None
         assert scheme.uri == "https://example.org/vocabularies/geothermics"
         assert ConceptScheme.objects.get_by_uri(scheme.uri) == scheme
 
     @pytest.mark.django_db
     def test_pre_existing_concept_reports_its_previous_identifier_and_resolves(self, scheme):
         concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
-        assert concept.permanent_uri is None
+        assert concept.static_uri is None
         assert concept.uri == f"https://example.org/vocabularies/{scheme.slug}/heat-flow"
         assert Concept.objects.get_by_uri(concept.uri) == concept
 
     @pytest.mark.django_db
     def test_pre_existing_collection_reports_its_previous_identifier_and_resolves(self, scheme):
         collection = Collection.objects.create(scheme=scheme, name="Igneous")
-        assert collection.permanent_uri is None
+        assert collection.static_uri is None
         assert collection.uri == f"https://example.org/vocabularies/{scheme.slug}/collection/igneous"
         assert Collection.objects.get_by_uri(collection.uri) == collection
 
 
-class TestPermanentUriDatabaseUniqueness:
+class TestStaticUriDatabaseUniqueness:
     """US-3 — FR-006/SC-005: two records of the same model cannot hold the same
-    ``permanent_uri``, and the refusal is the database constraint itself, not
+    ``static_uri``, and the refusal is the database constraint itself, not
     application validation — ``bulk_create`` bypasses ``save()``/``clean()`` so
     this reaches the constraint directly. Many records holding none coexist
-    freely, since the constraint is partial (``condition=Q(permanent_uri__isnull=False)``)."""
+    freely, since the constraint is partial (``condition=Q(static_uri__isnull=False)``)."""
 
     @pytest.mark.django_db
-    def test_two_schemes_with_the_same_permanent_uri_hit_the_database_constraint(self):
-        ConceptScheme.objects.create(name="Rocks", permanent_uri="http://vocabs.example.org/dup")
+    def test_two_schemes_with_the_same_static_uri_hit_the_database_constraint(self):
+        ConceptScheme.objects.create(name="Rocks", static_uri="http://vocabs.example.org/dup")
         with pytest.raises(IntegrityError), transaction.atomic():
             ConceptScheme.objects.bulk_create(
-                [ConceptScheme(name="Other rocks", slug="other-rocks", permanent_uri="http://vocabs.example.org/dup")]
+                [ConceptScheme(name="Other rocks", slug="other-rocks", static_uri="http://vocabs.example.org/dup")]
             )
 
     @pytest.mark.django_db
-    def test_two_concepts_with_the_same_permanent_uri_hit_the_database_constraint(self, scheme):
-        Concept.objects.create(scheme=scheme, label="Granite", permanent_uri="http://vocabs.example.org/dup")
+    def test_two_concepts_with_the_same_static_uri_hit_the_database_constraint(self, scheme):
+        Concept.objects.create(scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/dup")
         with pytest.raises(IntegrityError), transaction.atomic():
             Concept.objects.bulk_create(
-                [Concept(scheme=scheme, label="Basalt", slug="basalt", permanent_uri="http://vocabs.example.org/dup")]
+                [Concept(scheme=scheme, label="Basalt", slug="basalt", static_uri="http://vocabs.example.org/dup")]
             )
 
     @pytest.mark.django_db
-    def test_two_collections_with_the_same_permanent_uri_hit_the_database_constraint(self, scheme):
-        Collection.objects.create(scheme=scheme, name="Igneous", permanent_uri="http://vocabs.example.org/dup")
+    def test_two_collections_with_the_same_static_uri_hit_the_database_constraint(self, scheme):
+        Collection.objects.create(scheme=scheme, name="Igneous", static_uri="http://vocabs.example.org/dup")
         with pytest.raises(IntegrityError), transaction.atomic():
             Collection.objects.bulk_create(
                 [
@@ -1059,17 +1059,17 @@ class TestPermanentUriDatabaseUniqueness:
                         scheme=scheme,
                         name="Metamorphic",
                         slug="metamorphic",
-                        permanent_uri="http://vocabs.example.org/dup",
+                        static_uri="http://vocabs.example.org/dup",
                     )
                 ]
             )
 
     @pytest.mark.django_db
-    def test_many_records_holding_no_permanent_uri_coexist_freely(self, scheme):
+    def test_many_records_holding_no_static_uri_coexist_freely(self, scheme):
         Concept.objects.create(scheme=scheme, label="A")
         Concept.objects.create(scheme=scheme, label="B")
         Concept.objects.create(scheme=scheme, label="C")
-        assert Concept.objects.filter(permanent_uri__isnull=True).count() == 3
+        assert Concept.objects.filter(static_uri__isnull=True).count() == 3
 
 
 class TestLocalUrl:
@@ -1099,9 +1099,9 @@ class TestLocalUrl:
         assert collection.local_url == f"{conf.get_base_uri()}/{scheme.slug}/collection/{collection.slug}"
 
     @pytest.mark.django_db
-    def test_imported_concepts_local_url_differs_from_its_permanent_uri(self, scheme):
+    def test_imported_concepts_local_url_differs_from_its_static_uri(self, scheme):
         concept = Concept.objects.create(
-            scheme=scheme, label="Granite", permanent_uri="http://vocabs.example.org/rock/granite"
+            scheme=scheme, label="Granite", static_uri="http://vocabs.example.org/rock/granite"
         )
         assert concept.uri == "http://vocabs.example.org/rock/granite"
         assert concept.local_url == f"{conf.get_base_uri()}/{scheme.slug}/{concept.slug}"
@@ -1109,17 +1109,17 @@ class TestLocalUrl:
         assert concept.local_url.startswith(conf.get_base_uri())
 
     @pytest.mark.django_db
-    def test_imported_schemes_local_url_differs_from_its_permanent_uri(self):
-        scheme = ConceptScheme.objects.create(name="Rocks", permanent_uri="http://vocabs.example.org/rocks")
+    def test_imported_schemes_local_url_differs_from_its_static_uri(self):
+        scheme = ConceptScheme.objects.create(name="Rocks", static_uri="http://vocabs.example.org/rocks")
         assert scheme.uri == "http://vocabs.example.org/rocks"
         assert scheme.local_url == f"{conf.get_base_uri()}/{scheme.slug}"
         assert scheme.local_url != scheme.uri
         assert scheme.local_url.startswith(conf.get_base_uri())
 
     @pytest.mark.django_db
-    def test_imported_collections_local_url_differs_from_its_permanent_uri(self, scheme):
+    def test_imported_collections_local_url_differs_from_its_static_uri(self, scheme):
         collection = Collection.objects.create(
-            scheme=scheme, name="Igneous", permanent_uri="http://vocabs.example.org/rocks/igneous"
+            scheme=scheme, name="Igneous", static_uri="http://vocabs.example.org/rocks/igneous"
         )
         assert collection.uri == "http://vocabs.example.org/rocks/igneous"
         assert collection.local_url == f"{conf.get_base_uri()}/{scheme.slug}/collection/{collection.slug}"
@@ -1148,9 +1148,9 @@ class TestLocalUrl:
         must compose its provisional identifier under *this site's* address,
         not the publisher's — composing from ``self.scheme.uri`` instead of
         ``self.scheme.local_url`` would put it on the publisher's domain."""
-        scheme = ConceptScheme.objects.create(name="Rocks", permanent_uri="http://vocabs.example.org/rocks")
+        scheme = ConceptScheme.objects.create(name="Rocks", static_uri="http://vocabs.example.org/rocks")
         concept = Concept.objects.create(scheme=scheme, label="Granite")
-        assert concept.permanent_uri is None
+        assert concept.static_uri is None
         assert concept.local_url == f"{conf.get_base_uri()}/{scheme.slug}/{concept.slug}"
         assert concept.uri == concept.local_url
         assert not concept.uri.startswith("http://vocabs.example.org")
@@ -1158,16 +1158,16 @@ class TestLocalUrl:
     @pytest.mark.django_db
     def test_local_collection_of_an_externally_fixed_scheme_composes_under_this_sites_address(self):
         """The same hole as above, for a collection (spec.md Edge Cases §4)."""
-        scheme = ConceptScheme.objects.create(name="Rocks", permanent_uri="http://vocabs.example.org/rocks")
+        scheme = ConceptScheme.objects.create(name="Rocks", static_uri="http://vocabs.example.org/rocks")
         collection = Collection.objects.create(scheme=scheme, name="Igneous")
-        assert collection.permanent_uri is None
+        assert collection.static_uri is None
         assert collection.local_url == f"{conf.get_base_uri()}/{scheme.slug}/collection/{collection.slug}"
         assert collection.uri == collection.local_url
         assert not collection.uri.startswith("http://vocabs.example.org")
 
 
-class TestPermanentUriDoesNotShadowALocalRecordsAddress:
-    """US-1 — T034. Verified hijack: an externally assigned ``permanent_uri``
+class TestStaticUriDoesNotShadowALocalRecordsAddress:
+    """US-1 — T034. Verified hijack: an externally assigned ``static_uri``
     that happens to collide with a *different* record's own ``local_url`` used
     to be accepted. ``get_by_uri`` tries a stored match first (correctly, per
     FR-003/R6), so once stored it returned the imposter, and the victim was no
@@ -1179,49 +1179,49 @@ class TestPermanentUriDoesNotShadowALocalRecordsAddress:
     to this same record."""
 
     @pytest.mark.django_db
-    def test_a_new_records_permanent_uri_cannot_shadow_a_different_concepts_local_url(self, scheme):
+    def test_a_new_records_static_uri_cannot_shadow_a_different_concepts_local_url(self, scheme):
         victim = Concept.objects.create(scheme=scheme, label="Red")
         with pytest.raises(ValidationError):
-            Concept.objects.create(scheme=scheme, label="Crimson", permanent_uri=victim.local_url)
+            Concept.objects.create(scheme=scheme, label="Crimson", static_uri=victim.local_url)
         assert Concept.objects.get_by_uri(victim.local_url) == victim
 
     @pytest.mark.django_db
-    def test_an_existing_provisional_records_permanent_uri_cannot_be_set_to_shadow_a_different_concept(self, scheme):
+    def test_an_existing_provisional_records_static_uri_cannot_be_set_to_shadow_a_different_concept(self, scheme):
         victim = Concept.objects.create(scheme=scheme, label="Red")
         other = Concept.objects.create(scheme=scheme, label="Crimson")
-        other.permanent_uri = victim.local_url
+        other.static_uri = victim.local_url
         with pytest.raises(ValidationError):
             other.save()
         assert Concept.objects.get_by_uri(victim.local_url) == victim
 
     @pytest.mark.django_db
-    def test_a_collections_permanent_uri_cannot_shadow_a_concepts_local_url(self, scheme):
+    def test_a_collections_static_uri_cannot_shadow_a_concepts_local_url(self, scheme):
         victim = Concept.objects.create(scheme=scheme, label="Red")
         with pytest.raises(ValidationError):
-            Collection.objects.create(scheme=scheme, name="Reds", permanent_uri=victim.local_url)
+            Collection.objects.create(scheme=scheme, name="Reds", static_uri=victim.local_url)
 
     @pytest.mark.django_db
-    def test_a_concepts_permanent_uri_cannot_shadow_a_schemes_local_url(self):
+    def test_a_concepts_static_uri_cannot_shadow_a_schemes_local_url(self):
         victim_scheme = ConceptScheme.objects.create(name="Rocks")
         other_scheme = ConceptScheme.objects.create(name="Minerals")
         with pytest.raises(ValidationError):
-            Concept.objects.create(scheme=other_scheme, label="Quartz", permanent_uri=victim_scheme.local_url)
+            Concept.objects.create(scheme=other_scheme, label="Quartz", static_uri=victim_scheme.local_url)
 
     @pytest.mark.django_db
     def test_an_external_identifier_under_the_base_address_is_accepted_when_nothing_occupies_it(self, scheme):
         # spec.md Edge Case 1: legitimately sits under this site's address but
         # resolves to no existing record.
         made_up = f"{conf.get_base_uri()}/{scheme.slug}/no-such-slug"
-        concept = Concept.objects.create(scheme=scheme, label="Red", permanent_uri=made_up)
-        assert concept.permanent_uri == made_up
+        concept = Concept.objects.create(scheme=scheme, label="Red", static_uri=made_up)
+        assert concept.static_uri == made_up
 
     @pytest.mark.django_db
-    def test_a_records_permanent_uri_may_equal_its_own_local_url(self, scheme):
+    def test_a_records_static_uri_may_equal_its_own_local_url(self, scheme):
         concept = Concept.objects.create(scheme=scheme, label="Red")
-        concept.permanent_uri = concept.local_url
+        concept.static_uri = concept.local_url
         concept.save()
         concept.refresh_from_db()
-        assert concept.permanent_uri == concept.local_url
+        assert concept.static_uri == concept.local_url
 
 
 def _editable_fields(model: type[Model]):
@@ -2282,60 +2282,60 @@ class TestMembershipIntegrity:
         assert granite in igneous_rock.narrower()
 
 
-class TestBlankPermanentUriIsAbsent:
+class TestBlankStaticUriIsAbsent:
     """US-1 — an empty string is *absence* of an identifier, not an identifier.
 
-    ``permanent_uri`` is nullable so that the partial ``UniqueConstraint``
-    (``permanent_uri__isnull=False``) exempts provisional records. An empty
+    ``static_uri`` is nullable so that the partial ``UniqueConstraint``
+    (``static_uri__isnull=False``) exempts provisional records. An empty
     string is not null, so it falls *inside* the constraint while
-    ``uri``/``has_permanent_uri`` both read it as absent — the second such
+    ``uri``/``has_static_uri`` both read it as absent — the second such
     record fails at the database with an opaque error. Assigning ``""``
     instead of ``None`` is the ordinary shape of importer and serializer code
     (``node.get("about") or ""``), so the models normalise it on the way in.
     """
 
     @pytest.mark.django_db
-    def test_two_schemes_assigned_a_blank_permanent_uri_coexist(self):
-        first = ConceptScheme.objects.create(name="First", permanent_uri="")
-        second = ConceptScheme.objects.create(name="Second", permanent_uri="")
-        assert first.permanent_uri is None
-        assert second.permanent_uri is None
+    def test_two_schemes_assigned_a_blank_static_uri_coexist(self):
+        first = ConceptScheme.objects.create(name="First", static_uri="")
+        second = ConceptScheme.objects.create(name="Second", static_uri="")
+        assert first.static_uri is None
+        assert second.static_uri is None
         assert first.uri == first.local_url
         assert second.uri == second.local_url
 
     @pytest.mark.django_db
-    def test_two_concepts_assigned_a_blank_permanent_uri_coexist(self, scheme):
-        first = Concept.objects.create(scheme=scheme, label="First", permanent_uri="")
-        second = Concept.objects.create(scheme=scheme, label="Second", permanent_uri="")
-        assert first.permanent_uri is None
-        assert second.permanent_uri is None
+    def test_two_concepts_assigned_a_blank_static_uri_coexist(self, scheme):
+        first = Concept.objects.create(scheme=scheme, label="First", static_uri="")
+        second = Concept.objects.create(scheme=scheme, label="Second", static_uri="")
+        assert first.static_uri is None
+        assert second.static_uri is None
 
     @pytest.mark.django_db
-    def test_two_collections_assigned_a_blank_permanent_uri_coexist(self, scheme):
-        first = Collection.objects.create(scheme=scheme, name="First", permanent_uri="")
-        second = Collection.objects.create(scheme=scheme, name="Second", permanent_uri="")
-        assert first.permanent_uri is None
-        assert second.permanent_uri is None
+    def test_two_collections_assigned_a_blank_static_uri_coexist(self, scheme):
+        first = Collection.objects.create(scheme=scheme, name="First", static_uri="")
+        second = Collection.objects.create(scheme=scheme, name="Second", static_uri="")
+        assert first.static_uri is None
+        assert second.static_uri is None
 
     @pytest.mark.django_db
-    def test_a_blank_permanent_uri_is_stored_as_null_not_an_empty_string(self, scheme):
-        concept = Concept.objects.create(scheme=scheme, label="Heat Flow", permanent_uri="")
+    def test_a_blank_static_uri_is_stored_as_null_not_an_empty_string(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow", static_uri="")
         concept.refresh_from_db()
-        assert concept.permanent_uri is None
-        assert concept.has_permanent_uri is False
-        assert Concept.objects.filter(permanent_uri__isnull=True).count() == 1
+        assert concept.static_uri is None
+        assert concept.has_static_uri is False
+        assert Concept.objects.filter(static_uri__isnull=True).count() == 1
 
     @pytest.mark.django_db
-    def test_full_clean_also_normalises_a_blank_permanent_uri(self, scheme):
-        concept = Concept(scheme=scheme, label="Heat Flow", permanent_uri="")
+    def test_full_clean_also_normalises_a_blank_static_uri(self, scheme):
+        concept = Concept(scheme=scheme, label="Heat Flow", static_uri="")
         concept.full_clean(exclude=["slug"])
-        assert concept.permanent_uri is None
+        assert concept.static_uri is None
 
     @pytest.mark.django_db
-    def test_clearing_a_stored_permanent_uri_with_a_blank_is_still_refused(self, scheme):
-        concept = Concept.objects.create(scheme=scheme, label="Heat Flow", permanent_uri="http://vocab.example.org/hf")
+    def test_clearing_a_stored_static_uri_with_a_blank_is_still_refused(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow", static_uri="http://vocab.example.org/hf")
         reloaded = Concept.objects.get(pk=concept.pk)
-        reloaded.permanent_uri = ""
+        reloaded.static_uri = ""
         with pytest.raises(ValidationError) as excinfo:
             reloaded.save()
         assert "fixed and cannot be changed or cleared" in str(excinfo.value)

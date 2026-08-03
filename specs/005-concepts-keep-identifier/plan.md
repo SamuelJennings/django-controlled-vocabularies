@@ -8,7 +8,7 @@
 
 Split the one address `ConceptScheme`, `Concept`, and `Collection` carry today into identity and
 location. Each model gains a single nullable stored column holding an **externally assigned**
-identifier, plus two accessors: `uri` (unchanged name, now meaning the permanent URI — the stored value
+identifier, plus two accessors: `uri` (unchanged name, now meaning the static URI — the stored value
 when present, the R1 composition otherwise) and `local_url` (always the R1 composition, this site's own
 address). Fixedness is the presence of the stored value, not a separate flag (research R2). Uniqueness
 is a per-model `UniqueConstraint` on the column plus a cross-model validation check, because no

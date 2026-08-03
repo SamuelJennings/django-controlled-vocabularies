@@ -53,11 +53,11 @@ identifiers · vocabulary-as-data over vocabulary-as-code · SKOS fidelity over 
 
 ## Configuration
 
-Every vocabulary, concept, and collection has a permanent URI — its identity, stored and never
-changed once it is set. A record imported from an external vocabulary keeps the identifier its
-publisher assigned it, held exactly as given. A record authored here instead reports an identifier
-composed from a base address, until it is published, at which point that becomes fixed too. Set the
-base address in your Django settings:
+Every vocabulary, concept, and collection has a URI — its identity, always present. It is static,
+held exactly as given and never recomputed, once it is fixed: a record imported from an external
+vocabulary keeps the identifier its publisher assigned it. A record authored here instead has a
+dynamic URI, composed from a base address, until it is published, at which point that becomes
+static too. Set the base address in your Django settings:
 
 ```python
 CONTROLLED_VOCABULARIES_BASE_URI = "https://vocab.example.org/vocabularies"
@@ -66,10 +66,10 @@ CONTROLLED_VOCABULARIES_BASE_URI = "https://vocab.example.org/vocabularies"
 If you leave it unset, the app falls back to `http://localhost:8000/vocabularies` so it still
 runs out of the box — set a real address before you rely on it anywhere it is seen. This site's own
 address for viewing a record is always composed from this base and the record's slugs — a concept's
-is `{base}/{scheme-slug}/{concept-slug}` — even when that record's permanent URI points elsewhere, and
+is `{base}/{scheme-slug}/{concept-slug}` — even when that record's static URI points elsewhere, and
 the slugs follow the labels while a vocabulary is unpublished.
 
-An externally assigned permanent URI must use one of a small set of accepted schemes — `http`,
+An externally assigned static URI must use one of a small set of accepted schemes — `http`,
 `https`, `urn`, `doi`, `info`, and `ark` by default, since those are what real SKOS vocabularies
 actually use. If your vocabularies carry identifiers in another scheme, add it explicitly:
 

@@ -25,7 +25,7 @@ class ConceptSchemeFactory(factory.django.DjangoModelFactory):
     """Build a saved :class:`ConceptScheme` with an app-wide-unique name.
 
     The opt-in ``external`` trait gives the scheme a fixed, plausible externally
-    assigned ``permanent_uri`` (FS-005), as if it had arrived from an import
+    assigned ``static_uri`` (FS-005), as if it had arrived from an import
     rather than been authored here.
     """
 
@@ -36,7 +36,7 @@ class ConceptSchemeFactory(factory.django.DjangoModelFactory):
 
     class Params:
         external = factory.Trait(
-            permanent_uri=factory.Sequence(lambda n: f"http://publisher.example.org/vocab/{n}"),
+            static_uri=factory.Sequence(lambda n: f"http://publisher.example.org/vocab/{n}"),
         )
 
 
@@ -49,7 +49,7 @@ class ConceptFactory(factory.django.DjangoModelFactory):
     the concept so a single ``ConceptFactory(multilingual=True)`` call yields a
     concept whose preferred labels and notes span more than one language. The
     opt-in ``external`` trait gives the concept a fixed, plausible externally
-    assigned ``permanent_uri`` (FS-005), independent of its (by default,
+    assigned ``static_uri`` (FS-005), independent of its (by default,
     provisional) scheme's own identifier.
     """
 
@@ -61,7 +61,7 @@ class ConceptFactory(factory.django.DjangoModelFactory):
 
     class Params:
         external = factory.Trait(
-            permanent_uri=factory.Sequence(lambda n: f"http://publisher.example.org/concept/{n}"),
+            static_uri=factory.Sequence(lambda n: f"http://publisher.example.org/concept/{n}"),
         )
         multilingual = factory.Trait(
             # en preferred label is the anchor ``label`` above; de is a real
@@ -163,7 +163,7 @@ class CollectionFactory(factory.django.DjangoModelFactory):
     ``name`` drives the derived, per-scheme-unique slug via a sequence so repeated
     calls never collide. Unordered by default; pass ``ordered=True`` for an ordered
     collection. The opt-in ``external`` trait gives the collection a fixed,
-    plausible externally assigned ``permanent_uri`` (FS-005).
+    plausible externally assigned ``static_uri`` (FS-005).
     """
 
     class Meta:
@@ -174,7 +174,7 @@ class CollectionFactory(factory.django.DjangoModelFactory):
 
     class Params:
         external = factory.Trait(
-            permanent_uri=factory.Sequence(lambda n: f"http://publisher.example.org/collection/{n}"),
+            static_uri=factory.Sequence(lambda n: f"http://publisher.example.org/collection/{n}"),
         )
 
 

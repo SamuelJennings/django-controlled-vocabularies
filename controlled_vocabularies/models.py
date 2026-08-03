@@ -1,9 +1,11 @@
 """Models for controlled_vocabularies.
 
 The relational models are the source of truth for a vocabulary and its concepts.
-A record's ``uri`` is its permanent identity: an externally assigned identifier
-held verbatim when one was supplied (``permanent_uri``, FS-005), or otherwise
-composed from a configured base address and the slug exactly as R1 did.
+A record's ``uri`` is its identity, always present. It is static — held
+verbatim, exactly as assigned by an external publisher or frozen at
+publication (``static_uri``, FS-005) — once one has been assigned; until then
+it is dynamic, composed from a configured base address and the slug exactly as
+R1 did.
 """
 
 import urllib.parse
@@ -20,34 +22,34 @@ from django.utils.translation import gettext_lazy as _
 from controlled_vocabularies import conf
 
 #: Schemes that can carry executable content and must never be accepted as an
-#: externally assigned permanent URI (FR-004) — a stored identifier is later
+#: externally assigned static URI (FR-004) — a stored identifier is later
 #: rendered as a link by the browsing interface, so a hostile scheme accepted
 #: here becomes a hazard there. None of these sit in the default allowlist
 #: (:data:`~controlled_vocabularies.conf.DEFAULT_ALLOWED_URI_SCHEMES`), so this
 #: is belt-and-braces (T035): a second gate that still applies even if a
 #: downstream project's overridden allowlist includes one of them.
-_UNSAFE_PERMANENT_URI_SCHEMES = frozenset({"javascript", "data", "vbscript"})
+_UNSAFE_STATIC_URI_SCHEMES = frozenset({"javascript", "data", "vbscript"})
 
-#: The length bound for a permanent URI (FR-004, decisions.md D5): far beyond any
+#: The length bound for a static URI (FR-004, decisions.md D5): far beyond any
 #: identifier real SKOS vocabularies use, and inside the unique-index limit of
 #: every mainstream database, including MySQL's 3072-byte cap on ``utf8mb4``.
-PERMANENT_URI_MAX_LENGTH = 500
+STATIC_URI_MAX_LENGTH = 500
 
 #: How much of an offending value a validation message echoes (T032). A
 #: hostile value can be arbitrarily long; bounding the echo keeps the message
 #: itself from becoming another hazard, independent of the true length always
 #: reported via %(length)s/%(max_length)s in the too-long message.
-_PERMANENT_URI_MESSAGE_ECHO_CHARS = 80
+_STATIC_URI_MESSAGE_ECHO_CHARS = 80
 
 
 def _echoed_uri(value: str) -> str:
     """The value as it appears inside a validation message: bounded, never the
     unbounded raw value (T032)."""
-    return str(Truncator(value).chars(_PERMANENT_URI_MESSAGE_ECHO_CHARS))
+    return str(Truncator(value).chars(_STATIC_URI_MESSAGE_ECHO_CHARS))
 
 
-def validate_permanent_uri(value: str) -> None:
-    """Validate an externally assigned permanent URI (FR-004).
+def validate_static_uri(value: str) -> None:
+    """Validate an externally assigned static URI (FR-004).
 
     Checks length first — before parsing even runs — so an arbitrarily long
     hostile value is refused with a short, bounded message rather than one
@@ -67,11 +69,11 @@ def validate_permanent_uri(value: str) -> None:
     exception no caller expects, and surface as a 500 rather than a field
     error in a form/admin/DRF context (T031).
     """
-    if len(value) > PERMANENT_URI_MAX_LENGTH:
+    if len(value) > STATIC_URI_MAX_LENGTH:
         raise ValidationError(
-            _("A permanent URI cannot exceed %(max_length)s characters; '%(uri)s' has %(length)s."),
-            params={"max_length": PERMANENT_URI_MAX_LENGTH, "uri": _echoed_uri(value), "length": len(value)},
-            code="permanent_uri_too_long",
+            _("A static URI cannot exceed %(max_length)s characters; '%(uri)s' has %(length)s."),
+            params={"max_length": STATIC_URI_MAX_LENGTH, "uri": _echoed_uri(value), "length": len(value)},
+            code="static_uri_too_long",
         )
     try:
         parsed = urllib.parse.urlsplit(value)
@@ -79,43 +81,43 @@ def validate_permanent_uri(value: str) -> None:
         raise ValidationError(
             _("'%(uri)s' could not be parsed as a URI."),
             params={"uri": _echoed_uri(value)},
-            code="permanent_uri_unparseable",
+            code="static_uri_unparseable",
         ) from exc
     if not parsed.scheme or not (parsed.netloc or parsed.path):
         raise ValidationError(
             _("'%(uri)s' is not a well-formed absolute identifier with a scheme."),
             params={"uri": _echoed_uri(value)},
-            code="permanent_uri_not_absolute",
+            code="static_uri_not_absolute",
         )
     scheme = parsed.scheme.lower()
     if scheme not in conf.get_allowed_uri_schemes():
         raise ValidationError(
             _("'%(uri)s' uses the scheme '%(scheme)s', which is not one of the accepted schemes."),
             params={"uri": _echoed_uri(value), "scheme": parsed.scheme},
-            code="permanent_uri_scheme_not_allowed",
+            code="static_uri_scheme_not_allowed",
         )
-    if scheme in _UNSAFE_PERMANENT_URI_SCHEMES:
+    if scheme in _UNSAFE_STATIC_URI_SCHEMES:
         # Belt and braces (T035): refused even if a downstream project's
         # overridden allowlist includes it.
         raise ValidationError(
             _("'%(uri)s' uses the scheme '%(scheme)s', which is not permitted."),
             params={"uri": _echoed_uri(value), "scheme": parsed.scheme},
-            code="permanent_uri_unsafe_scheme",
+            code="static_uri_unsafe_scheme",
         )
 
 
-def _permanent_uri_still_deferred(instance: "PermanentUriModel") -> bool:
+def _static_uri_still_deferred(instance: "StaticUriModel") -> bool:
     """True when the column was never loaded and has not been assigned since.
 
     Nothing about the identifier can have changed in that case, so every check
     below can be skipped — and must be, because merely reading
-    ``instance.permanent_uri`` to check it would fetch the column that was
+    ``instance.static_uri`` to check it would fetch the column that was
     deliberately left behind.
     """
-    return "permanent_uri" in instance.get_deferred_fields()
+    return "static_uri" in instance.get_deferred_fields()
 
 
-def _stored_permanent_uri(instance: "PermanentUriModel") -> str | None:
+def _stored_static_uri(instance: "StaticUriModel") -> str | None:
     """The identifier the database currently holds for ``instance``.
 
     ``None`` both for a row holding no identifier and for one that does not
@@ -124,22 +126,22 @@ def _stored_permanent_uri(instance: "PermanentUriModel") -> str | None:
     """
     if instance.pk is None:
         return None
-    return type(instance)._base_manager.filter(pk=instance.pk).values_list("permanent_uri", flat=True).first()
+    return type(instance)._base_manager.filter(pk=instance.pk).values_list("static_uri", flat=True).first()
 
 
-def _permanent_uri_models() -> tuple[type["PermanentUriModel"], ...]:
-    """Every concrete model that carries a ``permanent_uri`` column (T028).
+def _static_uri_models() -> tuple[type["StaticUriModel"], ...]:
+    """Every concrete model that carries a ``static_uri`` column (T028).
 
-    Derived from :class:`PermanentUriModel`'s live subclasses rather than a
+    Derived from :class:`StaticUriModel`'s live subclasses rather than a
     hardcoded tuple, so a fourth model enrols itself in the cross-model
     uniqueness check the moment it subclasses the abstract base — forgetting to
     add it to a hand-maintained list is no longer possible.
     """
-    return tuple(model for model in PermanentUriModel.__subclasses__() if not model._meta.abstract)
+    return tuple(model for model in StaticUriModel.__subclasses__() if not model._meta.abstract)
 
 
-def _reject_permanent_uri_held_by_another_model(instance: "PermanentUriModel") -> None:
-    """Refuse a ``permanent_uri`` already held by a record of a *different* model.
+def _reject_static_uri_held_by_another_model(instance: "StaticUriModel") -> None:
+    """Refuse a ``static_uri`` already held by a record of a *different* model.
 
     Uniqueness within one model is a database constraint (FR-006, per-model
     ``UniqueConstraint``). No portable constraint spans the three tables, so this
@@ -147,23 +149,23 @@ def _reject_permanent_uri_held_by_another_model(instance: "PermanentUriModel") -
     must not hold the same externally assigned identifier. Only runs when the
     column is actually set, so nothing is paid for a still-provisional record.
     """
-    if not instance.permanent_uri:
+    if not instance.static_uri:
         return
     model = type(instance)
-    others = [candidate for candidate in _permanent_uri_models() if candidate is not model]
-    if any(candidate._default_manager.filter(permanent_uri=instance.permanent_uri).exists() for candidate in others):
+    others = [candidate for candidate in _static_uri_models() if candidate is not model]
+    if any(candidate._default_manager.filter(static_uri=instance.static_uri).exists() for candidate in others):
         raise ValidationError(
             {
-                "permanent_uri": ValidationError(
-                    _("The permanent URI '%(uri)s' is already held by another record."),
-                    params={"uri": instance.permanent_uri},
-                    code="permanent_uri_held_elsewhere",
+                "static_uri": ValidationError(
+                    _("The static URI '%(uri)s' is already held by another record."),
+                    params={"uri": instance.static_uri},
+                    code="static_uri_held_elsewhere",
                 )
             }
         )
 
 
-def _resolve_as_local_url(uri: str) -> "PermanentUriModel | None":
+def _resolve_as_local_url(uri: str) -> "StaticUriModel | None":
     """Resolve ``uri`` as a local address of any of the three models, or
     ``None`` when it matches none of them. Used only by the shadow check
     (T034) below — the three models' local address spaces are structurally
@@ -171,7 +173,7 @@ def _resolve_as_local_url(uri: str) -> "PermanentUriModel | None":
     a literal ``collection`` marker), so at most one model's parse can ever
     match a given value.
     """
-    for model in _permanent_uri_models():
+    for model in _static_uri_models():
         manager = model._default_manager
         try:
             # mypy/django-stubs types _default_manager as the generic base
@@ -183,14 +185,14 @@ def _resolve_as_local_url(uri: str) -> "PermanentUriModel | None":
     return None
 
 
-def _reject_permanent_uri_shadowing_local_url(instance: "PermanentUriModel") -> None:
+def _reject_static_uri_shadowing_local_url(instance: "StaticUriModel") -> None:
     """Refuse an externally assigned identifier that collides with a
     *different* record's own local address (T034).
 
     Verified hijack: with the base address ``https://example.org/vocabularies``,
     a local concept whose ``local_url`` is
     ``https://example.org/vocabularies/colours/red`` was displaced when another
-    record was saved with ``permanent_uri`` set to that exact string —
+    record was saved with ``static_uri`` set to that exact string —
     ``get_by_uri`` tries a stored match first (correctly, per FR-003/R6), so it
     then returned the imposter, and the victim was no longer reachable by its
     own identity; #50's importer would then write into the wrong record.
@@ -205,7 +207,7 @@ def _reject_permanent_uri_shadowing_local_url(instance: "PermanentUriModel") -> 
     the only correct response would be refusing the rename, which belongs
     with R4's publication lifecycle.
     """
-    uri = instance.permanent_uri
+    uri = instance.static_uri
     if not uri or not uri.startswith(conf.get_base_uri()):
         return
     resolved = _resolve_as_local_url(uri)
@@ -215,81 +217,81 @@ def _reject_permanent_uri_shadowing_local_url(instance: "PermanentUriModel") -> 
         return
     raise ValidationError(
         {
-            "permanent_uri": ValidationError(
+            "static_uri": ValidationError(
                 _("'%(uri)s' is already this site's own address for a different record."),
                 params={"uri": uri},
-                code="permanent_uri_shadows_local_url",
+                code="static_uri_shadows_local_url",
             )
         }
     )
 
 
-def _normalise_blank_permanent_uri(instance: "PermanentUriModel") -> None:
+def _normalise_blank_static_uri(instance: "StaticUriModel") -> None:
     """Store the *absence* of an identifier as ``None``, never as ``""``.
 
-    ``permanent_uri`` is nullable so the partial ``UniqueConstraint`` — which
+    ``static_uri`` is nullable so the partial ``UniqueConstraint`` — which
     only covers non-null values — leaves provisional records unconstrained. An
     empty string is not null, so it falls inside that constraint while
-    :attr:`uri` and :attr:`has_permanent_uri` both read it as absent: the record
+    :attr:`uri` and :attr:`has_static_uri` both read it as absent: the record
     behaves as provisional yet occupies the unique slot, and the second one
     saved fails at the database with an opaque ``IntegrityError``. Assigning
     ``""`` rather than ``None`` is the ordinary shape of importer and serializer
     code (``node.get("about") or ""``), which is exactly the path this feature
     exists to serve, so it is normalised here rather than left to every caller.
     """
-    if instance.permanent_uri == "":
-        instance.permanent_uri = None
+    if instance.static_uri == "":
+        instance.static_uri = None
 
 
-def _check_permanent_uri(instance: "PermanentUriModel", *, validate_format: bool) -> None:
-    """Every ``permanent_uri`` invariant a ``save()`` or ``full_clean()`` owes, in
+def _check_static_uri(instance: "StaticUriModel", *, validate_format: bool) -> None:
+    """Every ``static_uri`` invariant a ``save()`` or ``full_clean()`` owes, in
     one place.
 
     The single authority for "is an identifier already stored" is the database,
-    read back here with :func:`_stored_permanent_uri` — never an in-memory
+    read back here with :func:`_stored_static_uri` — never an in-memory
     snapshot taken at some earlier load. A snapshot goes stale the moment a
     second instance of the same row is saved, refreshed, or constructed with an
     explicit ``pk``: a three-lens review found all three bypass a
     snapshot-based guard and let a save rewrite or silently clear an identifier
     a *different* instance had already stored (T029). A read-back cannot go
     stale, at the cost of one indexed query per save of an existing row whose
-    column is loaded; an insert pays nothing, since :func:`_stored_permanent_uri`
+    column is loaded; an insert pays nothing, since :func:`_stored_static_uri`
     short-circuits on ``instance.pk is None``.
 
     ``validate_format`` is ``False`` from ``clean()``, called only under
     ``full_clean()``, where the field validator already ran
-    :func:`validate_permanent_uri`; it is ``True`` from ``save()``, which never
+    :func:`validate_static_uri`; it is ``True`` from ``save()``, which never
     calls ``full_clean()`` and is the path the import work this feature exists
     to serve actually uses (research R5).
     """
-    if _permanent_uri_still_deferred(instance):
+    if _static_uri_still_deferred(instance):
         return
-    _normalise_blank_permanent_uri(instance)
-    stored = _stored_permanent_uri(instance)
-    if stored is not None and instance.permanent_uri != stored:
+    _normalise_blank_static_uri(instance)
+    stored = _stored_static_uri(instance)
+    if stored is not None and instance.static_uri != stored:
         raise ValidationError(
             {
-                "permanent_uri": ValidationError(
-                    _("The permanent URI '%(uri)s' is fixed and cannot be changed or cleared once stored."),
+                "static_uri": ValidationError(
+                    _("The static URI '%(uri)s' is fixed and cannot be changed or cleared once stored."),
                     params={"uri": stored},
-                    code="permanent_uri_fixed",
+                    code="static_uri_fixed",
                 )
             }
         )
-    if not instance.permanent_uri:
+    if not instance.static_uri:
         return
     if validate_format:
         try:
-            validate_permanent_uri(instance.permanent_uri)
+            validate_static_uri(instance.static_uri)
         except ValidationError as exc:
-            raise ValidationError({"permanent_uri": exc}) from exc
-    if instance.permanent_uri == stored:
+            raise ValidationError({"static_uri": exc}) from exc
+    if instance.static_uri == stored:
         # Nothing about the value changed, so nothing that depends on it could
         # have either — skip the shadow and cross-model probes' wasted
         # queries (T029, extended to the shadow check by T034).
         return
-    _reject_permanent_uri_shadowing_local_url(instance)
-    _reject_permanent_uri_held_by_another_model(instance)
+    _reject_static_uri_shadowing_local_url(instance)
+    _reject_static_uri_held_by_another_model(instance)
 
 
 def _configured_language_codes() -> set[str]:
@@ -307,7 +309,7 @@ def _configured_language_codes() -> set[str]:
 _ModelT = TypeVar("_ModelT", bound=models.Model)
 
 
-class PermanentUriLookupMixin(models.Manager[_ModelT]):
+class StaticUriLookupMixin(models.Manager[_ModelT]):
     """Adds :meth:`get_by_uri` to a manager (research R6).
 
     Shared by the ``ConceptScheme``, ``Concept``, and ``Collection`` managers so
@@ -319,15 +321,15 @@ class PermanentUriLookupMixin(models.Manager[_ModelT]):
         """Return the record identified by ``uri``, fixed or provisional (FR-007).
 
         A falsy or non-``str`` ``uri`` raises ``DoesNotExist`` immediately
-        (T033): ``self.get(permanent_uri=None)`` compiles to
-        ``permanent_uri IS NULL``, which matches *every* provisional record —
+        (T033): ``self.get(static_uri=None)`` compiles to
+        ``static_uri IS NULL``, which matches *every* provisional record —
         with one in the table it would return that unrelated record, with two
         it would raise ``MultipleObjectsReturned``. #50's importer idiom
         ``node.get("about")`` yields ``None`` when the source omits an
         identifier, so without this guard it would upsert into an arbitrary
         unrelated record.
 
-        Otherwise, an exact match on the stored ``permanent_uri`` is tried
+        Otherwise, an exact match on the stored ``static_uri`` is tried
         first, so a fixed identifier resolves correctly even when it happens
         to sit under this site's own configured base address (FR-003,
         research R6). On no match this falls back to
@@ -342,7 +344,7 @@ class PermanentUriLookupMixin(models.Manager[_ModelT]):
                 f"No {self.model.__name__} matches the URI {uri!r}."
             )
         try:
-            return self.get(permanent_uri=uri)
+            return self.get(static_uri=uri)
         except ObjectDoesNotExist:
             return self._get_by_local_parse(uri)
 
@@ -351,29 +353,30 @@ class PermanentUriLookupMixin(models.Manager[_ModelT]):
         raise NotImplementedError
 
 
-class PermanentUriModel(models.Model):
+class StaticUriModel(models.Model):
     """Abstract base for a model carrying an externally assigned identifier (T028).
 
     ``ConceptScheme``, ``Concept``, and ``Collection`` each subclass this rather
-    than repeating the ``permanent_uri`` field, ``uri``, ``has_permanent_uri``,
-    the permanent-URI half of ``clean()``, and the save-tail validation hook
+    than repeating the ``static_uri`` field, ``uri``, ``has_static_uri``,
+    the static-URI half of ``clean()``, and the save-tail validation hook
     byte-identically three times. A concrete subclass supplies only its own
     ``local_url`` composition, its ``Meta.constraints`` entry name, and its
-    ``permanent_uri`` field's ``help_text`` wording (by redeclaring the field —
+    ``static_uri`` field's ``help_text`` wording (by redeclaring the field —
     an ordinary Django abstract-base override, not a second column).
     """
 
-    permanent_uri = models.CharField(
-        max_length=PERMANENT_URI_MAX_LENGTH,
+    static_uri = models.CharField(
+        max_length=STATIC_URI_MAX_LENGTH,
         null=True,
         blank=True,
-        verbose_name=_("permanent URI"),
+        verbose_name=_("static URI"),
         help_text=_(
-            "The identifier assigned by this record's publisher, held exactly as given. "
-            "Fixed once set. Leave blank for a record authored here, which reports the "
-            "identifier composed from this site's address instead."
+            "The identifier once it is fixed — assigned by this record's publisher, "
+            "or frozen when this vocabulary is published — held exactly as given and "
+            "never recomputed after that. Leave blank while this record is authored "
+            "here: its identifier is computed from this site's address until then."
         ),
-        validators=[validate_permanent_uri],
+        validators=[validate_static_uri],
     )
 
     class Meta:
@@ -381,13 +384,14 @@ class PermanentUriModel(models.Model):
 
     @property
     def uri(self) -> str:
-        """The record's permanent URI: its identity.
+        """The record's URI: its identity, always present.
 
-        The externally assigned identifier when one is held (fixed, held
-        verbatim), otherwise :attr:`local_url` (provisional, follows a rename
-        or a change to the configured address).
+        Static — the externally assigned identifier, held verbatim — when one
+        is held (:attr:`static_uri` is set); otherwise dynamic,
+        :attr:`local_url` (composed from the configured address, follows a
+        rename).
         """
-        return self.permanent_uri or self.local_url
+        return self.static_uri or self.local_url
 
     @property
     def local_url(self) -> str:
@@ -395,43 +399,43 @@ class PermanentUriModel(models.Model):
         raise NotImplementedError
 
     @property
-    def has_permanent_uri(self) -> bool:
-        """Whether this record's permanent URI is externally fixed (research R2).
+    def has_static_uri(self) -> bool:
+        """Whether this record's URI is static (fixed) rather than dynamic (research R2).
 
-        Recorded by the presence of :attr:`permanent_uri`, never inferred by
+        Recorded by the presence of :attr:`static_uri`, never inferred by
         comparing it against the configured base address (FR-003).
         """
-        return bool(self.permanent_uri)
+        return bool(self.static_uri)
 
     def clean(self):
-        """Refuse a ``permanent_uri`` that rewrites or clears a stored one, or is
+        """Refuse a ``static_uri`` that rewrites or clears a stored one, or is
         already held by a record of a different model.
 
-        Field validators (:func:`validate_permanent_uri`) already cover format on the
+        Field validators (:func:`validate_static_uri`) already cover format on the
         ``full_clean()`` path; the checks here need a query beyond one field so they
         live here rather than on the field itself (research R4).
         """
         super().clean()
-        _check_permanent_uri(self, validate_format=False)
+        _check_static_uri(self, validate_format=False)
 
     def save(self, *args, **kwargs):
-        """Validate ``permanent_uri`` — reading the database, never a stale
+        """Validate ``static_uri`` — reading the database, never a stale
         snapshot — before the write.
 
         Skipped entirely when ``update_fields`` is given and excludes
-        ``permanent_uri`` (T030): that save is never going to touch the
+        ``static_uri`` (T030): that save is never going to touch the
         column, so an in-memory value assigned but not meant to be written —
         malformed, or conflicting with what another instance already stored —
         must not block an otherwise unrelated save.
         """
         update_fields = kwargs.get("update_fields")
-        if update_fields is None or "permanent_uri" in update_fields:
-            _check_permanent_uri(self, validate_format=True)
+        if update_fields is None or "static_uri" in update_fields:
+            _check_static_uri(self, validate_format=True)
         super().save(*args, **kwargs)
 
 
-class ConceptSchemeManager(PermanentUriLookupMixin["ConceptScheme"]):
-    """Default manager for :class:`ConceptScheme`, adding permanent-URI-based lookup."""
+class ConceptSchemeManager(StaticUriLookupMixin["ConceptScheme"]):
+    """Default manager for :class:`ConceptScheme`, adding static-URI-based lookup."""
 
     def _get_by_local_parse(self, uri: str) -> "ConceptScheme":
         """Resolve ``{base}/{slug}`` — R1's scheme URI composition, unchanged.
@@ -448,7 +452,7 @@ class ConceptSchemeManager(PermanentUriLookupMixin["ConceptScheme"]):
         return self.get(slug=slug)
 
 
-class ConceptScheme(PermanentUriModel):
+class ConceptScheme(StaticUriModel):
     """A controlled vocabulary — a named container for concepts (a SKOS concept scheme).
 
     The ``slug`` is derived from ``name`` on every save (dynamic while unpublished,
@@ -484,17 +488,18 @@ class ConceptScheme(PermanentUriModel):
             "Must be one of the application's configured languages."
         ),
     )
-    permanent_uri = models.CharField(
-        max_length=PERMANENT_URI_MAX_LENGTH,
+    static_uri = models.CharField(
+        max_length=STATIC_URI_MAX_LENGTH,
         null=True,
         blank=True,
-        verbose_name=_("permanent URI"),
+        verbose_name=_("static URI"),
         help_text=_(
-            "The identifier assigned by this vocabulary's publisher, held exactly as given. "
-            "Fixed once set. Leave blank for a vocabulary authored here, which reports the "
-            "identifier composed from this site's address instead."
+            "The identifier once it is fixed — assigned by this vocabulary's publisher, "
+            "or frozen when this vocabulary is published — held exactly as given and "
+            "never recomputed after that. Leave blank while this vocabulary is authored "
+            "here: its identifier is computed from this site's address until then."
         ),
-        validators=[validate_permanent_uri],
+        validators=[validate_static_uri],
     )
 
     objects = ConceptSchemeManager()
@@ -504,9 +509,9 @@ class ConceptScheme(PermanentUriModel):
         verbose_name_plural = _("vocabularies")
         constraints = [
             models.UniqueConstraint(
-                fields=["permanent_uri"],
-                condition=Q(permanent_uri__isnull=False),
-                name="conceptscheme_permanent_uri_unique",
+                fields=["static_uri"],
+                condition=Q(static_uri__isnull=False),
+                name="conceptscheme_static_uri_unique",
             ),
         ]
 
@@ -517,7 +522,7 @@ class ConceptScheme(PermanentUriModel):
     def local_url(self) -> str:
         """Where this scheme is viewed on this site (FR-008), always this
         site's own — the configured base address and its slug — regardless of
-        who assigned :attr:`permanent_uri`.
+        who assigned :attr:`static_uri`.
         """
         return f"{conf.get_base_uri()}/{self.slug}"
 
@@ -580,11 +585,11 @@ class ConceptScheme(PermanentUriModel):
         super().save(*args, **kwargs)
 
 
-class ConceptManager(PermanentUriLookupMixin["Concept"]):
-    """Default manager for :class:`Concept`, adding permanent-URI-based lookup.
+class ConceptManager(StaticUriLookupMixin["Concept"]):
+    """Default manager for :class:`Concept`, adding static-URI-based lookup.
 
     Subclasses the standard manager so ``Concept.objects`` keeps all default
-    behaviour and gains :meth:`~PermanentUriLookupMixin.get_by_uri`, which keeps
+    behaviour and gains :meth:`~StaticUriLookupMixin.get_by_uri`, which keeps
     its existing name and exact local behaviour (FR-014) and additionally
     resolves an externally assigned identifier.
     """
@@ -613,7 +618,7 @@ class ConceptManager(PermanentUriLookupMixin["Concept"]):
         return self.get(scheme__slug=scheme_slug, slug=concept_slug)
 
 
-class Concept(PermanentUriModel):
+class Concept(StaticUriModel):
     """A single term within a vocabulary (a SKOS concept).
 
     The ``slug`` is derived from ``label`` on every save (dynamic while
@@ -655,17 +660,18 @@ class Concept(PermanentUriModel):
             "A manual slug is left untouched when the label later changes."
         ),
     )
-    permanent_uri = models.CharField(
-        max_length=PERMANENT_URI_MAX_LENGTH,
+    static_uri = models.CharField(
+        max_length=STATIC_URI_MAX_LENGTH,
         null=True,
         blank=True,
-        verbose_name=_("permanent URI"),
+        verbose_name=_("static URI"),
         help_text=_(
-            "The identifier assigned by this concept's publisher, held exactly as given. "
-            "Fixed once set. Leave blank for a concept authored here, which reports the "
-            "identifier composed from this site's address instead."
+            "The identifier once it is fixed — assigned by this concept's publisher, or "
+            "frozen when its vocabulary is published — held exactly as given and never "
+            "recomputed after that. Leave blank while this concept is authored here: "
+            "its identifier is computed from this site's address until then."
         ),
-        validators=[validate_permanent_uri],
+        validators=[validate_static_uri],
     )
 
     objects = ConceptManager()
@@ -676,9 +682,9 @@ class Concept(PermanentUriModel):
         constraints = [
             models.UniqueConstraint(fields=["scheme", "slug"], name="unique_concept_slug_per_scheme"),
             models.UniqueConstraint(
-                fields=["permanent_uri"],
-                condition=Q(permanent_uri__isnull=False),
-                name="concept_permanent_uri_unique",
+                fields=["static_uri"],
+                condition=Q(static_uri__isnull=False),
+                name="concept_static_uri_unique",
             ),
         ]
 
@@ -688,7 +694,7 @@ class Concept(PermanentUriModel):
     @property
     def local_url(self) -> str:
         """Where this concept is viewed on this site (FR-008), always this
-        site's own regardless of who assigned :attr:`permanent_uri`.
+        site's own regardless of who assigned :attr:`static_uri`.
 
         Composed from the *scheme's* :attr:`~ConceptScheme.local_url`, never
         from its ``uri`` — a concept added locally to a vocabulary whose own
@@ -1344,8 +1350,8 @@ class ConceptRelation(models.Model):
         super().save(*args, **kwargs)
 
 
-class CollectionManager(PermanentUriLookupMixin["Collection"]):
-    """Default manager for :class:`Collection`, adding permanent-URI-based lookup."""
+class CollectionManager(StaticUriLookupMixin["Collection"]):
+    """Default manager for :class:`Collection`, adding static-URI-based lookup."""
 
     def _get_by_local_parse(self, uri: str) -> "Collection":
         """Resolve ``{base}/{scheme-slug}/collection/{slug}`` — R1's collection
@@ -1365,7 +1371,7 @@ class CollectionManager(PermanentUriLookupMixin["Collection"]):
         return self.get(scheme__slug=scheme_slug, slug=collection_slug)
 
 
-class Collection(PermanentUriModel):
+class Collection(StaticUriModel):
     """A named grouping of concepts within one vocabulary (a SKOS collection).
 
     A collection captures a grouping the ``broader``/``narrower`` hierarchy does not
@@ -1406,17 +1412,18 @@ class Collection(PermanentUriModel):
             "An unordered collection is a plain set."
         ),
     )
-    permanent_uri = models.CharField(
-        max_length=PERMANENT_URI_MAX_LENGTH,
+    static_uri = models.CharField(
+        max_length=STATIC_URI_MAX_LENGTH,
         null=True,
         blank=True,
-        verbose_name=_("permanent URI"),
+        verbose_name=_("static URI"),
         help_text=_(
-            "The identifier assigned by this collection's publisher, held exactly as given. "
-            "Fixed once set. Leave blank for a collection authored here, which reports the "
-            "identifier composed from this site's address instead."
+            "The identifier once it is fixed — assigned by this collection's publisher, "
+            "or frozen when its vocabulary is published — held exactly as given and "
+            "never recomputed after that. Leave blank while this collection is authored "
+            "here: its identifier is computed from this site's address until then."
         ),
-        validators=[validate_permanent_uri],
+        validators=[validate_static_uri],
     )
 
     objects = CollectionManager()
@@ -1427,9 +1434,9 @@ class Collection(PermanentUriModel):
         constraints = [
             models.UniqueConstraint(fields=["scheme", "slug"], name="unique_collection_slug_per_scheme"),
             models.UniqueConstraint(
-                fields=["permanent_uri"],
-                condition=Q(permanent_uri__isnull=False),
-                name="collection_permanent_uri_unique",
+                fields=["static_uri"],
+                condition=Q(static_uri__isnull=False),
+                name="collection_static_uri_unique",
             ),
         ]
 
@@ -1439,7 +1446,7 @@ class Collection(PermanentUriModel):
     @property
     def local_url(self) -> str:
         """Where this collection is viewed on this site (FR-008), always this
-        site's own regardless of who assigned :attr:`permanent_uri`.
+        site's own regardless of who assigned :attr:`static_uri`.
 
         Composed from the *scheme's* :attr:`~ConceptScheme.local_url`, never
         from its ``uri`` — a collection added locally to a vocabulary whose own
