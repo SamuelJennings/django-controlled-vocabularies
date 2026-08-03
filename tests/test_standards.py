@@ -412,3 +412,25 @@ def test_local_url_and_has_permanent_uri_are_properties_not_indexable_columns():
         assert "has_permanent_uri" not in field_names, f"{model.__name__}.has_permanent_uri must not be a model field"
         assert isinstance(model.local_url, property)
         assert isinstance(model.has_permanent_uri, property)
+
+
+# --- T028: the cross-model uniqueness check's registry stays complete on its own ---
+# _reject_permanent_uri_held_by_another_model used to consult a hardcoded
+# (ConceptScheme, Concept, Collection) tuple — an untested single point of failure: a
+# fourth model that forgot to be added to that tuple would silently lose the cross-model
+# invariant, with nothing to notice. It now derives the set from PermanentUriModel's live
+# subclasses. This asserts that set against Django's own app registry — a source
+# independent of the helper's own implementation — so a regression back to a hardcoded,
+# incomplete list would still be caught even if it reused the same helper name.
+
+
+def test_every_concrete_permanent_uri_model_is_registered_for_the_cross_model_check():
+    from django.apps import apps
+
+    from controlled_vocabularies.models import PermanentUriModel, _permanent_uri_models
+
+    expected = {
+        model for model in apps.get_models() if issubclass(model, PermanentUriModel) and not model._meta.abstract
+    }
+    assert expected, "no concrete PermanentUriModel subclasses found — the registry has nothing to check"
+    assert set(_permanent_uri_models()) == expected

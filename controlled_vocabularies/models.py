@@ -63,13 +63,13 @@ def validate_permanent_uri(value: str) -> None:
         )
 
 
-def _snapshot_permanent_uri(instance: "ConceptScheme | Concept | Collection", field_names) -> None:
+def _snapshot_permanent_uri(instance: "PermanentUriModel", field_names) -> None:
     """Record the ``permanent_uri`` a record was loaded with, for the rewrite guard.
 
-    Called from each model's ``from_db``. When ``.only()``/``.defer()`` excluded
-    the column there is no value to snapshot, so the record is flagged instead
-    and :func:`_reject_permanent_uri_rewrite` reads the stored value back if and
-    only if the column is later assigned (T025, T026).
+    Called from :meth:`PermanentUriModel.from_db`. When ``.only()``/``.defer()``
+    excluded the column there is no value to snapshot, so the record is flagged
+    instead and :func:`_reject_permanent_uri_rewrite` reads the stored value back
+    if and only if the column is later assigned (T025, T026).
     """
     if "permanent_uri" in field_names:
         instance._loaded_permanent_uri = instance.permanent_uri
@@ -77,7 +77,7 @@ def _snapshot_permanent_uri(instance: "ConceptScheme | Concept | Collection", fi
         instance._permanent_uri_deferred = True
 
 
-def _permanent_uri_still_deferred(instance: "ConceptScheme | Concept | Collection") -> bool:
+def _permanent_uri_still_deferred(instance: "PermanentUriModel") -> bool:
     """True when the column was never loaded and has not been assigned since.
 
     Nothing about the identifier can have changed in that case, so every check
@@ -88,12 +88,12 @@ def _permanent_uri_still_deferred(instance: "ConceptScheme | Concept | Collectio
     return "permanent_uri" in instance.get_deferred_fields()
 
 
-def _stored_permanent_uri(instance: "ConceptScheme | Concept | Collection") -> str | None:
+def _stored_permanent_uri(instance: "PermanentUriModel") -> str | None:
     """The identifier the database currently holds for ``instance``."""
     return type(instance)._base_manager.filter(pk=instance.pk).values_list("permanent_uri", flat=True).first()
 
 
-def _note_permanent_uri_saved(instance: "ConceptScheme | Concept | Collection") -> None:
+def _note_permanent_uri_saved(instance: "PermanentUriModel") -> None:
     """Adopt the just-written identifier as the stored one.
 
     Fixedness has to start at the save that first stores an identifier, not at
@@ -106,7 +106,7 @@ def _note_permanent_uri_saved(instance: "ConceptScheme | Concept | Collection") 
     instance._permanent_uri_deferred = False
 
 
-def _reject_permanent_uri_rewrite(instance: "ConceptScheme | Concept | Collection") -> None:
+def _reject_permanent_uri_rewrite(instance: "PermanentUriModel") -> None:
     """Refuse a save that changes or clears an already-stored ``permanent_uri``.
 
     Fixedness moves one way only (FR-002, FR-013): once a record holds a stored
@@ -136,7 +136,18 @@ def _reject_permanent_uri_rewrite(instance: "ConceptScheme | Concept | Collectio
         )
 
 
-def _reject_permanent_uri_held_by_another_model(instance: "ConceptScheme | Concept | Collection") -> None:
+def _permanent_uri_models() -> tuple[type["PermanentUriModel"], ...]:
+    """Every concrete model that carries a ``permanent_uri`` column (T028).
+
+    Derived from :class:`PermanentUriModel`'s live subclasses rather than a
+    hardcoded tuple, so a fourth model enrols itself in the cross-model
+    uniqueness check the moment it subclasses the abstract base — forgetting to
+    add it to a hand-maintained list is no longer possible.
+    """
+    return tuple(model for model in PermanentUriModel.__subclasses__() if not model._meta.abstract)
+
+
+def _reject_permanent_uri_held_by_another_model(instance: "PermanentUriModel") -> None:
     """Refuse a ``permanent_uri`` already held by a record of a *different* model.
 
     Uniqueness within one model is a database constraint (FR-006, per-model
@@ -148,8 +159,8 @@ def _reject_permanent_uri_held_by_another_model(instance: "ConceptScheme | Conce
     if not instance.permanent_uri:
         return
     model = type(instance)
-    others = [candidate for candidate in (ConceptScheme, Concept, Collection) if candidate is not model]
-    if any(candidate.objects.filter(permanent_uri=instance.permanent_uri).exists() for candidate in others):
+    others = [candidate for candidate in _permanent_uri_models() if candidate is not model]
+    if any(candidate._default_manager.filter(permanent_uri=instance.permanent_uri).exists() for candidate in others):
         raise ValidationError(
             {
                 "permanent_uri": ValidationError(
@@ -161,7 +172,7 @@ def _reject_permanent_uri_held_by_another_model(instance: "ConceptScheme | Conce
         )
 
 
-def _normalise_blank_permanent_uri(instance: "ConceptScheme | Concept | Collection") -> None:
+def _normalise_blank_permanent_uri(instance: "PermanentUriModel") -> None:
     """Store the *absence* of an identifier as ``None``, never as ``""``.
 
     ``permanent_uri`` is nullable so the partial ``UniqueConstraint`` — which
@@ -178,7 +189,7 @@ def _normalise_blank_permanent_uri(instance: "ConceptScheme | Concept | Collecti
         instance.permanent_uri = None
 
 
-def _validate_permanent_uri_on_save(instance: "ConceptScheme | Concept | Collection") -> None:
+def _validate_permanent_uri_on_save(instance: "PermanentUriModel") -> None:
     """Every ``permanent_uri`` check a ``save()`` owes, in one place.
 
     ``save()`` never calls ``full_clean()``, so the field validator alone would
@@ -211,10 +222,10 @@ def _configured_language_codes() -> set[str]:
     return {code for code, _label in settings.LANGUAGES}
 
 
-_PermanentUriModel = TypeVar("_PermanentUriModel", bound=models.Model)
+_ModelT = TypeVar("_ModelT", bound=models.Model)
 
 
-class PermanentUriLookupMixin(models.Manager[_PermanentUriModel]):
+class PermanentUriLookupMixin(models.Manager[_ModelT]):
     """Adds :meth:`get_by_uri` to a manager (research R6).
 
     Shared by the ``ConceptScheme``, ``Concept``, and ``Collection`` managers so
@@ -222,7 +233,7 @@ class PermanentUriLookupMixin(models.Manager[_PermanentUriModel]):
     way it already can a concept, without three drifting implementations.
     """
 
-    def get_by_uri(self, uri: str) -> _PermanentUriModel:
+    def get_by_uri(self, uri: str) -> _ModelT:
         """Return the record identified by ``uri``, fixed or provisional (FR-007).
 
         An exact match on the stored ``permanent_uri`` is tried first, so a fixed
@@ -237,9 +248,98 @@ class PermanentUriLookupMixin(models.Manager[_PermanentUriModel]):
         except ObjectDoesNotExist:
             return self._get_by_local_parse(uri)
 
-    def _get_by_local_parse(self, uri: str) -> _PermanentUriModel:
+    def _get_by_local_parse(self, uri: str) -> _ModelT:
         """Resolve a provisional, base-relative identifier. Implemented per model."""
         raise NotImplementedError
+
+
+class PermanentUriModel(models.Model):
+    """Abstract base for a model carrying an externally assigned identifier (T028).
+
+    ``ConceptScheme``, ``Concept``, and ``Collection`` each subclass this rather
+    than repeating the ``permanent_uri`` field, ``uri``, ``has_permanent_uri``,
+    the permanent-URI half of ``clean()``, and the save-tail validation hook
+    byte-identically three times. A concrete subclass supplies only its own
+    ``local_url`` composition, its ``Meta.constraints`` entry name, and its
+    ``permanent_uri`` field's ``help_text`` wording (by redeclaring the field —
+    an ordinary Django abstract-base override, not a second column).
+    """
+
+    #: The ``permanent_uri`` this instance was loaded from the database with, set
+    #: by :meth:`from_db`. Not a model field — bookkeeping for
+    #: :func:`_reject_permanent_uri_rewrite`.
+    _loaded_permanent_uri: str | None = None
+
+    #: True when this instance came from the database with ``permanent_uri``
+    #: deferred, so there is a stored value to read back if it is assigned.
+    _permanent_uri_deferred: bool = False
+
+    permanent_uri = models.CharField(
+        max_length=PERMANENT_URI_MAX_LENGTH,
+        null=True,
+        blank=True,
+        verbose_name=_("permanent URI"),
+        help_text=_(
+            "The identifier assigned by this record's publisher, held exactly as given. "
+            "Fixed once set. Leave blank for a record authored here, which reports the "
+            "identifier composed from this site's address instead."
+        ),
+        validators=[validate_permanent_uri],
+    )
+
+    class Meta:
+        abstract = True
+
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        """Snapshot the loaded ``permanent_uri`` so a later save can detect a rewrite (T025)."""
+        instance = super().from_db(db, field_names, values)
+        _snapshot_permanent_uri(instance, field_names)
+        return instance
+
+    @property
+    def uri(self) -> str:
+        """The record's permanent URI: its identity.
+
+        The externally assigned identifier when one is held (fixed, held
+        verbatim), otherwise :attr:`local_url` (provisional, follows a rename
+        or a change to the configured address).
+        """
+        return self.permanent_uri or self.local_url
+
+    @property
+    def local_url(self) -> str:
+        """Where this record is viewed on this site (FR-008). Implemented per model."""
+        raise NotImplementedError
+
+    @property
+    def has_permanent_uri(self) -> bool:
+        """Whether this record's permanent URI is externally fixed (research R2).
+
+        Recorded by the presence of :attr:`permanent_uri`, never inferred by
+        comparing it against the configured base address (FR-003).
+        """
+        return bool(self.permanent_uri)
+
+    def clean(self):
+        """Refuse a ``permanent_uri`` already held by a record of a different model.
+
+        Field validators (:func:`validate_permanent_uri`) already cover format on the
+        ``full_clean()`` path; the cross-model check needs a query beyond one field
+        so it lives here rather than on the field itself (research R4).
+        """
+        super().clean()
+        if _permanent_uri_still_deferred(self):
+            return
+        _normalise_blank_permanent_uri(self)
+        _reject_permanent_uri_rewrite(self)
+        _reject_permanent_uri_held_by_another_model(self)
+
+    def save(self, *args, **kwargs):
+        """Validate ``permanent_uri`` before the write and adopt it as stored after."""
+        _validate_permanent_uri_on_save(self)
+        super().save(*args, **kwargs)
+        _note_permanent_uri_saved(self)
 
 
 class ConceptSchemeManager(PermanentUriLookupMixin["ConceptScheme"]):
@@ -260,21 +360,12 @@ class ConceptSchemeManager(PermanentUriLookupMixin["ConceptScheme"]):
         return self.get(slug=slug)
 
 
-class ConceptScheme(models.Model):
+class ConceptScheme(PermanentUriModel):
     """A controlled vocabulary — a named container for concepts (a SKOS concept scheme).
 
     The ``slug`` is derived from ``name`` on every save (dynamic while unpublished,
     research R5) and is unique app-wide. The ``uri`` is composed on read.
     """
-
-    #: The ``permanent_uri`` this instance was loaded from the database with, set
-    #: by :meth:`from_db` (T025). Not a model field — bookkeeping for
-    #: :func:`_reject_permanent_uri_rewrite`.
-    _loaded_permanent_uri: str | None = None
-
-    #: True when this instance came from the database with ``permanent_uri``
-    #: deferred, so there is a stored value to read back if it is assigned (T026).
-    _permanent_uri_deferred: bool = False
 
     name = models.CharField(
         max_length=255,
@@ -334,23 +425,6 @@ class ConceptScheme(models.Model):
     def __str__(self) -> str:
         return self.name
 
-    @classmethod
-    def from_db(cls, db, field_names, values):
-        """Snapshot the loaded ``permanent_uri`` so a later save can detect a rewrite (T025)."""
-        instance = super().from_db(db, field_names, values)
-        _snapshot_permanent_uri(instance, field_names)
-        return instance
-
-    @property
-    def uri(self) -> str:
-        """The scheme's permanent URI: its identity.
-
-        The externally assigned identifier when one is held (fixed, held
-        verbatim), otherwise :attr:`local_url` (provisional, follows a rename
-        or a change to the configured address).
-        """
-        return self.permanent_uri or self.local_url
-
     @property
     def local_url(self) -> str:
         """Where this scheme is viewed on this site (FR-008), always this
@@ -358,15 +432,6 @@ class ConceptScheme(models.Model):
         who assigned :attr:`permanent_uri`.
         """
         return f"{conf.get_base_uri()}/{self.slug}"
-
-    @property
-    def has_permanent_uri(self) -> bool:
-        """Whether this scheme's permanent URI is externally fixed (research R2).
-
-        Recorded by the presence of :attr:`permanent_uri`, never inferred by
-        comparing it against the configured base address (FR-003).
-        """
-        return bool(self.permanent_uri)
 
     @property
     def effective_default_language(self) -> str:
@@ -378,20 +443,6 @@ class ConceptScheme(models.Model):
         anchor identity in their own language (FR-009/FR-011).
         """
         return self.default_language or settings.LANGUAGE_CODE
-
-    def clean(self):
-        """Refuse a ``permanent_uri`` already held by a record of a different model.
-
-        Field validators (:func:`validate_permanent_uri`) already cover format on the
-        ``full_clean()`` path; the cross-model check needs a query beyond one field
-        so it lives here rather than on the field itself (research R4).
-        """
-        super().clean()
-        if _permanent_uri_still_deferred(self):
-            return
-        _normalise_blank_permanent_uri(self)
-        _reject_permanent_uri_rewrite(self)
-        _reject_permanent_uri_held_by_another_model(self)
 
     def save(self, *args, **kwargs):
         """Derive the slug from ``name``, freeze the default language once concepts
@@ -438,9 +489,7 @@ class ConceptScheme(models.Model):
                     )
                 }
             )
-        _validate_permanent_uri_on_save(self)
         super().save(*args, **kwargs)
-        _note_permanent_uri_saved(self)
 
 
 class ConceptManager(PermanentUriLookupMixin["Concept"]):
@@ -476,7 +525,7 @@ class ConceptManager(PermanentUriLookupMixin["Concept"]):
         return self.get(scheme__slug=scheme_slug, slug=concept_slug)
 
 
-class Concept(models.Model):
+class Concept(PermanentUriModel):
     """A single term within a vocabulary (a SKOS concept).
 
     The ``slug`` is derived from ``label`` on every save (dynamic while
@@ -485,15 +534,6 @@ class Concept(models.Model):
     owning scheme's URI (research R1). ``label`` is the default-language
     preferred label; richer multi-label support arrives with a later story.
     """
-
-    #: The ``permanent_uri`` this instance was loaded from the database with, set
-    #: by :meth:`from_db` (T025). Not a model field — bookkeeping for
-    #: :func:`_reject_permanent_uri_rewrite`.
-    _loaded_permanent_uri: str | None = None
-
-    #: True when this instance came from the database with ``permanent_uri``
-    #: deferred, so there is a stored value to read back if it is assigned (T026).
-    _permanent_uri_deferred: bool = False
 
     scheme = models.ForeignKey(
         ConceptScheme,
@@ -557,23 +597,6 @@ class Concept(models.Model):
     def __str__(self) -> str:
         return self.label
 
-    @classmethod
-    def from_db(cls, db, field_names, values):
-        """Snapshot the loaded ``permanent_uri`` so a later save can detect a rewrite (T025)."""
-        instance = super().from_db(db, field_names, values)
-        _snapshot_permanent_uri(instance, field_names)
-        return instance
-
-    @property
-    def uri(self) -> str:
-        """The concept's permanent URI: its identity.
-
-        The externally assigned identifier when one is held (fixed, held
-        verbatim, and never derived from its scheme's), otherwise
-        :attr:`local_url` (provisional, follows a rename).
-        """
-        return self.permanent_uri or self.local_url
-
     @property
     def local_url(self) -> str:
         """Where this concept is viewed on this site (FR-008), always this
@@ -585,15 +608,6 @@ class Concept(models.Model):
         one on the publisher's domain (spec.md Edge Cases §4).
         """
         return f"{self.scheme.local_url}/{self.slug}"
-
-    @property
-    def has_permanent_uri(self) -> bool:
-        """Whether this concept's permanent URI is externally fixed (research R2).
-
-        Recorded by the presence of :attr:`permanent_uri`, never inferred by
-        comparing it against the configured base address (FR-003).
-        """
-        return bool(self.permanent_uri)
 
     def set_slug(self, slug: str) -> None:
         """Set an explicit slug that survives later relabels (FR-010).
@@ -660,23 +674,7 @@ class Concept(models.Model):
                     )
                 }
             )
-        _validate_permanent_uri_on_save(self)
         super().save(*args, **kwargs)
-        _note_permanent_uri_saved(self)
-
-    def clean(self):
-        """Refuse a ``permanent_uri`` already held by a record of a different model.
-
-        Field validators (:func:`validate_permanent_uri`) already cover format on the
-        ``full_clean()`` path; the cross-model check needs a query beyond one field
-        so it lives here rather than on the field itself (research R4).
-        """
-        super().clean()
-        if _permanent_uri_still_deferred(self):
-            return
-        _normalise_blank_permanent_uri(self)
-        _reject_permanent_uri_rewrite(self)
-        _reject_permanent_uri_held_by_another_model(self)
 
     def preferred_label(self, language: str | None = None) -> str | None:
         """Return this concept's preferred label in ``language``.
@@ -1279,7 +1277,7 @@ class CollectionManager(PermanentUriLookupMixin["Collection"]):
         return self.get(scheme__slug=scheme_slug, slug=collection_slug)
 
 
-class Collection(models.Model):
+class Collection(PermanentUriModel):
     """A named grouping of concepts within one vocabulary (a SKOS collection).
 
     A collection captures a grouping the ``broader``/``narrower`` hierarchy does not
@@ -1291,15 +1289,6 @@ class Collection(models.Model):
     from ``name`` on save and unique within the scheme; the ``uri`` is composed on read under
     a ``/collection/`` segment so it can never collide with a concept URI (research R4).
     """
-
-    #: The ``permanent_uri`` this instance was loaded from the database with, set
-    #: by :meth:`from_db` (T025). Not a model field — bookkeeping for
-    #: :func:`_reject_permanent_uri_rewrite`.
-    _loaded_permanent_uri: str | None = None
-
-    #: True when this instance came from the database with ``permanent_uri``
-    #: deferred, so there is a stored value to read back if it is assigned (T026).
-    _permanent_uri_deferred: bool = False
 
     scheme = models.ForeignKey(
         ConceptScheme,
@@ -1359,26 +1348,6 @@ class Collection(models.Model):
     def __str__(self) -> str:
         return self.name
 
-    @classmethod
-    def from_db(cls, db, field_names, values):
-        """Snapshot the loaded ``permanent_uri`` so a later save can detect a rewrite (T025)."""
-        instance = super().from_db(db, field_names, values)
-        _snapshot_permanent_uri(instance, field_names)
-        return instance
-
-    @property
-    def uri(self) -> str:
-        """The collection's permanent URI: its identity.
-
-        The externally assigned identifier when one is held (fixed, held
-        verbatim), otherwise :attr:`local_url` (provisional, follows a
-        rename). The ``/collection/`` segment keeps a collection's identity
-        space disjoint from a concept's (whose local URL is
-        ``{scheme.local_url}/{slug}``), so the two can never mint the same
-        address when RDF projection lands (research R4).
-        """
-        return self.permanent_uri or self.local_url
-
     @property
     def local_url(self) -> str:
         """Where this collection is viewed on this site (FR-008), always this
@@ -1387,32 +1356,13 @@ class Collection(models.Model):
         Composed from the *scheme's* :attr:`~ConceptScheme.local_url`, never
         from its ``uri`` — a collection added locally to a vocabulary whose own
         identifier is externally fixed still needs a place on this site, not
-        one on the publisher's domain (spec.md Edge Cases §4).
+        one on the publisher's domain (spec.md Edge Cases §4). The
+        ``/collection/`` segment keeps a collection's identity space disjoint
+        from a concept's (whose local URL is ``{scheme.local_url}/{slug}``),
+        so the two can never mint the same address when RDF projection lands
+        (research R4).
         """
         return f"{self.scheme.local_url}/collection/{self.slug}"
-
-    @property
-    def has_permanent_uri(self) -> bool:
-        """Whether this collection's permanent URI is externally fixed (research R2).
-
-        Recorded by the presence of :attr:`permanent_uri`, never inferred by
-        comparing it against the configured base address (FR-003).
-        """
-        return bool(self.permanent_uri)
-
-    def clean(self):
-        """Refuse a ``permanent_uri`` already held by a record of a different model.
-
-        Field validators (:func:`validate_permanent_uri`) already cover format on the
-        ``full_clean()`` path; the cross-model check needs a query beyond one field
-        so it lives here rather than on the field itself (research R4).
-        """
-        super().clean()
-        if _permanent_uri_still_deferred(self):
-            return
-        _normalise_blank_permanent_uri(self)
-        _reject_permanent_uri_rewrite(self)
-        _reject_permanent_uri_held_by_another_model(self)
 
     def save(self, *args, **kwargs):
         """Derive the slug from ``name`` and refuse an empty or colliding slug.
@@ -1434,9 +1384,7 @@ class Collection(models.Model):
                     )
                 }
             )
-        _validate_permanent_uri_on_save(self)
         super().save(*args, **kwargs)
-        _note_permanent_uri_saved(self)
 
     def add(self, concept: "Concept") -> "CollectionMember":
         """Add ``concept`` to the collection as a member; append it (FS-004 FR-002).
