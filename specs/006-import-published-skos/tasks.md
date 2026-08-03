@@ -15,9 +15,9 @@ unless stated.
   was then reverted: `deptry` fails a declared-but-unused dependency, which is Article VII's rule
   ("runtime deps are declared alongside the code that imports them, never ahead of it") working as
   intended. The commit that declares them is the commit that imports them.
-- **T002** — Create the `controlled_vocabularies/io/` package and the mirroring `tests/test_io/`
-  and `tests/fixtures/` directories, with the public surface re-exported from `io/__init__.py`.
-  Test: importing the public names from `controlled_vocabularies.io` succeeds.
+- **T002** — Create the `controlled_vocabularies/exchange/` package and the mirroring `tests/test_exchange/`
+  and `tests/fixtures/` directories, with the public surface re-exported from `exchange/__init__.py`.
+  Test: importing the public names from `controlled_vocabularies.exchange` succeeds.
 - **T003** — `report.py`: `ImportReport` and `SetAsideEntry`, with the four outcome buckets FR-015
   requires — created, updated, set aside with a reason, and present-here-but-absent-from-source —
   plus the reason vocabulary. Tests assert the report is inspectable as data, that counts and

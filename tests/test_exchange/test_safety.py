@@ -13,7 +13,7 @@ import pytest
 from django.core.exceptions import ValidationError
 from django.utils.functional import Promise
 
-from controlled_vocabularies.io.safety import UnsafeRdfXmlError, scan_rdf_xml
+from controlled_vocabularies.exchange.safety import UnsafeRdfXmlError, scan_rdf_xml
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "security"
 

@@ -175,28 +175,36 @@ turns out to need the idiom.
 The test for this reinstates the measured bomb as its input, so the control is proven against the
 actual defect rather than a stand-in.
 
-## D10 — `mypy_path` is dropped; it collided with the new `io` package (T002, Implementer US0)
+## D10 — the package is named `exchange/`, not `io/`; `mypy_path` stays (T002, revised at convergence)
 
-Creating `controlled_vocabularies/io/` made `poetry run mypy` fail immediately: "Source file found
+Creating `controlled_vocabularies/exchange/` made `poetry run mypy` fail immediately: "Source file found
 twice under different module names: `controlled_vocabularies.io` and `io`". The repo's
-`[tool.mypy]` carried `mypy_path = "controlled_vocabularies/"` from onboarding, which adds that
+`[tool.mypy]` carries `mypy_path = "controlled_vocabularies/"` from the scaffold, which adds that
 directory itself as a search root — so every module inside it is reachable both as
 `controlled_vocabularies.<name>` (via `files = ["controlled_vocabularies"]`) and as a bare
 top-level `<name>` (via `mypy_path`). `conf.py`, `models.py`, and `apps.py` never collided because
 nothing else on the path is named that; `io` does, because it is a stdlib module name.
 
-`--explicit-package-bases` was tried first and made it worse — it surfaced the identical collision
-for `conf.py` too, showing the setting was already fragile and `io` only exposed it. `mypy_path` add
-no behaviour `files` does not already provide (confirmed: `poetry run mypy` still reports "Success:
-no issues found" across all five source files, baseline four plus `io/__init__.py`, with the line
-removed), so it is dropped rather than worked around.
+The Implementer's first resolution was to drop `mypy_path`. That is overturned here. The line is
+not local to this feature: the same setting is in `django-easy-icons`, `django-flex-menus` and
+`django-content-license`, so removing it makes this repo the one package configured differently
+from its siblings, for a reason recorded only in this feature's decision log. The collision is also
+not confined to mypy — a subpackage that shadows a stdlib top-level name will keep meeting tools
+that resolve modules by path (coverage, Sphinx autodoc, pytest import modes), and each will need
+its own local exception.
 
-**Why:** the plan named this package `io/` (plan.md Project Structure) and that name is right for a
-reader with no other job — inventing a different name to dodge a stdlib collision would be the tail
-wagging the dog, and the actual fix costs one redundant config line.
+Chosen: rename the package to `exchange/`, and `tests/test_io/` to `tests/test_exchange/`, with
+`mypy_path` restored. The name still covers both directions — reading a published vocabulary now,
+writing one at R4 export — which is what `io` was chosen for. Verified after the rename with
+`mypy_path` present: mypy "Success: no issues found in 7 source files", 339 tests pass, ruff,
+format, deptry and `makemigrations --check` all clean.
 
-**Revisit if:** a future module inside `controlled_vocabularies/` needs `MYPYPATH`-style resolution
-that `files` alone does not give it — none of the existing modules do, and `io/` does not either.
+**Why:** the collision comes from a name this feature chose, and the cheap fix is to change the
+thing this feature owns rather than shared toolchain config it does not. Five commits in is the
+cheapest this rename will ever be.
+
+**Revisit if:** the family standardises on dropping `mypy_path` across all packages, at which point
+this repo follows that change rather than leading it.
 
 ## D11 — `rdflib` is not declared with T001/T004; only `defusedxml` is (Implementer US0)
 
@@ -226,7 +234,7 @@ dependency until code under `controlled_vocabularies/` actually imports it (T006
 `deptry`'s `DEP002`.
 
 Chosen: declare `rdflib` under `[tool.poetry.group.dev.dependencies]` now, used only by
-`tests/test_io/test_fixtures.py`. Verified this does not trip `deptry`: `tests/` is already in
+`tests/test_exchange/test_fixtures.py`. Verified this does not trip `deptry`: `tests/` is already in
 `[tool.deptry] extend_exclude`, and `poetry run deptry .` passes with `rdflib` present in the dev
 group and nothing outside `tests/` importing it — the existing dev-toolchain packages (`pytest`,
 `ruff`, `mypy`, …) already establish that pattern; a dev-only dependency used solely by the test

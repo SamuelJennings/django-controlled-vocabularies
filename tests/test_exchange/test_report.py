@@ -11,7 +11,7 @@ count without parsing a message.
 import pytest
 from django.utils.functional import Promise
 
-from controlled_vocabularies.io.report import ImportReport, SetAsideEntry, SetAsideReason
+from controlled_vocabularies.exchange.report import ImportReport, SetAsideEntry, SetAsideReason
 
 # One example params dict per reason, exercising every named placeholder its
 # template declares (beyond the universal %(subject)s).

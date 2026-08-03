@@ -86,7 +86,7 @@ specs/006-import-published-skos/
 controlled_vocabularies/
 ├── models.py            # unchanged
 ├── conf.py              # unchanged
-└── io/                  # new
+└── exchange/            # new
     ├── __init__.py      # public surface: import_skos(), ImportReport
     ├── skos.py          # the reader: graph -> records
     ├── mapping.py       # SKOS predicate -> model mapping table (research.md R4)
@@ -94,7 +94,7 @@ controlled_vocabularies/
     └── safety.py        # pre-flight scan of untrusted RDF/XML (research.md R3)
 
 tests/
-├── test_io/             # mirrors the source tree (testing-structure standard)
+├── test_exchange/       # mirrors the source tree (testing-structure standard)
 │   ├── test_skos.py
 │   ├── test_report.py
 │   └── test_safety.py
@@ -105,9 +105,9 @@ tests/
     └── …                # edited copies for the re-import scenarios
 ```
 
-**Structure Decision**: a package (`io/`) rather than a single module, because the report is a
+**Structure Decision**: a package (`exchange/`) rather than a single module, because the report is a
 public type that #51 and #52 import, and the safety scan is independently testable. The public
-surface is re-exported from `io/__init__.py` so consumers import one name.
+surface is re-exported from `exchange/__init__.py` so consumers import one name.
 
 ## Complexity Tracking
 
@@ -115,7 +115,7 @@ surface is re-exported from `io/__init__.py` so consumers import one name.
 |---|---|---|
 | **rdflib** runtime dependency | Reading three RDF serializations correctly is not something to hand-roll; the package has always been designed around rdflib at the import/export boundary (Article X, `docs/brainstorm.md`), and `pyproject.toml` already reserves its declaration for the code that imports it. | Writing three parsers. Not seriously considered. |
 | **defusedxml** runtime dependency | A measured memory-exhaustion route through RDF/XML entity expansion, reachable by any deployment that lets a curator supply a file (`research.md` R3). Article V names imported RDF untrusted. | Refusing every document with a DTD — rejected, it also refuses legitimate namespace-entity files. Capping file size — rejected, the amplification starts small. |
-| **`io/` package rather than one module** | The report is a public type two other features consume, and the safety scan is separately testable. Four small modules with one job each. | One `importers.py`. Rejected: it would put a public contract, a security control, and a long graph walk in one file. |
+| **`exchange/` package rather than one module** | The report is a public type two other features consume, and the safety scan is separately testable. Four small modules with one job each. | One `importers.py`. Rejected: it would put a public contract, a security control, and a long graph walk in one file. |
 
 Nothing else here adds an abstraction. There is no serialization plugin layer, no predicate
 registry (the mapping is a dict), and no importer base class — rdflib already hides the format

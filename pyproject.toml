@@ -61,6 +61,7 @@ warn_return_any = "True"
 warn_unused_ignores = "True"
 show_error_codes = "True"
 exclude = ["docs/", "migrations/", "tests/settings.py"]
+mypy_path = "controlled_vocabularies/"
 plugins = ["mypy_django_plugin.main"]
 
 [tool.django-stubs]

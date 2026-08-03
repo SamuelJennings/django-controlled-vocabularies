@@ -24,7 +24,7 @@ Append-only log of stage transitions and gate outcomes.
 
 ## 2026-08-03T20:00:03Z · Implementer US0 · T002
 
-**Did**: Scaffolded the `controlled_vocabularies/io/` package (docstring-only `__init__.py`, no
+**Did**: Scaffolded the `controlled_vocabularies/exchange/` package (docstring-only `__init__.py`, no
 re-exports yet) and its mirroring `tests/test_io/` directory, with a failing-first test that the
 package imports and carries a module docstring. Created `tests/fixtures/` (empty; populated by
 T005). Dropped the redundant `mypy_path = "controlled_vocabularies/"` mypy config entry — it made
@@ -125,7 +125,7 @@ directly named in the spec (US-5 acceptance 5) and tasks.md (T030) — so all th
 real, spec-grounded material rather than one being invented to round out a count.
 
 `rdflib` declared as a dev dependency (not runtime) for this task alone — decisions.md D12 — used
-only by `tests/test_io/test_fixtures.py`; confirmed `deptry` does not flag it (`tests/` is already
+only by `tests/test_exchange/test_fixtures.py`; confirmed `deptry` does not flag it (`tests/` is already
 excluded from its scan, and unused dev-group packages aren't what `DEP002` checks for, matching the
 existing `pytest`/`ruff`/`mypy` pattern). Also ran `makemigrations --check --dry-run`: no changes
 detected, confirming Phase 0 added no schema drift.
@@ -143,3 +143,21 @@ this Implementer's scope.
 **Watch**: T006 promotes `rdflib` from the dev group to `[tool.poetry.dependencies]` in the same
 commit as the code that first imports it at runtime (decisions.md D12, reiterated from the
 T001/T004 entry above).
+
+## Phase 0 review (orchestrator)
+
+**Did**: reviewed the Implementer's five tasks, reproduced the mypy collision behind D10 by
+restoring `mypy_path = "controlled_vocabularies/"` and re-running mypy, and overturned that
+decision. The package is renamed `controlled_vocabularies/io/` → `controlled_vocabularies/exchange/`
+and `tests/test_io/` → `tests/test_exchange/`, with `mypy_path` restored. Rationale in the rewritten
+D10: three sibling packages carry the same setting, so dropping it here is silent toolchain drift,
+and a subpackage shadowing a stdlib top-level name will keep colliding with other path-resolving
+tools. D11 and D12 (the `rdflib` declaration ordering) are accepted as written. D13's fixture
+substitution is accepted — the empirical finding that `rdf:about=""` resolves against the parse
+base is correct, and `blank_node_collection.ttl` is grounded in US-5 acceptance 5.
+
+**Verified after the rename, with `mypy_path` present**: `poetry run mypy` — success, 7 source
+files. `poetry run pytest -q` — 339 passed. `poetry run ruff check .` — all checks passed.
+`poetry run ruff format --check .` — 20 files already formatted. `poetry run deptry .` — no issues.
+
+**Watch**: plan.md and tasks.md now say `exchange/`; any brief quoting `io/` is stale.

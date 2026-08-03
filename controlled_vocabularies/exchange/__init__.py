@@ -10,6 +10,6 @@ are a later story (tasks.md Phase US-1); this module grows its re-exports one
 task at a time, each landing with the test that covers it.
 """
 
-from controlled_vocabularies.io.report import ImportReport, SetAsideEntry, SetAsideReason
+from controlled_vocabularies.exchange.report import ImportReport, SetAsideEntry, SetAsideReason
 
 __all__ = ["ImportReport", "SetAsideEntry", "SetAsideReason"]
