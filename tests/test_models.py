@@ -477,6 +477,115 @@ class TestPermanentUriIsFixed:
         assert deferred.permanent_uri == "http://vocabs.example.org/rock/other"
 
 
+class TestGetByUri:
+    """US-2 — a record is found by its identifier wherever it points (FR-007).
+    ``get_by_uri`` tries an exact match on the stored ``permanent_uri`` first,
+    falling back to the model's base-relative parse (R1's behaviour, unchanged)
+    for a provisional identifier, and raises the model's ``DoesNotExist`` when
+    neither resolves. ``ConceptScheme`` and ``Collection`` gain the method for
+    the first time; ``Concept.objects.get_by_uri`` keeps its existing name and
+    exact local behaviour (FR-014)."""
+
+    @pytest.mark.django_db
+    def test_concept_resolves_by_external_permanent_uri(self, scheme):
+        concept = Concept.objects.create(
+            scheme=scheme, label="Granite", permanent_uri="http://vocabs.example.org/rock/granite"
+        )
+        assert Concept.objects.get_by_uri("http://vocabs.example.org/rock/granite") == concept
+
+    @pytest.mark.django_db
+    def test_concept_resolves_by_its_own_local_identifier(self, scheme):
+        # FR-014: unchanged from R1 — a locally authored concept still resolves
+        # by the identifier composed from the configured base and its slugs.
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        assert Concept.objects.get_by_uri(concept.uri) == concept
+
+    @pytest.mark.django_db
+    def test_concept_unheld_identifier_raises_does_not_exist(self, scheme):
+        Concept.objects.create(scheme=scheme, label="Heat Flow")
+        with pytest.raises(Concept.DoesNotExist):
+            Concept.objects.get_by_uri("http://vocabs.example.org/nothing")
+        with pytest.raises(Concept.DoesNotExist):
+            Concept.objects.get_by_uri(f"{conf.get_base_uri()}/{scheme.slug}/no-such-concept")
+
+    @pytest.mark.django_db
+    def test_imported_and_local_concept_do_not_answer_to_each_others_identifier(self, scheme):
+        imported = Concept.objects.create(
+            scheme=scheme, label="Granite", permanent_uri="http://vocabs.example.org/rock/granite"
+        )
+        local = Concept.objects.create(scheme=scheme, label="Basalt")
+        # Each is found by its own identifier — the imported concept's external
+        # permanent_uri, the local concept's composed base-relative one — and not
+        # by an identifier held by neither.
+        assert Concept.objects.get_by_uri(imported.uri) == imported
+        assert Concept.objects.get_by_uri(local.uri) == local
+        with pytest.raises(Concept.DoesNotExist):
+            Concept.objects.get_by_uri("http://vocabs.example.org/rock/nothing-here")
+
+    @pytest.mark.django_db
+    def test_scheme_resolves_by_external_permanent_uri(self):
+        scheme = ConceptScheme.objects.create(name="Rocks", permanent_uri="http://vocabs.example.org/rocks")
+        assert ConceptScheme.objects.get_by_uri("http://vocabs.example.org/rocks") == scheme
+
+    @pytest.mark.django_db
+    def test_scheme_resolves_by_its_own_local_identifier(self):
+        scheme = ConceptScheme.objects.create(name="Geothermics")
+        assert ConceptScheme.objects.get_by_uri(scheme.uri) == scheme
+
+    @pytest.mark.django_db
+    def test_scheme_unheld_identifier_raises_does_not_exist(self):
+        ConceptScheme.objects.create(name="Geothermics")
+        with pytest.raises(ConceptScheme.DoesNotExist):
+            ConceptScheme.objects.get_by_uri("http://vocabs.example.org/nothing")
+        with pytest.raises(ConceptScheme.DoesNotExist):
+            ConceptScheme.objects.get_by_uri(f"{conf.get_base_uri()}/no-such-scheme")
+
+    @pytest.mark.django_db
+    def test_scheme_does_not_resolve_a_concepts_identifier(self, scheme):
+        # A concept's local identifier has two path segments below the base; a
+        # scheme's has one — the scheme parse must not mistake one for the other.
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        with pytest.raises(ConceptScheme.DoesNotExist):
+            ConceptScheme.objects.get_by_uri(concept.uri)
+
+    @pytest.mark.django_db
+    def test_concept_does_not_resolve_a_schemes_identifier(self, scheme):
+        with pytest.raises(Concept.DoesNotExist):
+            Concept.objects.get_by_uri(scheme.uri)
+
+    @pytest.mark.django_db
+    def test_collection_resolves_by_external_permanent_uri(self, scheme):
+        collection = Collection.objects.create(
+            scheme=scheme, name="Igneous", permanent_uri="http://vocabs.example.org/rocks/igneous"
+        )
+        assert Collection.objects.get_by_uri("http://vocabs.example.org/rocks/igneous") == collection
+
+    @pytest.mark.django_db
+    def test_collection_resolves_by_its_own_local_identifier(self, scheme):
+        collection = Collection.objects.create(scheme=scheme, name="Igneous")
+        assert Collection.objects.get_by_uri(collection.uri) == collection
+
+    @pytest.mark.django_db
+    def test_collection_unheld_identifier_raises_does_not_exist(self, scheme):
+        Collection.objects.create(scheme=scheme, name="Igneous")
+        with pytest.raises(Collection.DoesNotExist):
+            Collection.objects.get_by_uri("http://vocabs.example.org/nothing")
+
+    @pytest.mark.django_db
+    def test_collection_does_not_resolve_a_concepts_identifier(self, scheme):
+        # A collection's local identifier carries a literal "collection" segment
+        # that a concept's never does — the collection parse must require it.
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        with pytest.raises(Collection.DoesNotExist):
+            Collection.objects.get_by_uri(concept.uri)
+
+    @pytest.mark.django_db
+    def test_concept_does_not_resolve_a_collections_identifier(self, scheme):
+        collection = Collection.objects.create(scheme=scheme, name="Igneous")
+        with pytest.raises(Concept.DoesNotExist):
+            Concept.objects.get_by_uri(collection.uri)
+
+
 def _editable_fields(model: type[Model]):
     """The model's own, user-editable, concrete fields (excludes the auto pk
     and reverse relations) — every one must meet the metadata standard."""
