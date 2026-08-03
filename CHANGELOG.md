@@ -10,8 +10,8 @@ All notable changes to this project are documented in this file. The format foll
 
 - Static, externally assigned identifiers: `ConceptScheme`, `Concept`, and `Collection` each gain a
   `static_uri` field holding an identifier assigned by an external publisher, held exactly as given
-  and never recomputed by the app. Set it and it stays put — the app will not overwrite it, though
-  nothing stops you from editing it, so make the field non-editable wherever you expose it once a
+  and never recomputed by the app. Nothing in the package overwrites a stored value, and nothing
+  stops you from editing one either, so make the field non-editable wherever you expose it once a
   record is published. A locally authored, unpublished record's `uri` instead stays dynamic,
   composed and reported live and following a rename, until one is assigned. `local_url` is a new,
   separate accessor for this site's own address for a record, always composed from the configured

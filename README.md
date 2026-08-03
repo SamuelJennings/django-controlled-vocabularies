@@ -74,10 +74,10 @@ a vocabulary's slug is unique across the site, and a concept's or collection's s
 within its vocabulary. A composed URI therefore cannot collide, because the parts it is built from
 cannot. A stored `static_uri` carries its own unique index per model on top of that.
 
-Nothing stops you changing a `static_uri` once it is set. That is deliberate — a published
-identifier is not supposed to move, but keeping it still is a matter of not editing it, not of the
-model refusing every write path. Make the field non-editable wherever you expose it once a record
-is published, and treat a value that differs between two imports of the same vocabulary as a
+Nothing stops you changing a `static_uri` once it is set. That is deliberate. A published
+identifier is not supposed to move, but keeping it still is a matter of not editing it, rather than
+of the model refusing every write path. Make the field non-editable wherever you expose it once a
+record is published, and treat a value that differs between two imports of the same vocabulary as a
 problem with the source file.
 
 An externally assigned static URI must use one of a small set of accepted schemes — `http`,
