@@ -243,13 +243,29 @@ class PermanentUriLookupMixin(models.Manager[_ModelT]):
     def get_by_uri(self, uri: str) -> _ModelT:
         """Return the record identified by ``uri``, fixed or provisional (FR-007).
 
-        An exact match on the stored ``permanent_uri`` is tried first, so a fixed
-        identifier resolves correctly even when it happens to sit under this
-        site's own configured base address (FR-003, research R6). On no match
-        this falls back to :meth:`_get_by_local_parse`, the model's
-        base-relative composition, which raises the model's ``DoesNotExist``
-        when nothing resolves either way.
+        A falsy or non-``str`` ``uri`` raises ``DoesNotExist`` immediately
+        (T033): ``self.get(permanent_uri=None)`` compiles to
+        ``permanent_uri IS NULL``, which matches *every* provisional record —
+        with one in the table it would return that unrelated record, with two
+        it would raise ``MultipleObjectsReturned``. #50's importer idiom
+        ``node.get("about")`` yields ``None`` when the source omits an
+        identifier, so without this guard it would upsert into an arbitrary
+        unrelated record.
+
+        Otherwise, an exact match on the stored ``permanent_uri`` is tried
+        first, so a fixed identifier resolves correctly even when it happens
+        to sit under this site's own configured base address (FR-003,
+        research R6). On no match this falls back to
+        :meth:`_get_by_local_parse`, the model's base-relative composition,
+        which raises the model's ``DoesNotExist`` when nothing resolves
+        either way.
         """
+        if not uri or not isinstance(uri, str):
+            # mypy/django-stubs cannot resolve .DoesNotExist off a still-generic
+            # type[_ModelT] (decisions.md D11) — only off a concrete model class.
+            raise self.model.DoesNotExist(  # type: ignore[attr-defined]
+                f"No {self.model.__name__} matches the URI {uri!r}."
+            )
         try:
             return self.get(permanent_uri=uri)
         except ObjectDoesNotExist:

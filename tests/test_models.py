@@ -821,6 +821,60 @@ class TestGetByUri:
             Concept.objects.get_by_uri(collection.uri)
 
 
+class TestGetByUriRejectsAbsentIdentifiers:
+    """US-2 — T033. ``self.get(permanent_uri=uri)`` with ``uri=None`` compiles to
+    ``permanent_uri IS NULL``, which matches *every* provisional record —
+    verified: with one provisional record in the table, ``get_by_uri(None)``
+    returns that unrelated record; with two, it raises
+    ``MultipleObjectsReturned``. #50's importer idiom ``node.get("about")``
+    yields ``None`` when the source omits an identifier, so this would upsert
+    into an arbitrary unrelated record. A falsy or non-``str`` ``uri`` now
+    raises the model's ``DoesNotExist`` up front, on all three managers."""
+
+    @pytest.mark.django_db
+    def test_concept_get_by_uri_none_does_not_return_an_unrelated_provisional_record(self, scheme):
+        Concept.objects.create(scheme=scheme, label="Heat Flow")
+        with pytest.raises(Concept.DoesNotExist):
+            Concept.objects.get_by_uri(None)
+
+    @pytest.mark.django_db
+    def test_concept_get_by_uri_none_does_not_raise_multiple_objects_returned(self, scheme):
+        Concept.objects.create(scheme=scheme, label="Heat Flow")
+        Concept.objects.create(scheme=scheme, label="Basalt")
+        with pytest.raises(Concept.DoesNotExist):
+            Concept.objects.get_by_uri(None)
+
+    @pytest.mark.django_db
+    def test_concept_get_by_uri_empty_string_does_not_return_an_unrelated_provisional_record(self, scheme):
+        Concept.objects.create(scheme=scheme, label="Heat Flow")
+        with pytest.raises(Concept.DoesNotExist):
+            Concept.objects.get_by_uri("")
+
+    @pytest.mark.django_db
+    def test_scheme_get_by_uri_none_does_not_return_an_unrelated_provisional_record(self):
+        ConceptScheme.objects.create(name="Geothermics")
+        with pytest.raises(ConceptScheme.DoesNotExist):
+            ConceptScheme.objects.get_by_uri(None)
+
+    @pytest.mark.django_db
+    def test_scheme_get_by_uri_empty_string_does_not_return_an_unrelated_provisional_record(self):
+        ConceptScheme.objects.create(name="Geothermics")
+        with pytest.raises(ConceptScheme.DoesNotExist):
+            ConceptScheme.objects.get_by_uri("")
+
+    @pytest.mark.django_db
+    def test_collection_get_by_uri_none_does_not_return_an_unrelated_provisional_record(self, scheme):
+        Collection.objects.create(scheme=scheme, name="Igneous")
+        with pytest.raises(Collection.DoesNotExist):
+            Collection.objects.get_by_uri(None)
+
+    @pytest.mark.django_db
+    def test_collection_get_by_uri_empty_string_does_not_return_an_unrelated_provisional_record(self, scheme):
+        Collection.objects.create(scheme=scheme, name="Igneous")
+        with pytest.raises(Collection.DoesNotExist):
+            Collection.objects.get_by_uri("")
+
+
 class TestProvisionalUri:
     """US-3 — a record authored here shows the identifier it will publish under
     (FR-005). A record with no ``permanent_uri`` reports the value R1's
