@@ -66,31 +66,64 @@ def validate_permanent_uri(value: str) -> None:
 def _snapshot_permanent_uri(instance: "ConceptScheme | Concept | Collection", field_names) -> None:
     """Record the ``permanent_uri`` a record was loaded with, for the rewrite guard.
 
-    Called from each model's ``from_db``. Only recorded when the field was
-    actually fetched — left at its default (``None``) when ``.only()``/
-    ``.defer()`` excluded it, so :func:`_reject_permanent_uri_rewrite` treats a
-    deferred field the same as "nothing stored yet" rather than comparing
-    against a value never read (T025).
+    Called from each model's ``from_db``. When ``.only()``/``.defer()`` excluded
+    the column there is no value to snapshot, so the record is flagged instead
+    and :func:`_reject_permanent_uri_rewrite` reads the stored value back if and
+    only if the column is later assigned (T025, T026).
     """
     if "permanent_uri" in field_names:
         instance._loaded_permanent_uri = instance.permanent_uri
+    else:
+        instance._permanent_uri_deferred = True
+
+
+def _permanent_uri_still_deferred(instance: "ConceptScheme | Concept | Collection") -> bool:
+    """True when the column was never loaded and has not been assigned since.
+
+    Nothing about the identifier can have changed in that case, so every check
+    below can be skipped — and must be, because merely reading
+    ``instance.permanent_uri`` to check it would fetch the column that was
+    deliberately left behind.
+    """
+    return "permanent_uri" in instance.get_deferred_fields()
+
+
+def _stored_permanent_uri(instance: "ConceptScheme | Concept | Collection") -> str | None:
+    """The identifier the database currently holds for ``instance``."""
+    return type(instance)._base_manager.filter(pk=instance.pk).values_list("permanent_uri", flat=True).first()
+
+
+def _note_permanent_uri_saved(instance: "ConceptScheme | Concept | Collection") -> None:
+    """Adopt the just-written identifier as the stored one.
+
+    Fixedness has to start at the save that first stores an identifier, not at
+    the next load: without this, the very instance R4's publish action holds
+    could be re-saved under a second identifier (T026).
+    """
+    if _permanent_uri_still_deferred(instance):
+        return
+    instance._loaded_permanent_uri = instance.permanent_uri
+    instance._permanent_uri_deferred = False
 
 
 def _reject_permanent_uri_rewrite(instance: "ConceptScheme | Concept | Collection") -> None:
     """Refuse a save that changes or clears an already-stored ``permanent_uri``.
 
-    Fixedness moves one way only (FR-002, FR-013): once a record has been loaded
-    from the database holding an identifier, no save may change or clear it.
-    Compared against the snapshot :func:`_snapshot_permanent_uri` took when the
-    record was loaded, which defaults to ``None`` — indistinguishable, and
-    deliberately so, whether the record is freshly constructed in memory, was
-    loaded with ``permanent_uri`` deferred, or was loaded genuinely provisional.
-    Each of those is unconstrained, so setting an identifier for the first time
-    is allowed (the path R4's publish action will use).
+    Fixedness moves one way only (FR-002, FR-013): once a record holds a stored
+    identifier, no save may change or clear it. The comparison is against the
+    snapshot :func:`_snapshot_permanent_uri` took at load, or — when the column
+    was deferred and has since been assigned — against a read-back of the stored
+    value, so ``.only()``/``.defer()`` is not a way around the guard. A record
+    with nothing stored is unconstrained, so setting an identifier for the first
+    time is allowed (the path R4's publish action will use).
     """
     loaded = instance._loaded_permanent_uri
     if loaded is None:
-        return
+        if not instance._permanent_uri_deferred or _permanent_uri_still_deferred(instance):
+            return
+        loaded = _stored_permanent_uri(instance)
+        if loaded is None:
+            return
     if instance.permanent_uri != loaded:
         raise ValidationError(
             {
@@ -126,6 +159,26 @@ def _reject_permanent_uri_held_by_another_model(instance: "ConceptScheme | Conce
                 )
             }
         )
+
+
+def _validate_permanent_uri_on_save(instance: "ConceptScheme | Concept | Collection") -> None:
+    """Every ``permanent_uri`` check a ``save()`` owes, in one place.
+
+    ``save()`` never calls ``full_clean()``, so the field validator alone would
+    leave the import path — the one this feature exists to serve — accepting a
+    value the specification says can never be stored (research R5, the same trap
+    the slug fields were defended against).
+    """
+    if _permanent_uri_still_deferred(instance):
+        return
+    _reject_permanent_uri_rewrite(instance)
+    if not instance.permanent_uri:
+        return
+    try:
+        validate_permanent_uri(instance.permanent_uri)
+    except ValidationError as exc:
+        raise ValidationError({"permanent_uri": exc}) from exc
+    _reject_permanent_uri_held_by_another_model(instance)
 
 
 def _configured_language_codes() -> set[str]:
@@ -200,6 +253,10 @@ class ConceptScheme(models.Model):
     #: by :meth:`from_db` (T025). Not a model field — bookkeeping for
     #: :func:`_reject_permanent_uri_rewrite`.
     _loaded_permanent_uri: str | None = None
+
+    #: True when this instance came from the database with ``permanent_uri``
+    #: deferred, so there is a stored value to read back if it is assigned (T026).
+    _permanent_uri_deferred: bool = False
 
     name = models.CharField(
         max_length=255,
@@ -305,6 +362,8 @@ class ConceptScheme(models.Model):
         so it lives here rather than on the field itself (research R4).
         """
         super().clean()
+        if _permanent_uri_still_deferred(self):
+            return
         _reject_permanent_uri_rewrite(self)
         _reject_permanent_uri_held_by_another_model(self)
 
@@ -353,18 +412,9 @@ class ConceptScheme(models.Model):
                     )
                 }
             )
-        _reject_permanent_uri_rewrite(self)
-        if self.permanent_uri:
-            # save() never calls full_clean(), so the field validator alone would
-            # leave the import path — the one this feature exists to serve —
-            # accepting a value the specification says can never be stored
-            # (research R5, the same trap Concept.slug was defended against).
-            try:
-                validate_permanent_uri(self.permanent_uri)
-            except ValidationError as exc:
-                raise ValidationError({"permanent_uri": exc}) from exc
-            _reject_permanent_uri_held_by_another_model(self)
+        _validate_permanent_uri_on_save(self)
         super().save(*args, **kwargs)
+        _note_permanent_uri_saved(self)
 
 
 class ConceptManager(PermanentUriLookupMixin["Concept"]):
@@ -414,6 +464,10 @@ class Concept(models.Model):
     #: by :meth:`from_db` (T025). Not a model field — bookkeeping for
     #: :func:`_reject_permanent_uri_rewrite`.
     _loaded_permanent_uri: str | None = None
+
+    #: True when this instance came from the database with ``permanent_uri``
+    #: deferred, so there is a stored value to read back if it is assigned (T026).
+    _permanent_uri_deferred: bool = False
 
     scheme = models.ForeignKey(
         ConceptScheme,
@@ -568,18 +622,9 @@ class Concept(models.Model):
                     )
                 }
             )
-        _reject_permanent_uri_rewrite(self)
-        if self.permanent_uri:
-            # save() never calls full_clean(), so the field validator alone would
-            # leave the import path — the one this feature exists to serve —
-            # accepting a value the specification says can never be stored
-            # (research R5, the same trap the slug fields were defended against).
-            try:
-                validate_permanent_uri(self.permanent_uri)
-            except ValidationError as exc:
-                raise ValidationError({"permanent_uri": exc}) from exc
-            _reject_permanent_uri_held_by_another_model(self)
+        _validate_permanent_uri_on_save(self)
         super().save(*args, **kwargs)
+        _note_permanent_uri_saved(self)
 
     def clean(self):
         """Refuse a ``permanent_uri`` already held by a record of a different model.
@@ -589,6 +634,8 @@ class Concept(models.Model):
         so it lives here rather than on the field itself (research R4).
         """
         super().clean()
+        if _permanent_uri_still_deferred(self):
+            return
         _reject_permanent_uri_rewrite(self)
         _reject_permanent_uri_held_by_another_model(self)
 
@@ -1211,6 +1258,10 @@ class Collection(models.Model):
     #: :func:`_reject_permanent_uri_rewrite`.
     _loaded_permanent_uri: str | None = None
 
+    #: True when this instance came from the database with ``permanent_uri``
+    #: deferred, so there is a stored value to read back if it is assigned (T026).
+    _permanent_uri_deferred: bool = False
+
     scheme = models.ForeignKey(
         ConceptScheme,
         on_delete=models.CASCADE,
@@ -1306,6 +1357,8 @@ class Collection(models.Model):
         so it lives here rather than on the field itself (research R4).
         """
         super().clean()
+        if _permanent_uri_still_deferred(self):
+            return
         _reject_permanent_uri_rewrite(self)
         _reject_permanent_uri_held_by_another_model(self)
 
@@ -1329,18 +1382,9 @@ class Collection(models.Model):
                     )
                 }
             )
-        _reject_permanent_uri_rewrite(self)
-        if self.permanent_uri:
-            # save() never calls full_clean(), so the field validator alone would
-            # leave the import path — the one this feature exists to serve —
-            # accepting a value the specification says can never be stored
-            # (research R5, the same trap the slug fields were defended against).
-            try:
-                validate_permanent_uri(self.permanent_uri)
-            except ValidationError as exc:
-                raise ValidationError({"permanent_uri": exc}) from exc
-            _reject_permanent_uri_held_by_another_model(self)
+        _validate_permanent_uri_on_save(self)
         super().save(*args, **kwargs)
+        _note_permanent_uri_saved(self)
 
     def add(self, concept: "Concept") -> "CollectionMember":
         """Add ``concept`` to the collection as a member; append it (FS-004 FR-002).
