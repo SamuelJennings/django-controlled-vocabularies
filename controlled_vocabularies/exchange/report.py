@@ -187,24 +187,78 @@ class FatalFinding:
         return str(self.reason.template) % {"subject": self.subject, **self.params}
 
 
+class NormalizedReason(TextChoices):
+    """The closed vocabulary of predicates this import stores under a different
+    model field than the one the file itself asserted (T021, FR-009, decisions.md D24).
+
+    Deliberately separate from :class:`SetAsideReason`: every set-aside entry
+    names a value that was *not* stored; every entry here names one that
+    *was*, just not verbatim under the source's own predicate. Article XI's
+    "never applied silently" reaches both — a value that made it in under a
+    different name still needs to be visible as a normalisation, not only a
+    value that did not make it in at all.
+    """
+
+    FOREIGN_DEFINITION = "foreign_definition", _("definition read from a foreign predicate")
+
+    @property
+    def template(self) -> Promise:
+        """The translatable, named-placeholder message template for this reason.
+
+        Every template declares ``%(subject)s``, the same shape
+        :class:`SetAsideReason.template` uses (Article XII).
+        """
+        return _NORMALIZED_TEMPLATES[self]
+
+
+_NORMALIZED_TEMPLATES: dict[NormalizedReason, Promise] = {
+    NormalizedReason.FOREIGN_DEFINITION: _(
+        "'%(subject)s' has no '%(language)s' definition of its own; its '%(predicate)s' value in "
+        "that language was stored as its definition instead."
+    ),
+}
+
+
+@dataclass(frozen=True)
+class NormalizedEntry:
+    """One value this import stored under a predicate other than the one the file asserted
+    (FR-009/FR-015), with what it was and why. The normalised counterpart of
+    :class:`SetAsideEntry`, with the same shape — ``subject`` names the record at
+    fault, ``params`` carries whatever else the reason's template needs — but kept as
+    a distinct type because a normalised value is never one of :class:`SetAsideReason`'s
+    reasons: it *was* stored.
+    """
+
+    reason: NormalizedReason
+    subject: str
+    params: dict[str, str] = field(default_factory=dict)
+
+    def render(self) -> str:
+        """This entry's message in the caller's active language (Article XII)."""
+        return str(self.reason.template) % {"subject": self.subject, **self.params}
+
+
 @dataclass
 class ImportReport:
     """The structured outcome of one import run (FR-015, decisions.md D7).
 
-    Five buckets, each a plain list a caller reads directly rather than parsing:
+    Six buckets, each a plain list a caller reads directly rather than parsing:
     :attr:`created` and :attr:`updated` hold the URIs of records the run wrote,
     :attr:`set_aside` holds a :class:`SetAsideEntry` per value the run could not
     store, :attr:`absent_from_source` holds the URIs of records the file no
-    longer mentions (FR-013) — left untouched, only named — and :attr:`fatal`
-    holds a :class:`FatalFinding` per reason the whole run was refused
-    (FR-004): non-empty only on a failed run, and always empty on one that
-    returned successfully.
+    longer mentions (FR-013) — left untouched, only named — :attr:`normalized`
+    holds a :class:`NormalizedEntry` per value the run *did* store, but under a
+    different predicate than the one the file asserted (T021, FR-009), and
+    :attr:`fatal` holds a :class:`FatalFinding` per reason the whole run was
+    refused (FR-004): non-empty only on a failed run, and always empty on one
+    that returned successfully.
     """
 
     created: list[str] = field(default_factory=list)
     updated: list[str] = field(default_factory=list)
     set_aside: list[SetAsideEntry] = field(default_factory=list)
     absent_from_source: list[str] = field(default_factory=list)
+    normalized: list[NormalizedEntry] = field(default_factory=list)
     fatal: list[FatalFinding] = field(default_factory=list)
 
     def add_created(self, subject: str) -> None:
@@ -223,6 +277,13 @@ class ImportReport:
         """Record that ``subject`` was not stored, for ``reason``, with any extra ``params``
         its message template needs."""
         self.set_aside.append(SetAsideEntry(reason=reason, subject=subject, params=params))
+
+    def add_normalized(self, reason: NormalizedReason, subject: str, **params: str) -> None:
+        """Record that ``subject`` was stored under a predicate other than the one the
+        file asserted, for ``reason``, with any extra ``params`` its message template
+        needs (T021, FR-009). The value *is* stored — this is visibility, not a refusal,
+        so it is tracked apart from :attr:`set_aside`."""
+        self.normalized.append(NormalizedEntry(reason=reason, subject=subject, params=params))
 
     def add_fatal(self, reason: FatalReason, subject: str, **params: str) -> None:
         """Record that ``subject`` is why the whole run was refused, for ``reason``, with any

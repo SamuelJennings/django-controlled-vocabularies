@@ -499,3 +499,159 @@ identifier.
 
 **Revisit if:** conformance drift of this kind reaches a story merge again — the gate belongs at each
 story's stage exit, where it would have caught this at US-0 instead of two stories later.
+
+## D24 — `rocks_updated.ttl` gains a fifth edit: a note dropped from a concept that stays present (T019)
+
+Tasks.md's T019 carries the same kind of deferred case T018 carries (decisions.md D20): "a re-import
+of `rocks_updated.ttl` removes the note the publisher dropped, leaving the concept itself intact."
+But checked against the actual fixture, no such case exists. `rocks_updated.ttl`'s four edits (D20)
+are: granite's preferred label corrected, granite's alternative label removed, quartz dropped
+entirely, and the ordered collection's member sequence changed. None of those is a note removed from
+a concept that *stays*: basalt, sedimentary, and igneous — the only concepts left carrying notes once
+quartz is gone — are all otherwise untouched between the two files. Quartz's own three notes
+(`historyNote`/`changeNote`/`note`) disappear with it, but that exercises "a record the file no
+longer mentions" (T015's `absent_from_source`, already covered), not "a value removed from a record
+the file still contains" — decisions.md D20's own carried case requires the concept to remain.
+
+This is exactly the situation D20's own "Revisit if" anticipated: "the fixture is not pinned, only
+reused where it already fits" — it does not fit here, so it is extended rather than left short one
+case.
+
+Chosen: drop basalt's `skos:example` note from `rocks_updated.ttl`, leaving basalt's labels
+otherwise unchanged. Checked against every existing test that reads this fixture
+(`TestAuthoritativeUpdateForContainedRecords`, `TestRecordsAbsentFromSource`,
+`TestFixtureCorpus.test_updated_fixture_carries_the_four_re_import_edits`): none inspects basalt's
+notes, so none is affected by the removal. `igneous`'s `definition` and `sedimentary`'s
+`editorialNote` were left alone rather than also edited, so the base vocabulary (`rocks.ttl`) keeps
+one example of each of the seven note kinds landing untouched on a plain re-import, which
+`TestConceptNotes`'s own coverage relies on.
+
+**Revisit if:** a later story needs a *second* concept in this pair to lose a note, or needs the
+lost note to be a different kind than `example` — the same "not pinned" latitude D20 grants applies
+here too.
+
+## D25 — Labels and notes are filtered by language *before* the write, never by catching the model's own refusal (T020)
+
+FR-014 requires a value in an unconfigured language to be set aside and reported, not stored. Both
+paths to that outcome are available: check `language in settings.LANGUAGES` before calling
+`Concept.add_label`/`add_note` at all, or call it unconditionally and catch the `ValidationError`
+`ConceptLabel.clean()`/`ConceptNote.clean()` already raise for exactly this case (the same check,
+duplicated). The brief for this task names the choice explicitly rather than letting it default to
+whichever came out of T018/T019's first draft (both left the filter out entirely, since every
+fixture up to T020 used only configured languages — decisions.md's T018/T019 entries flag this as
+their own known gap, not an oversight).
+
+Chosen: filter ahead of the write. Three reasons.
+
+1. **The exception is not shaped for this.** `full_clean()` raises one `ValidationError` naming
+   every invalid field on the row at once (language *and*, independently, kind/kind-specific rules).
+   Catching it and assuming the language is *why* it failed would silently swallow a genuinely
+   different defect — a future rule added to `clean()` would then get misreported as
+   "unconfigured language" instead of surfacing on its own terms.
+2. **A caught exception cannot cheaply say *how many*.** FR-014/T020 both ask for a count, and the
+   report's own contract (D7) already counts via `set_aside_by_reason()` grouping one entry per
+   value — catching per-attempt still works for that, but only because the importer already loops
+   value-by-value; the filter-ahead version needs no `try`/`except` scaffolding to get there, since
+   the check and the report call sit next to each other in the same branch.
+3. **Article XI's own language**, restated by decisions.md D2, is that this filtering is
+   "mechanical" — a plain membership check *is* mechanical; reacting to an exception the model
+   raises for its own protection is treating a safety net as a routing decision, which the T020
+   brief calls out directly ("the importer must not rely on the exception as its control flow").
+
+`ConceptLabel.clean()`/`ConceptNote.clean()`'s own language check is not redundant with this: it
+remains the backstop for every write path that is *not* this importer (the admin, a future editing
+UI, a factory), exactly as it already was before this decision.
+
+**Revisit if:** a future note/label rule needs richer set-aside detail than "the language was
+wrong" (e.g. distinguishing an invalid language code from a merely unconfigured one) — at that
+point the filter-ahead check may need to grow past a plain membership test, but should still stay
+ahead of the write rather than move to a catch.
+
+## D26 — Normalisation gets its own report bucket, not a `SetAsideReason` member (T021)
+
+FR-009 requires that a foreign predicate normalised onto another — `dcterms:description` read as a
+concept's `definition` — "MUST be reported, never applied silently." T021's own brief lumps this in
+with notation/mapping/unmodelled-predicate reporting in one sentence, then names it as its own,
+separate sub-case. The question is what mechanism carries it: reuse `SetAsideReason` (add a new
+member, or route it through an existing one), or something else.
+
+Reusing `SetAsideReason` was rejected. Its own docstring, and every existing member, says what it
+is: "the closed vocabulary of reasons an import *cannot store* something." A normalised value is
+not that — it *is* stored, as `ConceptNote.Kind.DEFINITION`, exactly where a concept's own
+`skos:definition` would have landed. Filing it under `set_aside` would make `report.set_aside`
+lie to a caller who filters it expecting "things that did not make it in" (`#51`'s own use of
+`set_aside_by_reason()` depends on that being true), and it would blur the exact distinction D1
+draws between "reported and dropped" and "reported and kept."
+
+Chosen: a fourth reason vocabulary, `NormalizedReason`, with its own `NormalizedEntry` dataclass
+and `ImportReport.normalized` bucket — the same shape (`reason`/`subject`/`params`, frozen, lazily
+translatable, one `render()`) `SetAsideReason`/`FatalReason` already established twice over (D7).
+This is not new invention: it is the third instance of a pattern this report already commits to,
+applied to a third, genuinely distinct outcome ("stored, but not verbatim") that the first two
+outcomes ("not stored" / "run refused") do not cover. `FOREIGN_DEFINITION` is its only member for
+now — no other normalisation exists yet in this feature — but the vocabulary is closed the same way
+the other two are, ready for a second member without a shape change if one arrives later (a note
+kind's own foreign-predicate alias, per D21's own "Revisit if").
+
+**Revisit if:** a future normalisation needs a materially different shape than `subject` + named
+`params` (e.g. one that spans two subjects) — that would be evidence the pattern doesn't generalise
+a third time and needs its own reconsideration, not a third copy-paste.
+
+## D27 — "Unmodelled predicate" is scoped to non-SKOS predicates only; a not-yet-built SKOS predicate is silently skipped (T021)
+
+FR-014 covers "predicates the models have no place for." `skos:broader`/`narrower`/`related`
+(US-4) and `skos:member`/`memberList` (US-5) are not read by this importer yet, but the models *do*
+have a place for them — `ConceptRelation`, `Collection`, `CollectionMember` all exist in R1's
+schema. Reporting them as `UNMODELLED_PREDICATE` now would be false on the words of the reason
+itself, and it would also break `rocks.ttl`'s own baseline: `TestReportPopulatedByARealRun`'s
+`test_a_first_import_reports_everything_as_created_nothing_as_updated` asserts `report.set_aside
+== []` for a plain import of `rocks.ttl`, which carries `skos:broader`, `skos:related`, and both
+collection-membership predicates. Any generic "everything not explicitly consumed on this concept"
+walk would have broken that test the moment it ran, for a reason that has nothing to do with T021's
+own scope.
+
+Chosen: `_import_unheld_values()` only reports a predicate as `UNMODELLED_PREDICATE` when it falls
+*outside* the SKOS namespace entirely — matching the acceptance text's own wording, "a predicate
+from outside SKOS." A SKOS predicate the model has a home for but this importer doesn't read yet is
+silently skipped, not reported, deferred to the story that builds its read path (T023-T030); a
+predicate genuinely outside SKOS, with no model home at all regardless of story, is reported now.
+This also means `skos:notation` and the six mapping predicates are checked *before* the generic
+walk and excluded from it by `_HANDLED_CONCEPT_PREDICATES` — they are SKOS predicates the models
+have no place for either, but they get their own named reasons (`NOTATION`/`MAPPING`) rather than
+falling through to the generic, less specific `UNMODELLED_PREDICATE`.
+
+**Revisit if:** a later story (US-4/US-5) lands and a SKOS predicate remains genuinely unbuilt with
+no story left to claim it — at that point silently skipping it stops being "deferred" and starts
+being "actually has no place," and it should move to being reported.
+
+## D28 — Tamper-check triage for US-3, and the spec amendment D26 required
+
+`forge tamper-check --base e2f4e8e --head 1033161` raised four `modified_preexisting_test` flags.
+All four are approved, and the reasoning is recorded here rather than left implicit.
+
+**Two are test modules, both purely additive.** Across `tests/test_exchange/test_report.py` and
+`tests/test_exchange/test_skos.py` the whole range removes exactly two lines, both `import`
+statements replaced by the same imports widened. No assertion was weakened, removed or skipped.
+
+**Two are shared fixtures used by earlier stories' tests, and those are the ones that needed
+checking.** `rocks_updated.ttl` lost basalt's `skos:example` note, because the four original
+re-import edits covered no case of a note dropped from a concept that stays present, which is
+exactly what T019 has to prove (D24). `no_default_language_label.ttl` gained an alternative label on
+concept "b", so T022 proves the rest of the vocabulary lands with its content rather than only its
+identity. Every test reading either fixture still passes, and the suite is green at 453.
+
+**One check the flags did not raise, and should have been asked anyway:** the behaviour US-3 added
+was probed by mutation rather than trusted from a green suite. Removing the label-import call, the
+note-import call, the unheld-value reporting call, and widening the configured-language set so the
+filter stops filtering, each produced failures in the tests that claim to cover them. A test that
+passes when its subject is deleted is not coverage.
+
+**Spec amended, per D26.** `NormalizedReason` adds a fifth report outcome, and `spec.md` named only
+four in FR-015, SC-014 and Key Entities. The spec was amended in place rather than left to disagree
+with the code, with the amendment marked as made during implementation and pointing at D26. This
+does not change any behaviour Sam signed off at the spec gate — it adds a channel that tells the
+curator more than the signed-off report did — but the amendment is flagged in the story report
+rather than buried here.
+
+**Revisit if:** a fixture shared across stories needs editing again. Twice is a pattern, and the
+better answer may be a fixture per story rather than one corpus every story edits.

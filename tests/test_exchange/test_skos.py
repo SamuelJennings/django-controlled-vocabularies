@@ -13,10 +13,10 @@ import pytest
 import rdflib
 
 import controlled_vocabularies.exchange as exchange
-from controlled_vocabularies.exchange.report import FatalReason, SetAsideReason
+from controlled_vocabularies.exchange.report import FatalReason, NormalizedReason, SetAsideReason
 from controlled_vocabularies.exchange.safety import UnsafeRdfXmlError
 from controlled_vocabularies.exchange.skos import SkosImportError, SkosImportFailed, _read_graph, import_skos
-from controlled_vocabularies.models import Concept, ConceptRelation, ConceptScheme
+from controlled_vocabularies.models import Concept, ConceptLabel, ConceptNote, ConceptRelation, ConceptScheme
 from tests.factories import ConceptFactory, ConceptSchemeFactory
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "skos"
@@ -617,6 +617,209 @@ class TestAtomicityOnAPopulatedDatabase:
         assert not Concept.objects.filter(label="Ghost concept").exists()
         scheme.refresh_from_db()
         assert scheme.name == name_before
+
+
+class TestConceptLabels:
+    """T018 — FR-008/research.md R5: preferred labels in configured languages
+    other than the default, and alternative and hidden labels, are stored
+    against their concept through ``Concept.add_label``, each with its own
+    kind and language. The preferred label in the vocabulary's default
+    language is ``Concept.label`` itself (T009) and is never also written as
+    a ``ConceptLabel`` row — ``ConceptLabel.clean()`` refuses that (models.py
+    ``_reject_default_language_preferred``), and this importer must not even
+    attempt it."""
+
+    def test_preferred_labels_in_other_configured_languages_are_stored(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
+        others = {(row.language, row.text) for row in igneous.labels.filter(kind=ConceptLabel.Kind.PREFERRED)}
+        assert others == {("de", "Magmatisches Gestein"), ("fr", "Roche ignée")}
+
+    def test_default_language_preferred_label_is_not_duplicated_as_a_concept_label(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
+        assert igneous.label == "Igneous rock"
+        assert not igneous.labels.filter(language="en", kind=ConceptLabel.Kind.PREFERRED).exists()
+
+    def test_alternative_and_hidden_labels_are_stored_with_their_own_kind_and_language(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        quartz = Concept.objects.get(static_uri="http://example.org/rocks/quartz")
+        assert granite.alt_labels("en") == ["Magma rock"]
+        assert granite.hidden_labels("en") == ["Granit rock"]
+        assert quartz.alt_labels("de") == ["Quartz"]
+
+    def test_reimport_removes_an_alternative_label_the_publisher_dropped_leaving_the_concept_intact(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        granite_pk = Concept.objects.get(static_uri="http://example.org/rocks/granite").pk
+        assert Concept.objects.get(pk=granite_pk).alt_labels("en") == ["Magma rock"]
+
+        import_skos(FIXTURES / "rocks_updated.ttl")
+
+        granite = Concept.objects.get(pk=granite_pk)
+        assert granite.alt_labels("en") == []
+        assert granite.hidden_labels("en") == ["Granit rock"]
+        assert granite.pk == granite_pk
+
+
+class TestConceptNotes:
+    """T019 — FR-009/research.md R5: the definition and each of the six SKOS
+    documentary note kinds are stored against their concept, each in its own
+    language, through ``Concept.add_note``."""
+
+    def test_definition_and_each_note_kind_are_stored_against_the_right_concept(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        basalt = Concept.objects.get(static_uri="http://example.org/rocks/basalt")
+        sedimentary = Concept.objects.get(static_uri="http://example.org/rocks/sedimentary")
+        quartz = Concept.objects.get(static_uri="http://example.org/rocks/quartz")
+
+        assert igneous.definition("en") == "Rock formed by the cooling and solidification of magma or lava."
+        assert granite.notes("en", ConceptNote.Kind.SCOPE) == ["Used here for coarse-grained intrusive igneous rock."]
+        assert basalt.notes("en", ConceptNote.Kind.EXAMPLE) == ["Columnar basalt at the Giant's Causeway."]
+        assert sedimentary.notes("en", ConceptNote.Kind.EDITORIAL) == [
+            "Confirm classification against the regional survey before publishing."
+        ]
+        assert quartz.notes("en", ConceptNote.Kind.HISTORY) == [
+            "Reclassified from 'Silica minerals' in the 2020 revision."
+        ]
+        assert quartz.notes("en", ConceptNote.Kind.CHANGE) == ["Definition tightened in 2022."]
+        assert quartz.notes("en", ConceptNote.Kind.NOTE) == ["See also feldspar for a related silicate."]
+
+    def test_reimport_removes_a_note_the_publisher_dropped_leaving_the_concept_intact(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        basalt_pk = Concept.objects.get(static_uri="http://example.org/rocks/basalt").pk
+        assert Concept.objects.get(pk=basalt_pk).notes("en", ConceptNote.Kind.EXAMPLE) == [
+            "Columnar basalt at the Giant's Causeway."
+        ]
+
+        import_skos(FIXTURES / "rocks_updated.ttl")
+
+        basalt = Concept.objects.get(pk=basalt_pk)
+        assert basalt.notes("en", ConceptNote.Kind.EXAMPLE) == []
+        assert basalt.label == "Basalt"
+        assert basalt.pk == basalt_pk
+
+
+class TestUnconfiguredLanguageValuesAreSetAside:
+    """T020 — FR-014: a label or note in a language the site is not configured
+    for is stored nowhere and is named in the report with its language, and
+    the concept still imports on whatever configured-language content it
+    carries. Filtered ahead of the write rather than caught from the models'
+    own refusal (decisions.md D25) — ``ConceptLabel.clean()``/``ConceptNote.clean()``
+    would refuse these too, but the importer must not rely on that exception
+    as its control flow."""
+
+    def test_labels_and_notes_in_an_unconfigured_language_are_set_aside_and_named(self, db):
+        report = import_skos(FIXTURES / "unconfigured_language_values.ttl")
+        schist = Concept.objects.get(static_uri="http://example.org/quarry3/schist")
+        entries = [
+            entry
+            for entry in report.set_aside
+            if entry.reason is SetAsideReason.UNCONFIGURED_LANGUAGE and entry.subject == schist.static_uri
+        ]
+        # Two alternative labels and one scope note, each named individually
+        # rather than merged into a single "some values were dropped" entry.
+        assert len(entries) == 3
+        assert all(entry.params["language"] == "es" for entry in entries)
+
+    def test_the_concept_still_imports_on_its_configured_language_content(self, db):
+        import_skos(FIXTURES / "unconfigured_language_values.ttl")
+        schist = Concept.objects.get(static_uri="http://example.org/quarry3/schist")
+        assert schist.label == "Schist"
+        assert schist.alt_labels("es") == []
+        assert schist.notes("es") == []
+
+
+class TestUnheldValuesAndNormalisation:
+    """T021 — FR-014: a notation, a mapping to another vocabulary, and a
+    predicate from outside SKOS entirely are each set aside and reported
+    rather than passed over in silence, and the concepts still import
+    successfully. FR-009: a foreign ``dcterms:description`` read as a
+    concept's definition, because the concept carries no ``skos:definition``
+    of its own, is reported as a normalisation rather than applied silently
+    (decisions.md D24 in mapping.py, D21's precedent extended from the scheme
+    level to the concept level)."""
+
+    def test_the_concepts_still_import_successfully(self, db):
+        report = import_skos(FIXTURES / "unmodelled_and_normalised_values.ttl")
+        assert report.fatal == []
+        assert Concept.objects.filter(scheme__static_uri="http://example.org/hardware/").count() == 2
+
+    def test_a_notation_is_set_aside(self, db):
+        report = import_skos(FIXTURES / "unmodelled_and_normalised_values.ttl")
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.NOTATION]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/hardware/widget"
+
+    def test_a_mapping_predicate_is_set_aside_naming_the_predicate(self, db):
+        report = import_skos(FIXTURES / "unmodelled_and_normalised_values.ttl")
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.MAPPING]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/hardware/widget"
+        assert entries[0].params["predicate"] == "skos:exactMatch"
+
+    def test_a_predicate_from_outside_skos_is_set_aside_naming_the_predicate(self, db):
+        report = import_skos(FIXTURES / "unmodelled_and_normalised_values.ttl")
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.UNMODELLED_PREDICATE]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/hardware/widget"
+        assert entries[0].params["predicate"] == "http://example.org/ns#customAttribute"
+
+    def test_a_foreign_description_is_read_as_the_definition_and_reported_as_normalised(self, db):
+        report = import_skos(FIXTURES / "unmodelled_and_normalised_values.ttl")
+        gadget = Concept.objects.get(static_uri="http://example.org/hardware/gadget")
+        assert gadget.definition("en") == "A small mechanical device."
+        assert len(report.normalized) == 1
+        entry = report.normalized[0]
+        assert entry.reason is NormalizedReason.FOREIGN_DEFINITION
+        assert entry.subject == "http://example.org/hardware/gadget"
+        assert entry.params["predicate"] == "dcterms:description"
+        assert entry.params["language"] == "en"
+
+    def test_a_concept_with_its_own_definition_is_not_normalised(self, db):
+        # rocks.ttl's igneous carries a native skos:definition; nothing about
+        # a run that never needs the dcterms alias should land in
+        # report.normalized.
+        report = import_skos(FIXTURES / "rocks.ttl")
+        assert report.normalized == []
+
+    def test_broader_related_and_collection_membership_are_not_reported_as_unmodelled(self, db):
+        # skos:broader/related/member/memberList are SKOS predicates this
+        # importer does not read yet (US-4/US-5), but the models do have a
+        # place for them — they must never be reported as UNMODELLED_PREDICATE
+        # merely because this story doesn't build that read path yet.
+        report = import_skos(FIXTURES / "rocks.ttl")
+        assert not any(entry.reason is SetAsideReason.UNMODELLED_PREDICATE for entry in report.set_aside)
+
+
+class TestNoPreferredLabelFinishedByUS3:
+    """T022 — FR-006: a concept with no preferred label in the vocabulary's
+    default language is set aside under ``NO_PREFERRED_LABEL`` and named in
+    the report, and the rest of the vocabulary imports. Built at T009
+    (decisions.md D17) because FR-006 states it in the same sentence as
+    concept creation itself; D17 left it deliberately minimal and named this
+    task as where it is finished. Nothing about the shape D17 chose disagrees
+    with what US-3 built on top of it, so "finished" here means acceptance
+    coverage proving the rest of the vocabulary imports *with* its own US-3
+    content (labels, in this fixture) alongside the set-aside concept, not a
+    production change."""
+
+    def test_the_concept_with_no_default_language_label_is_set_aside_and_named(self, db):
+        report = import_skos(FIXTURES / "no_default_language_label.ttl")
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.NO_PREFERRED_LABEL]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/quarry/c"
+        assert entries[0].params["language"] == "en"
+        assert not Concept.objects.filter(static_uri="http://example.org/quarry/c").exists()
+
+    def test_the_rest_of_the_vocabulary_imports_with_its_own_content_intact(self, db):
+        import_skos(FIXTURES / "no_default_language_label.ttl")
+        assert Concept.objects.filter(scheme__static_uri="http://example.org/quarry/").count() == 2
+        b = Concept.objects.get(static_uri="http://example.org/quarry/b")
+        assert b.label == "B"
+        assert b.alt_labels("en") == ["B-alt"]
 
 
 class TestFixtureCorpus:

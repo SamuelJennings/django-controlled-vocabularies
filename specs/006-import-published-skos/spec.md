@@ -171,7 +171,7 @@ Every message this feature puts in front of a person is translatable, any field 
 - **FR-012**: Collections MUST be created inside the imported vocabulary, holding their published identifiers, with their membership. A collection the file declares as ordered MUST be marked ordered and MUST keep the order the file gives.
 - **FR-013**: **Re-running an import MUST upsert, never delete-and-recreate** (Article XI). For a record the file contains, the file MUST be authoritative for that record's own content — labels, notes, relationships, and membership MUST end up matching the file, including the removal of values the file no longer carries. A record the file does not mention MUST be left untouched and MUST be named in the report. No record's identifier is ever rewritten by a re-import (#49, FR-002 there).
 - **FR-014**: Values the app cannot store MUST be set aside and reported, never dropped in silence (Article XI). This covers at least: content in a language the site is not configured for, predicates the models have no place for, notations, and mappings to other vocabularies.
-- **FR-015**: The report MUST be a structured result the caller can act on, not only text. It MUST distinguish what was created, what was updated, what was set aside and why, and what is present here but absent from the source. It MUST be sufficient for #52 to render a command-line summary and a rehearsal preview without re-reading the file.
+- **FR-015**: The report MUST be a structured result the caller can act on, not only text. It MUST distinguish what was created, what was updated, what was set aside and why, what was stored under a different predicate than the file used and why, and what is present here but absent from the source. It MUST be sufficient for #52 to render a command-line summary and a rehearsal preview without re-reading the file. *(Amended during implementation, decisions.md D26: "stored, but not verbatim" is a fifth outcome, and filing it under set-aside would make that bucket — the one #51 filters on — mean two different things.)*
 - **FR-016**: Every message this feature puts in front of a person, in a failure or in the report, MUST be translatable with named placeholders. Developer-facing diagnostics are exempt (Article XII).
 - **FR-017**: Any model field this feature adds MUST carry translatable metadata and non-empty help text, and its indexing MUST be a deliberate recorded decision (Articles XII and XIII).
 - **FR-018**: The test suite MUST ship a published vocabulary as a fixture file in each supported serialization, discoverable from the suite, so the features that follow do not rebuild them.
@@ -179,8 +179,9 @@ Every message this feature puts in front of a person is translatable, any field 
 ### Key Entities *(include if feature involves data)*
 
 - **Import run**: one reading of one file into one vocabulary. Atomic — it lands whole or not at all — and re-runnable, matching every record by its static URI.
-- **Import report**: the structured outcome of a run. What was created, what was updated, what was set aside and why, and what is here but no longer in the source. The contract #51 and #52 build on.
+- **Import report**: the structured outcome of a run. What was created, what was updated, what was set aside and why, what was normalised and why, and what is here but no longer in the source. The contract #51 and #52 build on.
 - **Set-aside entry**: one thing the run could not store, with what it was and why. A language the site is not configured for, a predicate with no home in the models, a relationship end that does not exist, a concept with no usable preferred label.
+- **Normalisation entry**: one thing the run *did* store, but under a different predicate than the file used, with what it was and why — a foreign description read as a definition, say. Distinct from a set-aside entry because the value is in the database, and a caller filtering set-aside entries is asking what did not make it in (decisions.md D26).
 - **ConceptScheme, Concept, Collection, ConceptLabel, ConceptNote, ConceptRelation, CollectionMember (unchanged)**: this feature adds no domain model. It writes the ones R1 defined, through the identity #49 established.
 
 ## Success Criteria *(mandatory)*
@@ -200,7 +201,7 @@ Every message this feature puts in front of a person is translatable, any field 
 - **SC-011**: A relationship or membership pointing outside the file does not fail the run, is named in the report, and is stored when its other end is already in the database — verified by test.
 - **SC-012**: An ordered collection returns its members in the file's order after an import and after a re-import that changes that order — verified by test.
 - **SC-013**: Values the models cannot hold — a notation, a mapping, an unmodelled predicate — are named in the report and the run still succeeds — verified by test.
-- **SC-014**: The report distinguishes created, updated, set aside with a reason, and present-but-absent-from-source, as data rather than prose — verified by test.
+- **SC-014**: The report distinguishes created, updated, set aside with a reason, normalised with a reason, and present-but-absent-from-source, as data rather than prose — verified by test.
 - **SC-015**: Every message this feature shows a person is translatable with named placeholders — verified by the standards test.
 - **SC-016**: A published vocabulary fixture exists in each supported serialization and is loaded by the tests from the suite rather than built inline — verified by test.
 - **SC-017**: Two concepts whose labels derive the same slug both import with distinct slugs and distinct identifiers, and each keeps its slug when the same file is imported again — verified by test.

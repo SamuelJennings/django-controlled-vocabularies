@@ -580,3 +580,172 @@ finally reads them; D21 sets the `dcterms:*` alias precedent (scheme description
 definition) a note-kind mapping may want to follow for its own foreign-predicate aliases.
 
 **Watch**: none.
+
+## 2026-08-04T11:10:00Z · Implementer US3 · T018
+
+**Did**: `mapping.py` gains `LABEL_PREDICATES` (`skos:prefLabel`/`altLabel`/`hiddenLabel` ->
+`ConceptLabel.Kind`). `skos.py`'s new `_import_labels()` writes every one of a concept's labels
+through `Concept.add_label` (research.md R5), replacing whatever the concept already held — a
+label carries no identifier of its own to upsert by, unlike the concept itself, so the file's
+current content is written fresh on every run rather than diffed against what was there before.
+The preferred label in the vocabulary's effective default language is skipped: it is already
+`Concept.label` (T009), and `ConceptLabel.clean()` refuses a second preferred row in that language,
+so the importer must not attempt one either. Wired in through a new `_import_concept_content()`,
+called once per created-or-updated concept right after `concept.save()` — a thin wrapper today,
+built to grow one call per US-3 task (T019, T021 add to it next) rather than threading each new
+piece of concept content through `_import_concepts()` directly.
+
+Language filtering is deliberately not built yet — every fixture this task reads from already
+uses a configured language, and tasks.md scopes that filtering to T020 as its own increment (the
+brief for T020 asks for a considered choice between filtering ahead of the write and catching the
+model's own refusal, which is exactly the kind of decision worth its own task rather than folded
+in here as a side effect).
+
+**Verified**: `poetry run pytest -q` — 431 passed (427 + 4 new in `test_skos.py`'s new
+`TestConceptLabels`). `poetry run ruff check .` — all checks passed. `poetry run ruff format
+--check .` — 21 files already formatted. `poetry run mypy` — success, 9 source files. `poetry run
+deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations --check
+--dry-run --settings=tests.settings` — no changes detected. `poetry run pre-commit run
+--all-files` — all hooks passed.
+
+**Next**: T019 — notes: the definition and the six SKOS documentary note kinds, each with its
+language, via `Concept.add_note`.
+
+**Watch**: `rocks_updated.ttl` does not yet drop a note from a concept that stays present — only
+granite's alternative label and quartz's whole removal are covered, so T018's own carried case
+(decisions.md D20) had fixture material to test against, but T019's equivalent carried case does
+not yet. Recorded as a new decision (D24) rather than left implicit.
+
+## 2026-08-04T11:25:00Z · Implementer US3 · T019
+
+**Did**: `mapping.py` gains `NOTE_PREDICATES` (the seven SKOS documentary-note predicates ->
+`ConceptNote.Kind`, `definition` included). `skos.py`'s new `_import_notes()` writes every one of a
+concept's notes through `Concept.add_note` (research.md R5), replacing whatever the concept already
+held — the same full-replace rule and rationale `_import_labels` (T018) established, reused rather
+than duplicated. Wired into `_import_concept_content()` alongside the T018 label call.
+`dcterms:description` as a `definition` alias is deliberately not built here — tasks.md scopes that
+normalisation, and the report entry FR-009 requires for it, to T021.
+
+decisions.md D24 (new): `rocks_updated.ttl` carried no case of "a note removed from a concept that
+stays present" — the fixture's four existing edits don't include one, only quartz's whole removal,
+which is a different case (absent-from-source, already covered by T015). Extended the fixture with a
+fifth edit — basalt's `example` note dropped — checked against every existing test reading that
+fixture to confirm none inspects notes and none is affected.
+
+**Verified**: `poetry run pytest -q` — 433 passed (431 + 2 new in `test_skos.py`'s new
+`TestConceptNotes`). `poetry run ruff check .` — all checks passed. `poetry run ruff format .` — 1
+file reformatted (`test_skos.py`) then clean. `poetry run mypy` — success, 9 source files. `poetry
+run deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations --check
+--dry-run --settings=tests.settings` — no changes detected.
+
+**Next**: T020 — a label or note in a language the site is not configured for: stored nowhere,
+named in the report with its language and a count.
+
+**Watch**: none.
+
+## 2026-08-04T11:35:00Z · Implementer US3 · T020
+
+**Did**: `_import_labels()` and `_import_notes()` now check each value's language against
+`settings.LANGUAGES` before calling `Concept.add_label`/`add_note` at all, rather than calling
+unconditionally and catching the model's own `ValidationError` refusal. An unconfigured-language
+value is set aside (`SetAsideReason.UNCONFIGURED_LANGUAGE`, naming the language) one entry per
+value — two alternative labels and a note in the same unconfigured language on one concept produce
+three separate entries, so a caller counts them via `report.set_aside_by_reason()` without the
+importer needing to pre-aggregate. New fixture `unconfigured_language_values.ttl`: a concept with a
+configured-language preferred label plus two alternative labels and a scope note all in Spanish,
+which the test site's `LANGUAGES` does not include.
+
+decisions.md D25 (new): filtering ahead of the write, not catching the model's refusal, chosen for
+three reasons — the exception isn't shaped to isolate "wrong language" from any other row defect a
+future `clean()` rule might add, a caught exception per attempt still needs the same per-value loop
+this importer already has, and Article XI/D2 both already call this filtering "mechanical," which a
+plain membership check is and a caught exception is not.
+
+**Verified**: `poetry run pytest -q` — 436 passed (433 + 2 new in `test_skos.py`'s new
+`TestUnconfiguredLanguageValuesAreSetAside`, plus 1 new fixture-discovery case). `poetry run ruff
+check .` — all checks passed. `poetry run ruff format --check .` — 21 files already formatted.
+`poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned.
+`poetry run python -m django makemigrations --check --dry-run --settings=tests.settings` — no
+changes detected.
+
+**Next**: T021 — notation, mappings, and unmodelled predicates set aside and reported; the
+`dcterms:description`-as-`definition` normalisation reported, never applied silently.
+
+**Watch**: none.
+
+## 2026-08-04T11:55:00Z · Implementer US3 · T021
+
+**Did**: `mapping.py` gains `MAPPING_PREDICATES` (the six SKOS mapping predicates ->
+their CURIEs). `report.py` gains a fourth reason vocabulary, `NormalizedReason`
+(one member so far, `FOREIGN_DEFINITION`), its own `NormalizedEntry` dataclass, and
+`ImportReport.normalized`/`add_normalized()` — kept apart from `SetAsideReason`/`set_aside`
+because a normalised value *was* stored, just not verbatim under the file's own predicate
+(decisions.md D26). `skos.py`'s new `_import_unheld_values()` sets aside a `skos:notation`
+(`NOTATION`), each of the six mapping predicates (`MAPPING`, naming the predicate's CURIE), and
+any predicate outside the SKOS namespace this module does not otherwise handle
+(`UNMODELLED_PREDICATE`, naming the predicate's own URI) — one entry per value, not merged.
+`_import_notes()` now also reads `dcterms:description` as a concept's definition when the concept
+carries no `skos:definition` of its own in that language, reporting the substitution via
+`add_normalized` rather than applying it silently (FR-009). decisions.md D27 (new): a SKOS
+predicate this importer doesn't read yet (`broader`/`narrower`/`related`/`member`/`memberList`) is
+deliberately *not* reported as unmodelled — the models do have a place for it, just not built yet
+(US-4/US-5) — checked against `rocks.ttl`'s own baseline (`report.set_aside == []`), which carries
+all of those predicates and would have broken under a broader "everything unconsumed" walk.
+
+New fixture `unmodelled_and_normalised_values.ttl`: a "widget" concept carrying a notation, a
+`skos:exactMatch`, and a custom non-SKOS predicate; a "gadget" concept carrying only
+`dcterms:description`, no `skos:definition` of its own.
+
+**Verified**: `poetry run pytest -q` — 451 passed (436 + 15 new: 7 in `test_skos.py`'s new
+`TestUnheldValuesAndNormalisation`, 7 in `test_report.py`'s new `TestImportReportNormalizedBucket`/
+`TestNormalizedReasonVocabulary`/`TestNormalizedReasonIsDisjointFromSetAsideAndFatal`, plus 1
+fixture-discovery case). `poetry run ruff check .` — all checks passed (one `B007` unused-loop-
+variable fix along the way). `poetry run ruff format .` — 1 file reformatted (`test_report.py`)
+then clean. `poetry run mypy` — success, 9 source files (one fix: renamed a reused loop variable
+so mypy did not infer a narrower type from an earlier loop in the same function). `poetry run
+deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations --check
+--dry-run --settings=tests.settings` — no changes detected.
+
+**Next**: T022 — a concept with no preferred label in the vocabulary's default language: set aside,
+reported, rest of the vocabulary imports (already built at T009, decisions.md D17 — this task
+finishes it with acceptance coverage that confirms it still holds now that US-3 has built labels
+and notes alongside it).
+
+**Watch**: none.
+
+## 2026-08-04T12:05:00Z · Implementer US3 · T022
+
+**Did**: `TestNoPreferredLabelFinishedByUS3` in `test_skos.py` — two tests: the concept with no
+preferred label in the vocabulary's default language is set aside under `NO_PREFERRED_LABEL`,
+named with its subject and language, and never created; the rest of the vocabulary imports with
+*its own* US-3 content intact, not only its identity — `no_default_language_label.ttl`'s concept
+"b" now carries an alternative label, proving labels built in this same phase (T018) land normally
+for a concept in the same run as one that gets set aside. No production change: T009's own
+`NO_PREFERRED_LABEL` handling (decisions.md D17) already `continue`s before any concept is created
+or its content imported, so nothing about US-3's own additions (T018-T021) could have disturbed it,
+and both tests passed on first execution — the third task across this feature's two most recent
+phases to do so (with T013/T014/T017 in US-2), each proving a piece of behaviour a prior task
+already built generally rather than needing new code of its own.
+
+**Verified**: `poetry run pytest -q` — 453 passed (451 + 2 new). `poetry run ruff check .` — all
+checks passed. `poetry run ruff format --check .` — 21 files already formatted. `poetry run mypy`
+— success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python
+-m django makemigrations --check --dry-run --settings=tests.settings` — no changes detected.
+
+**Phase US-3 complete (T018-T022).** A concept's labels — preferred labels in every configured
+language beyond the default, alternative and hidden labels — and its documentary notes — the
+definition and the six SKOS note kinds, plus a foreign `dcterms:description` read as a definition
+and reported as a normalisation — all land through the models' own `add_label`/`add_note` write
+path. A value in a language the site is not configured for is set aside and named, filtered ahead
+of the write. A notation, a mapping to another vocabulary, and a predicate from outside SKOS
+entirely are each set aside under the reason that fits, and a concept with no preferred label in
+the default language remains set aside and the rest of the vocabulary imports around it. `models.py`
+was not touched. Deferred to US-4/US-5 by design: relationships and collection membership are
+recognised SKOS predicates with a model home, so they are silently skipped rather than reported as
+unmodelled (decisions.md D27) — those stories build the read paths that will finally consume them.
+
+**Watch**: US-4's Implementer should read decisions.md D27 before starting — once relationships are
+read, `skos:broader`/`narrower`/`related` stop being "not yet built" and become genuinely handled;
+`_import_unheld_values()`'s own SKOS-namespace check will keep silently skipping them either way
+(nothing breaks if `_HANDLED_CONCEPT_PREDICATES` is left as-is), but adding them there too would
+make the set of predicates this module actually reads match what the constant claims to name.

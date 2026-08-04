@@ -15,6 +15,8 @@ from controlled_vocabularies.exchange.report import (
     FatalFinding,
     FatalReason,
     ImportReport,
+    NormalizedEntry,
+    NormalizedReason,
     SetAsideEntry,
     SetAsideReason,
 )
@@ -40,6 +42,11 @@ _EXAMPLE_FATAL_PARAMS = {
     FatalReason.VOCABULARY_UNDETERMINED: {},
     FatalReason.VOCABULARY_TARGET_MISMATCH: {"target": "https://example.org/vocab/target"},
     FatalReason.VOCABULARY_AMBIGUOUS: {"declared": "https://example.org/vocab/a, https://example.org/vocab/b"},
+}
+
+# One example params dict per normalized reason (T021), the same shape as _EXAMPLE_PARAMS.
+_EXAMPLE_NORMALIZED_PARAMS = {
+    NormalizedReason.FOREIGN_DEFINITION: {"predicate": "dcterms:description", "language": "en"},
 }
 
 
@@ -187,3 +194,76 @@ class TestReasonVocabulariesAreDisjoint:
         set_aside_values = {reason.value for reason in SetAsideReason}
         fatal_values = {reason.value for reason in FatalReason}
         assert set_aside_values.isdisjoint(fatal_values)
+
+
+class TestImportReportNormalizedBucket:
+    """T021 — the normalised bucket starts empty, ``add_normalized`` records
+    reason, subject and params as data without touching any other bucket, and
+    a recorded ``NormalizedEntry`` is frozen. Deliberately apart from
+    :attr:`ImportReport.set_aside`: a normalised value *was* stored (T021,
+    FR-009, decisions.md D24) — only under a different predicate than the
+    file itself asserted — whereas everything in ``set_aside`` was not."""
+
+    def test_import_report_starts_with_an_empty_normalized_bucket(self):
+        assert ImportReport().normalized == []
+
+    def test_add_normalized_records_reason_subject_and_params_as_data(self):
+        report = ImportReport()
+        report.add_normalized(
+            NormalizedReason.FOREIGN_DEFINITION,
+            "https://example.org/vocab/rocks/gadget",
+            predicate="dcterms:description",
+            language="en",
+        )
+        assert len(report.normalized) == 1
+        entry = report.normalized[0]
+        assert isinstance(entry, NormalizedEntry)
+        assert entry.reason is NormalizedReason.FOREIGN_DEFINITION
+        assert entry.subject == "https://example.org/vocab/rocks/gadget"
+        assert entry.params == {"predicate": "dcterms:description", "language": "en"}
+        # Adding a normalized entry never touches any other bucket.
+        assert report.set_aside == []
+        assert report.fatal == []
+
+    def test_normalized_entry_is_immutable(self):
+        entry = NormalizedEntry(reason=NormalizedReason.FOREIGN_DEFINITION, subject="https://example.org/vocab/x")
+        with pytest.raises((AttributeError, TypeError)):
+            entry.subject = "changed"
+
+
+class TestNormalizedReasonVocabulary:
+    """Every member of the closed ``NormalizedReason`` vocabulary is lazily
+    translatable, carries a named ``%(subject)s`` placeholder, and renders
+    with its own example params (Article XII)."""
+
+    @pytest.mark.parametrize("reason", list(NormalizedReason))
+    def test_every_normalized_reason_has_a_translatable_label(self, reason):
+        assert isinstance(reason.label, Promise), f"{reason} label is not lazily translatable"
+
+    @pytest.mark.parametrize("reason", list(NormalizedReason))
+    def test_every_normalized_reason_template_is_translatable_with_a_named_subject_placeholder(self, reason):
+        assert isinstance(reason.template, Promise), f"{reason} template is not lazily translatable"
+        assert "%(subject)s" in str(reason.template), f"{reason} template lacks a named %(subject)s placeholder"
+
+    @pytest.mark.parametrize("reason", list(NormalizedReason))
+    def test_every_normalized_reason_renders_with_its_example_params(self, reason):
+        entry = NormalizedEntry(
+            reason=reason, subject="https://example.org/vocab/x", params=_EXAMPLE_NORMALIZED_PARAMS[reason]
+        )
+        rendered = entry.render()
+        assert isinstance(rendered, str)
+        assert "https://example.org/vocab/x" in rendered
+        for value in _EXAMPLE_NORMALIZED_PARAMS[reason].values():
+            assert value in rendered
+
+
+class TestNormalizedReasonIsDisjointFromSetAsideAndFatal:
+    """A normalised value was stored; a set-aside or fatal one was not
+    (decisions.md D24) — the three closed vocabularies never share a value."""
+
+    def test_normalized_reason_shares_no_value_with_set_aside_or_fatal_reason(self):
+        normalized_values = {reason.value for reason in NormalizedReason}
+        set_aside_values = {reason.value for reason in SetAsideReason}
+        fatal_values = {reason.value for reason in FatalReason}
+        assert normalized_values.isdisjoint(set_aside_values)
+        assert normalized_values.isdisjoint(fatal_values)
