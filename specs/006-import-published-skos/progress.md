@@ -1261,3 +1261,22 @@ is the last story before convergence; this Implementer stops here.
 
 **Watch**: the feature-state.json ledger gap flagged at T031 is still open — Forge's own
 reconciliation, not this Implementer's to restructure.
+
+## 2026-08-04T14:10:00Z · Forge · US-6 convergence check
+
+**Did**: reviewed the US-6 Implementer's completion report and re-ran the gates independently.
+`forge verify --base origin/main` was **red on conformance** — `tests/test_exchange/test_standards.py`
+mirrors no source module. Split the sweep into the three modules of its subjects, moved the shared
+placeholder predicate into a new `tests/test_exchange/conftest.py` fixture, and deleted the
+standalone file. Recorded as D35.
+
+Also reconciled the ledger gap the Implementer flagged: `feature-state.json`'s US6 story carried
+only T031 and T032. T033 and T034 (tasks.md's T031a/T031b, renamed by the US-6 Implementer to match
+its commit trail) are now ledger entries with their evidence, tasks.md and decisions.md use the
+T033/T034 names throughout, and US6 is marked done.
+
+**Verified**: `poetry run pytest -q` — 520 passed, unchanged by the move. `forge verify --base
+origin/main` — conformance, lint, typecheck, test, build all green. `ruff format --check`, `deptry`,
+`makemigrations --check`, `pre-commit run --all-files` all clean.
+
+**Next**: convergence — merge US-6 to the feature branch and open the PR.

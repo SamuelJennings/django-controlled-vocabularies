@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 import rdflib
+from django.utils.functional import Promise
 
 import controlled_vocabularies.exchange as exchange
 from controlled_vocabularies.exchange.report import FatalReason, NormalizedReason, SetAsideReason
@@ -1491,3 +1492,56 @@ class TestExchangePackage:
         # A public package gets documented (Article VI); this catches an
         # accidentally-empty __init__.py before anything is re-exported from it.
         assert exchange.__doc__, "controlled_vocabularies.exchange has no module docstring"
+
+
+class TestFailureMessagesUseOnlyNamedPlaceholders:
+    """T031 (FR-016, spec User Story 6 Acceptance Scenarios 1 and 4) — the
+    "named, not positional" check applied to the messages this module raises
+    directly rather than adding to ``ImportReport``. Every ``raise …Error(_("…"))``
+    call site in ``skos.py`` is exercised once here.
+
+    Acceptance Scenario 4's developer-diagnostics exemption is the raw rdflib
+    parse error the unparseable-file refusal chains onto ``__cause__``: named and
+    asserted present, rather than left as an unstated gap in the sweep.
+    """
+
+    def test_missing_file_message(self, tmp_path, uses_only_named_placeholders):
+        with pytest.raises(SkosImportError) as excinfo:
+            _read_graph(tmp_path / "does-not-exist.ttl")
+        err = excinfo.value
+        assert isinstance(err.message, Promise)
+        assert uses_only_named_placeholders(str(err.message))
+        assert err.code == "skos_file_not_found"
+
+    def test_unsupported_serialization_message(self, uses_only_named_placeholders):
+        with pytest.raises(SkosImportError) as excinfo:
+            _read_graph(FIXTURES / "rocks.ttl", serialization="n3")
+        err = excinfo.value
+        assert isinstance(err.message, Promise)
+        assert uses_only_named_placeholders(str(err.message))
+        assert err.code == "skos_format_unsupported"
+
+    def test_unparseable_file_message_and_its_developer_diagnostic_exemption(
+        self, tmp_path, uses_only_named_placeholders
+    ):
+        bad = tmp_path / "bad.ttl"
+        bad.write_text("this is not turtle @@@ not even close {{{ ]][[ ")
+        with pytest.raises(SkosImportError) as excinfo:
+            _read_graph(bad)
+        err = excinfo.value
+        assert isinstance(err.message, Promise)
+        assert uses_only_named_placeholders(str(err.message))
+        assert err.code == "skos_parse_failed"
+        # Developer-diagnostic exemption: the raw rdflib parser exception is
+        # chained onto __cause__, not translated — only the curator-facing
+        # wrapper message just checked above is held to Article XII.
+        assert err.__cause__ is not None, "the underlying rdflib exception must be chained for developer diagnostics"
+
+    @pytest.mark.django_db
+    def test_import_failed_message(self, uses_only_named_placeholders):
+        with pytest.raises(SkosImportFailed) as excinfo:
+            import_skos(FIXTURES / "blank_node_concept.ttl")
+        err = excinfo.value
+        assert isinstance(err.message, Promise)
+        assert uses_only_named_placeholders(str(err.message))
+        assert err.code == "skos_import_failed"

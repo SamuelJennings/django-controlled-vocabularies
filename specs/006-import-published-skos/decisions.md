@@ -884,7 +884,7 @@ and reported instead of quietly adjusting.
 current file no longer mentions is reported nowhere. A concept in that position is named in
 `report.absent_from_source`, and a collection has its own identity for the same reasons. It was
 outside every acceptance scenario T027-T030 states, so it was correctly left unbuilt rather than
-invented, and it is now T031b in the standards phase rather than a note nobody owns.
+invented, and it is now T034 in the standards phase rather than a note nobody owns.
 
 **Revisit if:** the report grows a third record type with identity — the "which buckets does this
 belong in" question has now been answered twice by hand, and a third time is a sign the report
@@ -919,3 +919,28 @@ passing silently.
 from concepts, the scheme, and collections only) — the test's `_READ_BUT_NOT_AT_CONCEPT_LEVEL` set
 would need a fourth category, and at that point hand-listing per-node-kind exemptions may be worth
 replacing with something the test derives structurally instead.
+
+## D35 — The standards sweep lives in the module of its subject, not a file of its own (T031)
+
+**Decision:** the T031 sweep is split across `test_report.py`, `test_skos.py`, and `test_safety.py`
+— each half sitting with the code it checks — with the shared placeholder predicate as a fixture in
+a new `tests/test_exchange/conftest.py`. The standalone `tests/test_exchange/test_standards.py` is
+removed.
+
+T031 originally landed as its own file. `forge verify`'s conformance step is red on that: the
+workspace testing standard requires the test tree to mirror the source tree, and there is no
+`controlled_vocabularies/exchange/standards.py` for `test_standards.py` to mirror. A cross-cutting
+test belongs in the module of its subject as another `Test*` class — which is the precedent this
+feature already set with `TestExchangePackage`, homed in `test_skos.py` rather than given a file for
+the package scaffold alone.
+
+The split follows the subject, not convenience: the report-reason vocabularies are `report.py`'s, the
+`_read_graph` / `import_skos` refusals are `skos.py`'s, and the RDF/XML refusals are `safety.py`'s.
+Nothing about the assertions changed — the same 520 tests pass before and after — and each of the
+three sweeps keeps its own statement of the developer-diagnostics exemption for the failures it
+covers, so Acceptance Scenario 4 stays explicit in all three places rather than in one file that no
+longer exists.
+
+**Revisit if:** `exchange` grows a real `standards` module, or the sweep grows past what reads
+naturally as a trailing class in each module — at which point the mirror rule would itself supply
+the file.

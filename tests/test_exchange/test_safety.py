@@ -69,3 +69,40 @@ class TestScanRdfXml:
         assert err.params == {"system_id": "http://example.org/nonexistent.dtd"}
         assert "http://example.org/nonexistent.dtd" in err.messages[0]
         assert err.code == "rdf_xml_external_reference_forbidden"
+
+
+class TestRefusalMessagesUseOnlyNamedPlaceholders:
+    """T031 (FR-016, spec User Story 6 Acceptance Scenarios 1 and 4) — the
+    "named, not positional" check applied to the messages this module raises
+    directly rather than adding to ``ImportReport``.
+
+    Acceptance Scenario 4's developer-diagnostics exemption is the raw
+    ``defusedxml`` guard exception each refusal chains onto ``__cause__``: named
+    and asserted present here, so the exemption is stated rather than an unstated
+    gap in the sweep. It is the only thing this module puts in front of a person
+    that Article XII does not hold to a translatable, named-placeholder standard.
+    """
+
+    def test_entity_bomb_message_and_its_developer_diagnostic_exemption(self, uses_only_named_placeholders):
+        with pytest.raises(UnsafeRdfXmlError) as excinfo:
+            scan_rdf_xml(_read("entity_bomb.rdf"))
+        err = excinfo.value
+        assert isinstance(err.message, Promise)
+        assert uses_only_named_placeholders(str(err.message))
+        assert err.code == "rdf_xml_entities_forbidden"
+        # Developer-diagnostic exemption: the raw defusedxml guard exception
+        # is chained, not translated (this module's own docstring says so).
+        assert err.__cause__ is not None, (
+            "the underlying defusedxml exception must be chained for developer diagnostics"
+        )
+
+    def test_external_dtd_message_and_its_developer_diagnostic_exemption(self, uses_only_named_placeholders):
+        with pytest.raises(UnsafeRdfXmlError) as excinfo:
+            scan_rdf_xml(_read("external_dtd.rdf"))
+        err = excinfo.value
+        assert isinstance(err.message, Promise)
+        assert uses_only_named_placeholders(str(err.message))
+        assert err.code == "rdf_xml_external_reference_forbidden"
+        assert err.__cause__ is not None, (
+            "the underlying defusedxml exception must be chained for developer diagnostics"
+        )

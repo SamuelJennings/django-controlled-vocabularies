@@ -267,3 +267,20 @@ class TestNormalizedReasonIsDisjointFromSetAsideAndFatal:
         fatal_values = {reason.value for reason in FatalReason}
         assert normalized_values.isdisjoint(set_aside_values)
         assert normalized_values.isdisjoint(fatal_values)
+
+
+class TestReasonTemplatesUseOnlyNamedPlaceholders:
+    """T031 (FR-016, spec User Story 6 Acceptance Scenario 1) — one closed-world
+    sweep across all three report-reason vocabularies. The per-reason tests above
+    assert each template is lazily translatable and carries a named
+    ``%(subject)s``; this asserts there is nothing *besides* named placeholders in
+    any of them — the "named rather than positional" half FR-016 states but the
+    per-reason tests don't check for the absence of. A reason added later without
+    its own dedicated test is still caught here."""
+
+    @pytest.mark.parametrize("reason", list(SetAsideReason) + list(FatalReason) + list(NormalizedReason))
+    def test_reason_template_has_no_positional_placeholder(self, reason, uses_only_named_placeholders):
+        template = str(reason.template)
+        assert uses_only_named_placeholders(template), (
+            f"{reason} template carries something other than a named placeholder: {template!r}"
+        )
