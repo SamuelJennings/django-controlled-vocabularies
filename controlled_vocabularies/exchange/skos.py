@@ -936,21 +936,32 @@ def _import_relations(
     # one end outside this run's own writes is only half spoken about by the
     # file, and FR-013's deletion authority only ever covers what the file
     # actually speaks about.
-    existing_broader = ConceptRelation.objects.filter(
-        kind=ConceptRelation.Kind.BROADER,
-        source_id__in=successful_ids,
-        target_id__in=successful_ids,
-    )
+    #
+    # FIX 20 (review, performance/correctness, decisions.md D53): scoped by
+    # source__scheme=target_scheme — one bind parameter, the scheme's own pk
+    # — rather than the original source_id__in=successful_ids,
+    # target_id__in=successful_ids (2N parameters together). Django does not
+    # chunk an `__in` clause for PostgreSQL (only Oracle's own
+    # max_in_list_size is special-cased), whose 65,535-bind-parameter-per-
+    # statement limit this reaches at roughly 33k concepts — inside the
+    # "tens of thousands" the spec names as the target, and invisible to
+    # SQLite-backed CI at any dataset size this test suite runs. Every
+    # ConceptRelation row already has both ends in the same scheme
+    # (ConceptRelation._reject_cross_scheme), so scoping by source's scheme
+    # alone already scopes target's too; "both ends in successful_ids" is
+    # then checked in Python against the in-memory set, reproducing the
+    # original SQL-level condition exactly rather than widening it.
+    existing_broader = ConceptRelation.objects.filter(kind=ConceptRelation.Kind.BROADER, source__scheme=target_scheme)
     for row in existing_broader:
+        if row.source_id not in successful_ids or row.target_id not in successful_ids:
+            continue
         if (row.source_id, row.target_id) not in resolved_broader:
             row.delete()
 
-    existing_related = ConceptRelation.objects.filter(
-        kind=ConceptRelation.Kind.RELATED,
-        source_id__in=successful_ids,
-        target_id__in=successful_ids,
-    )
+    existing_related = ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED, source__scheme=target_scheme)
     for row in existing_related:
+        if row.source_id not in successful_ids or row.target_id not in successful_ids:
+            continue
         if frozenset({row.source_id, row.target_id}) not in resolved_related:
             row.delete()
 
@@ -1219,14 +1230,30 @@ def _import_collections(
             survivors = [concept for concept in current if concept.pk not in resolved_pks]
             row.set_member_order(resolved + survivors)
 
-    # FIX 7 (review, decisions.md D41): .exclude(static_uri__in=mentioned_uris)
-    # also selects a row whose static_uri is NULL — a locally authored
-    # collection the file could never mention at all, since it carries no
-    # external identifier for the file to name. Reported by its own .uri
-    # (StaticUriModel's property, always present per CONTEXT.md), never the
-    # raw column, which for such a row would be None; sorted in Python since
-    # .uri is not a database column .order_by() can reach.
-    absent = Collection.objects.filter(scheme=target_scheme).exclude(static_uri__in=mentioned_uris)
+    # FIX 7 (review, decisions.md D41): a row whose static_uri is NULL — a
+    # locally authored collection the file could never mention at all, since
+    # it carries no external identifier for the file to name — is reported
+    # by its own .uri (StaticUriModel's property, always present per
+    # CONTEXT.md), never the raw column, which for such a row would be None;
+    # sorted in Python since .uri is not a database column .order_by() can
+    # reach.
+    #
+    # FIX 20 (review, performance, decisions.md D53): filtered in Python
+    # against the in-memory mentioned_uris set rather than
+    # .exclude(static_uri__in=mentioned_uris) — the same __in-sized-by-file
+    # concern _import_relations's own fix addresses, here for a string
+    # __in rather than an integer one. Collections are typically far fewer
+    # than concepts, but nothing bounds that in principle, and the fix is
+    # the same either way: .filter(scheme=target_scheme) alone already
+    # carries only one bind parameter, so fetching every one of the scheme's
+    # collections and discarding the mentioned ones in Python avoids the
+    # __in clause's own parameter count entirely rather than merely
+    # shrinking it.
+    absent = [
+        collection
+        for collection in Collection.objects.filter(scheme=target_scheme)
+        if collection.static_uri not in mentioned_uris
+    ]
     for collection in sorted(absent, key=lambda row: row.uri):
         report.add_absent_from_source(collection.uri)
 
@@ -1402,7 +1429,13 @@ def _import_concepts(
     # FIX 7 (review, decisions.md D41): same fix as _import_collections's
     # identical query earlier in this module — see that comment for why
     # .uri, computed in Python, replaces the raw static_uri column here.
-    absent = Concept.objects.filter(scheme=target_scheme).exclude(static_uri__in=mentioned_uris)
+    # FIX 20 (review, performance, decisions.md D53): same fix as
+    # _import_collections's identical query too — filtered in Python
+    # against mentioned_uris rather than .exclude(static_uri__in=...),
+    # avoiding a parameter count sized by the file's own concept count.
+    absent = [
+        concept for concept in Concept.objects.filter(scheme=target_scheme) if concept.static_uri not in mentioned_uris
+    ]
     for concept in sorted(absent, key=lambda row: row.uri):
         report.add_absent_from_source(concept.uri)
 

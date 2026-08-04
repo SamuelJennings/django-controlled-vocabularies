@@ -1869,3 +1869,81 @@ rather than left inaccurate, since both edits touch the same paragraph.
 **Revisit if:** a future safety scan (a third serialization, say) adds its own refusal exception —
 the same "subclass the documented hierarchy, export it, document it" pattern applies without
 needing a fresh decision.
+
+## D53 — `__in` clauses sized by concept count are replaced with scheme-scoped queries and Python-side filtering (review fix 20, performance, confirmed before fixing)
+
+**Confirmed the claim first, against the installed Django version's own source, before writing any
+fix.** Read `django.db.models.lookups.In` (`as_sql`/`split_parameter_list_as_sql`): Django chunks an
+`__in` clause only when `connection.ops.max_in_list_size()` returns a number, and grepping every
+backend's `operations.py` in the installed package shows only Oracle overrides that method (its own
+1000-item `IN`-list restriction, a different limit than a bind-parameter count) — the base
+implementation, inherited by PostgreSQL and SQLite alike, returns `None` ("no limit"), so Django never
+chunks an `__in` clause for either backend this project actually targets. `_import_relations` passed
+`source_id__in=successful_ids, target_id__in=successful_ids` in one query (2N parameters together) and
+`_import_concepts`/`_import_collections` each passed `static_uri__in=mentioned_uris` (N). PostgreSQL's
+own extended-query-protocol Bind message uses a 16-bit parameter-count field, capping any one
+statement at 65,535 bind parameters — a real, well-documented limit, not folklore — so the relations
+query (2N) is claimed to fail around 33k concepts, inside the "tens of thousands of concepts" the spec
+names as the target; the two single-clause queries (N) would fail around 65k, a real but less
+immediate risk. Tests run against SQLite (`tests/settings.py`), which is not exempt from the same
+class of limit in principle, but no fixture in this suite is remotely close to either backend's actual
+ceiling, so CI cannot catch this regardless of which backend it uses.
+
+**Chosen: eliminate the `__in` clause entirely at each of the three sites, rather than chunk it.**
+Chunking one `__in` list into several smaller `IN (...)` clauses *within the same queryset* does not
+actually help — Django compiles `.exclude(a).exclude(b)` (or an OR of several filtered querysets
+merged) into one final SQL statement, whose total bind-parameter count is still the sum across every
+chunk. Fixing the actual limit — bind parameters *per statement* — needs either genuinely separate
+round trips (one full statement per chunk) or no `__in` clause on the file-sized list at all. The
+latter is simpler and was available at every one of the three sites:
+
+- **`_import_relations`'s existing-row lookup.** `ConceptRelation._reject_cross_scheme` already
+  guarantees both ends of every row share one scheme, so `source__scheme=target_scheme` (one bind
+  parameter, the scheme's own pk) already scopes both ends at once. The narrower "both ends in
+  `successful_ids`" condition D30 requires — a row with one end outside this run's own writes is left
+  untouched, never a deletion candidate — is then checked in Python against the in-memory
+  `successful_ids` set, reproducing the original SQL-level condition exactly rather than widening what
+  counts as a candidate.
+- **`_import_concepts`'s and `_import_collections`'s absent-from-source lookups.** Replaced
+  `.filter(scheme=target_scheme).exclude(static_uri__in=mentioned_uris)` with fetching
+  `.filter(scheme=target_scheme)` alone (one bind parameter) and filtering `not in mentioned_uris` in
+  Python. FIX 7/D41's own established distinction (report `.uri`, never the raw column, since a
+  locally authored record's `static_uri` can be `None`) carries over unchanged — the Python
+  comprehension checks the raw `static_uri` column against `mentioned_uris` (a set of real, non-`None`
+  URIs, so a `None`-static_uri row is never accidentally excluded by that check) exactly as the SQL
+  `exclude()` did, and still reports `.uri`.
+
+**A deliberate, named tradeoff: more rows travel over the wire than the old, DB-side-filtered
+queries.** Fetching every one of a scheme's relations (of one kind) or every one of its concepts/
+collections, then discarding most of them in Python, transfers strictly more data than a `WHERE`
+clause that excluded them server-side. This is accepted because it is *linear* in the scheme's own
+size (plan.md's actual constraint — "rules out anything quadratic in concept count" — not "rules out
+any query returning more rows than the minimal answer"), and because it turns a hard failure at scale
+into a bounded cost that degrades gracefully, rather than trading a hard failure for a different one
+(chunking that does not actually reduce per-statement parameter count) or a correctness change
+(widening D30's own candidate scope).
+
+**Verified by measuring the query's own shape, not by reproducing failure at 33k-concept scale.**
+Reproducing an actual 65,535-parameter failure would need a dataset this test suite has no reason to
+carry. Instead, `TestQueryParameterCountDoesNotScaleWithConceptCount` re-imports a 60-concept,
+60-collection file (one root concept, 60 children each stating `skos:broader` to it — 60
+`ConceptRelation` rows — and 60 one-member collections) a second time, under
+`CaptureQueriesContext`, and asserts no captured query's SQL contains a flat `IN (...)` clause with 20
+or more comma-separated items — a direct, query-shape-level assertion that would already fail at
+N=60, exactly as it would at N=33,000, since the defect is about *what shape of query gets built*, not
+about crossing a specific numeric threshold. Confirmed failing before the fix (a 61-item clause for
+the relations query, a 60-item clause for each of the two absent-from-source queries — each verified
+independently by reverting one of the three production changes at a time and re-running).
+
+**Verified by mutation, independently for all three sites.** Reverted the relations query back to
+`source_id__in=successful_ids, target_id__in=successful_ids` — the test failed, naming a 61-item
+clause. Restored, then reverted the concepts absent-from-source query back to
+`.exclude(static_uri__in=mentioned_uris)` — the same test failed again (the second `import_skos()`
+call in the test also exercises this path). Restored, then reverted the collections absent-from-source
+query the same way — failed a third time, naming a 60-item clause. Restored all three; full suite
+re-ran green.
+
+**Revisit if:** a future story adds a fourth site passing a file-sized collection to `__in` — the same
+"read the installed Django's own chunking behaviour before assuming it, then eliminate the clause
+rather than chunk it" approach applies, not a variant of this one that assumes Django will someday
+chunk it automatically.

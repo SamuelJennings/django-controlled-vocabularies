@@ -2045,3 +2045,55 @@ checks passed. `poetry run ruff format --check .` — 22 files already formatted
 success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m
 django makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry run
 pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T19:00:00Z · Forge · review fix 20 — `__in` clauses sized by concept count (performance, confirmed before fixing)
+
+**Did**: confirmed the claim first, per the task's own instruction, before writing any fix. Read
+`django.db.models.lookups.In` in the installed Django version: it only chunks an `__in` clause when
+`connection.ops.max_in_list_size()` returns a number, and grepping every backend's `operations.py`
+shows only Oracle overrides that method — PostgreSQL and SQLite both inherit the base `None` ("no
+limit"), so Django never chunks an `__in` clause for either. `_import_relations` passed
+`source_id__in=successful_ids, target_id__in=successful_ids` in one query (2N parameters together),
+and `_import_concepts`/`_import_collections` each passed `static_uri__in=mentioned_uris` (N).
+PostgreSQL's own wire-protocol Bind message caps a statement at 65,535 bind parameters (a real,
+documented limit), so the relations query is claimed to fail around 33k concepts — inside the "tens
+of thousands" the spec names as the target — and the two single-clause queries around 65k. The claim
+is real; proceeded to fix it.
+
+Wrote the failing test first (after confirming the claim, before any production change): a new
+`_write_file_with_a_shared_broader_parent` fixture generator (one root concept, N children each
+stating `skos:broader` to it, plus N one-member collections) and
+`TestQueryParameterCountDoesNotScaleWithConceptCount` in `test_skos.py`, which re-imports a 60-concept
+file a second time under `CaptureQueriesContext` and asserts no captured query's SQL contains a flat
+`IN (...)` clause with 20 or more items — a query-*shape* assertion, chosen because reproducing an
+actual 65,535-parameter failure would need a dataset this suite has no reason to carry, and the defect
+is about what shape of query gets built, not about crossing one specific numeric threshold. Confirmed
+failing against the original code (a 61-item clause for the relations query) via `git stash` before
+implementing anything, restored the fix, then separately re-confirmed the two absent-from-source
+queries would also fail their own dedicated mutation checks.
+
+Production change, at all three sites: `_import_relations`'s existing-row lookup now filters by
+`source__scheme=target_scheme` (one bind parameter) rather than two `__in` clauses —
+`ConceptRelation._reject_cross_scheme` already guarantees both ends share one scheme, so this already
+scopes both ends, and D30's own "both ends in successful_ids" condition is then checked in Python
+against the in-memory set, reproducing the original SQL-level condition exactly rather than widening
+it. `_import_concepts`'s and `_import_collections`'s absent-from-source lookups now fetch
+`.filter(scheme=target_scheme)` alone and filter `not in mentioned_uris` in Python, rather than
+`.exclude(static_uri__in=mentioned_uris)`. Recorded as decisions.md D53, including why chunking one
+`__in` list into several smaller clauses within the *same* queryset would not actually have helped
+(Django compiles them into one final statement, whose total bind-parameter count is unchanged), and
+the deliberate, named tradeoff of fetching more rows over the wire than the old DB-side-filtered
+queries in exchange for a bound that no longer depends on the file's own concept count.
+
+Mutation probe, independently for all three sites: reverted the relations query back to its original
+two-`__in`-clause form — the test failed, naming a 61-item clause. Restored, reverted the concepts
+absent-from-source query back to `.exclude(static_uri__in=mentioned_uris)` — failed again. Restored,
+reverted the collections absent-from-source query the same way — failed a third time, naming a
+60-item clause. Restored all three; full suite re-ran green.
+
+**Verified**: `poetry run pytest -q` — 668 passed (667 baseline-after-FIX-19 + 1 new). `poetry run
+ruff check .` — all checks passed. `poetry run ruff format --check .` — all files formatted (two
+files needed a format pass, applied). `poetry run mypy` — success, 9 source files. `poetry run deptry
+.` — no issues, 15 files scanned. `poetry run python -m django makemigrations --check --dry-run
+--settings=tests.settings` — no changes detected. `poetry run pre-commit run --all-files` — all hooks
+passed.

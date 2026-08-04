@@ -7,6 +7,7 @@ stated or determined, and RDF/XML is routed through the T004 safety scan
 before rdflib ever sees it.
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -491,6 +492,84 @@ class TestSlugAssignmentQueryCountIsLinearInASharedLabelGroup:
         }
         assert first_pass == second_pass
         assert len(set(first_pass.values())) == 12, "each concept in the shared-label group must get a distinct slug"
+
+
+def _write_file_with_a_shared_broader_parent(tmp_path: Path, n: int) -> Path:
+    """A Turtle file with one root concept and ``n`` children, each stating
+    ``skos:broader`` back to the root, plus ``n`` one-member collections
+    (FIX 20, review, decisions.md D53) — ``n`` ``ConceptRelation`` rows all
+    sharing one scheme (the shape ``_import_relations``'s own existing-row
+    lookup has to scan on a re-import) and ``n`` collection URIs (the shape
+    ``_import_collections``'s own absent-from-source lookup has to scan)."""
+    lines = [
+        "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .",
+        '<http://example.org/inclause/> a skos:ConceptScheme ; skos:prefLabel "In-clause"@en .',
+        '<http://example.org/inclause/root> a skos:Concept ; skos:inScheme <http://example.org/inclause/> ; skos:prefLabel "Root"@en .',
+    ]
+    for i in range(n):
+        uri = f"http://example.org/inclause/child{i:04d}"
+        lines.append(
+            f"<{uri}> a skos:Concept ; skos:inScheme <http://example.org/inclause/> ; "
+            f'skos:prefLabel "Child {i}"@en ; skos:broader <http://example.org/inclause/root> .'
+        )
+        collection_uri = f"http://example.org/inclause/group{i:04d}"
+        lines.append(f'<{collection_uri}> a skos:Collection ; skos:prefLabel "Group {i}"@en ; skos:member <{uri}> .')
+    path = tmp_path / "in_clause.ttl"
+    path.write_text("\n".join(lines))
+    return path
+
+
+def _max_in_clause_size(sql: str) -> int:
+    """The largest number of comma-separated items inside any flat ``IN (...)``
+    group in ``sql`` (FIX 20, review, decisions.md D53) — a direct,
+    query-shape-level check that a query never carries a parameter list
+    sized by the file's own concept count, the same "measure the actual
+    mechanism" discipline :func:`_write_shared_label_file`'s own query-count
+    test already applies to FIX 16. Django's debug cursor logs SQL with
+    values already substituted in, not placeholders, so this counts literal
+    items rather than ``%s``/``?`` markers."""
+    max_size = 0
+    for match in re.finditer(r"\bIN \(([^()]*)\)", sql):
+        items = [item for item in match.group(1).split(",") if item.strip()]
+        max_size = max(max_size, len(items))
+    return max_size
+
+
+class TestQueryParameterCountDoesNotScaleWithConceptCount:
+    """FIX 20 (review, decisions.md D53) — ``_import_relations`` passed
+    ``source_id__in=successful_ids, target_id__in=successful_ids`` (2N bind
+    parameters) and ``_import_concepts``/``_import_collections`` passed
+    ``static_uri__in=mentioned_uris`` (N). Django does not chunk an ``__in``
+    clause itself except for Oracle's own ``max_in_list_size`` — confirmed by
+    reading ``django.db.models.lookups.In`` and every backend's
+    ``operations.py`` in the installed Django version, not assumed —, so
+    PostgreSQL's 65,535-bind-parameter-per-statement limit is reached at
+    roughly 33k concepts, inside the "tens of thousands" the spec names as
+    the target. SQLite CI cannot catch the failure itself (its own parameter
+    ceiling is different, and no fixture in this suite is remotely close to
+    either backend's limit), so this asserts the *query shape* directly
+    instead — the size of any single ``IN (...)`` clause captured by a real
+    query — rather than trying to reproduce the failure at production scale.
+    """
+
+    def test_no_query_carries_an_in_clause_sized_by_the_concept_count(self, db, tmp_path):
+        # A modest N, deliberately far below any real parameter ceiling —
+        # this is a query-shape assertion, not a scale reproduction. If any
+        # query's IN clause grows with N at all, it is already the wrong
+        # shape at N=60 just as much as at N=33,000.
+        n = 60
+        path = _write_file_with_a_shared_broader_parent(tmp_path, n)
+        import_skos(path)  # first pass: creates the concepts and relations
+
+        with CaptureQueriesContext(connection) as ctx:
+            report = import_skos(path)  # second pass: exercises the existing-row lookup
+        assert report.fatal == []
+
+        worst = max((_max_in_clause_size(entry["sql"]) for entry in ctx.captured_queries), default=0)
+        assert worst < 20, (
+            f"a query carried an IN clause with {worst} items for only {n} concepts — "
+            "its parameter count scales with the file's own concept count"
+        )
 
 
 class TestFatalFindingsAndAtomicity:
