@@ -1,0 +1,24 @@
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+# FIX 17 (review): a node the file identifies as a concept only through a
+# scheme-membership predicate — never through rdf:type skos:Concept — must
+# still be imported, not invisible. "alpha" is reachable only through the
+# scheme's own skos:hasTopConcept, "beta" only through its own
+# skos:inScheme, and "gamma" only through its own skos:topConceptOf; none of
+# the three carries "a skos:Concept" at all.
+
+<http://example.org/implied/>
+    a skos:ConceptScheme ;
+    skos:prefLabel "Implied"@en ;
+    skos:hasTopConcept <http://example.org/implied/alpha> .
+
+<http://example.org/implied/alpha>
+    skos:prefLabel "Alpha"@en .
+
+<http://example.org/implied/beta>
+    skos:inScheme <http://example.org/implied/> ;
+    skos:prefLabel "Beta"@en .
+
+<http://example.org/implied/gamma>
+    skos:topConceptOf <http://example.org/implied/> ;
+    skos:prefLabel "Gamma"@en .

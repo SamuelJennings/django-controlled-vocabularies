@@ -117,6 +117,70 @@ class TestScanJsonLd:
         assert scan_json_ld(b"not json at all {{{") is None
 
 
+class TestScanJsonLdRefusesContextImport:
+    """FIX 14 (review, security, decisions.md D47) — an inline *object*
+    ``@context`` was previously waved through on the reasoning that it "carries
+    nothing to resolve" (the old module docstring's own words). False:
+    rdflib's ``Context._read_source`` (``rdflib/plugins/shared/jsonld/context.py``)
+    reads ``source.get('@import')`` from *any* dict it treats as a context —
+    the document's own top-level context, an entry inside an array context, a
+    term's own nested ``@context``, or a node's own ``@context`` inside
+    ``@graph`` — and resolves a string value through ``_fetch_context`` /
+    ``source_to_json`` / ``urlopen`` exactly as a string ``@context`` does.
+    ``exfil_via_import.jsonld`` is the actual measured defect: before this fix,
+    reading it through rdflib directly merges in ``exfil_secret.jsonld`` (a
+    stand-in for a server-side file the uploaded document must never be able to
+    read) and the merged ``leaked:`` prefix resolves the scheme node's own URI
+    to ``http://example.org/SECRET-FROM-LOCAL-FILE/scheme`` — the contents of a
+    file the caller never named, chosen entirely by the uploaded document.
+    """
+
+    def test_context_import_at_the_top_level_is_refused(self):
+        # The reproduction as measured: a dict @context bypassed the scan
+        # entirely and its @import was resolved by rdflib.
+        with pytest.raises(UnsafeJsonLdError) as excinfo:
+            scan_json_ld(_read("exfil_via_import.jsonld"))
+        err = excinfo.value
+        assert isinstance(err, ValidationError)
+        assert isinstance(err.message, Promise), "@import refusal message is not lazily translatable"
+        assert "%(context)s" in str(err.message)
+        assert err.params == {"context": "exfil_secret.jsonld"}
+        assert err.code == "jsonld_context_import_forbidden"
+
+    def test_context_import_inside_an_array_context_entry_is_refused(self):
+        # An array @context may freely mix inline objects with string
+        # references (refused already); a dict entry carrying its own
+        # @import is the same hole, one level deeper.
+        with pytest.raises(UnsafeJsonLdError) as excinfo:
+            scan_json_ld(_read("context_import_array.jsonld"))
+        assert excinfo.value.params == {"context": "exfil_secret.jsonld"}
+        assert excinfo.value.code == "jsonld_context_import_forbidden"
+
+    def test_context_import_nested_inside_a_terms_own_context_is_refused(self):
+        # A context inside a context: a term definition may itself carry a
+        # "@context" scoped to that term, which rdflib loads exactly as any
+        # other context — including running _read_source's @import check on it.
+        with pytest.raises(UnsafeJsonLdError) as excinfo:
+            scan_json_ld(_read("context_import_nested_term.jsonld"))
+        assert excinfo.value.params == {"context": "exfil_secret.jsonld"}
+        assert excinfo.value.code == "jsonld_context_import_forbidden"
+
+    def test_context_import_on_a_node_inside_graph_is_refused(self):
+        # Every embedded node object in @graph may carry its own "@context",
+        # not only the document's top-level one; that node-scoped context is
+        # read through the identical _read_source path.
+        with pytest.raises(UnsafeJsonLdError) as excinfo:
+            scan_json_ld(_read("context_import_graph_node.jsonld"))
+        assert excinfo.value.params == {"context": "exfil_secret.jsonld"}
+        assert excinfo.value.code == "jsonld_context_import_forbidden"
+
+    def test_an_ordinary_inline_object_context_with_no_import_still_passes(self):
+        # The regression control: an inline, locally-embedded @context — the
+        # overwhelmingly common shape of a published file — carries no @import
+        # and must be completely unaffected by this guard.
+        assert scan_json_ld(_read("inline_context.jsonld")) is None
+
+
 class TestRefusalMessagesUseOnlyNamedPlaceholders:
     """T031 (FR-016, spec User Story 6 Acceptance Scenarios 1 and 4) — the
     "named, not positional" check applied to the messages this module raises

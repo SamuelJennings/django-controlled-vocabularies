@@ -7,10 +7,13 @@ stated or determined, and RDF/XML is routed through the T004 safety scan
 before rdflib ever sees it.
 """
 
+import re
 from pathlib import Path
 
 import pytest
 import rdflib
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils.functional import Promise
 
 import controlled_vocabularies.exchange as exchange
@@ -127,6 +130,24 @@ class TestReadGraph:
     def test_json_ld_with_an_inline_context_is_unaffected_by_the_safety_scan(self):
         graph = _read_graph(SECURITY_FIXTURES / "inline_context.jsonld", serialization="json-ld")
         assert len(graph) > 0
+
+    def test_json_ld_context_import_cannot_exfiltrate_a_local_file(self, db):
+        # FIX 14 (review, security, decisions.md D47) — the actual measured
+        # defect: an inline *object* @context was waved through the old scan
+        # entirely, but rdflib still resolves that object's own "@import" key
+        # through urlopen. Before this fix, import_skos() on this exact file
+        # succeeds and creates a scheme whose URI is
+        # 'http://example.org/SECRET-FROM-LOCAL-FILE/scheme' — content merged
+        # in from exfil_secret.jsonld, a file the caller never named, chosen
+        # entirely by the uploaded document itself. Exercised through
+        # import_skos(), the public entry point the review's own reproduction
+        # used, not only _read_graph(), so the whole pipeline is proven, not
+        # only the scan in isolation.
+        with pytest.raises(UnsafeJsonLdError):
+            import_skos(SECURITY_FIXTURES / "exfil_via_import.jsonld")
+        assert not ConceptScheme.objects.filter(
+            static_uri__startswith="http://example.org/SECRET-FROM-LOCAL-FILE/"
+        ).exists()
 
 
 class TestImportSkosVocabulary:
@@ -314,6 +335,57 @@ class TestImportConcepts:
         assert "http://example.org/rocks/granite" not in report.created
 
 
+class TestConceptsImpliedByMembershipButNeverGivenAnRdfType:
+    """FIX 17 (review, decisions.md D50) — ``concept_nodes`` used to come only
+    from ``graph.subjects(rdf.RDF.type, SKOS.Concept)``. A node the file
+    identifies as a concept through ``skos:inScheme``, ``skos:topConceptOf``,
+    or the scheme's own ``skos:hasTopConcept`` — the identical three
+    predicates ``_scheme_refs`` already reads — but which never states
+    ``rdf:type`` at all, was invisible to the whole import: not created, not
+    set aside, not named anywhere in the report. A curator importing such a
+    file got a green result reporting only the scheme, with no explanation
+    for the missing concepts at all."""
+
+    def test_a_node_reachable_only_through_hastopconcept_is_imported_as_a_concept(self, db):
+        import_skos(FIXTURES / "concept_implied_by_membership_no_rdf_type.ttl")
+        alpha = Concept.objects.get(static_uri="http://example.org/implied/alpha")
+        assert alpha.label == "Alpha"
+        assert alpha.scheme.static_uri == "http://example.org/implied/"
+
+    def test_a_node_reachable_only_through_its_own_inscheme_is_imported_as_a_concept(self, db):
+        import_skos(FIXTURES / "concept_implied_by_membership_no_rdf_type.ttl")
+        beta = Concept.objects.get(static_uri="http://example.org/implied/beta")
+        assert beta.label == "Beta"
+        assert beta.scheme.static_uri == "http://example.org/implied/"
+
+    def test_a_node_reachable_only_through_its_own_topconceptof_is_imported_as_a_concept(self, db):
+        import_skos(FIXTURES / "concept_implied_by_membership_no_rdf_type.ttl")
+        gamma = Concept.objects.get(static_uri="http://example.org/implied/gamma")
+        assert gamma.label == "Gamma"
+        assert gamma.scheme.static_uri == "http://example.org/implied/"
+
+    def test_all_three_are_named_created_and_the_run_reports_no_fatal_findings(self, db):
+        report = import_skos(FIXTURES / "concept_implied_by_membership_no_rdf_type.ttl")
+        assert report.fatal == []
+        assert set(report.created) == {
+            "http://example.org/implied/",
+            "http://example.org/implied/alpha",
+            "http://example.org/implied/beta",
+            "http://example.org/implied/gamma",
+        }
+
+    def test_a_node_already_typed_as_something_else_is_never_reclassified(self, db):
+        # A node the file does give an rdf:type is never overridden by this
+        # widened discovery — mixed_scheme_membership.ttl's own concepts are
+        # all explicitly typed, and the scheme nodes there must stay schemes,
+        # not be swept up as concepts merely for appearing as an inScheme
+        # object (they never do — inScheme's *subject* is the candidate, not
+        # its object — but this asserts the outcome, not only the mechanism).
+        import_skos(FIXTURES / "mixed_scheme_membership.ttl")
+        assert not Concept.objects.filter(static_uri="http://example.org/minerals/").exists()
+        assert ConceptScheme.objects.filter(static_uri="http://example.org/minerals/").exists()
+
+
 class TestConceptSlugs:
     """T010 — FR-007/decisions.md D6: an imported concept's slug is derived
     from its label by the model's own rule, disambiguated by a deterministic
@@ -346,6 +418,158 @@ class TestConceptSlugs:
         # rock". If the slug tracked the identifier it would read "igneous",
         # not "igneous-rock".
         assert igneous.slug == "igneous-rock"
+
+
+def _write_shared_label_file(tmp_path: Path, n: int) -> Path:
+    """A Turtle file with ``n`` concepts sharing one ``skos:prefLabel`` — D6's
+    "two source concepts commonly sharing a preferred label" case, scaled up
+    to make a quadratic query cost in ``_assign_unique_slug`` measurable
+    (FIX 16, decisions.md D49). Written to a real file, not built as an
+    in-memory graph, because ``import_skos`` reads from a path."""
+    lines = [
+        "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .",
+        '<http://example.org/sharedslug/> a skos:ConceptScheme ; skos:prefLabel "Shared Slug Vocabulary"@en .',
+    ]
+    for i in range(n):
+        uri = f"http://example.org/sharedslug/c{i:04d}"
+        lines.append(
+            f'<{uri}> a skos:Concept ; skos:inScheme <http://example.org/sharedslug/> ; skos:prefLabel "Shared"@en .'
+        )
+    path = tmp_path / "shared_label.ttl"
+    path.write_text("\n".join(lines))
+    return path
+
+
+class TestSlugAssignmentQueryCountIsLinearInASharedLabelGroup:
+    """FIX 16 (review, decisions.md D49) — ``_assign_unique_slug``'s
+    ``while Concept.objects.filter(...).exclude(pk=...).exists()`` loop issued
+    one query per suffix attempt, and the suffix counter restarted at 1 for
+    every concept, so N concepts deriving the same base slug cost N(N+1)/2
+    round-trips inside the one ``transaction.atomic()`` the whole run sits in
+    — quadratic in the size of a shared-label group, which plan.md's own
+    reading strategy rules out. D6 already establishes that two source
+    concepts sharing a preferred label is the *expected* case, not a rare
+    edge condition, so this is not a hypothetical: a controlled-vocabulary
+    file (e.g. many concepts named "Unspecified" or "Other" across
+    sub-branches) can plausibly carry a group this size.
+    """
+
+    def test_query_count_stays_bounded_as_the_shared_label_group_grows(self, db, tmp_path):
+        # A small N, chosen to keep the test itself fast, but large enough to
+        # separate the two shapes clearly. Measured directly against this
+        # exact fixture and settings: the *pre-fix* quadratic version (one
+        # query per suffix attempt, restarting at 1 for every concept) cost
+        # 1,069 queries at N=40; the *post-fix* linear version cost 250 at
+        # the same N (and scaled linearly at larger N: 130/250/490/970 for
+        # N=20/40/80/160 — each doubling of N roughly doubles the count,
+        # never roughly quadruples it). The bound below sits well above the
+        # fix's own linear cost and well below the quadratic one, so it is
+        # generous headroom against an unrelated small query-count change
+        # elsewhere, not a tight ceiling — while still making it impossible
+        # for the quadratic shape to pass.
+        n = 40
+        path = _write_shared_label_file(tmp_path, n)
+        with CaptureQueriesContext(connection) as ctx:
+            report = import_skos(path)
+        assert report.fatal == []
+        assert Concept.objects.filter(scheme__static_uri="http://example.org/sharedslug/").count() == n
+        assert len(ctx.captured_queries) < 12 * n
+
+    def test_the_same_file_imported_twice_produces_the_same_slugs(self, db, tmp_path):
+        # D6: determinism survives whatever mechanism replaces the quadratic
+        # loop — the same file re-imported must derive the identical slug for
+        # each concept both times, not merely *a* unique one.
+        path = _write_shared_label_file(tmp_path, 12)
+        import_skos(path)
+        first_pass = {
+            concept.static_uri: concept.slug
+            for concept in Concept.objects.filter(scheme__static_uri="http://example.org/sharedslug/")
+        }
+        import_skos(path)
+        second_pass = {
+            concept.static_uri: concept.slug
+            for concept in Concept.objects.filter(scheme__static_uri="http://example.org/sharedslug/")
+        }
+        assert first_pass == second_pass
+        assert len(set(first_pass.values())) == 12, "each concept in the shared-label group must get a distinct slug"
+
+
+def _write_file_with_a_shared_broader_parent(tmp_path: Path, n: int) -> Path:
+    """A Turtle file with one root concept and ``n`` children, each stating
+    ``skos:broader`` back to the root, plus ``n`` one-member collections
+    (FIX 20, review, decisions.md D53) — ``n`` ``ConceptRelation`` rows all
+    sharing one scheme (the shape ``_import_relations``'s own existing-row
+    lookup has to scan on a re-import) and ``n`` collection URIs (the shape
+    ``_import_collections``'s own absent-from-source lookup has to scan)."""
+    lines = [
+        "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .",
+        '<http://example.org/inclause/> a skos:ConceptScheme ; skos:prefLabel "In-clause"@en .',
+        '<http://example.org/inclause/root> a skos:Concept ; skos:inScheme <http://example.org/inclause/> ; skos:prefLabel "Root"@en .',
+    ]
+    for i in range(n):
+        uri = f"http://example.org/inclause/child{i:04d}"
+        lines.append(
+            f"<{uri}> a skos:Concept ; skos:inScheme <http://example.org/inclause/> ; "
+            f'skos:prefLabel "Child {i}"@en ; skos:broader <http://example.org/inclause/root> .'
+        )
+        collection_uri = f"http://example.org/inclause/group{i:04d}"
+        lines.append(f'<{collection_uri}> a skos:Collection ; skos:prefLabel "Group {i}"@en ; skos:member <{uri}> .')
+    path = tmp_path / "in_clause.ttl"
+    path.write_text("\n".join(lines))
+    return path
+
+
+def _max_in_clause_size(sql: str) -> int:
+    """The largest number of comma-separated items inside any flat ``IN (...)``
+    group in ``sql`` (FIX 20, review, decisions.md D53) — a direct,
+    query-shape-level check that a query never carries a parameter list
+    sized by the file's own concept count, the same "measure the actual
+    mechanism" discipline :func:`_write_shared_label_file`'s own query-count
+    test already applies to FIX 16. Django's debug cursor logs SQL with
+    values already substituted in, not placeholders, so this counts literal
+    items rather than ``%s``/``?`` markers."""
+    max_size = 0
+    for match in re.finditer(r"\bIN \(([^()]*)\)", sql):
+        items = [item for item in match.group(1).split(",") if item.strip()]
+        max_size = max(max_size, len(items))
+    return max_size
+
+
+class TestQueryParameterCountDoesNotScaleWithConceptCount:
+    """FIX 20 (review, decisions.md D53) — ``_import_relations`` passed
+    ``source_id__in=successful_ids, target_id__in=successful_ids`` (2N bind
+    parameters) and ``_import_concepts``/``_import_collections`` passed
+    ``static_uri__in=mentioned_uris`` (N). Django does not chunk an ``__in``
+    clause itself except for Oracle's own ``max_in_list_size`` — confirmed by
+    reading ``django.db.models.lookups.In`` and every backend's
+    ``operations.py`` in the installed Django version, not assumed —, so
+    PostgreSQL's 65,535-bind-parameter-per-statement limit is reached at
+    roughly 33k concepts, inside the "tens of thousands" the spec names as
+    the target. SQLite CI cannot catch the failure itself (its own parameter
+    ceiling is different, and no fixture in this suite is remotely close to
+    either backend's limit), so this asserts the *query shape* directly
+    instead — the size of any single ``IN (...)`` clause captured by a real
+    query — rather than trying to reproduce the failure at production scale.
+    """
+
+    def test_no_query_carries_an_in_clause_sized_by_the_concept_count(self, db, tmp_path):
+        # A modest N, deliberately far below any real parameter ceiling —
+        # this is a query-shape assertion, not a scale reproduction. If any
+        # query's IN clause grows with N at all, it is already the wrong
+        # shape at N=60 just as much as at N=33,000.
+        n = 60
+        path = _write_file_with_a_shared_broader_parent(tmp_path, n)
+        import_skos(path)  # first pass: creates the concepts and relations
+
+        with CaptureQueriesContext(connection) as ctx:
+            report = import_skos(path)  # second pass: exercises the existing-row lookup
+        assert report.fatal == []
+
+        worst = max((_max_in_clause_size(entry["sql"]) for entry in ctx.captured_queries), default=0)
+        assert worst < 20, (
+            f"a query carried an IN clause with {worst} items for only {n} concepts — "
+            "its parameter count scales with the file's own concept count"
+        )
 
 
 class TestFatalFindingsAndAtomicity:
@@ -839,6 +1063,83 @@ class TestUnconfiguredLanguageValuesAreSetAside:
         assert schist.label == "Schist"
         assert schist.alt_labels("es") == []
         assert schist.notes("es") == []
+
+
+class TestUntaggedOrNonLiteralValuesAreSetAside:
+    """FIX 15 (review, decisions.md D48) — ``_import_labels`` and
+    ``_import_notes`` both ``continue`` on an object that is not an
+    ``rdflib.Literal``, or that carries no ``.language``, with no report entry
+    at all: a plain literal with no language tag, or a triple whose object is
+    a URI where the predicate is a label or note predicate, vanished from a
+    successful run with nothing in ``report.set_aside`` and nothing in
+    ``report.normalized`` to show for it. Plain (untagged) literals are
+    widespread in published SKOS, and FR-008/FR-009 both require a label or
+    note to be stored "with its language" — a value with none cannot meet
+    that requirement, so (argued in decisions.md D48) it is set aside and
+    reported under the new ``SetAsideReason.NO_LANGUAGE_TAG``, the same
+    "unusable value, never dropped in silence" treatment every other kind of
+    unusable value in this feature already gets, rather than guessed into the
+    vocabulary's default language — a guess the file never asserted, and one
+    that risks colliding with ``ConceptLabel``'s own per-language cardinality
+    rules for a ``PREFERRED`` value in particular.
+    """
+
+    def test_an_untagged_alternative_label_is_set_aside_and_named(self, db):
+        report = import_skos(FIXTURES / "untagged_literal_values.ttl")
+        alpha_uri = "http://example.org/untagged/alpha"
+        entries = [
+            entry
+            for entry in report.set_aside
+            if entry.reason is SetAsideReason.NO_LANGUAGE_TAG and entry.subject == alpha_uri
+        ]
+        assert len(entries) == 2, "expected one entry for the untagged altLabel and one for the untagged definition"
+        assert {entry.params.get("predicate") for entry in entries} == {"skos:altLabel", "skos:definition"}
+
+    def test_the_untagged_alternative_label_is_not_stored_under_any_language(self, db):
+        import_skos(FIXTURES / "untagged_literal_values.ttl")
+        alpha = Concept.objects.get(static_uri="http://example.org/untagged/alpha")
+        assert list(alpha.labels.all()) == []
+        assert alpha.notes("en") == []
+
+    def test_a_non_literal_definition_object_is_set_aside_the_same_way(self, db):
+        # skos:definition <some-uri> — not language-tagged text at all, the
+        # same branch an untagged Literal falls through, and the same
+        # unusable-value treatment applies.
+        report = import_skos(FIXTURES / "untagged_literal_values.ttl")
+        beta_uri = "http://example.org/untagged/beta"
+        entries = [
+            entry
+            for entry in report.set_aside
+            if entry.reason is SetAsideReason.NO_LANGUAGE_TAG and entry.subject == beta_uri
+        ]
+        assert len(entries) == 1
+        assert entries[0].params["predicate"] == "skos:definition"
+        beta = Concept.objects.get(static_uri=beta_uri)
+        assert beta.notes("en") == []
+
+    def test_an_untagged_foreign_description_is_also_set_aside(self, db):
+        # The dcterms:description alias _import_notes reads separately from
+        # the native NOTE_PREDICATES loop has the identical defect — an
+        # untagged value there was dropped with no report entry either.
+        report = import_skos(FIXTURES / "untagged_literal_values.ttl")
+        gamma_uri = "http://example.org/untagged/gamma"
+        entries = [
+            entry
+            for entry in report.set_aside
+            if entry.reason is SetAsideReason.NO_LANGUAGE_TAG and entry.subject == gamma_uri
+        ]
+        assert len(entries) == 1
+        assert entries[0].params["predicate"] == "dcterms:description"
+        gamma = Concept.objects.get(static_uri=gamma_uri)
+        assert gamma.notes("en") == []
+        assert report.normalized == [] or all(entry.subject != gamma_uri for entry in report.normalized)
+
+    def test_the_concepts_still_import_successfully_on_their_usable_content(self, db):
+        report = import_skos(FIXTURES / "untagged_literal_values.ttl")
+        assert report.fatal == []
+        assert Concept.objects.filter(scheme__static_uri="http://example.org/untagged/").count() == 3
+        alpha = Concept.objects.get(static_uri="http://example.org/untagged/alpha")
+        assert alpha.label == "Alpha"
 
 
 class TestUnheldValuesAndNormalisation:
@@ -1898,6 +2199,22 @@ _COVERAGE_NOTE_KIND = {
     SKOS.changeNote: ConceptNote.Kind.CHANGE,
     SKOS.note: ConceptNote.Kind.NOTE,
 }
+# FIX 15 (review, decisions.md D48) — independent CURIE naming for the same
+# label/note predicates above, restated rather than borrowed from skos.py's
+# own _skos_curie helper (the same "no shared classification" discipline FIX
+# 13 already applies to _COVERAGE_MAPPING_CURIE below).
+_COVERAGE_LABEL_NOTE_CURIE = {
+    SKOS.prefLabel: "skos:prefLabel",
+    SKOS.altLabel: "skos:altLabel",
+    SKOS.hiddenLabel: "skos:hiddenLabel",
+    SKOS.definition: "skos:definition",
+    SKOS.scopeNote: "skos:scopeNote",
+    SKOS.example: "skos:example",
+    SKOS.editorialNote: "skos:editorialNote",
+    SKOS.historyNote: "skos:historyNote",
+    SKOS.changeNote: "skos:changeNote",
+    SKOS.note: "skos:note",
+}
 _COVERAGE_MAPPING_CURIE = {
     SKOS.exactMatch: "skos:exactMatch",
     SKOS.closeMatch: "skos:closeMatch",
@@ -1937,6 +2254,7 @@ _PREDICATE_COVERAGE_EXCLUDED_FIXTURES = frozenset(
         "two_vocabularies.ttl",  # TestChoosingBetweenDeclaredVocabularies
         "no_scheme_declared.ttl",  # TestImportSkosVocabulary
         "vocabulary_reassignment.ttl",  # TestExistingConceptIsNotSilentlyMovedBetweenVocabularies
+        "cyclic_member_list.ttl",  # TestCraftedFilesStayInsideTheExceptionContract (FIX 18) — raises, no report
     }
 )
 
@@ -2020,6 +2338,20 @@ def _coverage_note_covered(
     )
 
 
+def _coverage_untagged_covered(subject_uri: str, predicate_curie: str, excluded_subjects: set[str], report) -> bool:
+    """Direct evidence that a label/note object with no language tag — or one that is not
+    even a Literal — was reported set aside under ``NO_LANGUAGE_TAG`` (FIX 15, decisions.md
+    D48), rather than silently skipped the way this gate used to skip it too."""
+    if subject_uri in excluded_subjects:
+        return True
+    return any(
+        entry.subject == subject_uri
+        and entry.params.get("predicate") == predicate_curie
+        and entry.reason is SetAsideReason.NO_LANGUAGE_TAG
+        for entry in report.set_aside
+    )
+
+
 def _coverage_predicate_covered(
     predicate: rdflib.URIRef,
     graph: rdflib.Graph,
@@ -2035,7 +2367,16 @@ def _coverage_predicate_covered(
         kind = _COVERAGE_LABEL_KIND[predicate]
         for subject_node, literal in graph.subject_objects(predicate):
             subject_uri = str(subject_node)
-            if subject_uri not in in_scope or not isinstance(literal, rdflib.Literal) or not literal.language:
+            if subject_uri not in in_scope:
+                continue
+            if not isinstance(literal, rdflib.Literal) or not literal.language:
+                # FIX 15 (review, decisions.md D48): previously skipped outright
+                # — the exact blind spot that let an untagged/non-literal value
+                # go unreported and unnoticed by this gate.
+                if not _coverage_untagged_covered(
+                    subject_uri, _COVERAGE_LABEL_NOTE_CURIE[predicate], excluded_subjects, report
+                ):
+                    return False, subject_uri
                 continue
             if not _coverage_label_covered(
                 subject_uri, literal.language, str(literal), kind, excluded_subjects, report
@@ -2047,7 +2388,14 @@ def _coverage_predicate_covered(
         kind = _COVERAGE_NOTE_KIND[predicate]
         for subject_node, literal in graph.subject_objects(predicate):
             subject_uri = str(subject_node)
-            if subject_uri not in in_scope or not isinstance(literal, rdflib.Literal) or not literal.language:
+            if subject_uri not in in_scope:
+                continue
+            if not isinstance(literal, rdflib.Literal) or not literal.language:
+                # FIX 15 (review, decisions.md D48): same blind spot, the note side.
+                if not _coverage_untagged_covered(
+                    subject_uri, _COVERAGE_LABEL_NOTE_CURIE[predicate], excluded_subjects, report
+                ):
+                    return False, subject_uri
                 continue
             if not _coverage_note_covered(subject_uri, literal.language, str(literal), kind, excluded_subjects, report):
                 return False, subject_uri
@@ -2242,6 +2590,135 @@ class TestExchangePackage:
         # A public package gets documented (Article VI); this catches an
         # accidentally-empty __init__.py before anything is re-exported from it.
         assert exchange.__doc__, "controlled_vocabularies.exchange has no module docstring"
+
+
+class TestSafetyExceptionsAreExportedAndPartOfTheDocumentedHierarchy:
+    """FIX 19 (review, decisions.md D52) — ``UnsafeRdfXmlError``/``UnsafeJsonLdError``
+    propagate out of ``import_skos()`` but were in neither
+    ``controlled_vocabularies.exchange.__all__`` nor a subclass of
+    ``SkosImportError``. A consumer writing the package's own documented
+    ``except (SkosImportError, SkosImportFailed)`` — the shape every other
+    test in this module already exercises — did not catch a hostile file,
+    precisely the case the safety scan exists to guard against."""
+
+    def test_unsaferdfxmlerror_is_a_skosimporterror(self):
+        assert issubclass(UnsafeRdfXmlError, SkosImportError)
+
+    def test_unsafejsonlderror_is_a_skosimporterror(self):
+        assert issubclass(UnsafeJsonLdError, SkosImportError)
+
+    def test_both_are_exported_from_the_exchange_package(self):
+        assert exchange.UnsafeRdfXmlError is UnsafeRdfXmlError
+        assert exchange.UnsafeJsonLdError is UnsafeJsonLdError
+        assert "UnsafeRdfXmlError" in exchange.__all__
+        assert "UnsafeJsonLdError" in exchange.__all__
+
+    def test_a_consumer_catching_only_the_documented_pair_still_catches_a_hostile_rdf_xml_file(self, db):
+        # The actual consumer-facing failure this fix closes: code written
+        # against only the two documented exception types must not let a
+        # hostile file through as an unhandled exception.
+        try:
+            import_skos(SECURITY_FIXTURES / "entity_bomb.rdf", serialization="xml")
+        except (SkosImportError, SkosImportFailed):
+            caught = True
+        else:
+            caught = False
+        assert caught, "a hostile RDF/XML file escaped the documented (SkosImportError, SkosImportFailed) pair"
+
+    def test_a_consumer_catching_only_the_documented_pair_still_catches_a_hostile_json_ld_file(self, db):
+        try:
+            import_skos(SECURITY_FIXTURES / "exfil_via_import.jsonld")
+        except (SkosImportError, SkosImportFailed):
+            caught = True
+        else:
+            caught = False
+        assert caught, "a hostile JSON-LD file escaped the documented (SkosImportError, SkosImportFailed) pair"
+
+
+def _write_deeply_nested_jsonld(tmp_path: Path, depth: int) -> Path:
+    """A JSON-LD document nesting one object inside another ``depth`` times
+    (FIX 18, review, decisions.md D51). Built as raw text, not via
+    ``json.dump`` — the encoder's own recursive descent hits Python's
+    recursion limit before the file is even written, at a depth well below
+    what is needed to reproduce the *parser's* own recursion failure."""
+    open_frag = '{"@id":"http://example.org/deep/","nested":'
+    close_frag = "}"
+    parts = [open_frag] * depth
+    parts.append('{"val":0}')
+    parts.extend([close_frag] * depth)
+    path = tmp_path / "deep.jsonld"
+    path.write_text("".join(parts))
+    return path
+
+
+class TestCraftedFilesStayInsideTheExceptionContract:
+    """FIX 18 (review, decisions.md D51) — three verified paths raised an
+    exception that is neither ``SkosImportError`` nor ``SkosImportFailed``,
+    so a caller catching only the documented pair (a downstream upload form,
+    say) got an unhandled exception instead: a non-well-formed RDF/XML
+    document (including a Turtle file merely renamed to ``.rdf``) raised a
+    bare ``xml.sax.SAXParseException`` from ``scan_rdf_xml`` at
+    ``_read_graph`` time, before the surrounding try/except that already
+    wraps ``graph.parse()``'s own failures; a deeply nested JSON-LD document
+    raised a bare ``RecursionError`` from ``scan_json_ld``'s own recursive
+    walk, the same "outside the try/except" shape; and a cyclic
+    ``skos:memberList`` (an ``rdf:rest`` chain that loops back on itself
+    instead of terminating in ``rdf:nil``) raised a bare
+    ``ValueError("List contains a recursive rdf:rest reference")`` from
+    ``graph.items()`` deep inside ``_import_collections``, well after the
+    scan stage entirely.
+    """
+
+    def test_a_turtle_file_renamed_to_rdf_raises_skosimporterror_not_a_bare_sax_exception(self, tmp_path):
+        # Not well-formed XML at all — no angle brackets, no doctype, nothing
+        # defusedxml.sax's own EntitiesForbidden/ExternalReferenceForbidden
+        # guards were built to catch. This is scan_rdf_xml's own parser
+        # rejecting malformed input, a different failure than either guard.
+        bad = tmp_path / "not_actually_xml.rdf"
+        bad.write_text("@prefix ex: <http://example.org/> .\nex:a ex:b ex:c .\n")
+        with pytest.raises(SkosImportError) as excinfo:
+            _read_graph(bad)
+        err = excinfo.value
+        assert err.code == "skos_parse_failed"
+        assert err.__cause__ is not None, "the underlying SAX exception must be chained for developer diagnostics"
+
+    def test_a_deeply_nested_json_ld_document_raises_skosimporterror_not_a_bare_recursionerror(self, tmp_path):
+        path = _write_deeply_nested_jsonld(tmp_path, 3000)
+        with pytest.raises(SkosImportError) as excinfo:
+            _read_graph(path, serialization="json-ld")
+        err = excinfo.value
+        assert err.code == "skos_parse_failed"
+        assert err.__cause__ is not None, "the underlying RecursionError must be chained for developer diagnostics"
+
+    def test_an_unsafe_rdf_xml_document_still_raises_unsaferdfxmlerror_not_wrapped(self):
+        # The wrapping added for the malformed-XML case above must not
+        # swallow the *deliberate* safety refusal into a generic
+        # SkosImportError — a caller distinguishing "unsafe" from "merely
+        # unreadable" needs the specific type to keep working.
+        with pytest.raises(UnsafeRdfXmlError):
+            _read_graph(SECURITY_FIXTURES / "entity_bomb.rdf", serialization="xml")
+
+    def test_an_unsafe_json_ld_document_still_raises_unsafejsonlderror_not_wrapped(self):
+        with pytest.raises(UnsafeJsonLdError):
+            _read_graph(SECURITY_FIXTURES / "remote_context_string.jsonld", serialization="json-ld")
+
+    @pytest.mark.django_db
+    def test_a_cyclic_memberlist_raises_skosimporterror_not_a_bare_valueerror(self):
+        with pytest.raises(SkosImportError) as excinfo:
+            import_skos(FIXTURES / "cyclic_member_list.ttl")
+        err = excinfo.value
+        assert err.code == "skos_cyclic_member_list"
+        assert err.__cause__ is not None, "the underlying ValueError must be chained for developer diagnostics"
+
+    @pytest.mark.django_db
+    def test_a_cyclic_memberlist_rolls_back_the_whole_run(self):
+        # research.md R7/FR-003: the run is all-or-nothing. The scheme and
+        # concept that import cleanly before the cyclic collection is reached
+        # must not survive if the run as a whole is refused.
+        with pytest.raises(SkosImportError):
+            import_skos(FIXTURES / "cyclic_member_list.ttl")
+        assert not ConceptScheme.objects.filter(static_uri="http://example.org/cyclic/").exists()
+        assert not Concept.objects.filter(static_uri="http://example.org/cyclic/a").exists()
 
 
 class TestFailureMessagesUseOnlyNamedPlaceholders:

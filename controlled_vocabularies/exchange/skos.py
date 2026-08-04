@@ -39,7 +39,13 @@ from controlled_vocabularies.exchange.mapping import (
     SKOS,
 )
 from controlled_vocabularies.exchange.report import FatalReason, ImportReport, NormalizedReason, SetAsideReason
-from controlled_vocabularies.exchange.safety import scan_json_ld, scan_rdf_xml
+from controlled_vocabularies.exchange.safety import (
+    SkosImportError,
+    UnsafeJsonLdError,
+    UnsafeRdfXmlError,
+    scan_json_ld,
+    scan_rdf_xml,
+)
 from controlled_vocabularies.models import (
     Collection,
     Concept,
@@ -56,17 +62,6 @@ from controlled_vocabularies.models import (
 #: run rather than being handed to rdflib on the chance it understands it:
 #: FR-002 names exactly these three, not "whatever rdflib happens to parse".
 _SUPPORTED_FORMATS = frozenset({"turtle", "xml", "json-ld"})
-
-
-class SkosImportError(ValidationError):
-    """Raised when a candidate file cannot be read as SKOS at all (FR-002).
-
-    Covers a missing file, a serialization that cannot be determined or is
-    not one of the three this feature reads, and a file that fails to parse
-    as the serialization it is read as. A :class:`~django.core.exceptions.ValidationError`
-    subclass so it carries the same translatable, named-placeholder message
-    shape as the rest of the package (Article XII).
-    """
 
 
 def _read_graph(file: str | Path, *, serialization: str | None = None) -> rdflib.Graph:
@@ -93,7 +88,20 @@ def _read_graph(file: str | Path, *, serialization: str | None = None) -> rdflib
     A file that cannot be found, or one that fails to parse as its
     serialization, raises :class:`SkosImportError` (FR-002's "cannot be
     read" half) rather than letting rdflib's own exception — untranslated,
-    shaped for a developer — escape to the caller.
+    shaped for a developer — escape to the caller. The same holds for the
+    pre-flight safety scan itself (review fix 18, decisions.md D51): a
+    document that is not well-formed at all — a Turtle file merely renamed
+    to ``.rdf``, say — makes ``scan_rdf_xml`` raise a bare
+    ``xml.sax.SAXParseException`` neither of its own guards is built to
+    catch, and a deeply nested JSON-LD document can exhaust Python's own
+    recursion limit inside ``scan_json_ld``'s recursive walk. Both used to
+    escape uncaught, outside this function's own try/except; both are now
+    wrapped the same way an unparseable file already was. The *deliberate*
+    refusals, :class:`~controlled_vocabularies.exchange.safety.UnsafeRdfXmlError`
+    and :class:`~controlled_vocabularies.exchange.safety.UnsafeJsonLdError`,
+    are excluded from that wrapping and continue to propagate as themselves
+    (decisions.md D36) — only a scan-stage failure that is not one of those
+    two deliberate refusals gets wrapped here.
     """
     path = Path(file)
     if not path.is_file():
@@ -109,19 +117,21 @@ def _read_graph(file: str | Path, *, serialization: str | None = None) -> rdflib
             params={"file": str(path)},
             code="skos_format_unsupported",
         )
-    if resolved_format == "xml":
-        # Pre-flight only — the bytes read here are not what gets parsed
-        # (see the base-URI note above), so a second, larger read is a
-        # deliberate, small cost on RDF/XML input only.
-        scan_rdf_xml(path.read_bytes())
-    elif resolved_format == "json-ld":
-        # Same pre-flight discipline, closing the equivalent hole D36 found
-        # in JSON-LD's own remote-`@context` route (see the module docstring
-        # above and safety.py's own).
-        scan_json_ld(path.read_bytes())
     graph = rdflib.Graph()
     try:
+        if resolved_format == "xml":
+            # Pre-flight only — the bytes read here are not what gets parsed
+            # (see the base-URI note above), so a second, larger read is a
+            # deliberate, small cost on RDF/XML input only.
+            scan_rdf_xml(path.read_bytes())
+        elif resolved_format == "json-ld":
+            # Same pre-flight discipline, closing the equivalent hole D36 found
+            # in JSON-LD's own remote-`@context` route (see the module docstring
+            # above and safety.py's own).
+            scan_json_ld(path.read_bytes())
         graph.parse(str(path), format=resolved_format)
+    except (UnsafeRdfXmlError, UnsafeJsonLdError):
+        raise
     except Exception as exc:
         raise SkosImportError(
             _("'%(file)s' could not be parsed as %(format)s: %(error)s"),
@@ -460,6 +470,39 @@ def _scheme_refs(graph: rdflib.Graph, concept_node: rdflib.term.Node) -> set[str
     return refs
 
 
+def _implied_concept_nodes(graph: rdflib.Graph) -> set[rdflib.term.Node]:
+    """Nodes the file identifies as concepts through a scheme-membership
+    predicate, but never types with ``rdf:type skos:Concept`` at all (review
+    fix 17, decisions.md D50).
+
+    ``concept_nodes`` used to come only from ``graph.subjects(rdflib.RDF.type,
+    SKOS.Concept)`` — a node reachable only through its own
+    ``skos:inScheme``/``skos:topConceptOf``, or as the object of some
+    scheme's own ``skos:hasTopConcept`` (the identical three predicates
+    :func:`_scheme_refs` already reads, here read graph-wide rather than for
+    one concept at a time, since there is no target scheme decided yet at
+    the point this runs — it feeds :func:`_choose_declared_scheme` too), was
+    invisible to the whole import: not created, not set aside, not named in
+    the report at all. Restricted to a node carrying **no** ``rdf:type``
+    whatsoever — one the file does type, as something other than
+    ``skos:Concept``, is left entirely to whatever that type already makes
+    of it, never reclassified.
+    """
+    candidates: set[rdflib.term.Node] = set(graph.subjects(SKOS.inScheme, None))
+    candidates |= set(graph.subjects(SKOS.topConceptOf, None))
+    candidates |= set(graph.objects(None, SKOS.hasTopConcept))
+    return {node for node in candidates if next(graph.objects(node, rdflib.RDF.type), None) is None}
+
+
+def _skos_curie(predicate: rdflib.URIRef) -> str:
+    """The ``skos:xxx`` CURIE for a predicate in the SKOS namespace (report display only,
+    FIX 15, decisions.md D48) — every :data:`LABEL_PREDICATES`/`NOTE_PREDICATES` key is one,
+    so a lookup table is unnecessary; this mirrors the readable-CURIE convention
+    :data:`MAPPING_PREDICATES` already uses for its own reported predicates.
+    """
+    return f"skos:{str(predicate)[len(str(SKOS)) :]}"
+
+
 def _preferred_label_in(graph: rdflib.Graph, node: rdflib.term.Node, language: str) -> str | None:
     """The lexicographically-first ``skos:prefLabel`` value on ``node`` in ``language``, or ``None``."""
     values = sorted(
@@ -533,6 +576,13 @@ def _import_labels(
     for predicate, kind in LABEL_PREDICATES.items():
         for literal in graph.objects(node, predicate):
             if not isinstance(literal, rdflib.Literal) or not literal.language:
+                # FIX 15 (review, decisions.md D48): a plain literal with no
+                # language tag, or an object that is not even a Literal (e.g.
+                # skos:altLabel pointing at a URI), was previously dropped
+                # with no report entry — the same "unusable value, never
+                # silent" rule every other kind of unusable value in this
+                # feature already gets.
+                report.add_set_aside(SetAsideReason.NO_LANGUAGE_TAG, subject=uri, predicate=_skos_curie(predicate))
                 continue
             language = literal.language
             if kind == ConceptLabel.Kind.PREFERRED and language == default_language:
@@ -583,6 +633,10 @@ def _import_notes(
     for predicate, kind in NOTE_PREDICATES.items():
         for literal in graph.objects(node, predicate):
             if not isinstance(literal, rdflib.Literal) or not literal.language:
+                # FIX 15 (review, decisions.md D48): same defect as
+                # _import_labels's identical branch — a note value with no
+                # language tag, or no text at all, was dropped in silence.
+                report.add_set_aside(SetAsideReason.NO_LANGUAGE_TAG, subject=uri, predicate=_skos_curie(predicate))
                 continue
             language = literal.language
             if kind == ConceptNote.Kind.DEFINITION:
@@ -594,6 +648,9 @@ def _import_notes(
 
     for literal in graph.objects(node, DCTERMS.description):
         if not isinstance(literal, rdflib.Literal) or not literal.language:
+            # FIX 15 (review, decisions.md D48): the dcterms:description alias
+            # carries the identical defect, one predicate over.
+            report.add_set_aside(SetAsideReason.NO_LANGUAGE_TAG, subject=uri, predicate="dcterms:description")
             continue
         language = literal.language
         if language in definition_languages:
@@ -879,21 +936,32 @@ def _import_relations(
     # one end outside this run's own writes is only half spoken about by the
     # file, and FR-013's deletion authority only ever covers what the file
     # actually speaks about.
-    existing_broader = ConceptRelation.objects.filter(
-        kind=ConceptRelation.Kind.BROADER,
-        source_id__in=successful_ids,
-        target_id__in=successful_ids,
-    )
+    #
+    # FIX 20 (review, performance/correctness, decisions.md D53): scoped by
+    # source__scheme=target_scheme — one bind parameter, the scheme's own pk
+    # — rather than the original source_id__in=successful_ids,
+    # target_id__in=successful_ids (2N parameters together). Django does not
+    # chunk an `__in` clause for PostgreSQL (only Oracle's own
+    # max_in_list_size is special-cased), whose 65,535-bind-parameter-per-
+    # statement limit this reaches at roughly 33k concepts — inside the
+    # "tens of thousands" the spec names as the target, and invisible to
+    # SQLite-backed CI at any dataset size this test suite runs. Every
+    # ConceptRelation row already has both ends in the same scheme
+    # (ConceptRelation._reject_cross_scheme), so scoping by source's scheme
+    # alone already scopes target's too; "both ends in successful_ids" is
+    # then checked in Python against the in-memory set, reproducing the
+    # original SQL-level condition exactly rather than widening it.
+    existing_broader = ConceptRelation.objects.filter(kind=ConceptRelation.Kind.BROADER, source__scheme=target_scheme)
     for row in existing_broader:
+        if row.source_id not in successful_ids or row.target_id not in successful_ids:
+            continue
         if (row.source_id, row.target_id) not in resolved_broader:
             row.delete()
 
-    existing_related = ConceptRelation.objects.filter(
-        kind=ConceptRelation.Kind.RELATED,
-        source_id__in=successful_ids,
-        target_id__in=successful_ids,
-    )
+    existing_related = ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED, source__scheme=target_scheme)
     for row in existing_related:
+        if row.source_id not in successful_ids or row.target_id not in successful_ids:
+            continue
         if frozenset({row.source_id, row.target_id}) not in resolved_related:
             row.delete()
 
@@ -1092,7 +1160,28 @@ def _import_collections(
         if ordered:
             member_list_node = graph.value(node, SKOS.memberList)
             if member_list_node is not None:
-                ordered_uris = [str(item) for item in graph.items(member_list_node)]
+                try:
+                    ordered_uris = [str(item) for item in graph.items(member_list_node)]
+                except ValueError as exc:
+                    # FIX 18 (review, decisions.md D51): a malformed
+                    # skos:memberList whose rdf:rest chain loops back on
+                    # itself instead of terminating in rdf:nil makes
+                    # graph.items() raise a bare ValueError — outside the
+                    # documented SkosImportError/SkosImportFailed contract.
+                    # Not collected as a per-record set-aside: an infinite
+                    # list has no well-defined membership to import "the
+                    # rest of", so the whole run is refused rather than
+                    # silently importing the collection with whatever
+                    # partial membership happened to be read before the
+                    # cycle was detected.
+                    raise SkosImportError(
+                        _(
+                            "'%(subject)s' has a skos:memberList that does not terminate (its rdf:rest "
+                            "chain loops back on itself); the import was refused."
+                        ),
+                        params={"subject": uri},
+                        code="skos_cyclic_member_list",
+                    ) from exc
                 # FIX 11 (review, decisions.md D44): skos:memberList narrows
                 # skos:member rather than replacing it (the SKOS reference's
                 # own wording) — a skos:member the memberList omits is still
@@ -1141,14 +1230,30 @@ def _import_collections(
             survivors = [concept for concept in current if concept.pk not in resolved_pks]
             row.set_member_order(resolved + survivors)
 
-    # FIX 7 (review, decisions.md D41): .exclude(static_uri__in=mentioned_uris)
-    # also selects a row whose static_uri is NULL — a locally authored
-    # collection the file could never mention at all, since it carries no
-    # external identifier for the file to name. Reported by its own .uri
-    # (StaticUriModel's property, always present per CONTEXT.md), never the
-    # raw column, which for such a row would be None; sorted in Python since
-    # .uri is not a database column .order_by() can reach.
-    absent = Collection.objects.filter(scheme=target_scheme).exclude(static_uri__in=mentioned_uris)
+    # FIX 7 (review, decisions.md D41): a row whose static_uri is NULL — a
+    # locally authored collection the file could never mention at all, since
+    # it carries no external identifier for the file to name — is reported
+    # by its own .uri (StaticUriModel's property, always present per
+    # CONTEXT.md), never the raw column, which for such a row would be None;
+    # sorted in Python since .uri is not a database column .order_by() can
+    # reach.
+    #
+    # FIX 20 (review, performance, decisions.md D53): filtered in Python
+    # against the in-memory mentioned_uris set rather than
+    # .exclude(static_uri__in=mentioned_uris) — the same __in-sized-by-file
+    # concern _import_relations's own fix addresses, here for a string
+    # __in rather than an integer one. Collections are typically far fewer
+    # than concepts, but nothing bounds that in principle, and the fix is
+    # the same either way: .filter(scheme=target_scheme) alone already
+    # carries only one bind parameter, so fetching every one of the scheme's
+    # collections and discarding the mentioned ones in Python avoids the
+    # __in clause's own parameter count entirely rather than merely
+    # shrinking it.
+    absent = [
+        collection
+        for collection in Collection.objects.filter(scheme=target_scheme)
+        if collection.static_uri not in mentioned_uris
+    ]
     for collection in sorted(absent, key=lambda row: row.uri):
         report.add_absent_from_source(collection.uri)
 
@@ -1212,9 +1317,27 @@ def _import_concepts(
     finished and every one of them has a primary key to relate through — see
     :func:`_import_relations` for why this cannot be folded into the
     per-concept loop instead.
+
+    ``taken_slugs`` (FIX 16, review, decisions.md D49) is fetched once, in a
+    single query, rather than once per concept: :func:`_assign_unique_slug`
+    reads and mutates it in place, so a scheme-wide slug collision check that
+    used to cost one query per suffix attempt — quadratic in the size of a
+    group of concepts sharing a label, D6's own "commonly share a preferred
+    label" case — now costs nothing per concept beyond the one shared lookup.
     """
     mentioned_uris: set[str] = set()
     concepts_by_uri: dict[str, Concept] = {}
+    # FIX 16 (review, decisions.md D49): slug -> the static_uri of the
+    # concept currently holding it, seeded from every concept already in
+    # target_scheme (including one this run will never touch — "absent from
+    # source" concepts keep their slug, and must go on blocking it) and kept
+    # current as each concept below is assigned its own final slug. Keyed by
+    # static_uri rather than pk: a newly created concept has no pk yet at the
+    # point its own slug is decided, so pk cannot distinguish "this is my own
+    # row" from "no owner yet" the way the immutable, already-known uri can.
+    taken_slugs: dict[str, str | None] = dict(
+        Concept.objects.filter(scheme=target_scheme).values_list("slug", "static_uri")
+    )
     for node in concept_nodes:
         hint = _first_literal(graph, node, SKOS.prefLabel)
         try:
@@ -1291,7 +1414,7 @@ def _import_concepts(
         concept.scheme = target_scheme
         concept.static_uri = uri
         concept.label = label
-        _assign_unique_slug(concept, target_scheme)
+        _assign_unique_slug(concept, taken_slugs)
         concept.save()
         concepts_by_uri[uri] = concept
         _import_concept_content(graph, node, concept, target_scheme, uri, report)
@@ -1306,12 +1429,18 @@ def _import_concepts(
     # FIX 7 (review, decisions.md D41): same fix as _import_collections's
     # identical query earlier in this module — see that comment for why
     # .uri, computed in Python, replaces the raw static_uri column here.
-    absent = Concept.objects.filter(scheme=target_scheme).exclude(static_uri__in=mentioned_uris)
+    # FIX 20 (review, performance, decisions.md D53): same fix as
+    # _import_collections's identical query too — filtered in Python
+    # against mentioned_uris rather than .exclude(static_uri__in=...),
+    # avoiding a parameter count sized by the file's own concept count.
+    absent = [
+        concept for concept in Concept.objects.filter(scheme=target_scheme) if concept.static_uri not in mentioned_uris
+    ]
     for concept in sorted(absent, key=lambda row: row.uri):
         report.add_absent_from_source(concept.uri)
 
 
-def _assign_unique_slug(concept: Concept, scheme: ConceptScheme) -> None:
+def _assign_unique_slug(concept: Concept, taken_slugs: dict[str, str | None]) -> None:
     """Give ``concept`` a deterministic, scheme-unique slug derived from its label (T010, FR-007).
 
     Nothing is derived from ``concept.static_uri`` — identity and slug are
@@ -1328,6 +1457,23 @@ def _assign_unique_slug(concept: Concept, scheme: ConceptScheme) -> None:
     which of two colliding concepts gets the plain slug and which gets the
     suffix is the same on every run of the identical file).
 
+    ``taken_slugs`` (FIX 16, review, decisions.md D49) maps every slug
+    currently claimed in ``concept``'s scheme to the ``static_uri`` of
+    whichever concept claims it — fetched once by :func:`_import_concepts`,
+    outside this function, rather than re-queried per candidate here. A
+    candidate is free when nothing claims it yet, or when the claimant is
+    ``concept`` itself (already-resolved, so ``concept.static_uri`` is set
+    before this function is ever called): checking against ``static_uri``
+    rather than ``concept.pk`` is what makes a shared, mutated-in-place dict
+    work at all — a newly created concept has no primary key yet at the point
+    its own slug is decided, so ``pk`` cannot tell "this is my own,
+    not-yet-assigned row" apart from "nothing has claimed this slug yet" the
+    way the already-known, immutable URI can. Once a candidate is chosen,
+    ``taken_slugs`` is updated in place so the next concept in this same run
+    sees it as taken — the whole point: what was one query per suffix
+    attempt (quadratic across a shared-label group) is now zero additional
+    queries per concept, the shared dict standing in for all of them.
+
     Setting ``slug_is_manual`` stops ``Concept.save()`` from re-deriving (and
     silently overwriting) this value on a later plain save unrelated to this
     importer. It does not pin the slug in the sense a curator's own manual
@@ -1338,11 +1484,12 @@ def _assign_unique_slug(concept: Concept, scheme: ConceptScheme) -> None:
     base = slugify(concept.label, allow_unicode=True)
     candidate = base
     suffix = 1
-    while Concept.objects.filter(scheme=scheme, slug=candidate).exclude(pk=concept.pk).exists():
+    while taken_slugs.get(candidate, concept.static_uri) != concept.static_uri:
         suffix += 1
         candidate = f"{base}-{suffix}"
     concept.slug = candidate
     concept.slug_is_manual = True
+    taken_slugs[candidate] = concept.static_uri
 
 
 def import_skos(
@@ -1386,7 +1533,14 @@ def import_skos(
 
     with transaction.atomic():
         declared_nodes = sorted(graph.subjects(rdflib.RDF.type, SKOS.ConceptScheme), key=str)
-        concept_nodes = sorted(graph.subjects(rdflib.RDF.type, SKOS.Concept), key=str)
+        # FIX 17 (review, decisions.md D50): a node the file identifies as a
+        # concept only through skos:inScheme/topConceptOf/hasTopConcept —
+        # never through rdf:type skos:Concept — is folded in here, before
+        # scheme disambiguation runs, so it is neither invisible to the
+        # import nor to _choose_declared_scheme's own membership count.
+        concept_nodes = sorted(
+            set(graph.subjects(rdflib.RDF.type, SKOS.Concept)) | _implied_concept_nodes(graph), key=str
+        )
 
         declared_node = _choose_declared_scheme(
             graph, declared_nodes, concept_nodes, scheme, report, source_label=source_label

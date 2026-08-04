@@ -63,7 +63,13 @@ class SetAsideReason(TextChoices):
     D43) names a URI already held by a record of a different kind — a
     collection where this file asserts a concept, or the reverse — a
     contradictory source reported while reading rather than surfacing as a
-    database constraint violation (spec Edge Cases).
+    database constraint violation (spec Edge Cases). ``NO_LANGUAGE_TAG``
+    (review fix 15, decisions.md D48) names a label or note value that is
+    either a plain literal with no language tag, or not a literal at all
+    (e.g. ``skos:definition`` pointing at a URI) — FR-008/FR-009 both require
+    a label or note to be stored "with its language", which a value carrying
+    none cannot meet; the value is set aside rather than guessed into the
+    vocabulary's default language, a language the file itself never asserted.
     """
 
     UNCONFIGURED_LANGUAGE = "unconfigured_language", _("language not configured")
@@ -80,6 +86,7 @@ class SetAsideReason(TextChoices):
     EMPTY_SLUG = "empty_slug", _("preferred label produces no usable slug")
     ALREADY_IN_ANOTHER_VOCABULARY = "already_in_another_vocabulary", _("already belongs to another vocabulary")
     URI_HELD_BY_DIFFERENT_KIND = "uri_held_by_different_kind", _("identifier held by a different kind of record")
+    NO_LANGUAGE_TAG = "no_language_tag", _("no language tag")
 
     @property
     def template(self) -> Promise:
@@ -145,6 +152,10 @@ _REASON_TEMPLATES: dict[SetAsideReason, Promise] = {
     SetAsideReason.URI_HELD_BY_DIFFERENT_KIND: _(
         "'%(subject)s' is already held by a record of a different kind in this application; a second "
         "record was not created for it."
+    ),
+    SetAsideReason.NO_LANGUAGE_TAG: _(
+        "'%(subject)s' carries a '%(predicate)s' value with no language tag (or one that is not text "
+        "at all); it was not stored."
     ),
 }
 

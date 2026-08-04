@@ -1735,3 +1735,365 @@ check .` — all checks passed. `poetry run ruff format --check .` — 22 files 
 detected. `poetry run pre-commit run --all-files` — all hooks passed.
 
 **This closes the last of the six fixes in this review batch (FIX 8–13).**
+
+## 2026-08-04T15:45:00Z · Forge · review fix 14 — `@import` inside an inline object `@context` bypasses `scan_json_ld` (security)
+
+**Did**: closed a critical security finding from the third review round: `safety.py::_check_context_value`
+refused a string `@context` but passed a `dict` `@context` through untouched, on the stated reasoning
+(the module's own docstring, until this fix) that an inline object context "carries nothing to
+resolve". False, and reproduced before writing any test: `import rdflib; rdflib.Graph().parse(...)`
+against a crafted document whose top-level `@context` is an inline object carrying `{"@import":
+"exfil_secret.jsonld", ...}` merges in `exfil_secret.jsonld`'s own `leaked:` prefix and resolves the
+scheme node's URI to `http://example.org/SECRET-FROM-LOCAL-FILE/scheme` — content read from a file
+the caller never named, chosen by the document itself. Confirmed `scan_json_ld()` returned `None` on
+the same document (the bug, live) before touching production code. Read
+`rdflib/plugins/shared/jsonld/context.py` (`Context._read_source`, `_fetch_context`, `_prep_sources`)
+in the installed package rather than guessing: `@import` is the only key a context dict carries that
+reaches `source_to_json`/`urlopen` — every other dict-shaped construct (`@vocab`, `@version`, `@base`,
+`@propagate`, `@protected`, a term's own `@id`/`@type`/`@container`/etc.) only assigns local `Context`
+state or routes through `_rec_expand`/`_prep_expand`, neither of which fetches anything.
+
+Wrote the failing tests first: `TestScanJsonLdRefusesContextImport` in `test_safety.py` (top-level
+dict `@context` with `@import`; `@import` inside a dict entry of an array `@context`; a term's own
+nested `@context` carrying `@import` — context inside a context; a node inside `@graph` carrying its
+own `@context` with `@import`; and the regression control, an ordinary inline-object context with no
+`@import` at all) and `TestReadGraph::test_json_ld_context_import_cannot_exfiltrate_a_local_file` in
+`test_skos.py`, calling `import_skos()` itself — the public entry point the review's own reproduction
+used — and asserting no `ConceptScheme` with the leaked URI prefix exists afterward. All five new
+`test_safety.py` cases and the `test_skos.py` case failed for the right reason (`DID NOT RAISE
+UnsafeJsonLdError` / the import silently succeeding) before the fix; `test_an_ordinary_inline_object_...`
+already passed, unaffected by the bug, confirming the regression control was correctly not broken by
+having no `@import` to trip on.
+
+Production change: `_check_context_value` now recurses into a `dict` — whether the top-level
+`@context`, an array entry, or one of `_iter_context_values`'s own nested/node-scoped discoveries —
+checking for a string `@import` key, refused under a distinct `jsonld_context_import_forbidden` code
+(kept separate from the string-`@context` refusal's `jsonld_remote_context_forbidden`, so a caller
+inspecting `err.code` can tell the two routes apart). The array branch now recurses through
+`_check_context_value` itself for a dict entry, rather than duplicating the check inline, so the
+top-level and array-entry paths cannot drift apart. Updated the module's own docstring, which
+previously stated the now-false "inline object carries nothing to resolve" reasoning.
+
+Mutation probe: reduced the new dict branch to `pass`. All four new attack-shape tests in
+`test_safety.py` failed (`DID NOT RAISE UnsafeJsonLdError`) and the `import_skos()` reproduction test
+failed the same way; the regression-control test (`inline_context.jsonld`, no `@import`) kept
+passing throughout, confirming it tests the right thing and nothing else. Restored the fix
+immediately; full suite re-ran green.
+
+New fixtures under `tests/fixtures/security/` (matching D36's own precedent — not `tests/fixtures/skos/`,
+which `TestEverySkosPredicateIsReadOrReported`/`ALL_FIXTURES` sweep on every run and which is no
+place for a document deliberately designed to reference another file): `exfil_secret.jsonld` (the
+file that must never be read — a stand-in for any server-side file an attacker cannot otherwise
+reach), `exfil_via_import.jsonld` (the exact reproduction), `context_import_array.jsonld`,
+`context_import_nested_term.jsonld`, `context_import_graph_node.jsonld`.
+
+Recorded as decisions.md D47, including the full enumeration of dict-shaped context constructs
+checked against the installed rdflib source and why each one besides `@import` was left unguarded.
+
+**Verified**: `poetry run pytest -q` — 635 passed (629 baseline + 6 new: 5 in
+`TestScanJsonLdRefusesContextImport`, 1 in `TestReadGraph`). `poetry run ruff check .` — all checks
+passed. `poetry run ruff format --check .` — all files formatted (one file needed a format pass,
+applied). `poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files
+scanned. `poetry run python -m django makemigrations --check --dry-run --settings=tests.settings` —
+no changes detected. `poetry run pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T16:10:00Z · Forge · review fix 15 — an untagged literal is dropped with no report entry
+
+**Did**: `_import_labels` and `_import_notes` both `continue`d on a label/note object that was not an
+`rdflib.Literal`, or carried no `.language`, with no report entry either way — nothing stored, nothing
+named, and `_report_unmodelled_predicates` blind to it by design (it skips every SKOS-namespace
+predicate unconditionally). Reproduced before writing any test: a concept with a tagged
+`skos:prefLabel "Alpha"@en`, an untagged `skos:altLabel "plain alt"`, and an untagged
+`skos:definition "plain definition"` imported with `report.set_aside == []` and `report.normalized ==
+[]` — both values silently gone.
+
+Wrote the failing tests first: new fixture `tests/fixtures/skos/untagged_literal_values.ttl` (three
+concepts — "alpha" with an untagged altLabel and an untagged definition, "beta" with a
+`skos:definition` object that is a URI rather than a literal at all, "gamma" with no
+`skos:definition` of its own but an untagged `dcterms:description`) and a new
+`TestUntaggedOrNonLiteralValuesAreSetAside` class in `test_skos.py` (five tests: the two untagged
+label/note values are set aside and named with their predicate CURIE; nothing was stored under any
+language; the non-Literal `skos:definition` object gets the same treatment; the untagged
+`dcterms:description` alias gets it too; the concepts still import successfully on their usable
+content). All three assertions expecting `NO_LANGUAGE_TAG` entries failed (`0 == 2`/`0 == 1`) before
+the production change — `SetAsideReason.NO_LANGUAGE_TAG` did not yet exist, and the two trivially-true
+"nothing was stored" tests confirmed the drop was total.
+
+Decided, argued from FR-008/FR-009 and the models rather than picked for convenience (recorded in
+full as decisions.md D48): **set aside and report under a new `SetAsideReason.NO_LANGUAGE_TAG`**,
+never guessed into the vocabulary's default language. Both FRs require a label/note to be stored
+"with its language"; an untagged value has none. Storing a `PREFERRED` value under the default
+language specifically would either collide with `Concept.label` (already chosen deterministically
+from *tagged* literals only) or hit `ConceptLabel._reject_default_language_preferred`'s own refusal —
+so "store it" was never a uniform option across every label kind, and applying it only to
+non-preferred kinds would be an inconsistent half-measure for one defect. The non-Literal case
+(`skos:definition <uri>`) gets identical treatment: not language-tagged text, for a different reason,
+same unusable outcome.
+
+Production change: both `_import_labels`'s loop and `_import_notes`'s two loops (the native
+`NOTE_PREDICATES` loop and the separate `dcterms:description` alias loop) now call
+`report.add_set_aside(SetAsideReason.NO_LANGUAGE_TAG, subject=uri, predicate=...)` in place of the
+bare `continue`, naming the predicate's own CURIE via a new `_skos_curie()` helper (mirroring the
+readable-CURIE convention `MAPPING_PREDICATES` already uses). Also closed the coverage gate's own
+matching blind spot: `TestEverySkosPredicateIsReadOrReported`'s `_coverage_predicate_covered` used to
+skip any untagged/non-literal label or note triple outright, before ever asking for evidence — exactly
+why nothing noticed this defect despite the gate's stated purpose. Replaced the skip with a call to a
+new `_coverage_untagged_covered` helper checking for a matching `NO_LANGUAGE_TAG` entry, backed by an
+independently-restated `_COVERAGE_LABEL_NOTE_CURIE` table in the test file (not imported from
+`skos.py`, the same "no shared classification with production" rule D46 already applies).
+
+Mutation probe, at both layers: reverted all three `report.add_set_aside(NO_LANGUAGE_TAG, ...)` call
+sites back to a bare `continue`. Three of the five new dedicated tests failed, and — independently —
+the predicate-coverage gate's own new parametrized instance for `untagged_literal_values.ttl` failed
+too, naming `skos:altLabel` and `skos:definition` on `alpha` as uncovered, proving the gate itself
+would have caught this regressing, not only the dedicated test class. Restored immediately; full
+suite re-ran green.
+
+**Verified**: `poetry run pytest -q` — 646 passed (635 baseline-after-FIX-14 + 11 new: 5 in
+`TestUntaggedOrNonLiteralValuesAreSetAside`, 1 new predicate-coverage-gate parametrized instance, 1
+new fixture-corpus-discovery parametrized instance, 4 new `SetAsideReason` template-sweep parametrized
+instances in `test_report.py`). `poetry run ruff check .` — all checks passed. `poetry run ruff format
+--check .` — all files formatted (one file needed a format pass, applied). `poetry run mypy` —
+success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m
+django makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry run
+pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T16:45:00Z · Forge · review fix 16 — `_assign_unique_slug` is quadratic in a shared-label group (performance)
+
+**Did**: `_assign_unique_slug`'s `while Concept.objects.filter(scheme=..., slug=candidate).exclude(pk=...).exists()`
+loop issued one query per suffix attempt, restarting the counter at 1 for every concept, so N concepts
+sharing a base label cost N(N+1)/2 round-trips — inside the one `transaction.atomic()` the whole run
+sits in. D6 already treats this as the expected case for a published file, not an edge condition, and
+plan.md's reading strategy explicitly rules out anything quadratic in concept count.
+
+Wrote the failing test first: a new `_write_shared_label_file` helper generates a Turtle file where N
+concepts all share one `skos:prefLabel`, and `TestSlugAssignmentQueryCountIsLinearInASharedLabelGroup`
+wraps the import in `django.test.utils.CaptureQueriesContext`, asserting the captured query count for
+N=40 stays under `12 * n`. Before the fix: 1,069 queries — the test failed exactly as expected,
+confirming the measured quadratic cost directly against this repository's own models and settings
+(not merely the brief's own numbers, which used a different fixture shape).
+
+Production change: `_import_concepts` now fetches every `(slug, static_uri)` pair already held in
+`target_scheme` once, in a single query, into a `taken_slugs: dict[str, str | None]`, and threads it
+into `_assign_unique_slug`, which reads and mutates it in place instead of querying per suffix
+attempt. Keyed by `static_uri` rather than `pk`, because a newly created concept has no primary key at
+the point its own slug is decided — `pk` cannot distinguish "my own not-yet-saved row" from "nothing
+claims this yet" the way the already-assigned, immutable `static_uri` can. Seeded from the whole
+scheme (not only concepts this run touches), so a "does not mention" concept (FR-013, left completely
+untouched) still correctly blocks a newly processed concept from claiming its slug. `Concept.save()`'s
+own identical `EXISTS` check in `models.py` is deliberately left in place — the model's own integrity
+backstop, guarding every caller, not only this importer — recorded with reasoning in decisions.md D49
+rather than silently left unaddressed.
+
+Re-measured after the fix: 250 queries at N=40 (down from 1,069), and confirmed genuinely linear, not
+merely smaller, by measuring N=20/40/80/160: 130/250/490/970 — each doubling of N roughly doubles the
+count rather than roughly quadrupling it. Added a second test,
+`test_the_same_file_imported_twice_produces_the_same_slugs`, re-importing a 12-concept shared-label
+file twice and asserting identical slugs both times — D6's determinism requirement, now resting on
+`taken_slugs` being freshly and deterministically seeded from the database on every run.
+
+Mutation probe: restored the original per-suffix `.exists()` loop (leaving `taken_slugs` threaded
+through unchanged elsewhere) — the query-count test failed at 1,070 queries for the same fixture,
+correctly rejecting the reintroduced quadratic shape. Restored the fix immediately; full suite re-ran
+green.
+
+**Verified**: `poetry run pytest -q` — 648 passed (646 baseline-after-FIX-15 + 2 new: both in
+`TestSlugAssignmentQueryCountIsLinearInASharedLabelGroup`). `poetry run ruff check .` — all checks
+passed. `poetry run ruff format --check .` — 22 files already formatted. `poetry run mypy` — success,
+9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django
+makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry run
+pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T17:15:00Z · Forge · review fix 17 — a concept with no `rdf:type` is invisible, and the run reports success
+
+**Did**: `concept_nodes` came only from `graph.subjects(rdflib.RDF.type, SKOS.Concept)`. A node the
+file identifies as a concept only through `skos:inScheme`, `skos:topConceptOf`, or the scheme's own
+`skos:hasTopConcept` — never through `rdf:type` — was invisible to the whole import: not created, not
+set aside, nothing in the report. Reproduced with the review's own shape: a scheme declaring
+`skos:hasTopConcept ex:a`, `ex:a` carrying `skos:inScheme` and a preferred label but no `rdf:type`,
+imported as `created == ['…/scheme']`, zero concepts, `set_aside == []`.
+
+Wrote the failing tests first: new fixture `tests/fixtures/skos/concept_implied_by_membership_no_rdf_type.ttl`
+(three concepts, each reachable through exactly one of the three predicates and none carrying `a
+skos:Concept`) and `TestConceptsImpliedByMembershipButNeverGivenAnRdfType` in `test_skos.py` (one test
+per predicate route, one asserting all three are named `created` with no fatal findings, and a
+regression control confirming a node the file *does* type as something else is never reclassified).
+Four of five failed for the right reason (`Concept.DoesNotExist`) before the production change.
+
+Decided, recorded as decisions.md D50: **treat such a node as a concept, not merely report it as
+skipped** — the file's own membership predicates already say what it means, and every downstream check
+(vocabulary-mismatch, no-preferred-label, blank-node/refused-identity) applies to it exactly as to an
+explicitly-typed concept. Production change: a new `_implied_concept_nodes(graph)` helper (computed
+graph-wide, mirroring `_scheme_refs`'s own three predicates but not scoped to any one already-chosen
+scheme, since none is chosen yet), folded into `concept_nodes` in `import_skos` *before*
+`_choose_declared_scheme` runs — so an implied concept also counts toward its own scheme's membership
+tally when disambiguating between multiple declared schemes, not only toward whether it gets imported
+at all. Restricted to a node carrying no `rdf:type` triple whatsoever, so a node the file does type as
+something else (a `Collection`, a `ConceptScheme`) is never reclassified.
+
+Mutation probe, at two layers: reverted `concept_nodes` to the type-only query. Four dedicated tests
+failed, and — independently — `TestEverySkosPredicateIsReadOrReported`'s own new auto-swept
+parametrized instance for the new fixture failed too, naming `skos:hasTopConcept` as neither reflected
+in a record nor reported, proving the coverage gate itself would have caught this regressing. Restored
+immediately; full suite re-ran green. Named one honest limitation in decisions.md D50: this does not
+attempt to guess collection-hood for an untyped node with no scheme-membership predicate of its own —
+out of this fix's scope, no fixture material motivating it yet.
+
+**Verified**: `poetry run pytest -q` — 655 passed (648 baseline-after-FIX-16 + 7 new: 5 in
+`TestConceptsImpliedByMembershipButNeverGivenAnRdfType`, 1 new predicate-coverage-gate parametrized
+instance, 1 new fixture-corpus-discovery parametrized instance). `poetry run ruff check .` — all
+checks passed. `poetry run ruff format --check .` — 22 files already formatted. `poetry run mypy` —
+success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m
+django makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry run
+pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T17:50:00Z · Forge · review fix 18 — crafted files escape import_skos() outside the documented exception contract
+
+**Did**: three verified paths raised an exception that is neither `SkosImportError` nor
+`SkosImportFailed` — a downstream caller catching only the documented pair got an unhandled exception
+instead. (1) `scan_rdf_xml` (called before `_read_graph`'s own try/except) raised a bare
+`xml.sax.SAXParseException` for a document that is not well-formed XML at all, including a Turtle
+file merely renamed to `.rdf`. (2) A cyclic `skos:memberList` (`rdf:rest` looping back on itself)
+raised a bare `ValueError` from `graph.items()` deep inside `_import_collections`. (3) A deeply
+nested JSON-LD document raised a bare `RecursionError` from `scan_json_ld`'s own recursive walk
+(also before `_read_graph`'s try/except).
+
+Wrote the failing tests first: new fixture `tests/fixtures/skos/cyclic_member_list.ttl` (a genuinely
+cyclic `rdf:rest` chain on a `skos:memberList`, added to `_PREDICATE_COVERAGE_EXCLUDED_FIXTURES` since
+it raises rather than returning a report) and `TestCraftedFilesStayInsideTheExceptionContract` in
+`test_skos.py`: a Turtle file renamed to `.rdf`, a 3,000-level-deep JSON-LD document (built as raw
+text — `json.dump`'s own recursive encoder hits Python's recursion limit before the file is even
+written), the cyclic-memberList fixture (both its own exception type/code and that the whole run rolls
+back), plus two regression controls confirming `UnsafeRdfXmlError`/`UnsafeJsonLdError` still propagate
+as themselves rather than getting swallowed into the new wrapping. Four of six failed for the right
+reason before the production change (the two `Unsafe*Error` regression controls already passed).
+
+Production change: widened `_read_graph`'s existing try/except to cover the `scan_rdf_xml`/
+`scan_json_ld` calls too, not only `graph.parse()`, reusing the identical `skos_parse_failed` code and
+message — from a caller's perspective it is the same "could not be parsed" experience either way — but
+explicitly re-raising `UnsafeRdfXmlError`/`UnsafeJsonLdError` unchanged first, so the deliberate safety
+refusals keep their own specific type. Wrapped the `graph.items(member_list_node)` call in
+`_import_collections` in its own try/except, raising a new `SkosImportError`/`skos_cyclic_member_list`
+naming the collection's URI — decided (recorded in decisions.md D51) to refuse the whole run rather
+than set the collection aside and continue, since a cyclic list has no principled partial membership
+to fall back to, unlike every other set-aside case this feature already handles. Raised inside the
+same `transaction.atomic()` block the whole run already sits in, so no separate rollback handling was
+needed for the cyclic-memberList case.
+
+Mutation probe, independently for each path: reverted `_read_graph`'s widened try/except back to
+covering only `graph.parse()` — both the malformed-XML and deep-JSON-LD tests failed with their
+original bare exceptions, while both `Unsafe*Error` regression controls kept passing. Restored, then
+separately reverted the `graph.items()` wrapping — both cyclic-memberList tests failed with the
+original bare `ValueError`. Restored both; full suite re-ran green. Noted one measurement detail, not
+a defect: the RecursionError reproduction took ~37s before the fix (pytest formatting a ~3,000-frame
+traceback) and well under a second after, since the exception is now caught only a few frames from
+where it originates.
+
+**Verified**: `poetry run pytest -q` — 662 passed (655 baseline-after-FIX-17 + 7 new: 6 in
+`TestCraftedFilesStayInsideTheExceptionContract`, 1 new fixture-corpus-discovery parametrized
+instance for `cyclic_member_list.ttl`). `poetry run ruff check .` — all checks passed. `poetry run
+ruff format --check .` — all files formatted (one file needed a format pass, applied). `poetry run
+mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run
+python -m django makemigrations --check --dry-run --settings=tests.settings` — no changes detected.
+`poetry run pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T18:20:00Z · Forge · review fix 19 — the safety exceptions are neither exported nor documented
+
+**Did**: `UnsafeRdfXmlError`/`UnsafeJsonLdError` propagate out of `import_skos()` but were in neither
+`controlled_vocabularies.exchange.__all__` nor the README/CHANGELOG, and were plain `ValidationError`
+subclasses unrelated to `SkosImportError`. A consumer writing the package's own documented `except
+(SkosImportError, SkosImportFailed)` did not catch a hostile file — the exact case the safety scan
+exists to guard against.
+
+Wrote the failing tests first: `TestSafetyExceptionsAreExportedAndPartOfTheDocumentedHierarchy` in
+`test_skos.py` — both `Unsafe*Error` types are `SkosImportError` subclasses, both are exported from
+`controlled_vocabularies.exchange` and listed in `__all__`, and (the actual consumer-facing proof)
+`import_skos()` on a hostile RDF/XML file and a hostile JSON-LD file, each wrapped only in `except
+(SkosImportError, SkosImportFailed)`, is actually caught. All five failed for the right reason before
+the production change (two `AttributeError`s, two `assert False`s, two uncaught exceptions escaping
+the `except` clause in the consumer-simulation tests).
+
+Decided, recorded as decisions.md D52: **make them subclasses of the documented hierarchy** (the
+task's own recommended option) rather than merely exporting and documenting a third independent type
+— existing consumer code becomes correct by construction with no changes needed on their side.
+`SkosImportError`'s own definition moved from `skos.py` to `safety.py` to make the subclassing
+possible without a circular import (`skos.py` already imports from `safety.py`; the reverse was never
+true and must not become true) — `skos.py` now imports and re-exports the same name, so no existing
+`from ...skos import SkosImportError` call site needed to change. `SkosImportFailed` was deliberately
+left as a separate `ValidationError` sibling, not folded into the same tree — it names a structurally
+different situation (fatal findings collected while processing an already-read file), and nothing in
+the fix's brief asks the two to be related. `exchange/__init__.py`'s `__all__` gains both `Unsafe*Error`
+names, imported directly from `safety.py`.
+
+Mutation probe: reverted both classes to plain `ValidationError` subclasses. Both subclass-relationship
+assertions failed, and both consumer-simulation tests failed with the exception escaping their `except`
+clause entirely — reproducing the exact consumer-facing failure this fix closes. Restored immediately;
+full suite re-ran green.
+
+Updated README and CHANGELOG in the same commit (Article VI), documenting the exception hierarchy for
+the first time (`SkosImportError` itself was previously undocumented by name) and correcting one
+sentence found stale while editing: the README's "A JSON-LD document that carries its context inline
+imports normally" no longer held after decisions.md D47 (an inline context carrying `@import` is
+refused) and was updated regardless of this fix's own scope, since both edits touch the same
+paragraph. Ran the humanizer skill on both files' new prose before committing, catching and fixing a
+semicolon clause-join and an em-dash-heavy passage in the CHANGELOG bullet, plus two contractions
+inconsistent with the rest of the document's formal register.
+
+**Verified**: `poetry run pytest -q` — 667 passed (662 baseline-after-FIX-18 + 5 new, all in
+`TestSafetyExceptionsAreExportedAndPartOfTheDocumentedHierarchy`). `poetry run ruff check .` — all
+checks passed. `poetry run ruff format --check .` — 22 files already formatted. `poetry run mypy` —
+success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m
+django makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry run
+pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T19:00:00Z · Forge · review fix 20 — `__in` clauses sized by concept count (performance, confirmed before fixing)
+
+**Did**: confirmed the claim first, per the task's own instruction, before writing any fix. Read
+`django.db.models.lookups.In` in the installed Django version: it only chunks an `__in` clause when
+`connection.ops.max_in_list_size()` returns a number, and grepping every backend's `operations.py`
+shows only Oracle overrides that method — PostgreSQL and SQLite both inherit the base `None` ("no
+limit"), so Django never chunks an `__in` clause for either. `_import_relations` passed
+`source_id__in=successful_ids, target_id__in=successful_ids` in one query (2N parameters together),
+and `_import_concepts`/`_import_collections` each passed `static_uri__in=mentioned_uris` (N).
+PostgreSQL's own wire-protocol Bind message caps a statement at 65,535 bind parameters (a real,
+documented limit), so the relations query is claimed to fail around 33k concepts — inside the "tens
+of thousands" the spec names as the target — and the two single-clause queries around 65k. The claim
+is real; proceeded to fix it.
+
+Wrote the failing test first (after confirming the claim, before any production change): a new
+`_write_file_with_a_shared_broader_parent` fixture generator (one root concept, N children each
+stating `skos:broader` to it, plus N one-member collections) and
+`TestQueryParameterCountDoesNotScaleWithConceptCount` in `test_skos.py`, which re-imports a 60-concept
+file a second time under `CaptureQueriesContext` and asserts no captured query's SQL contains a flat
+`IN (...)` clause with 20 or more items — a query-*shape* assertion, chosen because reproducing an
+actual 65,535-parameter failure would need a dataset this suite has no reason to carry, and the defect
+is about what shape of query gets built, not about crossing one specific numeric threshold. Confirmed
+failing against the original code (a 61-item clause for the relations query) via `git stash` before
+implementing anything, restored the fix, then separately re-confirmed the two absent-from-source
+queries would also fail their own dedicated mutation checks.
+
+Production change, at all three sites: `_import_relations`'s existing-row lookup now filters by
+`source__scheme=target_scheme` (one bind parameter) rather than two `__in` clauses —
+`ConceptRelation._reject_cross_scheme` already guarantees both ends share one scheme, so this already
+scopes both ends, and D30's own "both ends in successful_ids" condition is then checked in Python
+against the in-memory set, reproducing the original SQL-level condition exactly rather than widening
+it. `_import_concepts`'s and `_import_collections`'s absent-from-source lookups now fetch
+`.filter(scheme=target_scheme)` alone and filter `not in mentioned_uris` in Python, rather than
+`.exclude(static_uri__in=mentioned_uris)`. Recorded as decisions.md D53, including why chunking one
+`__in` list into several smaller clauses within the *same* queryset would not actually have helped
+(Django compiles them into one final statement, whose total bind-parameter count is unchanged), and
+the deliberate, named tradeoff of fetching more rows over the wire than the old DB-side-filtered
+queries in exchange for a bound that no longer depends on the file's own concept count.
+
+Mutation probe, independently for all three sites: reverted the relations query back to its original
+two-`__in`-clause form — the test failed, naming a 61-item clause. Restored, reverted the concepts
+absent-from-source query back to `.exclude(static_uri__in=mentioned_uris)` — failed again. Restored,
+reverted the collections absent-from-source query the same way — failed a third time, naming a
+60-item clause. Restored all three; full suite re-ran green.
+
+**Verified**: `poetry run pytest -q` — 668 passed (667 baseline-after-FIX-19 + 1 new). `poetry run
+ruff check .` — all checks passed. `poetry run ruff format --check .` — all files formatted (two
+files needed a format pass, applied). `poetry run mypy` — success, 9 source files. `poetry run deptry
+.` — no issues, 15 files scanned. `poetry run python -m django makemigrations --check --dry-run
+--settings=tests.settings` — no changes detected. `poetry run pre-commit run --all-files` — all hooks
+passed.

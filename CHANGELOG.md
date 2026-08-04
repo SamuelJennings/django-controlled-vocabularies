@@ -22,13 +22,18 @@ All notable changes to this project are documented in this file. The format foll
   different predicate than the file asserted, e.g. a foreign `dcterms:description` read as a
   concept's definition), and `fatal` buckets; a run either succeeds in full or writes nothing,
   raising `SkosImportFailed` (carrying the same report) on a fatal problem such as a missing or
-  blank-node identity. Reading a file never reassigns identity: a concept or collection whose URI
-  is already held by a different vocabulary, or by a record of another kind, is set aside and
-  reported rather than moved or duplicated. Imported files are treated as untrusted input — RDF/XML
-  is scanned for unsafe constructs (entity expansion, external references) before it is parsed, and
-  a JSON-LD document whose `@context` names a remote location is refused rather than fetched, so
-  reading a file never makes a network request. No command-line or web-facing entry point yet —
-  programmatic only. See the README.
+  blank-node identity. `SkosImportError` covers every other reason a file could not be turned into
+  usable SKOS at all (not found, unsupported serialization, unparseable, or refused by the safety
+  scan). Code catching only `(SkosImportError, SkosImportFailed)` already catches everything else
+  this function can raise. Reading a file never reassigns identity: a concept or collection
+  whose URI is already held by a different vocabulary, or by a record of another kind, is set aside
+  and reported rather than moved or duplicated. Imported files are treated as untrusted input.
+  RDF/XML is scanned for unsafe constructs (entity expansion, external references) before it is
+  parsed, and a JSON-LD document is refused rather than fetched if its `@context` names a remote
+  location, whether a plain string reference or an `@import` reference inside an inline object
+  context. Reading a file never makes a network request. Both refusals raise an exported,
+  translatable `UnsafeRdfXmlError`/`UnsafeJsonLdError`, each a `SkosImportError` subclass. No
+  command-line or web-facing entry point yet — programmatic only. See the README.
 - Static, externally assigned identifiers: `ConceptScheme`, `Concept`, and `Collection` each gain a
   `static_uri` field holding an identifier assigned by an external publisher, held exactly as given
   and never recomputed by the app. Nothing in the package overwrites a stored value, and nothing
