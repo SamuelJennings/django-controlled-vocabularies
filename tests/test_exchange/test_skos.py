@@ -571,3 +571,31 @@ class TestFrozenDefaultLanguageConflictIsReported:
         import_skos(FIXTURES / "rocks.ttl")
         report = import_skos(FIXTURES / "rocks.ttl")
         assert not any(entry.reason is SetAsideReason.DEFAULT_LANGUAGE_FROZEN for entry in report.set_aside)
+
+
+class TestAtomicityOnAPopulatedDatabase:
+    """T017 — FR-003: a run that fails partway leaves the database exactly as
+    it was, asserted against an already-populated database rather than an
+    empty one, so the test fails if the transaction boundary only protected
+    creation. T011 already proved this for a scheme field write and for a
+    plain creation; this proves it for an *update to an already-existing
+    concept*, which a creation-only rollback would let through."""
+
+    def test_a_failed_reimport_leaves_a_populated_database_exactly_as_it_was(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        granite_before = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        pk_before, label_before = granite_before.pk, granite_before.label
+        concept_count_before = Concept.objects.count()
+        scheme = ConceptScheme.objects.get(static_uri=ROCKS_URI)
+        name_before = scheme.name
+
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(FIXTURES / "reimport_rolls_back_an_update.ttl")
+        assert exc_info.value.report.fatal[0].reason is FatalReason.MISSING_IDENTITY
+
+        granite_after = Concept.objects.get(pk=pk_before)
+        assert granite_after.label == label_before
+        assert Concept.objects.count() == concept_count_before
+        assert not Concept.objects.filter(label="Ghost concept").exists()
+        scheme.refresh_from_db()
+        assert scheme.name == name_before

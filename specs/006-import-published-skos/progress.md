@@ -545,4 +545,38 @@ was, including rolling back an *update* to an existing concept, not only a creat
 
 **Watch**: none.
 
+## 2026-08-04T10:55:00Z · Implementer US2 · T017
+
+**Did**: new fixture `reimport_rolls_back_an_update.ttl` — the "rocks" scheme, granite with a label
+that must not land, and a blank-node concept (fatal, D3). One test: import `rocks.ttl`, then a
+failed re-import of that fixture, asserting granite's label, primary key, and total concept count
+are exactly as before, the scheme's `name` is unchanged, and the ghost concept was never created. No
+production change: `import_skos()` already wraps the whole run — vocabulary resolution and every
+concept write, create or update alike — inside one `transaction.atomic()` block (T007), and only
+raises `SkosImportFailed` once nothing further can be checked (T011), so an update mid-run rolls
+back exactly as a creation does. This is the third task this phase to pass on first execution
+without new code (with T013, T014), each proving a piece of FR-013's upsert contract that T006-T012
+already built generally rather than for the first-import case alone.
+
+**Verified**: `poetry run pytest -q` — 427 passed (425 + 2: 1 new test, 1 new fixture-discovery
+case). `poetry run ruff check .` — all checks passed. `poetry run ruff format --check .` — 23 files
+already formatted. `poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues,
+15 files scanned. `poetry run python -m django makemigrations --check --dry-run
+--settings=tests.settings` — no changes detected. `poetry run pre-commit run --all-files` — all
+hooks passed.
+
+**Phase US-2 complete (T013–T017).** Re-running `import_skos()` on an unchanged file duplicates
+nothing; a corrected preferred label, and a vocabulary's own name and description, land on re-import
+while identifiers stay fixed; a concept the file drops is left untouched and named in
+`report.absent_from_source`; a failed re-import rolls back an update exactly as it rolls back a
+creation. D18's silent skip of a frozen `default_language` conflict is now reported (D22). `models.py`
+was not touched. Deferred to US-3/US-4 by design (decisions.md D20): alternative-label, note, and
+relationship import — and therefore their removal on re-import — do not exist yet to defer *from*;
+`rocks_updated.ttl`'s edits to those predicates are already staged and waiting for those stories.
+
+**Watch**: US-3's Implementer should read decisions.md D20 and D21 before starting — D20 explains why
+`rocks_updated.ttl`'s alt-label/note edits are untested here and what's expected of the story that
+finally reads them; D21 sets the `dcterms:*` alias precedent (scheme description → concept
+definition) a note-kind mapping may want to follow for its own foreign-predicate aliases.
+
 **Watch**: none.
