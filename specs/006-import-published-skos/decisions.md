@@ -1197,7 +1197,7 @@ place" — right now both land in the same bucket under the same shape of value 
 dynamic), which this fix treats as correct per `CONTEXT.md`'s identity model, not as a gap to close
 here.
 
-## D42 — Reassigning a concept to a different vocabulary is never a side effect of reading a file (review fix 8)
+## D42 — Reassigning a concept or collection to a different vocabulary is never a side effect of reading a file (review fixes 8/9)
 
 A second review of the merged feature found that `_import_concepts` assigned `concept.scheme =
 target_scheme` unconditionally on a `Concept.objects.get_by_uri` match, with no check that the
@@ -1233,11 +1233,27 @@ skos:broader ex:a`) imported first into scheme "first", then into scheme "second
 both concepts' `scheme_id` became "second"'s, `first.concepts.count()` went to zero, and
 `report.updated` listed both URIs with nothing naming the move.
 
-**Revisit if:** `_import_collections` turns out to need the identical rule — a collection is a
-record with its own identity for the same reasons a concept is (D32), so the same defect shape is
-plausible there too; if so, the same `SetAsideReason` should be reused rather than a second one
-minted, since the underlying question ("does this record's identity already belong to a different
-vocabulary?") does not change with the kind of record asking it. Also revisit if a future workflow
-wants an explicit, curator-triggered "move this record to another vocabulary" operation — that is new
-functionality with its own review of what happens to relationships on the far side of the move, not a
-correction to this rule, which only ever concerns what an *import* run does on its own.
+**Extended for review fix 9: `_import_collections` carried the identical defect, with a sharper
+consequence.** `Collection.objects.get_by_uri` matched, `row.scheme = target_scheme` overwrote it
+unconditionally, and the collection's *pre-existing* membership — rows written when the collection
+genuinely belonged to its old vocabulary — was left exactly as it was, now spanning two schemes. That
+is precisely the state `CollectionMember._reject_cross_scheme` exists to prevent, produced through
+the package's own public API (`Collection.add`) with no report entry, because the membership rows a
+re-import doesn't rewrite are never re-validated. The prediction in this entry's own original
+"Revisit if" held: the same `SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY` is reused rather than a
+second reason minted, following D38's own precedent (one reason serving two structurally identical
+defects at two call sites) — "this record's identity is already held by a different vocabulary than
+the one this run is writing into" is the same question for a concept and a collection. The check sits
+in the identical place, `_import_collections`'s own `get_by_uri` match/create branch, before the row
+is mutated; for a collection this additionally means its membership is left completely intact — no
+half-migration, because the collection row itself is never rewritten.
+
+**Reproduced before the fix (review fix 9).** Two files declaring different vocabularies but the
+identical collection identifier, each with its own member: before the fix, the collection's `scheme`
+became whichever file imported last, and its membership spanned both vocabularies — a state the model
+itself refuses to create directly, produced anyway through the public import API.
+
+**Revisit if:** a future workflow wants an explicit, curator-triggered "move this record to another
+vocabulary" operation — that is new functionality with its own review of what happens to relationships
+and collection membership on the far side of the move, not a correction to this rule, which only ever
+concerns what an *import* run does on its own.

@@ -915,7 +915,12 @@ def _import_collections(
     blank nodes by construction (research.md R2) — read through
     ``graph.items()``, which yields the member *URIs* the list carries, never
     the list's own cells, so those blank nodes never reach :func:`_identify`
-    at all (D3's own carve-out, T030).
+    at all (D3's own carve-out, T030). A URI matching an *existing* collection
+    that already belongs to a different vocabulary is left there, untouched —
+    membership included — set aside and reported naming both vocabularies
+    (review fix 9, decisions.md D42, :data:`SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY`),
+    the same rule :func:`_import_concepts` applies to a concept in the same
+    position.
 
     ``skos:member`` (unordered) or ``skos:memberList`` (ordered, walked in the
     file's own order) name the file's desired membership. Each member URI is
@@ -973,6 +978,24 @@ def _import_collections(
         except Collection.DoesNotExist:
             row = Collection(scheme=target_scheme)
             created = True
+
+        if not created and row.scheme_id != target_scheme.pk:
+            # FIX 9 (review, decisions.md D42): the same rule FIX 8 gives a
+            # concept, applied to a collection — a collection matched here
+            # already belongs to a different vocabulary. Reassigning it (and
+            # its membership) to target_scheme is exactly the state
+            # CollectionMember._reject_cross_scheme exists to prevent,
+            # reachable here only because nothing checked the collection's
+            # own scheme before this fix. Left in place, untouched,
+            # membership included; set aside and reported naming both.
+            report.add_set_aside(
+                SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY,
+                subject=uri,
+                current=row.scheme.uri,
+                target=target_scheme.uri,
+            )
+            continue
+
         row.scheme = target_scheme
         row.static_uri = uri
         name = _first_literal(graph, node, SKOS.prefLabel, language=target_scheme.effective_default_language)

@@ -1549,6 +1549,46 @@ class TestExistingConceptIsNotSilentlyMovedBetweenVocabularies:
         assert "http://example.org/reassignment/b" not in report.created
 
 
+class TestExistingCollectionIsNotSilentlyReassignedBetweenVocabularies:
+    """FIX 9 (review, decisions.md D42) — the identical defect FIX 8 closes
+    for a concept, one level up: ``_import_collections`` wrote
+    ``row.scheme = target_scheme`` unconditionally on a matched collection,
+    with no equivalent of ``_conflicting_scheme_ref``. Two files that both
+    declare the same collection identifier from different vocabularies
+    would silently reassign the collection to whichever imported last,
+    leaving it holding a foreign member from the vocabulary it was pulled
+    out of — exactly the state ``CollectionMember._reject_cross_scheme``
+    exists to prevent, produced through the package's own public API. Same
+    rule as FIX 8: the existing collection is left exactly where it is,
+    membership included, set aside and reported naming both vocabularies."""
+
+    def test_a_collection_already_in_another_vocabulary_is_not_reassigned(self, db):
+        import_skos(FIXTURES / "shared_collection_vocab_a.ttl")
+        import_skos(FIXTURES / "shared_collection_vocab_b.ttl")
+
+        vocab_a = ConceptScheme.objects.get(static_uri="http://example.org/shared-collection/vocab-a/")
+        collection = Collection.objects.get_by_uri("http://example.org/shared/coll")
+        concept_a = Concept.objects.get(static_uri="http://example.org/shared-collection/vocab-a/concept-a")
+        concept_b = Concept.objects.get(static_uri="http://example.org/shared-collection/vocab-b/concept-b")
+
+        assert collection.scheme_id == vocab_a.pk
+        assert collection.members() == [concept_a]
+        assert concept_b not in collection.members()
+
+    def test_the_conflict_is_reported_naming_both_vocabularies(self, db):
+        import_skos(FIXTURES / "shared_collection_vocab_a.ttl")
+        vocab_a = ConceptScheme.objects.get(static_uri="http://example.org/shared-collection/vocab-a/")
+        vocab_b_uri = "http://example.org/shared-collection/vocab-b/"
+
+        report = import_skos(FIXTURES / "shared_collection_vocab_b.ttl")
+
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/shared/coll"
+        assert entries[0].params["current"] == vocab_a.uri
+        assert entries[0].params["target"] == vocab_b_uri
+
+
 class TestBlankNodeCollectionFails:
     """T030 — decisions.md D3: a collection identified only by a blank node
     fails the run, on the same rule that governs a concept. An ordered

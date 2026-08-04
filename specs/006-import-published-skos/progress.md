@@ -1546,3 +1546,36 @@ tests re-parametrizing over the new `ALREADY_IN_ANOTHER_VOCABULARY` member). `po
 `poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned.
 `poetry run python -m django makemigrations --check --dry-run --settings=tests.settings` — no changes
 detected. `poetry run pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T14:20:00Z · Forge · review fix 9 — a collection is reassigned across vocabularies and left holding a foreign member
+
+**Did**: closed a high-severity finding, the collection-level counterpart of review fix 8:
+`_import_collections` wrote `row.scheme = target_scheme` unconditionally on a matched collection,
+with no equivalent of `_conflicting_scheme_ref` — no membership or ownership check at all. Two files
+declaring different vocabularies but the identical collection identifier, each naming its own member,
+would silently reassign the collection to whichever imported last, leaving it holding a foreign
+member from the vocabulary it was pulled out of — exactly the state
+`CollectionMember._reject_cross_scheme` exists to prevent, reachable through the package's own public
+API (`Collection.add`) because a re-import never re-validates membership rows it doesn't rewrite.
+Wrote the failing tests first — `TestExistingCollectionIsNotSilentlyReassignedBetweenVocabularies` in
+`test_skos.py`, using a new pair of fixtures (`shared_collection_vocab_a.ttl`/`shared_collection_vocab_b.ttl`,
+each declaring its own vocabulary and naming the identical `http://example.org/shared/coll` collection
+with its own single member) — confirmed both failed before any production change: the collection's
+`scheme` became vocabulary B's, and nothing was reported. Made the production change: the identical
+rule review fix 8 gave a concept, applied to a collection, in the same place in `_import_collections`
+(right after the `get_by_uri` match/create branch, before the row is mutated) — reusing the same
+`SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY` member rather than minting a second one, following
+D38's own precedent that one reason can serve two structurally identical defects at two call sites.
+Extended decisions.md D42 (not a new decision) with the collection half of the story.
+
+**Mutation probe**: disabled the new guard (`if False and not created and row.scheme_id != ...`),
+re-ran the new test class, confirmed both tests failed the same way as before the fix; restored,
+re-ran green.
+
+**Verified**: `poetry run pytest -q` — 578 passed (576 + 2 new in
+`TestExistingCollectionIsNotSilentlyReassignedBetweenVocabularies` — no new `SetAsideReason` member
+this time, so no sweep re-parametrization). `poetry run ruff check .` — all checks passed. `poetry run
+ruff format .` — 1 file reformatted (`test_skos.py`) then clean. `poetry run mypy` — success, 9 source
+files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django
+makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry run
+pre-commit run --all-files` — all hooks passed.
