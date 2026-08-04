@@ -20,9 +20,9 @@ import controlled_vocabularies.exchange as exchange
 from controlled_vocabularies.exchange.report import FatalReason, NormalizedReason, SetAsideReason
 from controlled_vocabularies.exchange.safety import UnsafeJsonLdError, UnsafeRdfXmlError
 from controlled_vocabularies.exchange.skos import (
+    SkosGraph,
     SkosImportError,
     SkosImportFailed,
-    _read_graph,
     import_skos,
 )
 from controlled_vocabularies.models import (
@@ -66,27 +66,27 @@ class TestReadGraph:
         [("rocks.ttl", None), ("rocks.rdf", None), ("rocks.jsonld", None)],
     )
     def test_each_supported_serialization_parses_by_extension(self, filename, fmt):
-        graph = _read_graph(FIXTURES / filename, serialization=fmt)
+        graph = SkosGraph.from_file(FIXTURES / filename, serialization=fmt).graph
         assert len(graph) > 0
         assert (rdflib.URIRef("http://example.org/rocks/"), rdflib.RDF.type, SKOS.ConceptScheme) in graph
 
     @pytest.mark.parametrize("fmt", ["turtle", "xml", "json-ld"])
     def test_each_supported_serialization_parses_with_stated_format(self, fmt):
         filename = {"turtle": "rocks.ttl", "xml": "rocks.rdf", "json-ld": "rocks.jsonld"}[fmt]
-        graph = _read_graph(FIXTURES / filename, serialization=fmt)
+        graph = SkosGraph.from_file(FIXTURES / filename, serialization=fmt).graph
         assert len(graph) > 0
 
     def test_missing_file_fails_with_a_translatable_message(self, tmp_path):
         missing = tmp_path / "does-not-exist.ttl"
         with pytest.raises(SkosImportError) as exc_info:
-            _read_graph(missing)
+            SkosGraph.from_file(missing)
         assert str(missing) in str(exc_info.value)
 
     def test_unparseable_file_fails_with_a_translatable_message(self, tmp_path):
         bad = tmp_path / "bad.ttl"
         bad.write_text("this is not turtle @@@ not even close {{{ ]][[ ")
         with pytest.raises(SkosImportError) as exc_info:
-            _read_graph(bad)
+            SkosGraph.from_file(bad)
         assert "bad.ttl" in str(exc_info.value)
 
     def test_serialization_that_cannot_be_determined_fails(self, tmp_path):
@@ -95,13 +95,13 @@ class TestReadGraph:
         mystery = tmp_path / "vocab.mysteryext"
         mystery.write_bytes((FIXTURES / "rocks.ttl").read_bytes())
         with pytest.raises(SkosImportError):
-            _read_graph(mystery)
+            SkosGraph.from_file(mystery)
 
     def test_serialization_not_among_the_three_supported_fails_even_if_named_explicitly(self):
         # "n3" is a real rdflib format, but not one of FR-002's three — stating
         # it explicitly must not smuggle it past the supported-formats gate.
         with pytest.raises(SkosImportError):
-            _read_graph(FIXTURES / "rocks.ttl", serialization="n3")
+            SkosGraph.from_file(FIXTURES / "rocks.ttl", serialization="n3")
 
     def test_rdf_xml_is_routed_through_the_safety_scan_before_rdflib_sees_it(self):
         # Reinstates the measured entity bomb (research.md R3) as input to the
@@ -111,10 +111,10 @@ class TestReadGraph:
         # SkosImportError are ValidationError subclasses; wrapping one inside
         # the other would only blur which stage actually refused the file).
         with pytest.raises(UnsafeRdfXmlError):
-            _read_graph(SECURITY_FIXTURES / "entity_bomb.rdf", serialization="xml")
+            SkosGraph.from_file(SECURITY_FIXTURES / "entity_bomb.rdf", serialization="xml")
 
     def test_ordinary_rdf_xml_is_unaffected_by_the_safety_scan(self):
-        graph = _read_graph(SECURITY_FIXTURES / "ordinary.rdf", serialization="xml")
+        graph = SkosGraph.from_file(SECURITY_FIXTURES / "ordinary.rdf", serialization="xml").graph
         assert len(graph) > 0
 
     def test_json_ld_is_routed_through_the_safety_scan_before_rdflib_sees_it(self):
@@ -125,10 +125,10 @@ class TestReadGraph:
         # RDF/XML: if this were not actually wired in, the failure would be
         # a connection error from the real fetch attempt, not this refusal.
         with pytest.raises(UnsafeJsonLdError):
-            _read_graph(SECURITY_FIXTURES / "remote_context_string.jsonld", serialization="json-ld")
+            SkosGraph.from_file(SECURITY_FIXTURES / "remote_context_string.jsonld", serialization="json-ld")
 
     def test_json_ld_with_an_inline_context_is_unaffected_by_the_safety_scan(self):
-        graph = _read_graph(SECURITY_FIXTURES / "inline_context.jsonld", serialization="json-ld")
+        graph = SkosGraph.from_file(SECURITY_FIXTURES / "inline_context.jsonld", serialization="json-ld").graph
         assert len(graph) > 0
 
     def test_json_ld_context_import_cannot_exfiltrate_a_local_file(self, db):
@@ -340,7 +340,7 @@ class TestConceptsImpliedByMembershipButNeverGivenAnRdfType:
     from ``graph.subjects(rdf.RDF.type, SKOS.Concept)``. A node the file
     identifies as a concept through ``skos:inScheme``, ``skos:topConceptOf``,
     or the scheme's own ``skos:hasTopConcept`` — the identical three
-    predicates ``_scheme_refs`` already reads — but which never states
+    predicates ``scheme_refs`` already reads — but which never states
     ``rdf:type`` at all, was invisible to the whole import: not created, not
     set aside, not named anywhere in the report. A curator importing such a
     file got a green result reporting only the scheme, with no explanation
@@ -946,7 +946,7 @@ class TestSurplusPreferredLabelInAnotherConfiguredLanguage:
     values in one non-default *configured* language reached ``add_label``
     twice, and the second raised the model's own uncaught ``ValidationError``.
     One is kept deterministically — the lexicographically first, the same
-    rule ``_preferred_label_in`` already uses for the default language — and
+    rule ``preferred_label_in`` already uses for the default language — and
     the rest are set aside and reported."""
 
     def test_one_value_is_kept_deterministically_and_the_run_does_not_crash(self, db):
@@ -966,7 +966,7 @@ class TestSurplusPreferredLabelInAnotherConfiguredLanguage:
 
 
 class TestSurplusPreferredLabelInTheDefaultLanguage:
-    """FIX 4 (review, decisions.md D38) — ``_preferred_label_in`` already
+    """FIX 4 (review, decisions.md D38) — ``preferred_label_in`` already
     picks one default-language ``skos:prefLabel`` deterministically as
     ``Concept.label`` (T009); ``_import_labels`` then skips *every* PREFERRED
     literal in that language, including the ones that were not chosen —
@@ -1934,7 +1934,7 @@ class TestExistingCollectionIsNotSilentlyReassignedBetweenVocabularies:
     """FIX 9 (review, decisions.md D42) — the identical defect FIX 8 closes
     for a concept, one level up: ``_import_collections`` wrote
     ``row.scheme = target_scheme`` unconditionally on a matched collection,
-    with no equivalent of ``_conflicting_scheme_ref``. Two files that both
+    with no equivalent of ``conflicting_scheme_ref``. Two files that both
     declare the same collection identifier from different vocabularies
     would silently reassign the collection to whichever imported last,
     leaving it holding a foreign member from the vocabulary it was pulled
@@ -2201,7 +2201,7 @@ _COVERAGE_NOTE_KIND = {
 }
 # FIX 15 (review, decisions.md D48) — independent CURIE naming for the same
 # label/note predicates above, restated rather than borrowed from skos.py's
-# own _skos_curie helper (the same "no shared classification" discipline FIX
+# own skos_curie helper (the same "no shared classification" discipline FIX
 # 13 already applies to _COVERAGE_MAPPING_CURIE below).
 _COVERAGE_LABEL_NOTE_CURIE = {
     SKOS.prefLabel: "skos:prefLabel",
@@ -2677,7 +2677,7 @@ class TestCraftedFilesStayInsideTheExceptionContract:
         bad = tmp_path / "not_actually_xml.rdf"
         bad.write_text("@prefix ex: <http://example.org/> .\nex:a ex:b ex:c .\n")
         with pytest.raises(SkosImportError) as excinfo:
-            _read_graph(bad)
+            SkosGraph.from_file(bad)
         err = excinfo.value
         assert err.code == "skos_parse_failed"
         assert err.__cause__ is not None, "the underlying SAX exception must be chained for developer diagnostics"
@@ -2685,7 +2685,7 @@ class TestCraftedFilesStayInsideTheExceptionContract:
     def test_a_deeply_nested_json_ld_document_raises_skosimporterror_not_a_bare_recursionerror(self, tmp_path):
         path = _write_deeply_nested_jsonld(tmp_path, 3000)
         with pytest.raises(SkosImportError) as excinfo:
-            _read_graph(path, serialization="json-ld")
+            SkosGraph.from_file(path, serialization="json-ld")
         err = excinfo.value
         assert err.code == "skos_parse_failed"
         assert err.__cause__ is not None, "the underlying RecursionError must be chained for developer diagnostics"
@@ -2696,11 +2696,11 @@ class TestCraftedFilesStayInsideTheExceptionContract:
         # SkosImportError — a caller distinguishing "unsafe" from "merely
         # unreadable" needs the specific type to keep working.
         with pytest.raises(UnsafeRdfXmlError):
-            _read_graph(SECURITY_FIXTURES / "entity_bomb.rdf", serialization="xml")
+            SkosGraph.from_file(SECURITY_FIXTURES / "entity_bomb.rdf", serialization="xml")
 
     def test_an_unsafe_json_ld_document_still_raises_unsafejsonlderror_not_wrapped(self):
         with pytest.raises(UnsafeJsonLdError):
-            _read_graph(SECURITY_FIXTURES / "remote_context_string.jsonld", serialization="json-ld")
+            SkosGraph.from_file(SECURITY_FIXTURES / "remote_context_string.jsonld", serialization="json-ld")
 
     @pytest.mark.django_db
     def test_a_cyclic_memberlist_raises_skosimporterror_not_a_bare_valueerror(self):
@@ -2734,7 +2734,7 @@ class TestFailureMessagesUseOnlyNamedPlaceholders:
 
     def test_missing_file_message(self, tmp_path, uses_only_named_placeholders):
         with pytest.raises(SkosImportError) as excinfo:
-            _read_graph(tmp_path / "does-not-exist.ttl")
+            SkosGraph.from_file(tmp_path / "does-not-exist.ttl")
         err = excinfo.value
         assert isinstance(err.message, Promise)
         assert uses_only_named_placeholders(str(err.message))
@@ -2742,7 +2742,7 @@ class TestFailureMessagesUseOnlyNamedPlaceholders:
 
     def test_unsupported_serialization_message(self, uses_only_named_placeholders):
         with pytest.raises(SkosImportError) as excinfo:
-            _read_graph(FIXTURES / "rocks.ttl", serialization="n3")
+            SkosGraph.from_file(FIXTURES / "rocks.ttl", serialization="n3")
         err = excinfo.value
         assert isinstance(err.message, Promise)
         assert uses_only_named_placeholders(str(err.message))
@@ -2754,7 +2754,7 @@ class TestFailureMessagesUseOnlyNamedPlaceholders:
         bad = tmp_path / "bad.ttl"
         bad.write_text("this is not turtle @@@ not even close {{{ ]][[ ")
         with pytest.raises(SkosImportError) as excinfo:
-            _read_graph(bad)
+            SkosGraph.from_file(bad)
         err = excinfo.value
         assert isinstance(err.message, Promise)
         assert uses_only_named_placeholders(str(err.message))

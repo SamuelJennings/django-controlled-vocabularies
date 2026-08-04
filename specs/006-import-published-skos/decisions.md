@@ -1947,3 +1947,36 @@ re-ran green.
 "read the installed Django's own chunking behaviour before assuming it, then eliminate the clause
 rather than chunk it" approach applies, not a variant of this one that assumes Django will someday
 chunk it automatically.
+
+## D54 — `skos.py` becomes eight collaborating classes, and a helper reached across class boundaries is public or module-level (maintainer request, post-review)
+
+**The maintainer asked for this after reading the PR.** The module was 25 functions at module level,
+24 of them private, behind a single public entry point. Three parameters carried the state: `graph`
+appeared in 17 of the 25 signatures, `report` in 10, `target_scheme` in 5. Parameters threaded through
+two-thirds of a module are instance state that has not been given an object yet.
+
+**The shape.** `SkosGraph` wraps `rdflib.Graph` and its SKOS query helpers, with `from_file()`
+replacing `_read_graph`. `SchemeResolver` decides which vocabulary the file belongs to.
+`ConceptImporter` maps one concept. `RelationImporter` and `CollectionImporter` are the two second
+passes, sharing `_resolve_concept_reference` through a small mixin. `SkosImporter` orchestrates,
+holding the graph, report, target vocabulary and transaction. `import_skos()` stays a module-level
+function with an unchanged signature — a one-line wrapper over `SkosImporter`.
+
+**Visibility follows reach, not layer.** A first pass kept `SkosGraph`'s query helpers private and had
+four other classes call them anyway, which is a worse arrangement than the flat module it replaced: a
+module-private function called from the same module is idiomatic Python, a class-private method
+reached from another class is not. Every helper a collaborator calls is now public on its class
+(`identify`, `first_literal`, `label_languages`, `preferred_label_in`, `scheme_refs`,
+`conflicting_scheme_ref`, `implied_concept_nodes`, `skos_curie`). Two stateless helpers that three
+different classes need — `report_unmodelled_predicates` and `configured_language_codes` — are
+module-level functions rather than a static method one class reaches into another to call.
+
+**No behaviour change, and the test suite is the evidence.** All 668 tests pass untouched except for
+one import line and its call sites in `test_skos.py`, which named `_read_graph` directly. Coverage
+holds at 97% project, 96% on `skos.py`. The file is 1559 → 1286 lines and its docstrings 538 → 335,
+by cutting prose that restated the code or duplicated `spec.md` while keeping every FR, decision and
+review-fix reference.
+
+**Revisit if:** a consumer needs to override label mapping, slug assignment, scheme choice or language
+determination — those are public on their classes for exactly that, and the first real subclass will
+say whether the seams are in the right places.
