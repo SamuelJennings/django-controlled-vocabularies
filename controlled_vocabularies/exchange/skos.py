@@ -1021,9 +1021,16 @@ def _import_collections(
             survivors = [concept for concept in current if concept.pk not in resolved_pks]
             row.set_member_order(resolved + survivors)
 
+    # FIX 7 (review, decisions.md D41): .exclude(static_uri__in=mentioned_uris)
+    # also selects a row whose static_uri is NULL — a locally authored
+    # collection the file could never mention at all, since it carries no
+    # external identifier for the file to name. Reported by its own .uri
+    # (StaticUriModel's property, always present per CONTEXT.md), never the
+    # raw column, which for such a row would be None; sorted in Python since
+    # .uri is not a database column .order_by() can reach.
     absent = Collection.objects.filter(scheme=target_scheme).exclude(static_uri__in=mentioned_uris)
-    for uri in absent.order_by("static_uri").values_list("static_uri", flat=True):
-        report.add_absent_from_source(uri)
+    for collection in sorted(absent, key=lambda row: row.uri):
+        report.add_absent_from_source(collection.uri)
 
 
 def _import_concept_content(
@@ -1140,9 +1147,12 @@ def _import_concepts(
     _import_relations(graph, target_scheme, concepts_by_uri, report)
     _import_collections(graph, target_scheme, concepts_by_uri, report)
 
+    # FIX 7 (review, decisions.md D41): same fix as _import_collections's
+    # identical query earlier in this module — see that comment for why
+    # .uri, computed in Python, replaces the raw static_uri column here.
     absent = Concept.objects.filter(scheme=target_scheme).exclude(static_uri__in=mentioned_uris)
-    for uri in absent.order_by("static_uri").values_list("static_uri", flat=True):
-        report.add_absent_from_source(uri)
+    for concept in sorted(absent, key=lambda row: row.uri):
+        report.add_absent_from_source(concept.uri)
 
 
 def _assign_unique_slug(concept: Concept, scheme: ConceptScheme) -> None:

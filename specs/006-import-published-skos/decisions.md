@@ -1163,3 +1163,36 @@ counts as the review-found inconsistency it is, not a considered design point be
 `skos:broader` deliberately (unlikely, since SKOS's own semantics make it meaningless) — at that
 point silently skipping it may need to become reporting it instead, matching whatever `related`'s own
 equivalent revisit would look like.
+
+## D41 — `report.absent_from_source` names a record's `.uri`, never its raw (possibly-NULL) `static_uri` column (review fix 7)
+
+A review of the merged feature found that `_import_concepts` and `_import_collections` share an
+identical query bug: `Concept.objects.filter(scheme=target_scheme).exclude(static_uri__in=mentioned_uris)`
+(and the same shape for `Collection`) also selects a row whose `static_uri` is `NULL`. Django compiles
+`exclude(field__in=[...])` to `NOT (field IN (...) AND field IS NOT NULL)`, which evaluates true for a
+NULL row regardless of what `mentioned_uris` contains — confirmed directly against the query, not
+assumed from a reading of SQL's `NOT IN` semantics. A locally authored concept or collection (one
+never given an externally published identifier) therefore always matched "not mentioned by this
+file", which is even correct in one sense — the file genuinely never could mention it, having no
+identifier to name it by — but the value the two functions then appended to
+`report.absent_from_source: list[str]` was the raw column itself, `None`, not a URI at all.
+`CONTEXT.md`'s own glossary entry for **URI** is explicit: "always present, never `None`. ... Every
+record has one; it is never 'missing,' only dynamic or static."
+
+**Chosen: report `.uri`, the `StaticUriModel` property every record already has, not the raw
+column.** `.uri` returns `self.static_uri or self.local_url` — a locally authored record's dynamic,
+site-composed URL when it has no static one, exactly the "dynamic or static, never missing" contract
+`CONTEXT.md` states. Both call sites now iterate the queryset as model instances and report
+`record.uri`, sorted in Python (`.uri` is a Python property, not a database column `.order_by()` can
+reach) rather than via `.values_list("static_uri", flat=True).order_by("static_uri")` as before —
+determinism preserved, just computed after the fetch rather than by the database. This does not
+change *which* records are reported absent, only the string logged for the ones that were already
+being caught by the query: a locally authored record with no publisher identity was already, correctly,
+being treated as "the file cannot possibly speak about this" under FR-013's own authority rule; only
+the value standing in for its identity in the report was wrong.
+
+**Revisit if:** a future story wants to distinguish, in the report itself, "absent because the
+publisher's file dropped it" from "absent because it was never externally identified in the first
+place" — right now both land in the same bucket under the same shape of value (a URI, static or
+dynamic), which this fix treats as correct per `CONTEXT.md`'s identity model, not as a gap to close
+here.

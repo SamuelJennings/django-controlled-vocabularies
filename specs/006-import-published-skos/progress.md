@@ -1478,3 +1478,39 @@ re-parametrization). `poetry run ruff check .` — all checks passed. `poetry ru
 issues, 15 files scanned. `poetry run python -m django makemigrations --check --dry-run
 --settings=tests.settings` — no changes detected. `poetry run pre-commit run --all-files` — all hooks
 passed.
+
+## 2026-08-04T13:40:00Z · Forge · review fix 7 — report.absent_from_source contains None
+
+**Did**: closed a medium-severity finding from the merged feature's review, the last of the seven:
+`_import_concepts` and `_import_collections` share an identical bug in their "record the file no
+longer mentions" query — `.exclude(static_uri__in=mentioned_uris)` also selects a row whose
+`static_uri` is `NULL` (verified directly: Django compiles this to `NOT (field IN (...) AND field IS
+NOT NULL)`, true for any NULL row), so a locally authored concept or collection appended `None`
+straight into `report.absent_from_source: list[str]`, contradicting `CONTEXT.md`'s own "a record's
+uri is always present, never None." Wrote the failing tests first —
+`TestAbsentFromSourceNeverContainsNone` in `test_skos.py`, covering both sites: a locally authored
+`ConceptFactory` and a locally authored `CollectionFactory`, each in an already-imported scheme with
+no `static_uri` of their own — confirmed both failed with `None` actually present in
+`report.absent_from_source` before any production change. Made the production change at both sites:
+iterate the queryset as model instances and report each record's `.uri` property (`StaticUriModel`'s
+own "static if set, else the dynamic local URL" contract, never `None`) instead of the raw column,
+sorting in Python since `.uri` is not a database column. Mutation probe: reverted each site back to
+`.static_uri` in turn (using `CollectionFactory`, now imported into `test_skos.py` alongside the
+existing `ConceptFactory`) and confirmed each mutation was caught by, and only by, its own site's
+test — the concept-site revert failed only the concept test, the collection-site revert failed only
+the collection test, proving the two fixes are independently load-bearing, not a copy that happens to
+also pass by luck. Restored both, re-ran green. Recorded as decisions.md D41, including an explicit
+note that this changes only the reported *value*, not which records are reported absent — a locally
+authored record was already correctly caught by the query, since the file genuinely cannot mention a
+record with no external identifier to name it by.
+
+**This closes the last of the seven fixes in the review's list.**
+
+**Verified**: `poetry run pytest -q` — 561 passed (559 baseline + 2 new: 2 in
+`TestAbsentFromSourceNeverContainsNone` — no new fixture, since both tests build their locally
+authored record with a factory rather than a `.ttl` file, and no new `SetAsideReason` member, so no
+sweep re-parametrization). `poetry run ruff check .` — all checks passed. `poetry run ruff format
+--check .` — 22 files already formatted. `poetry run mypy` — success, 9 source files. `poetry run
+deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations --check
+--dry-run --settings=tests.settings` — no changes detected. `poetry run pre-commit run --all-files` —
+all hooks passed.

@@ -31,7 +31,7 @@ from controlled_vocabularies.models import (
     ConceptRelation,
     ConceptScheme,
 )
-from tests.factories import ConceptFactory, ConceptSchemeFactory
+from tests.factories import CollectionFactory, ConceptFactory, ConceptSchemeFactory
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "skos"
 SECURITY_FIXTURES = Path(__file__).parent.parent / "fixtures" / "security"
@@ -1453,6 +1453,44 @@ class TestCollectionAbsentFromSource:
         import_skos(FIXTURES / "collection_absent_from_source_updated.ttl")
 
         assert alpha in dropped.members()
+
+
+class TestAbsentFromSourceNeverContainsNone:
+    """FIX 7 (review, decisions.md D41) — ``Concept.objects.filter(scheme=...)
+    .exclude(static_uri__in=mentioned_uris)`` (and ``_import_collections``'s
+    identical query for ``Collection``) also selects a row whose
+    ``static_uri`` is ``NULL``: Django's ``exclude(field__in=...)`` compiles
+    to ``NOT (field IN (...) AND field IS NOT NULL)``, which is true for a
+    NULL row regardless of what ``mentioned_uris`` holds. A locally authored
+    record — one the file could never "mention" at all, since it carries no
+    external identifier for the file to name in the first place — was
+    therefore always "absent from source", and its ``None`` static URI was
+    appended straight into ``report.absent_from_source: list[str]``.
+    CONTEXT.md is explicit that a record's ``uri`` is "always present,
+    never None"; the value to report is that property (the dynamic local
+    URL), not the raw column."""
+
+    def test_a_locally_authored_concept_reports_its_dynamic_uri_not_none(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/rocks/")
+        local = ConceptFactory(scheme=scheme, label="Local only")
+        assert local.static_uri is None
+
+        report = import_skos(FIXTURES / "rocks.ttl")
+
+        assert None not in report.absent_from_source
+        assert local.uri in report.absent_from_source
+
+    def test_a_locally_authored_collection_reports_its_dynamic_uri_not_none(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/rocks/")
+        local = CollectionFactory(scheme=scheme, name="Local collection only")
+        assert local.static_uri is None
+
+        report = import_skos(FIXTURES / "rocks.ttl")
+
+        assert None not in report.absent_from_source
+        assert local.uri in report.absent_from_source
 
 
 class TestBlankNodeCollectionFails:
