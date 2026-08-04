@@ -566,3 +566,60 @@ UI, a factory), exactly as it already was before this decision.
 wrong" (e.g. distinguishing an invalid language code from a merely unconfigured one) — at that
 point the filter-ahead check may need to grow past a plain membership test, but should still stay
 ahead of the write rather than move to a catch.
+
+## D26 — Normalisation gets its own report bucket, not a `SetAsideReason` member (T021)
+
+FR-009 requires that a foreign predicate normalised onto another — `dcterms:description` read as a
+concept's `definition` — "MUST be reported, never applied silently." T021's own brief lumps this in
+with notation/mapping/unmodelled-predicate reporting in one sentence, then names it as its own,
+separate sub-case. The question is what mechanism carries it: reuse `SetAsideReason` (add a new
+member, or route it through an existing one), or something else.
+
+Reusing `SetAsideReason` was rejected. Its own docstring, and every existing member, says what it
+is: "the closed vocabulary of reasons an import *cannot store* something." A normalised value is
+not that — it *is* stored, as `ConceptNote.Kind.DEFINITION`, exactly where a concept's own
+`skos:definition` would have landed. Filing it under `set_aside` would make `report.set_aside`
+lie to a caller who filters it expecting "things that did not make it in" (`#51`'s own use of
+`set_aside_by_reason()` depends on that being true), and it would blur the exact distinction D1
+draws between "reported and dropped" and "reported and kept."
+
+Chosen: a fourth reason vocabulary, `NormalizedReason`, with its own `NormalizedEntry` dataclass
+and `ImportReport.normalized` bucket — the same shape (`reason`/`subject`/`params`, frozen, lazily
+translatable, one `render()`) `SetAsideReason`/`FatalReason` already established twice over (D7).
+This is not new invention: it is the third instance of a pattern this report already commits to,
+applied to a third, genuinely distinct outcome ("stored, but not verbatim") that the first two
+outcomes ("not stored" / "run refused") do not cover. `FOREIGN_DEFINITION` is its only member for
+now — no other normalisation exists yet in this feature — but the vocabulary is closed the same way
+the other two are, ready for a second member without a shape change if one arrives later (a note
+kind's own foreign-predicate alias, per D21's own "Revisit if").
+
+**Revisit if:** a future normalisation needs a materially different shape than `subject` + named
+`params` (e.g. one that spans two subjects) — that would be evidence the pattern doesn't generalise
+a third time and needs its own reconsideration, not a third copy-paste.
+
+## D27 — "Unmodelled predicate" is scoped to non-SKOS predicates only; a not-yet-built SKOS predicate is silently skipped (T021)
+
+FR-014 covers "predicates the models have no place for." `skos:broader`/`narrower`/`related`
+(US-4) and `skos:member`/`memberList` (US-5) are not read by this importer yet, but the models *do*
+have a place for them — `ConceptRelation`, `Collection`, `CollectionMember` all exist in R1's
+schema. Reporting them as `UNMODELLED_PREDICATE` now would be false on the words of the reason
+itself, and it would also break `rocks.ttl`'s own baseline: `TestReportPopulatedByARealRun`'s
+`test_a_first_import_reports_everything_as_created_nothing_as_updated` asserts `report.set_aside
+== []` for a plain import of `rocks.ttl`, which carries `skos:broader`, `skos:related`, and both
+collection-membership predicates. Any generic "everything not explicitly consumed on this concept"
+walk would have broken that test the moment it ran, for a reason that has nothing to do with T021's
+own scope.
+
+Chosen: `_import_unheld_values()` only reports a predicate as `UNMODELLED_PREDICATE` when it falls
+*outside* the SKOS namespace entirely — matching the acceptance text's own wording, "a predicate
+from outside SKOS." A SKOS predicate the model has a home for but this importer doesn't read yet is
+silently skipped, not reported, deferred to the story that builds its read path (T023-T030); a
+predicate genuinely outside SKOS, with no model home at all regardless of story, is reported now.
+This also means `skos:notation` and the six mapping predicates are checked *before* the generic
+walk and excluded from it by `_HANDLED_CONCEPT_PREDICATES` — they are SKOS predicates the models
+have no place for either, but they get their own named reasons (`NOTATION`/`MAPPING`) rather than
+falling through to the generic, less specific `UNMODELLED_PREDICATE`.
+
+**Revisit if:** a later story (US-4/US-5) lands and a SKOS predicate remains genuinely unbuilt with
+no story left to claim it — at that point silently skipping it stops being "deferred" and starts
+being "actually has no place," and it should move to being reported.

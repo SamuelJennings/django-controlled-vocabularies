@@ -13,7 +13,7 @@ import pytest
 import rdflib
 
 import controlled_vocabularies.exchange as exchange
-from controlled_vocabularies.exchange.report import FatalReason, SetAsideReason
+from controlled_vocabularies.exchange.report import FatalReason, NormalizedReason, SetAsideReason
 from controlled_vocabularies.exchange.safety import UnsafeRdfXmlError
 from controlled_vocabularies.exchange.skos import SkosImportError, SkosImportFailed, _read_graph, import_skos
 from controlled_vocabularies.models import Concept, ConceptLabel, ConceptNote, ConceptRelation, ConceptScheme
@@ -730,6 +730,68 @@ class TestUnconfiguredLanguageValuesAreSetAside:
         assert schist.label == "Schist"
         assert schist.alt_labels("es") == []
         assert schist.notes("es") == []
+
+
+class TestUnheldValuesAndNormalisation:
+    """T021 — FR-014: a notation, a mapping to another vocabulary, and a
+    predicate from outside SKOS entirely are each set aside and reported
+    rather than passed over in silence, and the concepts still import
+    successfully. FR-009: a foreign ``dcterms:description`` read as a
+    concept's definition, because the concept carries no ``skos:definition``
+    of its own, is reported as a normalisation rather than applied silently
+    (decisions.md D24 in mapping.py, D21's precedent extended from the scheme
+    level to the concept level)."""
+
+    def test_the_concepts_still_import_successfully(self, db):
+        report = import_skos(FIXTURES / "unmodelled_and_normalised_values.ttl")
+        assert report.fatal == []
+        assert Concept.objects.filter(scheme__static_uri="http://example.org/hardware/").count() == 2
+
+    def test_a_notation_is_set_aside(self, db):
+        report = import_skos(FIXTURES / "unmodelled_and_normalised_values.ttl")
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.NOTATION]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/hardware/widget"
+
+    def test_a_mapping_predicate_is_set_aside_naming_the_predicate(self, db):
+        report = import_skos(FIXTURES / "unmodelled_and_normalised_values.ttl")
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.MAPPING]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/hardware/widget"
+        assert entries[0].params["predicate"] == "skos:exactMatch"
+
+    def test_a_predicate_from_outside_skos_is_set_aside_naming_the_predicate(self, db):
+        report = import_skos(FIXTURES / "unmodelled_and_normalised_values.ttl")
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.UNMODELLED_PREDICATE]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/hardware/widget"
+        assert entries[0].params["predicate"] == "http://example.org/ns#customAttribute"
+
+    def test_a_foreign_description_is_read_as_the_definition_and_reported_as_normalised(self, db):
+        report = import_skos(FIXTURES / "unmodelled_and_normalised_values.ttl")
+        gadget = Concept.objects.get(static_uri="http://example.org/hardware/gadget")
+        assert gadget.definition("en") == "A small mechanical device."
+        assert len(report.normalized) == 1
+        entry = report.normalized[0]
+        assert entry.reason is NormalizedReason.FOREIGN_DEFINITION
+        assert entry.subject == "http://example.org/hardware/gadget"
+        assert entry.params["predicate"] == "dcterms:description"
+        assert entry.params["language"] == "en"
+
+    def test_a_concept_with_its_own_definition_is_not_normalised(self, db):
+        # rocks.ttl's igneous carries a native skos:definition; nothing about
+        # a run that never needs the dcterms alias should land in
+        # report.normalized.
+        report = import_skos(FIXTURES / "rocks.ttl")
+        assert report.normalized == []
+
+    def test_broader_related_and_collection_membership_are_not_reported_as_unmodelled(self, db):
+        # skos:broader/related/member/memberList are SKOS predicates this
+        # importer does not read yet (US-4/US-5), but the models do have a
+        # place for them — they must never be reported as UNMODELLED_PREDICATE
+        # merely because this story doesn't build that read path yet.
+        report = import_skos(FIXTURES / "rocks.ttl")
+        assert not any(entry.reason is SetAsideReason.UNMODELLED_PREDICATE for entry in report.set_aside)
 
 
 class TestFixtureCorpus:

@@ -14,6 +14,8 @@ from controlled_vocabularies.exchange.report import (
     FatalFinding,
     FatalReason,
     ImportReport,
+    NormalizedEntry,
+    NormalizedReason,
     SetAsideEntry,
     SetAsideReason,
 )
@@ -23,6 +25,8 @@ __all__ = [
     "FatalFinding",
     "FatalReason",
     "ImportReport",
+    "NormalizedEntry",
+    "NormalizedReason",
     "SetAsideEntry",
     "SetAsideReason",
     "SkosImportError",

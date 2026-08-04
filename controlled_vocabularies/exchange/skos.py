@@ -24,10 +24,16 @@ from django.db import transaction
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 
-from controlled_vocabularies.exchange.mapping import DCTERMS, LABEL_PREDICATES, NOTE_PREDICATES, SKOS
-from controlled_vocabularies.exchange.report import FatalReason, ImportReport, SetAsideReason
+from controlled_vocabularies.exchange.mapping import (
+    DCTERMS,
+    LABEL_PREDICATES,
+    MAPPING_PREDICATES,
+    NOTE_PREDICATES,
+    SKOS,
+)
+from controlled_vocabularies.exchange.report import FatalReason, ImportReport, NormalizedReason, SetAsideReason
 from controlled_vocabularies.exchange.safety import scan_rdf_xml
-from controlled_vocabularies.models import Concept, ConceptLabel, ConceptScheme, validate_static_uri
+from controlled_vocabularies.models import Concept, ConceptLabel, ConceptNote, ConceptScheme, validate_static_uri
 
 #: The three serializations FR-002 requires this feature to read. Anything
 #: else — an unrecognised extension with no explicit ``format``, or an
@@ -496,9 +502,12 @@ def _import_notes(
     rule :func:`_import_labels` applies and for the same reason: a note
     carries no identifier of its own to upsert by, and the file is
     authoritative for what it contains (FR-013). :attr:`NOTE_PREDICATES`
-    covers the native SKOS predicates only — the ``dcterms:description``
-    alias for a concept with no ``skos:definition`` of its own is a separate,
-    reported normalisation (T021, FR-009), not folded in here.
+    covers the native SKOS predicates only. ``dcterms:description`` is a
+    separate, concept-level alias for the definition (T021, FR-009,
+    decisions.md D24/D21) — read only in a language the concept carries no
+    ``skos:definition`` of its own in, and reported as a normalisation rather
+    than applied silently, so it is handled after the native predicates
+    rather than folded into :attr:`NOTE_PREDICATES` alongside them.
 
     A value in a language this application is not configured for is set
     aside and reported by its own language rather than written, the same
@@ -507,15 +516,85 @@ def _import_notes(
     """
     configured = _configured_language_codes()
     concept.concept_notes.all().delete()
+    definition_languages: set[str] = set()
     for predicate, kind in NOTE_PREDICATES.items():
         for literal in graph.objects(node, predicate):
             if not isinstance(literal, rdflib.Literal) or not literal.language:
                 continue
             language = literal.language
+            if kind == ConceptNote.Kind.DEFINITION:
+                definition_languages.add(language)
             if language not in configured:
                 report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, subject=uri, language=language)
                 continue
             concept.add_note(language=language, kind=kind, value=str(literal))
+
+    for literal in graph.objects(node, DCTERMS.description):
+        if not isinstance(literal, rdflib.Literal) or not literal.language:
+            continue
+        language = literal.language
+        if language in definition_languages:
+            # The concept already carries its own skos:definition in this
+            # language; the foreign predicate has nothing to contribute here.
+            continue
+        if language not in configured:
+            report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, subject=uri, language=language)
+            continue
+        concept.add_note(language=language, kind=ConceptNote.Kind.DEFINITION, value=str(literal))
+        report.add_normalized(
+            NormalizedReason.FOREIGN_DEFINITION, subject=uri, predicate="dcterms:description", language=language
+        )
+
+
+#: Every predicate a concept node carries that this module already reads and
+#: accounts for elsewhere (T021) — the identity/scheme predicates T009 reads,
+#: every label and note predicate (:data:`LABEL_PREDICATES`/`NOTE_PREDICATES`),
+#: the mapping predicates (reported under their own reason below), and
+#: ``dcterms:description`` (the definition alias, also reported under its own
+#: reason). Checked so :func:`_import_unheld_values` never double-reports a
+#: predicate it, or another function in this module, already accounted for.
+_HANDLED_CONCEPT_PREDICATES = frozenset(
+    {rdflib.RDF.type, SKOS.inScheme, SKOS.topConceptOf, SKOS.notation, DCTERMS.description}
+    | set(LABEL_PREDICATES)
+    | set(NOTE_PREDICATES)
+    | set(MAPPING_PREDICATES)
+)
+
+
+def _import_unheld_values(graph: rdflib.Graph, node: rdflib.term.Node, uri: str, report: ImportReport) -> None:
+    """Set aside and report the values on ``concept`` the models have no place for (T021, FR-014).
+
+    Three kinds, each named under the reason that fits it (one entry per
+    value, not merged, so nothing set aside is hidden behind a count only):
+    a ``skos:notation`` (:data:`SetAsideReason.NOTATION`); a cross-vocabulary
+    mapping (:data:`MAPPING_PREDICATES`, :data:`SetAsideReason.MAPPING`,
+    naming the predicate's CURIE); and any predicate this concept carries
+    that is neither handled elsewhere in this module nor itself a SKOS
+    predicate (:data:`SetAsideReason.UNMODELLED_PREDICATE`, naming the
+    predicate's own URI — there is no curated CURIE table for a predicate
+    this module has never seen before).
+
+    A SKOS predicate this module simply does not read *yet* —
+    ``skos:broader``/``narrower``/``related`` (US-4) and
+    ``skos:member``/``memberList`` (US-5) — is deliberately not reported
+    here: the models do have a place for it, so FR-014's "the models have no
+    place for" does not apply, only "not yet built" does, and reporting it
+    now would be misleading noise that a later story's own read path would
+    then need to un-report.
+    """
+    for _notation in graph.objects(node, SKOS.notation):
+        report.add_set_aside(SetAsideReason.NOTATION, subject=uri)
+
+    for mapping_predicate, name in MAPPING_PREDICATES.items():
+        for _obj in graph.objects(node, mapping_predicate):
+            report.add_set_aside(SetAsideReason.MAPPING, subject=uri, predicate=name)
+
+    for other_predicate, _obj in graph.predicate_objects(node):
+        if other_predicate in _HANDLED_CONCEPT_PREDICATES:
+            continue
+        if str(other_predicate).startswith(str(SKOS)):
+            continue
+        report.add_set_aside(SetAsideReason.UNMODELLED_PREDICATE, subject=uri, predicate=str(other_predicate))
 
 
 def _import_concept_content(
@@ -530,12 +609,12 @@ def _import_concept_content(
 
     Called once per created-or-updated concept, after it has a primary key
     (T018's label replacement needs one). Grows one call at a time as
-    Phase US-3 lands: T018 (labels), T019 (notes), and T021
-    (notation/mappings/unmodelled predicates and the ``dcterms:description``
-    normalisation) alongside it.
+    Phase US-3 landed: T018 (labels), T019 (notes), T021 (notation, mappings,
+    unmodelled predicates, and the ``dcterms:description`` normalisation).
     """
     _import_labels(graph, node, concept, target_scheme.effective_default_language, uri, report)
     _import_notes(graph, node, concept, uri, report)
+    _import_unheld_values(graph, node, uri, report)
 
 
 def _import_concepts(

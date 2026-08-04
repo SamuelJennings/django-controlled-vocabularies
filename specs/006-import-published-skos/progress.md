@@ -672,3 +672,43 @@ changes detected.
 `dcterms:description`-as-`definition` normalisation reported, never applied silently.
 
 **Watch**: none.
+
+## 2026-08-04T11:55:00Z · Implementer US3 · T021
+
+**Did**: `mapping.py` gains `MAPPING_PREDICATES` (the six SKOS mapping predicates ->
+their CURIEs). `report.py` gains a fourth reason vocabulary, `NormalizedReason`
+(one member so far, `FOREIGN_DEFINITION`), its own `NormalizedEntry` dataclass, and
+`ImportReport.normalized`/`add_normalized()` — kept apart from `SetAsideReason`/`set_aside`
+because a normalised value *was* stored, just not verbatim under the file's own predicate
+(decisions.md D26). `skos.py`'s new `_import_unheld_values()` sets aside a `skos:notation`
+(`NOTATION`), each of the six mapping predicates (`MAPPING`, naming the predicate's CURIE), and
+any predicate outside the SKOS namespace this module does not otherwise handle
+(`UNMODELLED_PREDICATE`, naming the predicate's own URI) — one entry per value, not merged.
+`_import_notes()` now also reads `dcterms:description` as a concept's definition when the concept
+carries no `skos:definition` of its own in that language, reporting the substitution via
+`add_normalized` rather than applying it silently (FR-009). decisions.md D27 (new): a SKOS
+predicate this importer doesn't read yet (`broader`/`narrower`/`related`/`member`/`memberList`) is
+deliberately *not* reported as unmodelled — the models do have a place for it, just not built yet
+(US-4/US-5) — checked against `rocks.ttl`'s own baseline (`report.set_aside == []`), which carries
+all of those predicates and would have broken under a broader "everything unconsumed" walk.
+
+New fixture `unmodelled_and_normalised_values.ttl`: a "widget" concept carrying a notation, a
+`skos:exactMatch`, and a custom non-SKOS predicate; a "gadget" concept carrying only
+`dcterms:description`, no `skos:definition` of its own.
+
+**Verified**: `poetry run pytest -q` — 451 passed (436 + 15 new: 7 in `test_skos.py`'s new
+`TestUnheldValuesAndNormalisation`, 7 in `test_report.py`'s new `TestImportReportNormalizedBucket`/
+`TestNormalizedReasonVocabulary`/`TestNormalizedReasonIsDisjointFromSetAsideAndFatal`, plus 1
+fixture-discovery case). `poetry run ruff check .` — all checks passed (one `B007` unused-loop-
+variable fix along the way). `poetry run ruff format .` — 1 file reformatted (`test_report.py`)
+then clean. `poetry run mypy` — success, 9 source files (one fix: renamed a reused loop variable
+so mypy did not infer a narrower type from an earlier loop in the same function). `poetry run
+deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations --check
+--dry-run --settings=tests.settings` — no changes detected.
+
+**Next**: T022 — a concept with no preferred label in the vocabulary's default language: set aside,
+reported, rest of the vocabulary imports (already built at T009, decisions.md D17 — this task
+finishes it with acceptance coverage that confirms it still holds now that US-3 has built labels
+and notes alongside it).
+
+**Watch**: none.
