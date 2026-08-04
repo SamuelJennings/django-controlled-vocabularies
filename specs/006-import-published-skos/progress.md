@@ -1058,3 +1058,58 @@ changes detected. `poetry run pre-commit run --all-files` — all hooks passed.
 ordered collection's blank-node list cells are read normally.
 
 **Watch**: none.
+
+## 2026-08-04T13:25:00Z · Implementer US5 · T030
+
+**Did**: No new production code. `_import_collections` (T027) already runs every collection node
+through the same `_identify()` a concept or the vocabulary itself uses, so a blank-node collection
+was already fatal (`FatalReason.MISSING_IDENTITY`) from the moment collections started importing —
+`blank_node_collection.ttl` (built at Phase 0, T005, decisions.md D13, ahead of any code that could
+exercise it) is exercised for the first time by this task. Three tests: the run fails naming the
+collection by its `skos:prefLabel` hint ("Nameless collection", since it has no URI to show); nothing
+is written, including the ordinary concept the same file also carries (atomicity, T011's existing
+mechanism); and, the other half of D3's own carve-out, `rocks.ttl`'s ordinary ordered collection
+(`example-sequence`) imports with `report.fatal == []` even though its `skos:memberList` is an RDF
+list made of blank nodes by construction (research.md R2) — those cells never reach `_identify()` at
+all, since `graph.items()` (T028) yields the member URIs the list carries, never the list's own
+cells.
+
+**Mutation probe**: bypassed `_identify()`'s blank-node check for collections specifically (treating
+the blank node's hint as if it were a usable URI, the same shape a missing check would produce). Both
+blank-node tests failed — not with a clean assertion mismatch but with an uncaught
+`django.core.exceptions.ValidationError` from `Collection.save()` itself
+(`'Nameless collection' is not a well-formed absolute identifier with a scheme`), confirming the test
+is bound to a real safety check rather than passing by construction. The third test (ordinary ordered
+collection) was unaffected, as expected — it exercises no blank-node collection at all. Restored;
+full suite green again.
+
+**Phase US-5 complete (T027-T030).** A `skos:Collection`/`skos:OrderedCollection` lands as a
+`Collection` inside the vocabulary being imported, matched by its published identifier, its
+`skos:member`/`skos:memberList` membership written only through the model's own `Collection.add`/
+`remove`/`set_member_order` API. An ordered collection's members come back in the file's own order,
+and a re-import that changes that order updates positions to match. A member neither in the file nor
+already in the database is set aside and reported, naming both the member and the collection, and
+the run still succeeds; a re-import that adds and drops members keeps the collection's membership in
+line with the file, except that a member whose concept the file no longer mentions *at all* — as
+opposed to one the collection statement explicitly excludes — survives, per decisions.md D30's own
+rule, carried here rather than re-derived (decisions.md D32 records why, along with the one
+pre-existing test this correctness required widening). A collection identified only by a blank node
+fails the run on the same rule as a concept (D3); an ordered collection's own list cells, blank nodes
+by construction, are read normally. `models.py` was not touched.
+
+**Verified**: `poetry run pytest -q` — 493 passed (490 + 3 new in `test_skos.py`'s new
+`TestBlankNodeCollectionFails`). `poetry run ruff check .` — all checks passed. `poetry run ruff
+format --check .` — 21 files already formatted. `poetry run mypy` — success, 9 source files.
+`poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations
+--check --dry-run --settings=tests.settings` — no changes detected. `poetry run pre-commit run
+--all-files` — all hooks passed.
+
+**Next**: US-6 (T031/T031a/T032) — standards and documentation sweep. Out of this Implementer's
+scope.
+
+**Watch**: (1) `_import_collections` does not track a collection itself absent from a run's file —
+see the T027 entry's own Watch, carried forward, unaffected by T028-T030. (2) decisions.md D32
+widened two pre-existing `TestReportPopulatedByARealRun` assertions (T012, US-1) to include
+collections in the created/updated bucket; flagged for the next tamper-check triage pass to review
+alongside D23/D28/D31's own precedent, even though this session applied and verified the fix itself
+rather than leaving it open, since no separate orchestrator pass is described for this story.

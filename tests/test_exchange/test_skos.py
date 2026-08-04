@@ -1216,6 +1216,36 @@ class TestCollectionMembershipMissingOrAbsentEnds:
         assert set(collection.members()) == {alpha, gamma, delta}
 
 
+class TestBlankNodeCollectionFails:
+    """T030 — decisions.md D3: a collection identified only by a blank node
+    fails the run, on the same rule that governs a concept. An ordered
+    collection's ``skos:memberList`` uses blank nodes structurally for the
+    list's own cells; those are not identities and are read normally."""
+
+    def test_a_blank_node_collection_fails_the_run(self, db):
+        with pytest.raises(SkosImportFailed) as excinfo:
+            import_skos(FIXTURES / "blank_node_collection.ttl")
+        entries = [entry for entry in excinfo.value.report.fatal if entry.reason is FatalReason.MISSING_IDENTITY]
+        assert len(entries) == 1
+        assert entries[0].subject == "Nameless collection"
+
+    def test_a_blank_node_collection_writes_nothing(self, db):
+        with pytest.raises(SkosImportFailed):
+            import_skos(FIXTURES / "blank_node_collection.ttl")
+        assert not Concept.objects.filter(static_uri="http://example.org/rocks/igneous").exists()
+        assert not Collection.objects.exists()
+
+    def test_an_ordered_collections_list_cells_are_not_identities(self, db):
+        # rocks.ttl's example-sequence is an ordinary ordered collection: its
+        # skos:memberList is an RDF list, which is blank nodes by
+        # construction (research.md R2). The run must not treat any of those
+        # cells as a record needing its own identity.
+        report = import_skos(FIXTURES / "rocks.ttl")
+        assert report.fatal == []
+        collection = Collection.objects.get_by_uri("http://example.org/rocks/collection/example-sequence")
+        assert collection.ordered is True
+
+
 class TestFixtureCorpus:
     """T005 — the published-vocabulary fixtures are discoverable and parse (FR-018, SC-016).
 
