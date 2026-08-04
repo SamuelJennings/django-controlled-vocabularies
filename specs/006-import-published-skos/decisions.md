@@ -889,3 +889,33 @@ invented, and it is now T031b in the standards phase rather than a note nobody o
 **Revisit if:** the report grows a third record type with identity — the "which buckets does this
 belong in" question has now been answered twice by hand, and a third time is a sign the report
 should ask the record rather than the importer remembering to.
+
+## D34 — Closing D27's gap exposed that "read or reported" needs more than one gate (T033)
+
+D27 deferred reporting a SKOS predicate with a model home but no read path, on the rule that every
+story would eventually claim it. US-4 and US-5 have now landed relationships and collections, so
+T033 (tasks.md's own name for closing this) writes the check D27's "Revisit if" describes: every
+SKOS predicate appearing anywhere in the fixture corpus — discovered by walking the files, the same
+discipline `ALL_FIXTURES` already applies, not a hand-kept list — must be either read by the
+importer or named in the report.
+
+A first, deliberately naive version checked the discovered predicates against
+`_HANDLED_CONCEPT_PREDICATES` alone — `_import_unheld_values`'s own gate, imported directly rather
+than duplicated. It failed, correctly: `skos:hasTopConcept`, `skos:member`, and `skos:memberList`
+are all genuinely read (by `_scheme_refs` and `_import_collections` respectively), but none of the
+three is a *concept's own* predicate — `hasTopConcept` is stated by the scheme, `member`/`memberList`
+by a collection — so none of them is a predicate `_import_unheld_values`'s per-concept walk ever
+sees, and `_HANDLED_CONCEPT_PREDICATES`'s own name says exactly that scope. Fixed in the test, not
+production: a small `_READ_BUT_NOT_AT_CONCEPT_LEVEL` set names the three explicitly, so the test's
+own "recognised" set matches what the importer actually reads across all three node kinds (concept,
+scheme, collection), not only the one internal constant that happens to gate the concept-level case.
+
+No production code changed — every predicate the fixture corpus carries was already read or
+reported by the time US-5 landed; this closes the gap by proving it, and by making a future SKOS
+predicate added to a fixture without either a read path or a report reason fail loudly instead of
+passing silently.
+
+**Revisit if:** a fourth node kind starts carrying SKOS predicates (this feature currently reads
+from concepts, the scheme, and collections only) — the test's `_READ_BUT_NOT_AT_CONCEPT_LEVEL` set
+would need a fourth category, and at that point hand-listing per-node-kind exemptions may be worth
+replacing with something the test derives structurally instead.

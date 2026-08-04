@@ -1155,3 +1155,31 @@ job, not an Implementer's (feature-state.schema.json's own description), so this
 status/attempts/evidence only on the two task ids the ledger already has and records T033/T034's own
 progress here in prose instead — flagged for Forge to reconcile the ledger's task list with
 tasks.md's own T031/T033/T034/T032 numbering.
+
+## 2026-08-04T13:00:00Z · Implementer US6 · T033
+
+**Did**: `TestEverySkosPredicateIsReadOrReported` in `test_skos.py` — closes decisions.md D27's own
+gap. Discovers every SKOS predicate appearing anywhere in the fixture corpus by walking the files
+(the same discipline `ALL_FIXTURES` already applies, not a hand-kept list) and asserts each one is
+either read by the importer or named in the report, now that US-4/US-5 have landed every read path
+D27 deferred to.
+
+**Deviation** (decisions.md D34, new): a first, deliberately naive version checked the discovered
+predicates against `_HANDLED_CONCEPT_PREDICATES` alone (`_import_unheld_values`'s own gate, imported
+directly rather than duplicated) and failed, correctly, naming `skos:hasTopConcept`,
+`skos:member`, and `skos:memberList` — all three genuinely read (`_scheme_refs`,
+`_import_collections`), but never at concept-node level, so they never reach that gate. Fixed in the
+test with a small `_READ_BUT_NOT_AT_CONCEPT_LEVEL` set naming the three explicitly, not in
+production — no predicate in the corpus was actually unhandled.
+
+**Verified**: `poetry run pytest -q` — 515 passed (514 + 1 new). `poetry run ruff check .` — all
+checks passed. `poetry run ruff format --check .` — 22 files already formatted. `poetry run mypy` —
+success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m
+django makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry
+run pre-commit run --all-files` — all hooks passed.
+
+**Next**: T034 (was T031b in tasks.md prose) — a collection an earlier import created that the
+current file no longer mentions is reported in `report.absent_from_source`, the way a concept in
+that position already is. The only task in this story expected to need new production code.
+
+**Watch**: none beyond the feature-state.json ledger gap already flagged at T031.

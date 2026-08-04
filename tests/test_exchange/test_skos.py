@@ -15,7 +15,13 @@ import rdflib
 import controlled_vocabularies.exchange as exchange
 from controlled_vocabularies.exchange.report import FatalReason, NormalizedReason, SetAsideReason
 from controlled_vocabularies.exchange.safety import UnsafeRdfXmlError
-from controlled_vocabularies.exchange.skos import SkosImportError, SkosImportFailed, _read_graph, import_skos
+from controlled_vocabularies.exchange.skos import (
+    _HANDLED_CONCEPT_PREDICATES,
+    SkosImportError,
+    SkosImportFailed,
+    _read_graph,
+    import_skos,
+)
 from controlled_vocabularies.models import (
     Collection,
     Concept,
@@ -1382,6 +1388,49 @@ class TestFixtureCorpus:
         scheme = str(concepts[0]).split(":", 1)[0]
         assert scheme not in DEFAULT_ALLOWED_URI_SCHEMES, (
             f"fixture's concept scheme '{scheme}' must be outside the default allowlist"
+        )
+
+
+class TestEverySkosPredicateIsReadOrReported:
+    """T033 — closes decisions.md D27's own gap. D27 silently skips a SKOS
+    predicate that has a model home but no read path yet, correct only
+    while a later story still owed that read path; every story has now
+    landed (US-4 relationships, US-5 collections), so a silent skip is the
+    disappearance D1 forbids. This turns D27's own "Revisit if" into a
+    check: every SKOS predicate appearing anywhere in the fixture corpus —
+    discovered by walking the files, not a hand-kept list, the same
+    discovery discipline ``ALL_FIXTURES`` above already applies — must be
+    either read by the importer or named in the report.
+
+    ``_HANDLED_CONCEPT_PREDICATES`` is ``_import_unheld_values``'s own gate
+    in ``skos.py`` — imported directly rather than duplicated, so this test
+    tracks the production classification instead of a second copy of it
+    that could drift from it. It only classifies *concept*-level predicates,
+    though, because it only ever gates a walk over one concept node's own
+    predicates: three more SKOS predicates are read, but never reach that
+    gate at all because they are never a concept's own predicate to begin
+    with. ``skos:hasTopConcept`` is stated *by the scheme, about* a concept
+    (read by ``_scheme_refs``); ``skos:member``/``skos:memberList`` are
+    stated by a *collection* (read by ``_import_collections``). A first,
+    deliberately naive version of this test — checking only against
+    ``_HANDLED_CONCEPT_PREDICATES`` — failed by naming exactly these three,
+    which is what exposed that they needed naming here explicitly rather
+    than being silently missing from the "recognised" set.
+    """
+
+    _READ_BUT_NOT_AT_CONCEPT_LEVEL = frozenset({SKOS.hasTopConcept, SKOS.member, SKOS.memberList})
+
+    def test_every_skos_predicate_in_the_fixture_corpus_is_read_or_reported(self):
+        found: set[str] = set()
+        for filename, fmt in ALL_FIXTURES:
+            graph = rdflib.Graph()
+            graph.parse(FIXTURES / filename, format=fmt)
+            found |= {str(predicate) for predicate in graph.predicates() if str(predicate).startswith(str(SKOS))}
+
+        recognised = {str(predicate) for predicate in _HANDLED_CONCEPT_PREDICATES | self._READ_BUT_NOT_AT_CONCEPT_LEVEL}
+        unrecognised = found - recognised
+        assert not unrecognised, (
+            f"SKOS predicate(s) in the fixture corpus are neither read nor reported: {sorted(unrecognised)}"
         )
 
 
