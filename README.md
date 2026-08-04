@@ -130,6 +130,13 @@ inspect what happened without parsing anything:
   predicate the models have no place for, a missing relationship or collection member, and so on)
   and the data needed to render a message about it. Nothing a file contains is ever dropped in
   silence — a value the app cannot store is always named here.
+
+  Published files are often not well-behaved, and the reasons cover that too. Where a pair of
+  concepts is stated as both broader and related, the hierarchical statement wins, because SKOS
+  declares the two disjoint, and the related one is set aside. A second preferred label in one
+  language is set aside rather than refused at the database. A label that yields no usable slug is
+  set aside naming the slug as the problem, not the label. None of these stops the rest of the
+  vocabulary from importing.
 - `absent_from_source` — the URIs of records that exist here but that the file no longer mentions.
 - `normalized` — a `NormalizedEntry` per value the run stored, but under a different predicate than
   the one the file asserted (a foreign `dcterms:description` read as a concept's definition, for
@@ -142,6 +149,16 @@ inspect what happened without parsing anything:
 A run either succeeds in full or changes nothing: every problem in a file is collected before any
 of it is written, and a fatal one rolls the whole run back. There is no command-line or web-facing
 entry point yet — `import_skos()` is a programmatic call only.
+
+Reading a file never reassigns identity. A concept or collection whose URI is already held by a
+different vocabulary stays where it is. So does one whose URI is held by a record of another kind,
+such as a collection in one file and a concept in another. Both are set aside and reported. Moving
+a record between vocabularies is a curatorial decision, not a side effect of reading a file.
+
+An imported file is treated as untrusted input. RDF/XML is scanned for entity expansion and
+external references before a parser sees it, and a JSON-LD document whose `@context` names a remote
+location is refused rather than fetched. Importing a file never makes a network request. A JSON-LD
+document that carries its context inline imports normally.
 
 ## Relationship to other packages
 
