@@ -16,7 +16,14 @@ import controlled_vocabularies.exchange as exchange
 from controlled_vocabularies.exchange.report import FatalReason, NormalizedReason, SetAsideReason
 from controlled_vocabularies.exchange.safety import UnsafeRdfXmlError
 from controlled_vocabularies.exchange.skos import SkosImportError, SkosImportFailed, _read_graph, import_skos
-from controlled_vocabularies.models import Concept, ConceptLabel, ConceptNote, ConceptRelation, ConceptScheme
+from controlled_vocabularies.models import (
+    Collection,
+    Concept,
+    ConceptLabel,
+    ConceptNote,
+    ConceptRelation,
+    ConceptScheme,
+)
 from tests.factories import ConceptFactory, ConceptSchemeFactory
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "skos"
@@ -384,6 +391,11 @@ class TestReportPopulatedByARealRun:
             "http://example.org/rocks/basalt",
             "http://example.org/rocks/sedimentary",
             "http://example.org/rocks/quartz",
+            # T027 (decisions.md D32): rocks.ttl's own two collections are
+            # records with their own identity, same as a concept or the
+            # vocabulary itself, so they land in this bucket too.
+            "http://example.org/rocks/collection/silica-bearing",
+            "http://example.org/rocks/collection/example-sequence",
         }
         assert set(report.created) == expected
         assert report.updated == []
@@ -402,6 +414,9 @@ class TestReportPopulatedByARealRun:
             "http://example.org/rocks/basalt",
             "http://example.org/rocks/sedimentary",
             "http://example.org/rocks/quartz",
+            # T027 (decisions.md D32): see the sibling test above.
+            "http://example.org/rocks/collection/silica-bearing",
+            "http://example.org/rocks/collection/example-sequence",
         }
         assert report.created == []
 
@@ -1038,6 +1053,197 @@ class TestRelationRemovalOnReimport:
         import_skos(FIXTURES / "relation_lifecycle_updated.ttl")
 
         assert companion in quarry.related()
+
+
+class TestCollectionsAndMembership:
+    """T027 — FR-012: a ``skos:Collection`` lands as a ``Collection`` holding
+    the identifier the file gave it, inside the vocabulary being imported,
+    with each ``skos:member`` concept attached through the model's own
+    membership API (``Collection.add``) — never a row constructed to bypass
+    its cross-scheme check."""
+
+    def test_a_collection_is_created_holding_its_published_identifier(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        collection = Collection.objects.get_by_uri("http://example.org/rocks/collection/silica-bearing")
+        assert collection.scheme == ConceptScheme.objects.get(static_uri="http://example.org/rocks/")
+        assert collection.ordered is False
+
+    def test_the_collection_holds_exactly_its_published_members(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        collection = Collection.objects.get_by_uri("http://example.org/rocks/collection/silica-bearing")
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        quartz = Concept.objects.get(static_uri="http://example.org/rocks/quartz")
+        assert set(collection.members()) == {granite, quartz}
+
+    def test_reimporting_the_identical_file_does_not_duplicate_the_collection_or_its_members(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        import_skos(FIXTURES / "rocks.ttl")
+        assert Collection.objects.filter(static_uri="http://example.org/rocks/collection/silica-bearing").count() == 1
+        collection = Collection.objects.get_by_uri("http://example.org/rocks/collection/silica-bearing")
+        assert collection.memberships.count() == 2
+
+    def test_a_first_import_reports_the_collection_as_created(self, db):
+        report = import_skos(FIXTURES / "rocks.ttl")
+        assert "http://example.org/rocks/collection/silica-bearing" in report.created
+
+
+class TestOrderedCollectionMemberOrder:
+    """T028 — FR-012: an ordered collection's ``skos:memberList`` is walked in
+    order (research.md R2), ``ordered`` is set, and each member's position
+    matches the file. A re-import whose list states a different order updates
+    the positions to match (FR-013)."""
+
+    def test_an_ordered_collection_is_marked_ordered(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        collection = Collection.objects.get_by_uri("http://example.org/rocks/collection/example-sequence")
+        assert collection.ordered is True
+
+    def test_members_come_back_in_the_files_own_order(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        collection = Collection.objects.get_by_uri("http://example.org/rocks/collection/example-sequence")
+        basalt = Concept.objects.get(static_uri="http://example.org/rocks/basalt")
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        sedimentary = Concept.objects.get(static_uri="http://example.org/rocks/sedimentary")
+        assert collection.members() == [basalt, granite, sedimentary]
+
+    def test_a_reimport_that_changes_the_order_updates_the_positions_to_match(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        collection_pk = Collection.objects.get_by_uri("http://example.org/rocks/collection/example-sequence").pk
+
+        import_skos(FIXTURES / "rocks_updated.ttl")
+
+        collection = Collection.objects.get(pk=collection_pk)
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        sedimentary = Concept.objects.get(static_uri="http://example.org/rocks/sedimentary")
+        basalt = Concept.objects.get(static_uri="http://example.org/rocks/basalt")
+        assert collection.members() == [granite, sedimentary, basalt]
+
+    def test_the_ordered_collections_own_identifier_is_unchanged_by_reordering(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        before = Collection.objects.get_by_uri("http://example.org/rocks/collection/example-sequence")
+
+        import_skos(FIXTURES / "rocks_updated.ttl")
+
+        after = Collection.objects.get_by_uri("http://example.org/rocks/collection/example-sequence")
+        assert after.pk == before.pk
+        assert after.static_uri == before.static_uri
+
+
+class TestCollectionMembershipMissingOrAbsentEnds:
+    """T029 — FR-011: a collection member neither in the file nor already in
+    the database is set aside and reported, and the collection is still
+    created; the run succeeds. FR-013: a re-import that adds and removes
+    members leaves membership matching the file, except that decisions.md
+    D30's own rule — settled for relationship reconciliation and carried
+    here unchanged, not re-derived — means a member whose concept the file no
+    longer mentions *at all* survives, exactly as that concept itself
+    survives (``report.absent_from_source``)."""
+
+    def test_a_member_neither_in_the_file_nor_the_database_is_set_aside_naming_both(self, db):
+        report = import_skos(FIXTURES / "collection_lifecycle.ttl")
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.MISSING_MEMBER]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/lifecycle-collections/missing"
+        assert entries[0].params["collection"] == "http://example.org/lifecycle-collections/collection/group"
+
+    def test_the_collection_is_still_created_and_the_run_succeeds(self, db):
+        report = import_skos(FIXTURES / "collection_lifecycle.ttl")
+        assert report.fatal == []
+        collection = Collection.objects.get_by_uri("http://example.org/lifecycle-collections/collection/group")
+        alpha = Concept.objects.get(static_uri="http://example.org/lifecycle-collections/alpha")
+        beta = Concept.objects.get(static_uri="http://example.org/lifecycle-collections/beta")
+        gamma = Concept.objects.get(static_uri="http://example.org/lifecycle-collections/gamma")
+        assert set(collection.members()) == {alpha, beta, gamma}
+        assert not Concept.objects.filter(static_uri="http://example.org/lifecycle-collections/missing").exists()
+
+    def test_a_member_the_file_still_states_survives_the_reimport(self, db):
+        import_skos(FIXTURES / "collection_lifecycle.ttl")
+        collection = Collection.objects.get_by_uri("http://example.org/lifecycle-collections/collection/group")
+        alpha = Concept.objects.get(static_uri="http://example.org/lifecycle-collections/alpha")
+
+        import_skos(FIXTURES / "collection_lifecycle_updated.ttl")
+
+        assert alpha in collection.members()
+
+    def test_a_member_the_file_still_contains_but_excludes_is_removed(self, db):
+        # beta stays a concept in collection_lifecycle_updated.ttl, but
+        # "group"'s own member list no longer names it — a genuine
+        # retraction, since beta was mentioned (and rewritten) this run.
+        import_skos(FIXTURES / "collection_lifecycle.ttl")
+        collection = Collection.objects.get_by_uri("http://example.org/lifecycle-collections/collection/group")
+        beta = Concept.objects.get(static_uri="http://example.org/lifecycle-collections/beta")
+
+        import_skos(FIXTURES / "collection_lifecycle_updated.ttl")
+
+        assert beta not in collection.members()
+        assert Concept.objects.filter(pk=beta.pk).exists()
+
+    def test_a_member_whose_concept_the_file_no_longer_mentions_at_all_survives(self, db):
+        # decisions.md D30's rule, applied to membership rather than a
+        # relation: gamma leaves collection_lifecycle_updated.ttl entirely,
+        # so this run never rewrites gamma at all — the file's silence about
+        # gamma is not the same as "group" retracting its membership, and the
+        # membership is left exactly as it was, same as gamma's own concept
+        # row (report.absent_from_source).
+        import_skos(FIXTURES / "collection_lifecycle.ttl")
+        collection = Collection.objects.get_by_uri("http://example.org/lifecycle-collections/collection/group")
+        gamma = Concept.objects.get(static_uri="http://example.org/lifecycle-collections/gamma")
+
+        report = import_skos(FIXTURES / "collection_lifecycle_updated.ttl")
+
+        assert gamma in collection.members()
+        assert Concept.objects.filter(pk=gamma.pk).exists()
+        assert "http://example.org/lifecycle-collections/gamma" in report.absent_from_source
+
+    def test_a_new_member_is_added_on_reimport(self, db):
+        import_skos(FIXTURES / "collection_lifecycle.ttl")
+        collection = Collection.objects.get_by_uri("http://example.org/lifecycle-collections/collection/group")
+
+        import_skos(FIXTURES / "collection_lifecycle_updated.ttl")
+
+        delta = Concept.objects.get(static_uri="http://example.org/lifecycle-collections/delta")
+        assert delta in collection.members()
+
+    def test_the_final_membership_matches_the_updated_file_plus_the_survivor(self, db):
+        import_skos(FIXTURES / "collection_lifecycle.ttl")
+        collection = Collection.objects.get_by_uri("http://example.org/lifecycle-collections/collection/group")
+
+        import_skos(FIXTURES / "collection_lifecycle_updated.ttl")
+
+        alpha = Concept.objects.get(static_uri="http://example.org/lifecycle-collections/alpha")
+        gamma = Concept.objects.get(static_uri="http://example.org/lifecycle-collections/gamma")
+        delta = Concept.objects.get(static_uri="http://example.org/lifecycle-collections/delta")
+        assert set(collection.members()) == {alpha, gamma, delta}
+
+
+class TestBlankNodeCollectionFails:
+    """T030 — decisions.md D3: a collection identified only by a blank node
+    fails the run, on the same rule that governs a concept. An ordered
+    collection's ``skos:memberList`` uses blank nodes structurally for the
+    list's own cells; those are not identities and are read normally."""
+
+    def test_a_blank_node_collection_fails_the_run(self, db):
+        with pytest.raises(SkosImportFailed) as excinfo:
+            import_skos(FIXTURES / "blank_node_collection.ttl")
+        entries = [entry for entry in excinfo.value.report.fatal if entry.reason is FatalReason.MISSING_IDENTITY]
+        assert len(entries) == 1
+        assert entries[0].subject == "Nameless collection"
+
+    def test_a_blank_node_collection_writes_nothing(self, db):
+        with pytest.raises(SkosImportFailed):
+            import_skos(FIXTURES / "blank_node_collection.ttl")
+        assert not Concept.objects.filter(static_uri="http://example.org/rocks/igneous").exists()
+        assert not Collection.objects.exists()
+
+    def test_an_ordered_collections_list_cells_are_not_identities(self, db):
+        # rocks.ttl's example-sequence is an ordinary ordered collection: its
+        # skos:memberList is an RDF list, which is blank nodes by
+        # construction (research.md R2). The run must not treat any of those
+        # cells as a record needing its own identity.
+        report = import_skos(FIXTURES / "rocks.ttl")
+        assert report.fatal == []
+        collection = Collection.objects.get_by_uri("http://example.org/rocks/collection/example-sequence")
+        assert collection.ordered is True
 
 
 class TestFixtureCorpus:

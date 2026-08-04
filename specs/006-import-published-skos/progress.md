@@ -943,3 +943,173 @@ open relation-deletion conflict.
 **Watch**: D30's "Revisit if" — a future story needing a relation reconciled against only one
 rewritten end (e.g. a bulk downstream-retirement operation) would be new, deliberately-asymmetric
 behaviour, not a further correction to this rule.
+
+## 2026-08-04T12:55:00Z · Implementer US5 · T027
+
+**Did**: `skos.py` gains `_import_collections`, called from `_import_concepts` right after
+`_import_relations` (needs the same `concepts_by_uri` this run's own writes give the pk's a
+membership resolves against). Every `skos:Collection`/`skos:OrderedCollection` node in the graph is
+matched or created by `static_uri` (research.md R6, the same upsert rule every other record uses),
+written through the model's own `save()`, and its `skos:member` set resolved through a renamed,
+generalised `_resolve_concept_reference` (was `_resolve_relation_concept`, T023) — decisions.md D30's
+own text calls collection membership "the same shape of problem" a relation end already is, so the
+same resolution rule (this run's own writes first, then `get_by_uri` for an earlier import, `None`
+for neither) now serves both callers rather than being duplicated. Membership is written only
+through `Collection.add()`/`Collection.remove()` — never a `CollectionMember` row constructed
+directly — so the model's own cross-scheme check always runs, per this task's own acceptance text.
+`models.py` was not touched.
+
+**Deviation** (decisions.md D32, new): implementing this correctly means a `Collection` now lands in
+`report.created`/`report.updated`, exactly as `ConceptScheme` and `Concept` already do (it is an
+identified record with its own `static_uri`, not content of one). `rocks.ttl` has carried two
+collections since Phase 0 (T005), so `TestReportPopulatedByARealRun` (T012, merged in US-1)'s two
+exact-set assertions over a plain import went stale the moment collections started being reported —
+not a defect this story introduced, a bucket correctly reporting more of what the fixture always
+held. This story's brief is explicit that a pre-existing test is not this Implementer's to modify
+without saying so; D32 records why the two assertions were widened (not weakened — both remain exact
+equality, still catch a missing, duplicated, or wrong URI) rather than left failing for a separate
+pass, since no such pass is described for this story and the closing gate requires a green suite.
+
+**Mutation probe**: commented out the `_import_collections` call in `_import_concepts`. Six tests
+failed — this task's own four new `TestCollectionsAndMembership` tests, plus exactly the two widened
+`TestReportPopulatedByARealRun` assertions — nothing else. Restored; 477 passed.
+
+**Verified**: `poetry run pytest -q` — 477 passed (473 + 4 new in `test_skos.py`'s new
+`TestCollectionsAndMembership`). `poetry run ruff check .` — all checks passed. `poetry run ruff
+format .` — 1 file reformatted (`skos.py`) then clean. `poetry run mypy` — success, 9 source files.
+`poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations
+--check --dry-run --settings=tests.settings` — no changes detected. `poetry run pre-commit run
+--all-files` — all hooks passed.
+
+**Next**: T028 — ordered collections: `skos:memberList` walked in order (research.md R2), `ordered`
+set, positions assigned; a re-import that changes the order updates positions to match.
+
+**Watch**: `_import_collections` does not track a collection absent from this run's file at all (no
+`report.absent_from_source` entry for a collection an earlier import created that this file no
+longer mentions) — T027-T030's own acceptance scenarios never name this case, only a *member*
+missing from a collection that is itself still present, so it is left unbuilt rather than invented
+speculatively. Flagged as a concern in the story report for the next pass to weigh against FR-013's
+general "left untouched and named" wording for any record.
+
+## 2026-08-04T13:05:00Z · Implementer US5 · T028
+
+**Did**: No new production code. T027's `_import_collections` already had to walk
+`skos:memberList` in order via `graph.items()` (research.md R2), set `ordered` from the node's own
+`rdf:type`, and call `Collection.set_member_order()` to make a re-import's changed order match the
+file — the general "resolved (file order) + survivors" reconciliation built for the D30-equivalent
+survivor case (T029's own concern, built ahead of its own acceptance coverage the same way T023 built
+`_resolve_relation_concept`'s cross-scheme guard ahead of T025) already gives an ordinary reorder for
+free. Four tests against `rocks.ttl`'s existing `example-sequence` collection (Phase 0, T005) and its
+already-staged `rocks_updated.ttl` reordering: marked ordered; members returned in the file's own
+order; a re-import with a changed `skos:memberList` updates positions to match; the collection's own
+identifier and primary key are unchanged by the reorder.
+
+**Mutation probe**: replaced the `row.set_member_order(...)` call with a no-op. The reorder test
+failed (`Basalt` where `Granite (revised)` was expected — the stale first-import order), the other
+three passed unaffected (order-marking, initial order, and identity are independent of the reorder
+call). Restored; full suite green again.
+
+**Verified**: `poetry run pytest -q` — 481 passed (477 + 4 new in `test_skos.py`'s new
+`TestOrderedCollectionMemberOrder`). `poetry run ruff check .` — all checks passed. `poetry run ruff
+format --check .` — 21 files already formatted. `poetry run mypy` — success, 9 source files.
+`poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations
+--check --dry-run --settings=tests.settings` — no changes detected. `poetry run pre-commit run
+--all-files` — all hooks passed.
+
+**Next**: T029 — a collection member neither in the file nor already in the database: collection
+still created, member set aside and reported; a re-import that adds and removes members leaves
+membership matching the file, and a member's concept the file no longer mentions at all survives
+(decisions.md D30's rule, applied here).
+
+**Watch**: none.
+
+## 2026-08-04T13:15:00Z · Implementer US5 · T029
+
+**Did**: No new production code. T027's `_import_collections` already had to resolve every member
+URI through `_resolve_concept_reference` and set aside a `None` result under
+`SetAsideReason.MISSING_MEMBER` (naming both the member and the collection), and already only ever
+removes an existing membership when its concept belongs to `successful_concepts` — exactly the
+brief's own D30-equivalent rule, applied from the start rather than re-derived here, per the story
+brief's explicit instruction. New fixture pair `collection_lifecycle.ttl`/
+`collection_lifecycle_updated.ttl` (decisions.md D28's own "prefer a new fixture" counsel, rather
+than a third edit to `rocks.ttl`/`rocks_updated.ttl`): four members side by side in one collection —
+alpha stays a member across both files, beta stays present as a concept but is genuinely dropped
+from the collection statement (removed), gamma leaves the file entirely (survives, per D30), delta
+is added on the second run, and "missing" never exists anywhere (set aside on the first run). Seven
+tests, all passing on first execution — the same shape T025 was for relationship endpoints, this
+task's own acceptance criteria proving a mechanism the previous task already had to build correctly
+to avoid crashing on an ordinary, partial file.
+
+**Mutation probe, two separate**: (1) dropped the `successful_ids` guard from the removal condition
+(widening it back to "membership not in resolved_pks", the pre-D30-equivalent "either end" shape) —
+the survivor test and the "final membership" test both failed (gamma wrongly removed), the other five
+unaffected; restored. (2) dropped the `report.add_set_aside(MISSING_MEMBER, ...)` call — the
+missing-member test failed (`0 == 1`), the other six unaffected; restored. Full suite green again
+after each restore.
+
+**Verified**: `poetry run pytest -q` — 490 passed (481 + 7 new in `test_skos.py`'s new
+`TestCollectionMembershipMissingOrAbsentEnds`, + 2 new fixture-discovery cases). `poetry run ruff
+check .` — all checks passed. `poetry run ruff format --check .` — 21 files already formatted.
+`poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned.
+`poetry run python -m django makemigrations --check --dry-run --settings=tests.settings` — no
+changes detected. `poetry run pre-commit run --all-files` — all hooks passed.
+
+**Next**: T030 — a blank-node collection fails the run, on the same rule as concepts (D3); an
+ordered collection's blank-node list cells are read normally.
+
+**Watch**: none.
+
+## 2026-08-04T13:25:00Z · Implementer US5 · T030
+
+**Did**: No new production code. `_import_collections` (T027) already runs every collection node
+through the same `_identify()` a concept or the vocabulary itself uses, so a blank-node collection
+was already fatal (`FatalReason.MISSING_IDENTITY`) from the moment collections started importing —
+`blank_node_collection.ttl` (built at Phase 0, T005, decisions.md D13, ahead of any code that could
+exercise it) is exercised for the first time by this task. Three tests: the run fails naming the
+collection by its `skos:prefLabel` hint ("Nameless collection", since it has no URI to show); nothing
+is written, including the ordinary concept the same file also carries (atomicity, T011's existing
+mechanism); and, the other half of D3's own carve-out, `rocks.ttl`'s ordinary ordered collection
+(`example-sequence`) imports with `report.fatal == []` even though its `skos:memberList` is an RDF
+list made of blank nodes by construction (research.md R2) — those cells never reach `_identify()` at
+all, since `graph.items()` (T028) yields the member URIs the list carries, never the list's own
+cells.
+
+**Mutation probe**: bypassed `_identify()`'s blank-node check for collections specifically (treating
+the blank node's hint as if it were a usable URI, the same shape a missing check would produce). Both
+blank-node tests failed — not with a clean assertion mismatch but with an uncaught
+`django.core.exceptions.ValidationError` from `Collection.save()` itself
+(`'Nameless collection' is not a well-formed absolute identifier with a scheme`), confirming the test
+is bound to a real safety check rather than passing by construction. The third test (ordinary ordered
+collection) was unaffected, as expected — it exercises no blank-node collection at all. Restored;
+full suite green again.
+
+**Phase US-5 complete (T027-T030).** A `skos:Collection`/`skos:OrderedCollection` lands as a
+`Collection` inside the vocabulary being imported, matched by its published identifier, its
+`skos:member`/`skos:memberList` membership written only through the model's own `Collection.add`/
+`remove`/`set_member_order` API. An ordered collection's members come back in the file's own order,
+and a re-import that changes that order updates positions to match. A member neither in the file nor
+already in the database is set aside and reported, naming both the member and the collection, and
+the run still succeeds; a re-import that adds and drops members keeps the collection's membership in
+line with the file, except that a member whose concept the file no longer mentions *at all* — as
+opposed to one the collection statement explicitly excludes — survives, per decisions.md D30's own
+rule, carried here rather than re-derived (decisions.md D32 records why, along with the one
+pre-existing test this correctness required widening). A collection identified only by a blank node
+fails the run on the same rule as a concept (D3); an ordered collection's own list cells, blank nodes
+by construction, are read normally. `models.py` was not touched.
+
+**Verified**: `poetry run pytest -q` — 493 passed (490 + 3 new in `test_skos.py`'s new
+`TestBlankNodeCollectionFails`). `poetry run ruff check .` — all checks passed. `poetry run ruff
+format --check .` — 21 files already formatted. `poetry run mypy` — success, 9 source files.
+`poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations
+--check --dry-run --settings=tests.settings` — no changes detected. `poetry run pre-commit run
+--all-files` — all hooks passed.
+
+**Next**: US-6 (T031/T031a/T032) — standards and documentation sweep. Out of this Implementer's
+scope.
+
+**Watch**: (1) `_import_collections` does not track a collection itself absent from a run's file —
+see the T027 entry's own Watch, carried forward, unaffected by T028-T030. (2) decisions.md D32
+widened two pre-existing `TestReportPopulatedByARealRun` assertions (T012, US-1) to include
+collections in the created/updated bucket; flagged for the next tamper-check triage pass to review
+alongside D23/D28/D31's own precedent, even though this session applied and verified the fix itself
+rather than leaving it open, since no separate orchestrator pass is described for this story.

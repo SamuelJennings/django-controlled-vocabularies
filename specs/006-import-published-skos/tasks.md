@@ -134,6 +134,10 @@ unless stated.
   D27 silently skips a SKOS predicate that has a model home but no read path yet, which is correct
   only while a later story still owes that read path. Once every story has landed, a silent skip is
   the disappearance D1 forbids, and this test is what turns "revisit if" into a check that fails.
+- **T031b** — Closes the gap US-5 left named rather than invented: a collection an earlier import
+  created that the current file no longer mentions is not reported anywhere. A concept in that
+  position is named in the report's absent-from-source list; a collection is a record with its own
+  identity and should be too. Report it, and test it.
 - **T032** — Documentation in the same PR as the code (Article VI): README gains the import
   surface, CHANGELOG gains its entry, the public callable and the report carry docstrings. The
   README text and any other public markdown get the humanizer pass before the PR leaves draft.
