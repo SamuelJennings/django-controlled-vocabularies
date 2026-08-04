@@ -1,0 +1,21 @@
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+# The re-import half of the pair (see collection_absent_from_source.ttl).
+# "kept" restates its membership unchanged. "dropped" is gone from this file
+# altogether — no triple about it at all, not even a member statement that
+# excludes it — the same "the file simply does not mention it" case T015
+# already covers for a concept.
+
+<http://example.org/vanishing-collections/>
+    a skos:ConceptScheme ;
+    skos:prefLabel "Vanishing collections"@en .
+
+<http://example.org/vanishing-collections/alpha>
+    a skos:Concept ;
+    skos:inScheme <http://example.org/vanishing-collections/> ;
+    skos:prefLabel "Alpha"@en .
+
+<http://example.org/vanishing-collections/collection/kept>
+    a skos:Collection ;
+    skos:prefLabel "Kept"@en ;
+    skos:member <http://example.org/vanishing-collections/alpha> .

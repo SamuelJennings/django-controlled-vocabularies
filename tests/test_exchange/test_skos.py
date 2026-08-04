@@ -1222,6 +1222,47 @@ class TestCollectionMembershipMissingOrAbsentEnds:
         assert set(collection.members()) == {alpha, gamma, delta}
 
 
+class TestCollectionAbsentFromSource:
+    """T034 — closes the gap decisions.md D33 named rather than invented: a
+    collection an earlier import created that the current file no longer
+    mentions at all is left untouched and named in
+    ``report.absent_from_source``, the same way a concept in that position
+    already is (T015). A collection is a record with its own identity for
+    the same reasons a concept and a vocabulary are (decisions.md D32)."""
+
+    def test_a_collection_dropped_from_the_file_is_untouched_and_named_absent(self, db):
+        import_skos(FIXTURES / "collection_absent_from_source.ttl")
+        dropped = Collection.objects.get_by_uri("http://example.org/vanishing-collections/collection/dropped")
+        dropped_pk, dropped_name = dropped.pk, dropped.name
+
+        report = import_skos(FIXTURES / "collection_absent_from_source_updated.ttl")
+
+        dropped_after = Collection.objects.get_by_uri("http://example.org/vanishing-collections/collection/dropped")
+        assert dropped_after.pk == dropped_pk
+        assert dropped_after.name == dropped_name
+        assert "http://example.org/vanishing-collections/collection/dropped" in report.absent_from_source
+        assert "http://example.org/vanishing-collections/collection/dropped" not in report.updated
+        assert "http://example.org/vanishing-collections/collection/dropped" not in report.created
+
+    def test_a_collection_still_mentioned_in_the_file_is_not_reported_absent(self, db):
+        import_skos(FIXTURES / "collection_absent_from_source.ttl")
+        report = import_skos(FIXTURES / "collection_absent_from_source_updated.ttl")
+        assert "http://example.org/vanishing-collections/collection/kept" not in report.absent_from_source
+
+    def test_a_dropped_collections_membership_survives_untouched(self, db):
+        # FR-013's "left untouched", not only "not deleted": the concept
+        # stays a member of the absent collection across the re-import,
+        # exactly as an absent concept's own foreign-key references survive
+        # (TestRecordsAbsentFromSource, T015).
+        import_skos(FIXTURES / "collection_absent_from_source.ttl")
+        dropped = Collection.objects.get_by_uri("http://example.org/vanishing-collections/collection/dropped")
+        alpha = Concept.objects.get(static_uri="http://example.org/vanishing-collections/alpha")
+
+        import_skos(FIXTURES / "collection_absent_from_source_updated.ttl")
+
+        assert alpha in dropped.members()
+
+
 class TestBlankNodeCollectionFails:
     """T030 — decisions.md D3: a collection identified only by a blank node
     fails the run, on the same rule that governs a concept. An ordered

@@ -831,6 +831,12 @@ def _import_collections(
     exactly as the concept at that end already is
     (``report.absent_from_source``); only the latter is removed. This is not
     re-derived — it is D30's own rule, applied to a second model.
+
+    Finally (T034, FR-013), every existing collection of ``target_scheme``
+    whose identity was never seen among ``collection_nodes`` — the file
+    simply does not mention it — is left completely untouched, membership
+    included, and named in ``report.absent_from_source``, the same tail
+    :func:`_import_concepts` already runs for a concept in that position.
     """
     collection_nodes = sorted(
         set(graph.subjects(rdflib.RDF.type, SKOS.Collection))
@@ -838,6 +844,7 @@ def _import_collections(
         key=str,
     )
     successful_ids = {concept.pk for concept in successful_concepts.values()}
+    mentioned_uris: set[str] = set()
 
     for node in collection_nodes:
         hint = _first_literal(graph, node, SKOS.prefLabel)
@@ -846,6 +853,7 @@ def _import_collections(
         except _FatalIdentity as exc:
             report.add_fatal(exc.reason, exc.subject, **exc.params)
             continue
+        mentioned_uris.add(uri)
 
         ordered = (node, rdflib.RDF.type, SKOS.OrderedCollection) in graph
 
@@ -902,6 +910,10 @@ def _import_collections(
             ]
             survivors = [concept for concept in current if concept.pk not in resolved_pks]
             row.set_member_order(resolved + survivors)
+
+    absent = Collection.objects.filter(scheme=target_scheme).exclude(static_uri__in=mentioned_uris)
+    for uri in absent.order_by("static_uri").values_list("static_uri", flat=True):
+        report.add_absent_from_source(uri)
 
 
 def _import_concept_content(

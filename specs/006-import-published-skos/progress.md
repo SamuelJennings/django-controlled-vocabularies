@@ -1183,3 +1183,39 @@ current file no longer mentions is reported in `report.absent_from_source`, the 
 that position already is. The only task in this story expected to need new production code.
 
 **Watch**: none beyond the feature-state.json ledger gap already flagged at T031.
+
+## 2026-08-04T13:10:00Z · Implementer US6 · T034
+
+**Did**: closes the gap decisions.md D33 named rather than invented at the end of US-5. New fixture
+pair `collection_absent_from_source.ttl`/`_updated.ttl` (D28's own "prefer a new fixture" counsel):
+"kept" is restated by both files, "dropped" exists only in the first. `TestCollectionAbsentFromSource`
+in `test_skos.py` — three tests, the first genuinely failing against the pre-existing code (`_import_collections`
+never tracked which collections a run's own file mentioned, per the Watch note carried since T027):
+the dropped collection's primary key and name are unchanged after the re-import, it is named in
+`report.absent_from_source` and in neither `created` nor `updated`, and its membership (the concept
+`alpha`) survives untouched — the same three assertions `TestRecordsAbsentFromSource` (T015) makes
+for a concept in the same position.
+
+Production change (`_import_collections`, `skos.py`): a `mentioned_uris` set, populated the moment
+each collection node's identity is successfully checked (mirroring `_import_concepts`'s own
+`mentioned_uris`, T015) — a collection that fails identity (D3, T030) is never added, since it never
+gets a usable URI to report absence by. After the per-collection loop, every existing `Collection` of
+`target_scheme` whose URI was never seen is reported via `report.add_absent_from_source()`, the same
+tail `_import_concepts` already runs. Nothing about an absent collection's own row or its membership
+is touched — only named, per FR-013's "left untouched."
+
+**Mutation probe**: replaced the new absent-reporting block with a no-op. The first
+`TestCollectionAbsentFromSource` test failed exactly as it had before this task's fix (`'…/dropped'
+in []`), the other two were unaffected (they don't depend on the absent bucket). Restored; full
+suite green again.
+
+**Verified**: `poetry run pytest -q` — 520 passed (515 + 3 new in `TestCollectionAbsentFromSource` +
+2 new fixture-discovery cases). `poetry run ruff check .` — all checks passed. `poetry run ruff
+format --check .` — 24 files already formatted. `poetry run mypy` — success, 9 source files. `poetry
+run deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations --check
+--dry-run --settings=tests.settings` — no changes detected. `poetry run pre-commit run --all-files`
+— all hooks passed.
+
+**Next**: T032 — documentation (README, CHANGELOG, docstrings) in the same PR as the code.
+
+**Watch**: none beyond the feature-state.json ledger gap already flagged at T031.
