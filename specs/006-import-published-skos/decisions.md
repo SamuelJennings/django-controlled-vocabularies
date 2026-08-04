@@ -1980,3 +1980,36 @@ review-fix reference.
 **Revisit if:** a consumer needs to override label mapping, slug assignment, scheme choice or language
 determination — those are public on their classes for exactly that, and the first real subclass will
 say whether the seams are in the right places.
+
+## D55 — the exception hierarchy moves to `exceptions.py` (maintainer request, post-review)
+
+**The maintainer asked why error types were declared in `skos.py` when `safety.py` already held
+some.** The answer was that D52 had moved `SkosImportError` into `safety.py` for one reason only:
+so `UnsafeRdfXmlError`/`UnsafeJsonLdError` could subclass it without a circular import, since
+`skos.py` imports from `safety.py` and the reverse must never become true. That left the base of
+the package's whole error hierarchy — which covers a missing file and an undeterminable
+serialization, neither of them a safety concern — living inside the safety scanner. An import
+cycle was deciding a module's contents, which is why the layout read oddly.
+
+**The shape.** `exceptions.py` now holds all four public types: `SkosImportError` with its two
+`Unsafe*` subclasses, and `SkosImportFailed`. `safety.py` and `skos.py` import what they raise.
+`report.py` and `safety.py` import nothing from the package, so `exceptions.py` introduces no
+cycle; its only package import is `ImportReport`, needed for an annotation and therefore guarded
+by `TYPE_CHECKING`, so a future `report.py` that raises cannot create one either.
+
+**Nothing moves for a caller.** `exchange.safety.SkosImportError`, `exchange.skos.SkosImportError`,
+`exchange.skos.SkosImportFailed` and the `exchange` package re-exports all still resolve to the
+same objects; `safety.py` carries an explicit `__all__` so the re-export is deliberate rather than
+an unused import. Verified by asserting object identity across every pre-existing path, not by
+assuming it. `SkosImportError` and `SkosImportFailed` remain siblings under `ValidationError`
+rather than one subclassing the other — catching "unreadable file" must not also catch "readable
+file, refused content".
+
+`_FatalIdentity` stays in `skos.py`. It is not part of the public hierarchy: it is an internal
+control-flow signal carrying a finding across one walk, and it is meaningless outside that walk.
+
+The move took `skos.py` from D54's 1286 lines to 1267.
+
+**Revisit if:** a second module in the package starts raising these, at which point the
+`__all__`-based re-export from `safety.py` is worth dropping in favour of a single documented
+import location.

@@ -27,6 +27,12 @@ from django.db.models import Q
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 
+from controlled_vocabularies.exchange.exceptions import (
+    SkosImportError,
+    SkosImportFailed,
+    UnsafeJsonLdError,
+    UnsafeRdfXmlError,
+)
 from controlled_vocabularies.exchange.mapping import (
     DCTERMS,
     LABEL_PREDICATES,
@@ -35,13 +41,7 @@ from controlled_vocabularies.exchange.mapping import (
     SKOS,
 )
 from controlled_vocabularies.exchange.report import FatalReason, ImportReport, NormalizedReason, SetAsideReason
-from controlled_vocabularies.exchange.safety import (
-    SkosImportError,
-    UnsafeJsonLdError,
-    UnsafeRdfXmlError,
-    scan_json_ld,
-    scan_rdf_xml,
-)
+from controlled_vocabularies.exchange.safety import scan_json_ld, scan_rdf_xml
 from controlled_vocabularies.models import (
     Collection,
     Concept,
@@ -58,26 +58,6 @@ from controlled_vocabularies.models import (
 #: run rather than being handed to rdflib on the chance it understands it:
 #: FR-002 names exactly these three, not "whatever rdflib happens to parse".
 _SUPPORTED_FORMATS = frozenset({"turtle", "xml", "json-ld"})
-
-
-class SkosImportFailed(ValidationError):
-    """Raised when a run collects one or more fatal findings (FR-004, decisions.md D3/D8).
-
-    Carries the run's partial :class:`~controlled_vocabularies.exchange.report.ImportReport`
-    (its :attr:`~controlled_vocabularies.exchange.report.ImportReport.fatal` bucket is what
-    matters here) so a caller can see exactly what was wrong, even though the transaction
-    this was raised inside has already rolled back everything the run wrote (T011,
-    ``research.md`` R7 — the run is all-or-nothing, but the report still names every problem,
-    per FR-004's "MUST fail the run and be named in the report").
-    """
-
-    def __init__(self, report: ImportReport) -> None:
-        self.report = report
-        super().__init__(
-            _("The import was refused: %(count)s problem(s) were found. See the report for details."),
-            params={"count": len(report.fatal)},
-            code="skos_import_failed",
-        )
 
 
 class _FatalIdentity(Exception):
@@ -116,8 +96,8 @@ class SkosGraph:
         rdflib's own exception escape. The pre-flight scan itself is wrapped the same way (review
         fix 18, D51): a malformed document can make the scan raise a bare exception outside this
         try/except otherwise. The *deliberate* refusals,
-        :class:`~controlled_vocabularies.exchange.safety.UnsafeRdfXmlError` and
-        :class:`~controlled_vocabularies.exchange.safety.UnsafeJsonLdError`, are excluded from that
+        :class:`~controlled_vocabularies.exchange.exceptions.UnsafeRdfXmlError` and
+        :class:`~controlled_vocabularies.exchange.exceptions.UnsafeJsonLdError`, are excluded from that
         wrapping and propagate as themselves (D36).
         """
         path = Path(file)
