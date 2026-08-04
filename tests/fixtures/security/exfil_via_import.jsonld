@@ -1,0 +1,14 @@
+{
+  "@context": {
+    "@version": 1.1,
+    "@import": "exfil_secret.jsonld",
+    "skos": "http://www.w3.org/2004/02/skos/core#"
+  },
+  "@graph": [
+    {
+      "@id": "leaked:scheme",
+      "@type": "skos:ConceptScheme",
+      "skos:prefLabel": { "@value": "Leak", "@language": "en" }
+    }
+  ]
+}

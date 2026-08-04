@@ -1,0 +1,27 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+# FIX 18 (review): a malformed skos:memberList whose rdf:rest chain loops
+# back on itself rather than terminating in rdf:nil. rdflib's own
+# graph.items() raises a bare ValueError for this, which must not escape
+# import_skos() outside the documented SkosImportError/SkosImportFailed
+# exception contract.
+
+<http://example.org/cyclic/>
+    a skos:ConceptScheme ;
+    skos:prefLabel "Cyclic"@en .
+
+<http://example.org/cyclic/a>
+    a skos:Concept ;
+    skos:inScheme <http://example.org/cyclic/> ;
+    skos:prefLabel "A"@en .
+
+<http://example.org/cyclic/group>
+    a skos:OrderedCollection ;
+    skos:prefLabel "Group"@en ;
+    skos:memberList _:l1 .
+
+_:l1 rdf:first <http://example.org/cyclic/a> ;
+     rdf:rest _:l2 .
+_:l2 rdf:first <http://example.org/cyclic/a> ;
+     rdf:rest _:l1 .

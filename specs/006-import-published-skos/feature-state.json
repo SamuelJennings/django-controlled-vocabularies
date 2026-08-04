@@ -1,0 +1,375 @@
+{
+  "$schema": "../../../../.openclaw/workspaces/forge/engineering-org/kit/schemas/feature-state.schema.json",
+  "feature": "006-import-published-skos",
+  "branch": "006-import-published-skos",
+  "repo": "SamuelJennings/django-controlled-vocabularies",
+  "state": "IMPLEMENT",
+  "state_history": [
+    {
+      "state": "INTAKE",
+      "at": "2026-08-03T09:30:00Z",
+      "note": "issue #50 grilled, accepted"
+    },
+    {
+      "state": "SPECIFY",
+      "at": "2026-08-03T10:00:00Z",
+      "note": "spec.md + decisions.md"
+    },
+    {
+      "state": "SETUP",
+      "at": "2026-08-03T10:30:00Z",
+      "note": "epic #50, stories #61-66, draft PR #67"
+    },
+    {
+      "state": "GATE_SPEC",
+      "at": "2026-08-03T10:45:00Z",
+      "note": "approved by Sam"
+    },
+    {
+      "state": "PLAN",
+      "at": "2026-08-03T11:00:00Z",
+      "note": "research, plan, tasks"
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-03T11:15:00Z",
+      "note": "foundational phase dispatched"
+    }
+  ],
+  "gates": {
+    "spec": {
+      "approved_by": "SamuelJennings",
+      "at": "2026-08-03T10:45:00Z",
+      "self_resolved": [
+        "D1 escrow deferred to a feature sequenced with export",
+        "D2 language filtering lands here, narrowing #51",
+        "D3 blank-node identity is fatal",
+        "D4 imported vocabulary default language comes from the file",
+        "D5 authoritative for records the file contains, silent about the rest",
+        "D6 slugs derived by the model rule, suffix-disambiguated",
+        "D7 the report is structured data, not text",
+        "D8 all-or-nothing with a small fatal set"
+      ]
+    },
+    "plan": {
+      "approved_by": "notified (veto window, not a gate)",
+      "at": "2026-08-03T11:15:00Z"
+    },
+    "merge": {
+      "approved_by": null,
+      "at": null
+    }
+  },
+  "stories": [
+    {
+      "id": "US0",
+      "priority": "P1",
+      "issue": null,
+      "worktree": null,
+      "status": "done",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T001",
+          "status": "done",
+          "attempts": 1
+        },
+        {
+          "id": "T002",
+          "status": "done",
+          "attempts": 1
+        },
+        {
+          "id": "T003",
+          "status": "done",
+          "attempts": 1
+        },
+        {
+          "id": "T004",
+          "status": "done",
+          "attempts": 1
+        },
+        {
+          "id": "T005",
+          "status": "done",
+          "attempts": 1
+        }
+      ]
+    },
+    {
+      "id": "US1",
+      "priority": "P1",
+      "issue": 61,
+      "worktree": null,
+      "status": "done",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T006",
+          "status": "done",
+          "attempts": 1
+        },
+        {
+          "id": "T007",
+          "status": "done",
+          "attempts": 1
+        },
+        {
+          "id": "T008",
+          "status": "done",
+          "attempts": 1
+        },
+        {
+          "id": "T009",
+          "status": "done",
+          "attempts": 1
+        },
+        {
+          "id": "T010",
+          "status": "done",
+          "attempts": 1
+        },
+        {
+          "id": "T011",
+          "status": "done",
+          "attempts": 1
+        },
+        {
+          "id": "T012",
+          "status": "done",
+          "attempts": 1
+        }
+      ]
+    },
+    {
+      "id": "US2",
+      "priority": "P1",
+      "issue": 62,
+      "worktree": null,
+      "status": "done",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T013",
+          "status": "done",
+          "attempts": 0
+        },
+        {
+          "id": "T014",
+          "status": "done",
+          "attempts": 0
+        },
+        {
+          "id": "T015",
+          "status": "done",
+          "attempts": 0
+        },
+        {
+          "id": "T016",
+          "status": "done",
+          "attempts": 0
+        },
+        {
+          "id": "T017",
+          "status": "done",
+          "attempts": 0
+        }
+      ]
+    },
+    {
+      "id": "US3",
+      "priority": "P2",
+      "issue": 63,
+      "worktree": null,
+      "status": "done",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T018",
+          "status": "done",
+          "attempts": 1
+        },
+        {
+          "id": "T019",
+          "status": "done",
+          "attempts": 1
+        },
+        {
+          "id": "T020",
+          "status": "done",
+          "attempts": 1
+        },
+        {
+          "id": "T021",
+          "status": "done",
+          "attempts": 1
+        },
+        {
+          "id": "T022",
+          "status": "done",
+          "attempts": 1
+        }
+      ]
+    },
+    {
+      "id": "US4",
+      "priority": "P2",
+      "issue": 64,
+      "worktree": null,
+      "status": "done",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T023",
+          "status": "done",
+          "attempts": 1
+        },
+        {
+          "id": "T024",
+          "status": "done",
+          "attempts": 1
+        },
+        {
+          "id": "T025",
+          "status": "done",
+          "attempts": 1
+        },
+        {
+          "id": "T026",
+          "status": "done",
+          "attempts": 1
+        }
+      ]
+    },
+    {
+      "id": "US5",
+      "priority": "P2",
+      "issue": 65,
+      "worktree": null,
+      "status": "done",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T027",
+          "status": "done",
+          "attempts": 1
+        },
+        {
+          "id": "T028",
+          "status": "done",
+          "attempts": 1
+        },
+        {
+          "id": "T029",
+          "status": "done",
+          "attempts": 1
+        },
+        {
+          "id": "T030",
+          "status": "done",
+          "attempts": 1
+        }
+      ]
+    },
+    {
+      "id": "US6",
+      "priority": "P3",
+      "issue": 66,
+      "worktree": null,
+      "status": "done",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T031",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_report.py",
+              "tests/test_exchange/test_skos.py",
+              "tests/test_exchange/test_safety.py"
+            ],
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy",
+              "poetry run deptry .",
+              "poetry run python -m django makemigrations --check --dry-run --settings=tests.settings",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
+        },
+        {
+          "id": "T033",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py"
+            ],
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy",
+              "poetry run deptry .",
+              "poetry run python -m django makemigrations --check --dry-run --settings=tests.settings",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
+        },
+        {
+          "id": "T034",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py"
+            ],
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy",
+              "poetry run deptry .",
+              "poetry run python -m django makemigrations --check --dry-run --settings=tests.settings",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
+        },
+        {
+          "id": "T032",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [],
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy",
+              "poetry run deptry .",
+              "poetry run python -m django makemigrations --check --dry-run --settings=tests.settings",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "budgets": {
+    "converge_cycles": {
+      "max": 2,
+      "used": 0
+    },
+    "review_cycles": {
+      "max": 2,
+      "used": 0
+    },
+    "tokens": {
+      "max": 4000000,
+      "used": 0
+    }
+  }
+}

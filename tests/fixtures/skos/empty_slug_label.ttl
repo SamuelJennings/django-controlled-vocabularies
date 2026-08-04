@@ -1,0 +1,22 @@
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+# FIX 5 (review, decisions.md D39) — a preferred label made up only of
+# characters slugify() strips ("±"). Concept.save() raises "An explicit
+# slug must not be empty" for this — a message that names the slug, not
+# the label, even though the label itself is perfectly fine; the concept
+# must be set aside and reported rather than crash the run.
+
+<http://example.org/emptyslug/>
+    a skos:ConceptScheme ;
+    skos:prefLabel "Empty slug"@en .
+
+<http://example.org/emptyslug/symbol>
+    a skos:Concept ;
+    skos:inScheme <http://example.org/emptyslug/> ;
+    skos:prefLabel "±"@en .
+
+<http://example.org/emptyslug/normal>
+    a skos:Concept ;
+    skos:inScheme <http://example.org/emptyslug/> ;
+    skos:prefLabel "Normal"@en ;
+    skos:altLabel "Normal-alt"@en .

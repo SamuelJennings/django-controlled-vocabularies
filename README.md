@@ -94,6 +94,83 @@ CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES = [
 A stored identifier is later rendered as a link, so schemes that can carry executable content
 (`javascript`, `data`, `vbscript`) are refused even if you add them to this setting.
 
+## Importing a published vocabulary
+
+`import_skos()` reads a SKOS file — Turtle, RDF/XML, or JSON-LD — and creates or updates the
+vocabulary it declares, along with every concept it contains: identity, labels, documentary notes,
+broader/narrower and related relationships, and collection membership. Every record is matched by
+its static URI, never by name, so importing the same file twice updates the same rows rather than
+duplicating them.
+
+```python
+from controlled_vocabularies.exchange import import_skos
+
+report = import_skos("rocks.ttl")
+```
+
+The caller may name a target `ConceptScheme` for a file that declares no vocabulary of its own, or
+have it checked against one the file does declare:
+
+```python
+report = import_skos("rocks.ttl", scheme=my_scheme)
+```
+
+Re-running an import upserts rather than deleting and recreating. For a record the file still
+contains, the file is authoritative for that record's own content — labels, notes, relationships,
+and collection membership end up matching the file exactly, including the removal of a value the
+file no longer carries. A record the file does not mention at all is left completely untouched and
+named in the report instead, never deleted.
+
+The call returns an `ImportReport`, a plain dataclass rather than rendered text, so a caller can
+inspect what happened without parsing anything:
+
+- `created` / `updated` — the URIs of every vocabulary, concept, and collection the run wrote.
+- `set_aside` — a `SetAsideEntry` per value the run could not store, each carrying a closed,
+  translatable reason (an unconfigured language, a notation, a mapping to another vocabulary, a
+  predicate the models have no place for, a missing relationship or collection member, and so on)
+  and the data needed to render a message about it. Nothing a file contains is ever dropped in
+  silence — a value the app cannot store is always named here.
+
+  Published files are often not well-behaved, and the reasons cover that too. Where a pair of
+  concepts is stated as both broader and related, the hierarchical statement wins, because SKOS
+  declares the two disjoint, and the related one is set aside. A second preferred label in one
+  language is set aside rather than refused at the database. A label that yields no usable slug is
+  set aside naming the slug as the problem, not the label. None of these stops the rest of the
+  vocabulary from importing.
+- `absent_from_source` — the URIs of records that exist here but that the file no longer mentions.
+- `normalized` — a `NormalizedEntry` per value the run stored, but under a different predicate than
+  the one the file asserted (a foreign `dcterms:description` read as a concept's definition, for
+  example).
+- `fatal` — populated only on a failed run: a `FatalFinding` per reason the whole import was
+  refused (a missing or blank-node identity, or a vocabulary that could not be resolved). A failed
+  run raises `SkosImportFailed`, carrying this same report, and leaves the database exactly as it
+  was before the run started.
+
+A run either succeeds in full or changes nothing: every problem in a file is collected before any
+of it is written, and a fatal one rolls the whole run back. There is no command-line or web-facing
+entry point yet — `import_skos()` is a programmatic call only.
+
+Reading a file never reassigns identity. A concept or collection whose URI is already held by a
+different vocabulary stays where it is. So does one whose URI is held by a record of another kind,
+such as a collection in one file and a concept in another. Both are set aside and reported. Moving
+a record between vocabularies is a curatorial decision, not a side effect of reading a file.
+
+An imported file is treated as untrusted input. RDF/XML is scanned for entity expansion and
+external references before a parser sees it. A JSON-LD document is refused rather than fetched if
+its `@context` names a remote location, whether that is a plain string reference or an `@import`
+reference tucked inside an inline object context. Importing a file never makes a network request.
+An ordinary inline JSON-LD context, carrying no such reference, imports normally.
+
+`import_skos()` raises one of two exceptions, both `ValidationError` subclasses carrying a
+translatable message. `SkosImportError` covers every reason a file cannot be turned into usable SKOS
+at all: not found, not in a supported serialization, unparseable, or refused by the safety scan
+above. `SkosImportFailed` covers the case where the file parses but the run collects one or more
+fatal problems (a missing or blank-node identity, or a vocabulary that cannot be resolved), and
+carries the same `ImportReport` its `fatal` bucket names them in. `UnsafeRdfXmlError` and
+`UnsafeJsonLdError`, the two exceptions the safety scan itself raises, are exported
+`SkosImportError` subclasses, so code that only catches `(SkosImportError, SkosImportFailed)`
+already catches a file the safety scan refuses too.
+
 ## Relationship to other packages
 
 Supersedes and retires `skos-builder` and `django-research-vocabs`, consolidating vocabulary

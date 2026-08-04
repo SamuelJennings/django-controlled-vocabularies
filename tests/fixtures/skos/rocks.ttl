@@ -1,0 +1,57 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+<http://example.org/rocks/>
+    a skos:ConceptScheme ;
+    skos:prefLabel "Rock types"@en ;
+    skos:hasTopConcept <http://example.org/rocks/igneous>, <http://example.org/rocks/sedimentary> .
+
+<http://example.org/rocks/igneous>
+    a skos:Concept ;
+    skos:inScheme <http://example.org/rocks/> ;
+    skos:topConceptOf <http://example.org/rocks/> ;
+    skos:prefLabel "Igneous rock"@en, "Magmatisches Gestein"@de, "Roche ignée"@fr ;
+    skos:definition "Rock formed by the cooling and solidification of magma or lava."@en ;
+    skos:narrower <http://example.org/rocks/basalt> .
+
+<http://example.org/rocks/granite>
+    a skos:Concept ;
+    skos:inScheme <http://example.org/rocks/> ;
+    skos:prefLabel "Granite"@en, "Granit"@de, "Granite"@fr ;
+    skos:altLabel "Magma rock"@en ;
+    skos:hiddenLabel "Granit rock"@en ;
+    skos:scopeNote "Used here for coarse-grained intrusive igneous rock."@en ;
+    skos:broader <http://example.org/rocks/igneous> ;
+    skos:related <http://example.org/rocks/quartz> .
+
+<http://example.org/rocks/basalt>
+    a skos:Concept ;
+    skos:inScheme <http://example.org/rocks/> ;
+    skos:prefLabel "Basalt"@en, "Basalt"@de ;
+    skos:example "Columnar basalt at the Giant's Causeway."@en .
+
+<http://example.org/rocks/sedimentary>
+    a skos:Concept ;
+    skos:inScheme <http://example.org/rocks/> ;
+    skos:topConceptOf <http://example.org/rocks/> ;
+    skos:prefLabel "Sedimentary rock"@en, "Roche sédimentaire"@fr ;
+    skos:editorialNote "Confirm classification against the regional survey before publishing."@en .
+
+<http://example.org/rocks/quartz>
+    a skos:Concept ;
+    skos:inScheme <http://example.org/rocks/> ;
+    skos:prefLabel "Quartz"@en ;
+    skos:altLabel "Quartz"@de ;
+    skos:historyNote "Reclassified from 'Silica minerals' in the 2020 revision."@en ;
+    skos:changeNote "Definition tightened in 2022."@en ;
+    skos:note "See also feldspar for a related silicate."@en .
+
+<http://example.org/rocks/collection/silica-bearing>
+    a skos:Collection ;
+    skos:prefLabel "Silica-bearing rocks"@en ;
+    skos:member <http://example.org/rocks/granite>, <http://example.org/rocks/quartz> .
+
+<http://example.org/rocks/collection/example-sequence>
+    a skos:OrderedCollection ;
+    skos:prefLabel "Example sequence"@en ;
+    skos:memberList ( <http://example.org/rocks/basalt> <http://example.org/rocks/granite> <http://example.org/rocks/sedimentary> ) .

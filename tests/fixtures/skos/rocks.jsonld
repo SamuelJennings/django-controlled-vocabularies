@@ -1,0 +1,106 @@
+{
+  "@context": {
+    "skos": "http://www.w3.org/2004/02/skos/core#",
+    "prefLabel": {"@id": "skos:prefLabel"},
+    "altLabel": {"@id": "skos:altLabel"},
+    "hiddenLabel": {"@id": "skos:hiddenLabel"},
+    "definition": {"@id": "skos:definition"},
+    "scopeNote": {"@id": "skos:scopeNote"},
+    "example": {"@id": "skos:example"},
+    "editorialNote": {"@id": "skos:editorialNote"},
+    "historyNote": {"@id": "skos:historyNote"},
+    "changeNote": {"@id": "skos:changeNote"},
+    "note": {"@id": "skos:note"},
+    "inScheme": {"@id": "skos:inScheme", "@type": "@id"},
+    "topConceptOf": {"@id": "skos:topConceptOf", "@type": "@id"},
+    "hasTopConcept": {"@id": "skos:hasTopConcept", "@type": "@id"},
+    "broader": {"@id": "skos:broader", "@type": "@id"},
+    "narrower": {"@id": "skos:narrower", "@type": "@id"},
+    "related": {"@id": "skos:related", "@type": "@id"},
+    "member": {"@id": "skos:member", "@type": "@id"},
+    "memberList": {"@id": "skos:memberList", "@type": "@id", "@container": "@list"}
+  },
+  "@graph": [
+    {
+      "@id": "http://example.org/rocks/",
+      "@type": "skos:ConceptScheme",
+      "prefLabel": {"@value": "Rock types", "@language": "en"},
+      "hasTopConcept": ["http://example.org/rocks/igneous", "http://example.org/rocks/sedimentary"]
+    },
+    {
+      "@id": "http://example.org/rocks/igneous",
+      "@type": "skos:Concept",
+      "inScheme": "http://example.org/rocks/",
+      "topConceptOf": "http://example.org/rocks/",
+      "prefLabel": [
+        {"@value": "Igneous rock", "@language": "en"},
+        {"@value": "Magmatisches Gestein", "@language": "de"},
+        {"@value": "Roche ignée", "@language": "fr"}
+      ],
+      "definition": {"@value": "Rock formed by the cooling and solidification of magma or lava.", "@language": "en"},
+      "narrower": "http://example.org/rocks/basalt"
+    },
+    {
+      "@id": "http://example.org/rocks/granite",
+      "@type": "skos:Concept",
+      "inScheme": "http://example.org/rocks/",
+      "prefLabel": [
+        {"@value": "Granite", "@language": "en"},
+        {"@value": "Granit", "@language": "de"},
+        {"@value": "Granite", "@language": "fr"}
+      ],
+      "altLabel": {"@value": "Magma rock", "@language": "en"},
+      "hiddenLabel": {"@value": "Granit rock", "@language": "en"},
+      "scopeNote": {"@value": "Used here for coarse-grained intrusive igneous rock.", "@language": "en"},
+      "broader": "http://example.org/rocks/igneous",
+      "related": "http://example.org/rocks/quartz"
+    },
+    {
+      "@id": "http://example.org/rocks/basalt",
+      "@type": "skos:Concept",
+      "inScheme": "http://example.org/rocks/",
+      "prefLabel": [
+        {"@value": "Basalt", "@language": "en"},
+        {"@value": "Basalt", "@language": "de"}
+      ],
+      "example": {"@value": "Columnar basalt at the Giant's Causeway.", "@language": "en"}
+    },
+    {
+      "@id": "http://example.org/rocks/sedimentary",
+      "@type": "skos:Concept",
+      "inScheme": "http://example.org/rocks/",
+      "topConceptOf": "http://example.org/rocks/",
+      "prefLabel": [
+        {"@value": "Sedimentary rock", "@language": "en"},
+        {"@value": "Roche sédimentaire", "@language": "fr"}
+      ],
+      "editorialNote": {"@value": "Confirm classification against the regional survey before publishing.", "@language": "en"}
+    },
+    {
+      "@id": "http://example.org/rocks/quartz",
+      "@type": "skos:Concept",
+      "inScheme": "http://example.org/rocks/",
+      "prefLabel": {"@value": "Quartz", "@language": "en"},
+      "altLabel": {"@value": "Quartz", "@language": "de"},
+      "historyNote": {"@value": "Reclassified from 'Silica minerals' in the 2020 revision.", "@language": "en"},
+      "changeNote": {"@value": "Definition tightened in 2022.", "@language": "en"},
+      "note": {"@value": "See also feldspar for a related silicate.", "@language": "en"}
+    },
+    {
+      "@id": "http://example.org/rocks/collection/silica-bearing",
+      "@type": "skos:Collection",
+      "prefLabel": {"@value": "Silica-bearing rocks", "@language": "en"},
+      "member": ["http://example.org/rocks/granite", "http://example.org/rocks/quartz"]
+    },
+    {
+      "@id": "http://example.org/rocks/collection/example-sequence",
+      "@type": "skos:OrderedCollection",
+      "prefLabel": {"@value": "Example sequence", "@language": "en"},
+      "memberList": [
+        "http://example.org/rocks/basalt",
+        "http://example.org/rocks/granite",
+        "http://example.org/rocks/sedimentary"
+      ]
+    }
+  ]
+}
