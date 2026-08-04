@@ -504,7 +504,14 @@ def _import_labels(
     default language, so the same file always imports the same way — is
     ever attempted; every other value in that language is set aside and
     reported instead, ahead of the write, the same D25 discipline applied to
-    the same class of refusal.
+    the same class of refusal. A surplus ``skos:prefLabel`` in
+    ``default_language`` itself (FIX 4, review, decisions.md D38) is the
+    same defect, not a different one: :func:`_import_concepts` already chose
+    one such value, by the identical rule, as ``Concept.label`` before this
+    function ever runs, so every other one is reported here too — never
+    written (that would duplicate the identity anchor, exactly what
+    ``ConceptLabel.clean()`` itself refuses), but never silently dropped
+    either (Article XI).
     """
     configured = _configured_language_codes()
     concept.labels.all().delete()
@@ -525,6 +532,11 @@ def _import_labels(
                 continue
             language = literal.language
             if kind == ConceptLabel.Kind.PREFERRED and language == default_language:
+                if str(literal) != preferred_kept[language]:
+                    # FIX 4 (review, decisions.md D38): the winner already
+                    # lives as concept.label; a loser in this language must
+                    # still be named, not merely skipped.
+                    report.add_set_aside(SetAsideReason.SURPLUS_PREFERRED_LABEL, subject=uri, language=language)
                 continue
             if language not in configured:
                 report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, subject=uri, language=language)

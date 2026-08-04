@@ -1391,3 +1391,34 @@ fixture). `poetry run ruff check .` — all checks passed. `poetry run ruff form
 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django
 makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry run
 pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T12:50:00Z · Forge · review fix 4 — a surplus default-language preferred label is dropped silently
+
+**Did**: closed a medium-severity finding from the merged feature's review, in the same family as
+FIX 3: `_import_labels`'s `if kind == PREFERRED and language == default_language: continue` line
+skips *every* `skos:prefLabel` literal in the default language, including the ones
+`_preferred_label_in` (`_import_concepts`) did not choose as `Concept.label` — dropped with no
+report at all, contradicting Article XI and the README's own "nothing a file contains is ever
+dropped in silence." Wrote the failing test first —
+`TestSurplusPreferredLabelInTheDefaultLanguage` in `test_skos.py`, using a new
+`surplus_preferred_label_default_language.ttl` fixture (two English `skos:prefLabel` values,
+"Widget" and "Doohickey", "en" being the default language) — confirmed the "kept as label" half
+already passed (no crash, matching FIX 3's finding that this half was never the bug) but the
+"reported" half failed (`0 == 1`, no set-aside entry at all) before any production change. Made the
+production change: the same `preferred_by_language`/`preferred_kept` machinery FIX 3 introduced now
+also drives the default-language branch — a literal matching `preferred_kept[default_language]` is
+still skipped silently (it already lives as `concept.label`; writing it as a `ConceptLabel` row too
+would duplicate the identity anchor, exactly what the model refuses), but every other literal in that
+language is now reported under the same `SetAsideReason.SURPLUS_PREFERRED_LABEL` FIX 3 added.
+Mutation probe: disabled the new report call in the default-language branch, re-ran the test class,
+confirmed the "reported" test failed again (`0 == 1`) while the "kept as label" test stayed green
+(proving the mutation is isolated to the reporting half, not the storage half); restored, re-ran
+green. Recorded together with FIX 3 in decisions.md D38 — one mechanism, one decision, covering both.
+
+**Verified**: `poetry run pytest -q` — 550 passed (547 baseline + 3 new: 2 in
+`TestSurplusPreferredLabelInTheDefaultLanguage`, one `TestFixtureCorpus` parse-sweep instance for the
+new fixture — no new `SetAsideReason` member this time, so no further sweep re-parametrization).
+`poetry run ruff check .` — all checks passed. `poetry run ruff format --check .` — 22 files already
+formatted. `poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files
+scanned. `poetry run python -m django makemigrations --check --dry-run --settings=tests.settings` —
+no changes detected. `poetry run pre-commit run --all-files` — all hooks passed.

@@ -741,6 +741,36 @@ class TestSurplusPreferredLabelInAnotherConfiguredLanguage:
         assert entries[0].params["language"] == "de"
 
 
+class TestSurplusPreferredLabelInTheDefaultLanguage:
+    """FIX 4 (review, decisions.md D38) — ``_preferred_label_in`` already
+    picks one default-language ``skos:prefLabel`` deterministically as
+    ``Concept.label`` (T009); ``_import_labels`` then skips *every* PREFERRED
+    literal in that language, including the ones that were not chosen —
+    dropped with no report at all, the silent-normalisation Article XI
+    forbids and the README's own "nothing a file contains is ever dropped in
+    silence" contradicts. The surplus is now reported under the same
+    ``SetAsideReason.SURPLUS_PREFERRED_LABEL`` FIX 3 uses — the same defect,
+    just in the language ``Concept.label`` itself anchors rather than any
+    other."""
+
+    def test_one_value_is_kept_as_the_concepts_label(self, db):
+        import_skos(FIXTURES / "surplus_preferred_label_default_language.ttl")
+        widget = Concept.objects.get(static_uri="http://example.org/surplus2/widget")
+        assert widget.label == "Doohickey"
+        assert not widget.labels.filter(language="en", kind=ConceptLabel.Kind.PREFERRED).exists()
+
+    def test_the_surplus_default_language_value_is_set_aside_and_reported(self, db):
+        report = import_skos(FIXTURES / "surplus_preferred_label_default_language.ttl")
+        widget_uri = "http://example.org/surplus2/widget"
+        entries = [
+            entry
+            for entry in report.set_aside
+            if entry.reason is SetAsideReason.SURPLUS_PREFERRED_LABEL and entry.subject == widget_uri
+        ]
+        assert len(entries) == 1
+        assert entries[0].params["language"] == "en"
+
+
 class TestConceptNotes:
     """T019 — FR-009/research.md R5: the definition and each of the six SKOS
     documentary note kinds are stored against their concept, each in its own
