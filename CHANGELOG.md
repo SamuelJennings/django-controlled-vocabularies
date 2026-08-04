@@ -8,6 +8,32 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Added
 
+- Importing a published SKOS vocabulary: `import_skos(file, *, serialization=None, scheme=None)`
+  reads a Turtle, RDF/XML, or JSON-LD file and creates or updates the vocabulary it declares, its
+  concepts, their labels and documentary notes, their broader/narrower and related relationships,
+  and their collection membership, every record matched by its static URI. Re-running an import
+  upserts rather than deleting and recreating: a record the file still contains has its content
+  matched to the file exactly, including removing a value the file no longer carries, while a
+  record the file does not mention at all is left untouched and named in the report instead of
+  being deleted. Returns an `ImportReport` — a plain dataclass, not rendered text — with `created`,
+  `updated`, `set_aside` (a translatable, closed-vocabulary reason per value the app could not
+  store, e.g. an unconfigured language, a notation, a mapping to another vocabulary, or a predicate
+  the models have no place for), `absent_from_source`, `normalized` (a value stored under a
+  different predicate than the file asserted, e.g. a foreign `dcterms:description` read as a
+  concept's definition), and `fatal` buckets; a run either succeeds in full or writes nothing,
+  raising `SkosImportFailed` (carrying the same report) on a fatal problem such as a missing or
+  blank-node identity. `SkosImportError` covers every other reason a file could not be turned into
+  usable SKOS at all (not found, unsupported serialization, unparseable, or refused by the safety
+  scan). Code catching only `(SkosImportError, SkosImportFailed)` already catches everything else
+  this function can raise. Reading a file never reassigns identity: a concept or collection
+  whose URI is already held by a different vocabulary, or by a record of another kind, is set aside
+  and reported rather than moved or duplicated. Imported files are treated as untrusted input.
+  RDF/XML is scanned for unsafe constructs (entity expansion, external references) before it is
+  parsed, and a JSON-LD document is refused rather than fetched if its `@context` names a remote
+  location, whether a plain string reference or an `@import` reference inside an inline object
+  context. Reading a file never makes a network request. Both refusals raise an exported,
+  translatable `UnsafeRdfXmlError`/`UnsafeJsonLdError`, each a `SkosImportError` subclass. No
+  command-line or web-facing entry point yet — programmatic only. See the README.
 - Static, externally assigned identifiers: `ConceptScheme`, `Concept`, and `Collection` each gain a
   `static_uri` field holding an identifier assigned by an external publisher, held exactly as given
   and never recomputed by the app. Nothing in the package overwrites a stored value, and nothing

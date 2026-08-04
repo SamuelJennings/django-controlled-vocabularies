@@ -1,0 +1,26 @@
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+# T034's own dedicated fixture pair (D28's own "prefer a new fixture" counsel,
+# followed by T029's collection_lifecycle pair too). "kept" is restated by
+# both files; "dropped" exists only here, so a re-import against the updated
+# file must report it absent, the way a concept in that position already is
+# (T015) — not delete it, and not leave its membership silently unreported.
+
+<http://example.org/vanishing-collections/>
+    a skos:ConceptScheme ;
+    skos:prefLabel "Vanishing collections"@en .
+
+<http://example.org/vanishing-collections/alpha>
+    a skos:Concept ;
+    skos:inScheme <http://example.org/vanishing-collections/> ;
+    skos:prefLabel "Alpha"@en .
+
+<http://example.org/vanishing-collections/collection/kept>
+    a skos:Collection ;
+    skos:prefLabel "Kept"@en ;
+    skos:member <http://example.org/vanishing-collections/alpha> .
+
+<http://example.org/vanishing-collections/collection/dropped>
+    a skos:Collection ;
+    skos:prefLabel "Dropped"@en ;
+    skos:member <http://example.org/vanishing-collections/alpha> .

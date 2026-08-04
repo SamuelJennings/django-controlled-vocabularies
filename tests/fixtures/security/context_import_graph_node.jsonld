@@ -1,0 +1,10 @@
+{
+  "@context": { "skos": "http://www.w3.org/2004/02/skos/core#" },
+  "@graph": [
+    {
+      "@context": { "@import": "exfil_secret.jsonld" },
+      "@id": "http://example.org/graphnode/",
+      "@type": "skos:ConceptScheme"
+    }
+  ]
+}
