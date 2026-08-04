@@ -515,4 +515,34 @@ django makemigrations --check --dry-run --settings=tests.settings` — no change
 unchanged; also D22 (carried from US-1 review): a re-imported file whose declared default language
 conflicts with the one frozen on an existing scheme must be reported as set-aside.
 
+## 2026-08-04T10:40:00Z · Implementer US2 · T016
+
+**Did**: two pieces, both in `_resolve_scheme`. (1) `row.description` is now read from
+`DCTERMS.description` the same way `name` is read from `SKOS.prefLabel` (effective default language
+first, any language as fallback), written unconditionally including to `""` when the file no longer
+carries one (decisions.md D21 — SKOS has no scheme-level description predicate, so this reuses the
+`dcterms:description` alias CONTEXT.md already names for a concept's own `definition`).
+`mapping.py` gains `DCTERMS = rdflib.namespace.DCTERMS`, a built-in namespace object, no new
+dependency. New fixtures: `vocabulary_metadata.ttl`, `vocabulary_metadata_updated.ttl` (name and
+description both changed, identifier unchanged), `vocabulary_metadata_description_removed.ttl`
+(description predicate dropped entirely). (2) D22 (carried from the US-1 review): `_resolve_scheme`
+now always computes the file's declared default language, even for a matched existing scheme; when
+it disagrees with the scheme's `effective_default_language` a new `SetAsideReason.DEFAULT_LANGUAGE_FROZEN`
+set-aside entry is added, naming the declared and frozen values — `default_language` itself stays
+untouched (D18's guard is unchanged), only the silence is fixed. `test_report.py`'s
+`_EXAMPLE_PARAMS` table (T003's parametrized "every reason renders" test) gets the new reason's
+example params, the same extension T007 made for `FatalReason`.
+
+**Verified**: `poetry run pytest -q` — 425 passed (414 + 11 new: 5 in `test_skos.py`'s
+`TestVocabularyMetadataUpdate`/`TestFrozenDefaultLanguageConflictIsReported`, plus the parametrized
+`test_report.py` case for the new reason and its fixture-discovery entries). `poetry run ruff check .`
+— all checks passed. `poetry run ruff format --check .` — 23 files already formatted. `poetry run
+mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run
+python -m django makemigrations --check --dry-run --settings=tests.settings` — no changes detected.
+
+**Next**: T017 — a failed re-import against an already-populated database leaves it exactly as it
+was, including rolling back an *update* to an existing concept, not only a creation.
+
+**Watch**: none.
+
 **Watch**: none.

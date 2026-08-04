@@ -511,3 +511,63 @@ class TestRecordsAbsentFromSource:
         report = import_skos(FIXTURES / "rocks_updated.ttl")
         assert "http://example.org/rocks/granite" not in report.absent_from_source
         assert "http://example.org/rocks/basalt" not in report.absent_from_source
+
+
+class TestVocabularyMetadataUpdate:
+    """T016 — FR-013: the vocabulary's own name and description update from
+    the file on re-import, identifier unchanged. SKOS defines no description
+    predicate for a ``skos:ConceptScheme``; decisions.md D21 records
+    ``dcterms:description`` as the source, the same alias CONTEXT.md already
+    establishes for a concept's own ``definition``."""
+
+    def test_a_description_is_read_from_dcterms_description(self, db):
+        import_skos(FIXTURES / "vocabulary_metadata.ttl")
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/gems/")
+        assert scheme.name == "Gemstones"
+        assert scheme.description == "A vocabulary of gemstone types."
+
+    def test_a_changed_name_and_description_land_on_reimport_with_identifier_unchanged(self, db):
+        import_skos(FIXTURES / "vocabulary_metadata.ttl")
+        scheme_pk = ConceptScheme.objects.get(static_uri="http://example.org/gems/").pk
+
+        import_skos(FIXTURES / "vocabulary_metadata_updated.ttl")
+
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/gems/")
+        assert scheme.pk == scheme_pk
+        assert scheme.static_uri == "http://example.org/gems/"
+        assert scheme.name == "Precious stones"
+        assert scheme.description == "An updated vocabulary of gemstones and precious stones."
+
+    def test_a_description_removed_from_the_file_is_cleared_not_left_stale(self, db):
+        import_skos(FIXTURES / "vocabulary_metadata.ttl")
+
+        import_skos(FIXTURES / "vocabulary_metadata_description_removed.ttl")
+
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/gems/")
+        assert scheme.description == ""
+
+
+class TestFrozenDefaultLanguageConflictIsReported:
+    """Carried from the US-1 review (decisions.md D18/D22): D18 froze an
+    existing, concept-bearing scheme's ``default_language`` by silently
+    skipping recomputation on every non-creating run. That protects the
+    database but says nothing to the curator — a re-imported file that
+    genuinely declares a different default language now gets reported."""
+
+    def test_a_conflicting_declared_default_language_is_reported_not_silently_dropped(self, db):
+        scheme = ConceptSchemeFactory(name="Geology", static_uri="http://example.org/geology/", default_language="")
+        ConceptFactory(scheme=scheme, label="Existing concept")
+
+        report = import_skos(FIXTURES / "french_vocabulary.ttl")
+
+        scheme.refresh_from_db()
+        assert scheme.default_language == ""
+        conflicts = [entry for entry in report.set_aside if entry.reason is SetAsideReason.DEFAULT_LANGUAGE_FROZEN]
+        assert len(conflicts) == 1
+        assert conflicts[0].subject == "http://example.org/geology/"
+        assert conflicts[0].params == {"declared": "fr", "frozen": "en"}
+
+    def test_an_agreeing_declared_default_language_produces_no_conflict(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        report = import_skos(FIXTURES / "rocks.ttl")
+        assert not any(entry.reason is SetAsideReason.DEFAULT_LANGUAGE_FROZEN for entry in report.set_aside)
