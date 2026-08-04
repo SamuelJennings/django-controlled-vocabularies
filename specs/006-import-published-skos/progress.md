@@ -615,3 +615,30 @@ language, via `Concept.add_note`.
 granite's alternative label and quartz's whole removal are covered, so T018's own carried case
 (decisions.md D20) had fixture material to test against, but T019's equivalent carried case does
 not yet. Recorded as a new decision (D24) rather than left implicit.
+
+## 2026-08-04T11:25:00Z · Implementer US3 · T019
+
+**Did**: `mapping.py` gains `NOTE_PREDICATES` (the seven SKOS documentary-note predicates ->
+`ConceptNote.Kind`, `definition` included). `skos.py`'s new `_import_notes()` writes every one of a
+concept's notes through `Concept.add_note` (research.md R5), replacing whatever the concept already
+held — the same full-replace rule and rationale `_import_labels` (T018) established, reused rather
+than duplicated. Wired into `_import_concept_content()` alongside the T018 label call.
+`dcterms:description` as a `definition` alias is deliberately not built here — tasks.md scopes that
+normalisation, and the report entry FR-009 requires for it, to T021.
+
+decisions.md D24 (new): `rocks_updated.ttl` carried no case of "a note removed from a concept that
+stays present" — the fixture's four existing edits don't include one, only quartz's whole removal,
+which is a different case (absent-from-source, already covered by T015). Extended the fixture with a
+fifth edit — basalt's `example` note dropped — checked against every existing test reading that
+fixture to confirm none inspects notes and none is affected.
+
+**Verified**: `poetry run pytest -q` — 433 passed (431 + 2 new in `test_skos.py`'s new
+`TestConceptNotes`). `poetry run ruff check .` — all checks passed. `poetry run ruff format .` — 1
+file reformatted (`test_skos.py`) then clean. `poetry run mypy` — success, 9 source files. `poetry
+run deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations --check
+--dry-run --settings=tests.settings` — no changes detected.
+
+**Next**: T020 — a label or note in a language the site is not configured for: stored nowhere,
+named in the report with its language and a count.
+
+**Watch**: none.

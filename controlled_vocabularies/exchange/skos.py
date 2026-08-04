@@ -24,7 +24,7 @@ from django.db import transaction
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 
-from controlled_vocabularies.exchange.mapping import DCTERMS, LABEL_PREDICATES, SKOS
+from controlled_vocabularies.exchange.mapping import DCTERMS, LABEL_PREDICATES, NOTE_PREDICATES, SKOS
 from controlled_vocabularies.exchange.report import FatalReason, ImportReport, SetAsideReason
 from controlled_vocabularies.exchange.safety import scan_rdf_xml
 from controlled_vocabularies.models import Concept, ConceptLabel, ConceptScheme, validate_static_uri
@@ -477,6 +477,37 @@ def _import_labels(
             concept.add_label(language=language, kind=kind, text=str(literal))
 
 
+def _import_notes(
+    graph: rdflib.Graph,
+    node: rdflib.term.Node,
+    concept: Concept,
+    uri: str,
+    report: ImportReport,
+) -> None:
+    """Store ``concept``'s documentary notes — the definition and the six SKOS note kinds
+    (T019, FR-009) — through :meth:`~controlled_vocabularies.models.Concept.add_note`.
+
+    Replaces whatever notes this concept already held, the same full-replace
+    rule :func:`_import_labels` applies and for the same reason: a note
+    carries no identifier of its own to upsert by, and the file is
+    authoritative for what it contains (FR-013). :attr:`NOTE_PREDICATES`
+    covers the native SKOS predicates only — the ``dcterms:description``
+    alias for a concept with no ``skos:definition`` of its own is a separate,
+    reported normalisation (T021, FR-009), not folded in here.
+
+    A language this application is not configured for is not filtered here
+    yet (T020 adds that, the same deferral :func:`_import_labels` makes for
+    labels): every fixture this task reads from already uses a configured
+    language.
+    """
+    concept.concept_notes.all().delete()
+    for predicate, kind in NOTE_PREDICATES.items():
+        for literal in graph.objects(node, predicate):
+            if not isinstance(literal, rdflib.Literal) or not literal.language:
+                continue
+            concept.add_note(language=literal.language, kind=kind, value=str(literal))
+
+
 def _import_concept_content(
     graph: rdflib.Graph,
     node: rdflib.term.Node,
@@ -489,10 +520,12 @@ def _import_concept_content(
 
     Called once per created-or-updated concept, after it has a primary key
     (T018's label replacement needs one). Grows one call at a time as
-    Phase US-3 lands: T018 (labels) first, T019 (notes) and T021
-    (notation/mappings/unmodelled predicates) alongside it.
+    Phase US-3 lands: T018 (labels), T019 (notes), and T021
+    (notation/mappings/unmodelled predicates and the ``dcterms:description``
+    normalisation) alongside it.
     """
     _import_labels(graph, node, concept, target_scheme.effective_default_language, uri, report)
+    _import_notes(graph, node, concept, uri, report)
 
 
 def _import_concepts(

@@ -499,3 +499,33 @@ identifier.
 
 **Revisit if:** conformance drift of this kind reaches a story merge again — the gate belongs at each
 story's stage exit, where it would have caught this at US-0 instead of two stories later.
+
+## D24 — `rocks_updated.ttl` gains a fifth edit: a note dropped from a concept that stays present (T019)
+
+Tasks.md's T019 carries the same kind of deferred case T018 carries (decisions.md D20): "a re-import
+of `rocks_updated.ttl` removes the note the publisher dropped, leaving the concept itself intact."
+But checked against the actual fixture, no such case exists. `rocks_updated.ttl`'s four edits (D20)
+are: granite's preferred label corrected, granite's alternative label removed, quartz dropped
+entirely, and the ordered collection's member sequence changed. None of those is a note removed from
+a concept that *stays*: basalt, sedimentary, and igneous — the only concepts left carrying notes once
+quartz is gone — are all otherwise untouched between the two files. Quartz's own three notes
+(`historyNote`/`changeNote`/`note`) disappear with it, but that exercises "a record the file no
+longer mentions" (T015's `absent_from_source`, already covered), not "a value removed from a record
+the file still contains" — decisions.md D20's own carried case requires the concept to remain.
+
+This is exactly the situation D20's own "Revisit if" anticipated: "the fixture is not pinned, only
+reused where it already fits" — it does not fit here, so it is extended rather than left short one
+case.
+
+Chosen: drop basalt's `skos:example` note from `rocks_updated.ttl`, leaving basalt's labels
+otherwise unchanged. Checked against every existing test that reads this fixture
+(`TestAuthoritativeUpdateForContainedRecords`, `TestRecordsAbsentFromSource`,
+`TestFixtureCorpus.test_updated_fixture_carries_the_four_re_import_edits`): none inspects basalt's
+notes, so none is affected by the removal. `igneous`'s `definition` and `sedimentary`'s
+`editorialNote` were left alone rather than also edited, so the base vocabulary (`rocks.ttl`) keeps
+one example of each of the seven note kinds landing untouched on a plain re-import, which
+`TestConceptNotes`'s own coverage relies on.
+
+**Revisit if:** a later story needs a *second* concept in this pair to lose a note, or needs the
+lost note to be a different kind than `example` — the same "not pinned" latitude D20 grants applies
+here too.

@@ -1,13 +1,15 @@
 @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
 
-# The re-import edit of rocks.ttl (US-2 scenarios): granite's preferred label is
-# corrected, its "Magma rock" alternative label is dropped, quartz is removed
-# from the file entirely (taking granite's related edge and its own collection
-# membership with it), and the ordered collection's member sequence changes.
-# basalt and sedimentary are otherwise unchanged and still present here, so a
-# re-import must leave them untouched and name them as still absent from this
-# file's mention where applicable.
+# The re-import edit of rocks.ttl (US-2/US-3 scenarios): granite's preferred label is
+# corrected, its "Magma rock" alternative label is dropped, basalt's "example" note
+# is dropped, quartz is removed from the file entirely (taking granite's related edge
+# and its own collection membership with it), and the ordered collection's member
+# sequence changes. sedimentary is otherwise unchanged and still present here, so a
+# re-import must leave it untouched and name it as still absent from this file's
+# mention where applicable. (decisions.md D24: the note-removal edit was added here
+# for US-3's T019, which needs a note dropped from a concept that stays present —
+# the original four re-import edits covered no such case.)
 
 <http://example.org/rocks/>
     a skos:ConceptScheme ;
@@ -33,8 +35,7 @@
 <http://example.org/rocks/basalt>
     a skos:Concept ;
     skos:inScheme <http://example.org/rocks/> ;
-    skos:prefLabel "Basalt"@en, "Basalt"@de ;
-    skos:example "Columnar basalt at the Giant's Causeway."@en .
+    skos:prefLabel "Basalt"@en, "Basalt"@de .
 
 <http://example.org/rocks/sedimentary>
     a skos:Concept ;

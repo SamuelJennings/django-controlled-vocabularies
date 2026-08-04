@@ -16,7 +16,7 @@ import controlled_vocabularies.exchange as exchange
 from controlled_vocabularies.exchange.report import FatalReason, SetAsideReason
 from controlled_vocabularies.exchange.safety import UnsafeRdfXmlError
 from controlled_vocabularies.exchange.skos import SkosImportError, SkosImportFailed, _read_graph, import_skos
-from controlled_vocabularies.models import Concept, ConceptLabel, ConceptRelation, ConceptScheme
+from controlled_vocabularies.models import Concept, ConceptLabel, ConceptNote, ConceptRelation, ConceptScheme
 from tests.factories import ConceptFactory, ConceptSchemeFactory
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "skos"
@@ -660,6 +660,46 @@ class TestConceptLabels:
         assert granite.alt_labels("en") == []
         assert granite.hidden_labels("en") == ["Granit rock"]
         assert granite.pk == granite_pk
+
+
+class TestConceptNotes:
+    """T019 — FR-009/research.md R5: the definition and each of the six SKOS
+    documentary note kinds are stored against their concept, each in its own
+    language, through ``Concept.add_note``."""
+
+    def test_definition_and_each_note_kind_are_stored_against_the_right_concept(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        basalt = Concept.objects.get(static_uri="http://example.org/rocks/basalt")
+        sedimentary = Concept.objects.get(static_uri="http://example.org/rocks/sedimentary")
+        quartz = Concept.objects.get(static_uri="http://example.org/rocks/quartz")
+
+        assert igneous.definition("en") == "Rock formed by the cooling and solidification of magma or lava."
+        assert granite.notes("en", ConceptNote.Kind.SCOPE) == ["Used here for coarse-grained intrusive igneous rock."]
+        assert basalt.notes("en", ConceptNote.Kind.EXAMPLE) == ["Columnar basalt at the Giant's Causeway."]
+        assert sedimentary.notes("en", ConceptNote.Kind.EDITORIAL) == [
+            "Confirm classification against the regional survey before publishing."
+        ]
+        assert quartz.notes("en", ConceptNote.Kind.HISTORY) == [
+            "Reclassified from 'Silica minerals' in the 2020 revision."
+        ]
+        assert quartz.notes("en", ConceptNote.Kind.CHANGE) == ["Definition tightened in 2022."]
+        assert quartz.notes("en", ConceptNote.Kind.NOTE) == ["See also feldspar for a related silicate."]
+
+    def test_reimport_removes_a_note_the_publisher_dropped_leaving_the_concept_intact(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        basalt_pk = Concept.objects.get(static_uri="http://example.org/rocks/basalt").pk
+        assert Concept.objects.get(pk=basalt_pk).notes("en", ConceptNote.Kind.EXAMPLE) == [
+            "Columnar basalt at the Giant's Causeway."
+        ]
+
+        import_skos(FIXTURES / "rocks_updated.ttl")
+
+        basalt = Concept.objects.get(pk=basalt_pk)
+        assert basalt.notes("en", ConceptNote.Kind.EXAMPLE) == []
+        assert basalt.label == "Basalt"
+        assert basalt.pk == basalt_pk
 
 
 class TestFixtureCorpus:
