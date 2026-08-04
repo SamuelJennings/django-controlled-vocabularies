@@ -824,3 +824,34 @@ deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigr
 reported with both ends; an end already in the database from an earlier import is stored.
 
 **Watch**: the two pre-existing test conflicts above remain open for orchestrator review.
+
+## 2026-08-04T12:38:00Z · Implementer US4 · T025
+
+**Did**: No production change — T023's `_resolve_relation_concept`/`_import_relations` already
+had to make the missing-end/known-end/cross-scheme distinctions to avoid crashing on an ordinary,
+partial published file (decisions.md D29), the same shape decisions.md D17/T022 established for
+this story's predecessor (build the general mechanism where correctness requires it, finish it
+with acceptance coverage later). New fixture pair `relation_endpoints.ttl` /
+`relation_endpoints_updated.ttl`: alpha and beta both land on the first import with a broader
+relationship between them; the re-import drops beta from the file entirely (already in the
+database, so the relationship still lands) and adds a related edge to a URI that has never existed
+anywhere (set aside naming both ends, run still succeeds). A third fixture,
+`relation_cross_scheme_target.ttl`, exercises D29's cross-scheme guard directly: a concept in a
+second vocabulary stating a relationship to `rocks.ttl`'s granite is set aside rather than
+crashing on the model's own cross-scheme refusal.
+
+All four tests passed on first execution, confirming T023's design already covers this task's
+acceptance criteria in full.
+
+**Verified**: `poetry run pytest -q` — 466 passed, 2 failed (the two pre-existing conflicts named
+at T023/T024, unchanged and not touched; 462 + 4 new tests in `test_skos.py`'s new
+`TestRelationEndpointsMissingOrKnown` + 3 new fixture-discovery cases). `poetry run ruff check .`
+— all checks passed. `poetry run ruff format --check .` — 21 files already formatted. `poetry run
+mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run
+python -m django makemigrations --check --dry-run --settings=tests.settings` — no changes
+detected.
+
+**Next**: T026 — a re-import with a relationship removed removes it, leaving both concepts.
+
+**Watch**: the two pre-existing test conflicts remain open for orchestrator review; unaffected by
+this task.

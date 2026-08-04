@@ -898,6 +898,69 @@ class TestRelatedRelations:
         assert ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED).count() == 1
 
 
+class TestRelationEndpointsMissingOrKnown:
+    """T025 — FR-011: a relationship end that is neither in the file nor
+    already in the database is set aside and reported, naming both ends, and
+    the run still succeeds; a relationship end already in the database from
+    an earlier import is stored even when this file does not separately
+    redeclare it. Builds no new production behaviour of its own — T023's
+    ``_resolve_relation_concept``/``_import_relations`` (research.md R4,
+    decisions.md D29) already has to make exactly this distinction to avoid
+    crashing on an ordinary, partial published file, so this task's own job
+    is acceptance coverage proving it, the same shape decisions.md D17/T022
+    already established for this story's predecessor."""
+
+    def test_an_end_already_in_the_database_from_an_earlier_import_is_stored(self, db):
+        import_skos(FIXTURES / "relation_endpoints.ttl")
+        alpha_pk = Concept.objects.get(static_uri="http://example.org/relendpoints/alpha").pk
+        beta_pk = Concept.objects.get(static_uri="http://example.org/relendpoints/beta").pk
+
+        import_skos(FIXTURES / "relation_endpoints_updated.ttl")
+
+        assert ConceptRelation.objects.filter(
+            source_id=alpha_pk, target_id=beta_pk, kind=ConceptRelation.Kind.BROADER
+        ).exists()
+        # beta is untouched — the file no longer mentions it as a concept at all.
+        assert Concept.objects.filter(pk=beta_pk).exists()
+
+    def test_an_end_neither_in_the_file_nor_the_database_is_set_aside_naming_both_ends(self, db):
+        import_skos(FIXTURES / "relation_endpoints.ttl")
+
+        report = import_skos(FIXTURES / "relation_endpoints_updated.ttl")
+
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.MISSING_RELATION_END]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/relendpoints/alpha"
+        assert entries[0].params["other"] == "http://example.org/relendpoints/ghost"
+        assert not Concept.objects.filter(static_uri="http://example.org/relendpoints/ghost").exists()
+
+    def test_the_run_succeeds_and_every_other_relationship_still_lands(self, db):
+        import_skos(FIXTURES / "relation_endpoints.ttl")
+
+        report = import_skos(FIXTURES / "relation_endpoints_updated.ttl")
+
+        assert report.fatal == []
+        alpha = Concept.objects.get(static_uri="http://example.org/relendpoints/alpha")
+        beta = Concept.objects.get(static_uri="http://example.org/relendpoints/beta")
+        assert beta in alpha.broader()
+
+    def test_an_end_that_exists_but_in_a_different_vocabulary_is_set_aside_not_a_crash(self, db):
+        # ConceptRelation only ever joins concepts of the same scheme
+        # (models.py _reject_cross_scheme); asserting one across vocabularies
+        # must not raise an uncaught ValidationError (decisions.md D29).
+        import_skos(FIXTURES / "rocks.ttl")
+
+        report = import_skos(FIXTURES / "relation_cross_scheme_target.ttl")
+
+        assert report.fatal == []
+        outsider = Concept.objects.get(static_uri="http://example.org/outsiders/outsider")
+        assert list(outsider.broader()) == []
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.MISSING_RELATION_END]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/outsiders/outsider"
+        assert entries[0].params["other"] == "http://example.org/rocks/granite"
+
+
 class TestFixtureCorpus:
     """T005 — the published-vocabulary fixtures are discoverable and parse (FR-018, SC-016).
 
