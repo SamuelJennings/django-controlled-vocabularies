@@ -1,0 +1,33 @@
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+# FIX 11 (review, decisions.md D44). memberList narrows member rather than
+# replacing it: gamma and alpha are named by both, in memberList's own
+# order; beta is named only by skos:member, and must not disappear.
+
+<http://example.org/ordered-mixed/>
+    a skos:ConceptScheme ;
+    skos:prefLabel "Ordered mixed member and memberList"@en .
+
+<http://example.org/ordered-mixed/alpha>
+    a skos:Concept ;
+    skos:inScheme <http://example.org/ordered-mixed/> ;
+    skos:prefLabel "Alpha"@en .
+
+<http://example.org/ordered-mixed/beta>
+    a skos:Concept ;
+    skos:inScheme <http://example.org/ordered-mixed/> ;
+    skos:prefLabel "Beta"@en .
+
+<http://example.org/ordered-mixed/gamma>
+    a skos:Concept ;
+    skos:inScheme <http://example.org/ordered-mixed/> ;
+    skos:prefLabel "Gamma"@en .
+
+<http://example.org/ordered-mixed/collection/group>
+    a skos:OrderedCollection ;
+    skos:prefLabel "Group"@en ;
+    skos:member
+        <http://example.org/ordered-mixed/gamma>,
+        <http://example.org/ordered-mixed/alpha>,
+        <http://example.org/ordered-mixed/beta> ;
+    skos:memberList ( <http://example.org/ordered-mixed/gamma> <http://example.org/ordered-mixed/alpha> ) .

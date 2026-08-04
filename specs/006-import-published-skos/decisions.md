@@ -1307,3 +1307,62 @@ independently load-bearing, not a copy that happens to also pass by luck.
 **Revisit if:** a future feature wants to *resolve* the clash (e.g., let a curator choose which kind
 wins, or merge the two) rather than refuse the second record — that is new curatorial functionality,
 not a correction to this rule, which only ever refuses silently colliding on one identifier.
+
+## D44 — An ordered collection falls back to `skos:member` when it has no `memberList`, and `memberList` narrows rather than replaces `member` when both are present (review fix 11)
+
+`_import_collections`'s `if ordered:` branch read membership exclusively from `skos:memberList`,
+falling back to an empty list when the collection carried none at all — even though `skos:member` is
+the general SKOS membership predicate, valid on an ordered collection exactly as much as an
+unordered one, and a publisher who states only `skos:member` on a `skos:OrderedCollection` (a real,
+unremarkable shape — not every export bothers with an RDF list for a two- or three-member group) has
+made a perfectly good, explicit membership assertion that this importer dropped entirely. Worse on a
+re-import: because the reconciliation pass (D30) removes a membership the file "no longer states"
+whenever the member concept was itself rewritten this run, reading an empty `member_uris` for such a
+collection didn't just fail to add anything — it actively stripped membership an earlier,
+correctly-read import (of the same file, before this defect, or of a different collection reached
+via `skos:member` alone) had written.
+
+The SKOS reference itself settles what the fallback should be: `skos:memberList` is documented as
+*narrowing* `skos:member`, not replacing it — an ordered collection's list is understood to restate,
+in order, the same members `skos:member` already asserts, and a publisher is free to assert both, or
+a less careful export may assert only one or the other.
+
+**Chosen: read both, with `memberList` — when present — deciding the order, and any `skos:member`
+it omits appended afterward.** Three cases:
+
+1. **`memberList` present, `skos:member` absent or a subset of it.** Unchanged from before this fix:
+   `memberList`'s own order is `member_uris` in full.
+2. **`memberList` present, `skos:member` also present and naming something `memberList` omits.**
+   `memberList`'s own order comes first; any `skos:member` value not already named by `memberList`
+   is appended after it, deduplicated against `memberList`'s own values by URI, in the same
+   deterministic sorted order the unordered branch already uses for a value that carries no order of
+   its own (a member asserted only via `skos:member` has none to prefer).
+3. **`memberList` absent, `skos:member` present.** The new case this fix exists for: read the same
+   deterministic sorted way as case 2's appended tail and as the unordered branch — there is no order
+   to read, so there is nothing to lose by picking the same rule already used everywhere else a
+   member carries none.
+
+**What happens to a `skos:member` the `memberList` omits, decided explicitly rather than left
+implicit:** it is *kept*, not dropped and not separately reported. Article XI's "nothing a file
+contains is ever dropped in silence" is the operative rule, and `skos:member` is a real, explicit
+membership assertion — omitting it from `memberList` is not the same shape of problem as a value the
+models have no place for (that is what `SetAsideReason` names); it is simply a member whose *order*
+the file did not additionally state through the ordered mechanism. No new report reason was added for
+this: the member lands, visibly, as a `CollectionMember` row like any other, and a caller inspecting
+the collection's own membership sees it there, which is a stronger form of "not silent" than a report
+entry pointing at a value that was never actually withheld.
+
+**Reproduced before the fix:** an `OrderedCollection` stated only with `skos:member` (no
+`memberList` at all) imported with zero members, and a second import of the identical file produced
+zero members again rather than staying at whatever the first import (correctly, once fixed) wrote —
+confirming this was not only a missing-on-first-import defect but a lifecycle one. A second fixture,
+asserting both predicates with `memberList` naming two of three members, confirmed the third
+(`skos:member`-only) member was dropped entirely before the fix and lands after `memberList`'s own
+two, in deterministic order, once fixed.
+
+**Revisit if:** a future story finds a real published vocabulary where a `skos:member`-only member's
+absence from `memberList` is meant to signal something other than "the publisher didn't bother
+including it in the ordered list too" (for instance, a convention where `memberList` is deliberately
+partial and authoritative for exactly what it names) — that would be evidence for treating the
+omission as a set-aside-worthy discrepancy rather than a plain append, and belongs in its own
+decision built against that evidence.

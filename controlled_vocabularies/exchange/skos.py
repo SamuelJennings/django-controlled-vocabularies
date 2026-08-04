@@ -926,12 +926,19 @@ def _import_collections(
     :data:`SetAsideReason.URI_HELD_BY_DIFFERENT_KIND`).
 
     ``skos:member`` (unordered) or ``skos:memberList`` (ordered, walked in the
-    file's own order) name the file's desired membership. Each member URI is
-    resolved through :func:`_resolve_concept_reference` — this run's own
-    writes first, then an earlier import's; one that resolves to nothing is
-    set aside and reported (:data:`SetAsideReason.MISSING_MEMBER`, naming both
-    the member and the collection) rather than failing the run (FR-011), and
-    the collection is still created holding whatever members did resolve.
+    file's own order) name the file's desired membership. An ordered
+    collection with no ``skos:memberList`` at all falls back to
+    ``skos:member``, read in the same deterministic sorted order the
+    unordered branch uses; when both are present, ``skos:memberList``
+    governs the order of the members it names, and any ``skos:member`` it
+    omits is appended after them, sorted the same way (review fix 11,
+    decisions.md D44 — ``memberList`` narrows ``member`` rather than
+    replacing it). Each member URI is resolved through
+    :func:`_resolve_concept_reference` — this run's own writes first, then
+    an earlier import's; one that resolves to nothing is set aside and
+    reported (:data:`SetAsideReason.MISSING_MEMBER`, naming both the member
+    and the collection) rather than failing the run (FR-011), and the
+    collection is still created holding whatever members did resolve.
 
     Membership is written only through the model's own API —
     :meth:`~controlled_vocabularies.models.Collection.add`,
@@ -1026,7 +1033,25 @@ def _import_collections(
 
         if ordered:
             member_list_node = graph.value(node, SKOS.memberList)
-            member_uris = [str(item) for item in graph.items(member_list_node)] if member_list_node is not None else []
+            if member_list_node is not None:
+                ordered_uris = [str(item) for item in graph.items(member_list_node)]
+                # FIX 11 (review, decisions.md D44): skos:memberList narrows
+                # skos:member rather than replacing it (the SKOS reference's
+                # own wording) — a skos:member the memberList omits is still
+                # an explicit membership assertion and must not disappear
+                # (Article XI). Appended after memberList's own order, in the
+                # same deterministic sorted order the unordered branch below
+                # already uses, since a member named only through
+                # skos:member carries no order of its own to prefer.
+                member_only = sorted({str(obj) for obj in graph.objects(node, SKOS.member)} - set(ordered_uris))
+                member_uris = ordered_uris + member_only
+            else:
+                # FIX 11 (review, decisions.md D44): an ordered collection
+                # asserted only with skos:member — no memberList at all —
+                # still has real, explicit membership to import; read the
+                # same deterministic sorted way the unordered branch already
+                # reads skos:member, since there is no order to read.
+                member_uris = sorted({str(obj) for obj in graph.objects(node, SKOS.member)})
         else:
             member_uris = sorted({str(obj) for obj in graph.objects(node, SKOS.member)})
 

@@ -1614,3 +1614,35 @@ over the new `URI_HELD_BY_DIFFERENT_KIND` member). `poetry run ruff check .` —
 files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django
 makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry run
 pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T14:50:00Z · Forge · review fix 11 — an ordered collection stated with skos:member and no skos:memberList imports empty
+
+**Did**: closed a medium-severity finding: the `if ordered:` branch of `_import_collections` read
+membership exclusively from `skos:memberList`, falling back to an empty list when the collection
+carried none at all — even though `skos:member` is a perfectly good, explicit membership assertion on
+an ordered collection too, and the SKOS reference itself documents `memberList` as *narrowing*
+`member`, not replacing it. Worse on a re-import: the reconciliation pass treats an empty
+`member_uris` as "the file states no members now" and removes membership an earlier, correctly-read
+import had written. Wrote the failing tests first — `TestOrderedCollectionFallsBackToMember` in
+`test_skos.py`, using two new fixtures (`ordered_collection_member_only.ttl`: an `OrderedCollection`
+asserted only with `skos:member`; `ordered_collection_member_and_memberlist.ttl`: both predicates,
+`memberList` naming two of three members) — confirmed all three tests failed before any production
+change: zero members on first import, zero again on re-import, and the third member dropped entirely
+in the mixed case. Made the production change: the `ordered` branch now reads `skos:memberList` when
+present (its own order first), appending any `skos:member` value it omits afterward in the same
+deterministic sorted order the unordered branch already uses; when `memberList` is absent entirely,
+it falls back to that same sorted read of `skos:member`. Recorded as decisions.md D44, including the
+explicit decision that an omitted `skos:member` is *kept*, not separately reported — it is a real
+membership assertion, not an unusable value.
+
+**Mutation probe**: reverted the `ordered` branch to its pre-fix shape (`memberList` only, empty list
+otherwise), re-ran the new test class, confirmed all three tests failed the same way as before the
+fix; restored, re-ran green.
+
+**Verified**: `poetry run pytest -q` — 587 passed (584 + 3 new in
+`TestOrderedCollectionFallsBackToMember` — no new `SetAsideReason` member this time, so no sweep
+re-parametrization). `poetry run ruff check .` — all checks passed. `poetry run ruff format --check .`
+— 22 files already formatted. `poetry run mypy` — success, 9 source files. `poetry run deptry .` — no
+issues, 15 files scanned. `poetry run python -m django makemigrations --check --dry-run
+--settings=tests.settings` — no changes detected. `poetry run pre-commit run --all-files` — all hooks
+passed.

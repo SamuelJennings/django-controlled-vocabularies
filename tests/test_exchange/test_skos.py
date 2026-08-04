@@ -1327,6 +1327,48 @@ class TestOrderedCollectionMemberOrder:
         assert after.static_uri == before.static_uri
 
 
+class TestOrderedCollectionFallsBackToMember:
+    """FIX 11 (review, decisions.md D44) — the ``if ordered:`` branch of
+    ``_import_collections`` read membership exclusively from
+    ``skos:memberList``; a ``skos:OrderedCollection`` asserted only with
+    ``skos:member`` therefore imported with no members at all, and a
+    re-import additionally *removed* membership an earlier, correctly-read
+    import had written, because the reconciliation pass treats an empty
+    ``member_uris`` as "the file states no members now". The SKOS reference
+    treats ``memberList`` as narrowing ``member`` rather than replacing it,
+    so both are read: ``memberList``, when present, governs the order of
+    the members it names; any ``skos:member`` it omits is appended
+    afterward, in the same deterministic sorted order the unordered branch
+    already uses for a member that carries no order of its own."""
+
+    def test_an_ordered_collection_with_only_member_is_not_empty(self, db):
+        report = import_skos(FIXTURES / "ordered_collection_member_only.ttl")
+        collection = Collection.objects.get_by_uri("http://example.org/ordered-member-only/collection/group")
+        alpha = Concept.objects.get(static_uri="http://example.org/ordered-member-only/alpha")
+        beta = Concept.objects.get(static_uri="http://example.org/ordered-member-only/beta")
+        assert collection.ordered is True
+        assert collection.members() == [alpha, beta]
+        assert report.fatal == []
+
+    def test_a_reimport_with_only_member_does_not_empty_existing_membership(self, db):
+        # The reconciliation pass's own failure mode: an empty member_uris
+        # read from a genuinely empty file is correctly a full retraction,
+        # but the bug here was reading the collection as if it had none when
+        # it plainly does.
+        import_skos(FIXTURES / "ordered_collection_member_only.ttl")
+        import_skos(FIXTURES / "ordered_collection_member_only.ttl")
+        collection = Collection.objects.get_by_uri("http://example.org/ordered-member-only/collection/group")
+        assert collection.memberships.count() == 2
+
+    def test_memberlist_governs_order_and_member_only_entries_are_appended(self, db):
+        import_skos(FIXTURES / "ordered_collection_member_and_memberlist.ttl")
+        collection = Collection.objects.get_by_uri("http://example.org/ordered-mixed/collection/group")
+        alpha = Concept.objects.get(static_uri="http://example.org/ordered-mixed/alpha")
+        beta = Concept.objects.get(static_uri="http://example.org/ordered-mixed/beta")
+        gamma = Concept.objects.get(static_uri="http://example.org/ordered-mixed/gamma")
+        assert collection.members() == [gamma, alpha, beta]
+
+
 class TestCollectionMembershipMissingOrAbsentEnds:
     """T029 — FR-011: a collection member neither in the file nor already in
     the database is set aside and reported, and the collection is still
