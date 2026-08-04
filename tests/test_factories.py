@@ -228,3 +228,54 @@ def test_collection_with_members_helper_builds_an_ordered_collection():
     collection, members = collection_with_members(ordered=True)
     assert collection.ordered is True
     assert list(collection.members()) == members
+
+
+class TestExternalTrait:
+    """FS-005 US-5 — the ``external`` trait produces a record carrying a fixed,
+    plausible externally assigned ``static_uri``, opt-in like ``multilingual``,
+    on each of ``ConceptSchemeFactory``, ``ConceptFactory``, and
+    ``CollectionFactory``. Without the trait, each factory stays provisional.
+    """
+
+    @pytest.mark.django_db
+    def test_scheme_factory_without_the_trait_is_provisional(self):
+        scheme = ConceptSchemeFactory()
+        assert scheme.static_uri is None
+        assert scheme.has_static_uri is False
+
+    @pytest.mark.django_db
+    def test_scheme_factory_external_trait_yields_a_fixed_externally_assigned_uri(self):
+        scheme = ConceptSchemeFactory(external=True)
+        assert scheme.has_static_uri is True
+        assert scheme.static_uri
+        assert scheme.uri == scheme.static_uri
+
+    @pytest.mark.django_db
+    def test_concept_factory_without_the_trait_is_provisional(self):
+        concept = ConceptFactory()
+        assert concept.static_uri is None
+        assert concept.has_static_uri is False
+
+    @pytest.mark.django_db
+    def test_concept_factory_external_trait_yields_a_fixed_externally_assigned_uri(self):
+        concept = ConceptFactory(external=True)
+        assert concept.has_static_uri is True
+        assert concept.uri == concept.static_uri
+        # the concept's own identifier, independent of its (here, provisional) scheme
+        assert concept.scheme.has_static_uri is False
+
+    @pytest.mark.django_db
+    def test_collection_factory_without_the_trait_is_provisional(self):
+        from tests.factories import CollectionFactory
+
+        collection = CollectionFactory()
+        assert collection.static_uri is None
+        assert collection.has_static_uri is False
+
+    @pytest.mark.django_db
+    def test_collection_factory_external_trait_yields_a_fixed_externally_assigned_uri(self):
+        from tests.factories import CollectionFactory
+
+        collection = CollectionFactory(external=True)
+        assert collection.has_static_uri is True
+        assert collection.uri == collection.static_uri
