@@ -21,6 +21,7 @@ import rdflib.util
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 
@@ -33,7 +34,14 @@ from controlled_vocabularies.exchange.mapping import (
 )
 from controlled_vocabularies.exchange.report import FatalReason, ImportReport, NormalizedReason, SetAsideReason
 from controlled_vocabularies.exchange.safety import scan_rdf_xml
-from controlled_vocabularies.models import Concept, ConceptLabel, ConceptNote, ConceptScheme, validate_static_uri
+from controlled_vocabularies.models import (
+    Concept,
+    ConceptLabel,
+    ConceptNote,
+    ConceptRelation,
+    ConceptScheme,
+    validate_static_uri,
+)
 
 #: The three serializations FR-002 requires this feature to read. Anything
 #: else — an unrecognised extension with no explicit ``format``, or an
@@ -554,7 +562,15 @@ def _import_notes(
 #: reason). Checked so :func:`_import_unheld_values` never double-reports a
 #: predicate it, or another function in this module, already accounted for.
 _HANDLED_CONCEPT_PREDICATES = frozenset(
-    {rdflib.RDF.type, SKOS.inScheme, SKOS.topConceptOf, SKOS.notation, DCTERMS.description}
+    {
+        rdflib.RDF.type,
+        SKOS.inScheme,
+        SKOS.topConceptOf,
+        SKOS.notation,
+        DCTERMS.description,
+        SKOS.broader,
+        SKOS.narrower,
+    }
     | set(LABEL_PREDICATES)
     | set(NOTE_PREDICATES)
     | set(MAPPING_PREDICATES)
@@ -595,6 +611,114 @@ def _import_unheld_values(graph: rdflib.Graph, node: rdflib.term.Node, uri: str,
         if str(other_predicate).startswith(str(SKOS)):
             continue
         report.add_set_aside(SetAsideReason.UNMODELLED_PREDICATE, subject=uri, predicate=str(other_predicate))
+
+
+def _resolve_relation_concept(
+    uri: str, successful_concepts: dict[str, Concept], target_scheme: ConceptScheme
+) -> Concept | None:
+    """Return the :class:`Concept` ``uri`` names, or ``None`` when it cannot back a relation (FR-011).
+
+    Tries this run's own writes first (``successful_concepts``, keyed by URI —
+    every concept this run actually created or updated); when ``uri`` was not
+    itself imported this run, falls back to
+    :meth:`~controlled_vocabularies.models.ConceptManager.get_by_uri` for a
+    concept an earlier import already created (spec Acceptance Scenario US4-6)
+    — a relationship the file restates to an end it does not separately
+    redeclare this time still lands. A match belonging to a *different*
+    vocabulary than the one being imported is treated the same as no match at
+    all: :class:`ConceptRelation` only ever joins concepts of the same scheme
+    (research.md R4), and attempting one across schemes would otherwise raise
+    a ``ValidationError`` this importer does not catch — the same
+    "collect, don't crash" discipline every other set-aside reason follows
+    (decisions.md D29).
+    """
+    concept = successful_concepts.get(uri)
+    if concept is None:
+        try:
+            concept = Concept.objects.get_by_uri(uri)
+        except Concept.DoesNotExist:
+            return None
+    if concept.scheme_id != target_scheme.pk:
+        return None
+    return concept
+
+
+def _import_relations(
+    graph: rdflib.Graph,
+    target_scheme: ConceptScheme,
+    successful_concepts: dict[str, Concept],
+    report: ImportReport,
+) -> None:
+    """Reconcile ``skos:broader``/``skos:narrower`` into the single canonical
+    :attr:`~controlled_vocabularies.models.ConceptRelation.Kind.BROADER` row
+    research.md R4 defines, for every concept this run created or updated
+    (T023, FR-010/FR-011/FR-013).
+
+    Read only from the concepts this run itself just wrote — a concept set
+    aside for another reason (a vocabulary mismatch, no preferred label) has
+    no row of its own to attach a relation to, so its predicates are never
+    read here: its identity is simply never a key of ``successful_concepts``.
+
+    ``skos:broader`` and ``skos:narrower`` both resolve to the same stored
+    row: :meth:`~controlled_vocabularies.models.Concept.add_broader`'s own
+    contract is ``source`` the narrower end, ``target`` the broader end, so a
+    ``narrower`` triple's ends are swapped before the pair is looked up. Both
+    directions stated for the same pair collapse to the same dict key, so
+    exactly one row results (FR-010) — the whole file's worth of pairs is read
+    before any of them is written, rather than creating one and then the
+    other, so which direction the file happened to state first never matters.
+
+    Every BROADER relation touching a concept this run wrote is then made to
+    match the file exactly (FR-013): an existing row the file no longer
+    restates is deleted, and a row the file newly states is created. This is
+    computed as one whole pass over every concept this run touched, rather
+    than incrementally per concept, because a relation is commonly asserted
+    from only one of its two ends (``narrower`` from the parent, ``broader``
+    from the child) — an incremental per-concept delete-and-recreate would
+    delete a row a sibling concept's own pass had only just written,
+    depending on which concept happened to be reached first.
+
+    An end neither reachable through this run's own writes nor already in the
+    database under a matching scheme is set aside and reported, naming both
+    ends, and the run continues (FR-011, finished with acceptance coverage at
+    T025, decisions.md D29).
+    """
+    desired: dict[tuple[str, str], None] = {}
+    for uri in successful_concepts:
+        node = rdflib.URIRef(uri)
+        for other in graph.objects(node, SKOS.broader):
+            desired[(uri, str(other))] = None
+        for other in graph.objects(node, SKOS.narrower):
+            desired[(str(other), uri)] = None
+
+    resolved: set[tuple[int, int]] = set()
+    concepts_by_pk: dict[int, Concept] = {}
+    for narrower_uri, broader_uri in desired:
+        narrower_concept = _resolve_relation_concept(narrower_uri, successful_concepts, target_scheme)
+        broader_concept = _resolve_relation_concept(broader_uri, successful_concepts, target_scheme)
+        if narrower_concept is None or broader_concept is None:
+            subject_uri = narrower_uri if narrower_concept is not None else broader_uri
+            other_uri = broader_uri if narrower_concept is not None else narrower_uri
+            report.add_set_aside(SetAsideReason.MISSING_RELATION_END, subject=subject_uri, other=other_uri)
+            continue
+        resolved.add((narrower_concept.pk, broader_concept.pk))
+        concepts_by_pk[narrower_concept.pk] = narrower_concept
+        concepts_by_pk[broader_concept.pk] = broader_concept
+
+    successful_ids = {concept.pk for concept in successful_concepts.values()}
+    existing = ConceptRelation.objects.filter(kind=ConceptRelation.Kind.BROADER).filter(
+        Q(source_id__in=successful_ids) | Q(target_id__in=successful_ids)
+    )
+    for row in existing:
+        if (row.source_id, row.target_id) not in resolved:
+            row.delete()
+
+    for narrower_pk, broader_pk in resolved:
+        already_stored = ConceptRelation.objects.filter(
+            source_id=narrower_pk, target_id=broader_pk, kind=ConceptRelation.Kind.BROADER
+        ).exists()
+        if not already_stored:
+            concepts_by_pk[narrower_pk].add_broader(concepts_by_pk[broader_pk])
 
 
 def _import_concept_content(
@@ -644,8 +768,15 @@ def _import_concepts(
     completely untouched and named in ``report.absent_from_source``. A concept
     set aside for claiming a *different* vocabulary is not "absent from
     source": the file does mention it, just not as a member of this one.
+
+    Relationships (T023, FR-010/FR-011) are reconciled in one pass over every
+    concept this call itself created or updated, once the loop below has
+    finished and every one of them has a primary key to relate through — see
+    :func:`_import_relations` for why this cannot be folded into the
+    per-concept loop instead.
     """
     mentioned_uris: set[str] = set()
+    concepts_by_uri: dict[str, Concept] = {}
     for node in concept_nodes:
         hint = _first_literal(graph, node, SKOS.prefLabel)
         try:
@@ -680,11 +811,14 @@ def _import_concepts(
         concept.label = label
         _assign_unique_slug(concept, target_scheme)
         concept.save()
+        concepts_by_uri[uri] = concept
         _import_concept_content(graph, node, concept, target_scheme, uri, report)
         if created:
             report.add_created(uri)
         else:
             report.add_updated(uri)
+
+    _import_relations(graph, target_scheme, concepts_by_uri, report)
 
     absent = Concept.objects.filter(scheme=target_scheme).exclude(static_uri__in=mentioned_uris)
     for uri in absent.order_by("static_uri").values_list("static_uri", flat=True):

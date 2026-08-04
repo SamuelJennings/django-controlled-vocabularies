@@ -822,6 +822,55 @@ class TestNoPreferredLabelFinishedByUS3:
         assert b.alt_labels("en") == ["B-alt"]
 
 
+class TestBroaderAndNarrowerRelations:
+    """T023 — FR-010/research.md R4: ``skos:broader`` and ``skos:narrower`` both
+    land as the single ``ConceptRelation`` row the models define, ``source`` the
+    narrower end and ``target`` the broader end, whichever direction the file
+    states it from. Both directions stated for the same pair still produce
+    exactly one row, never two."""
+
+    def test_a_narrower_triple_lands_with_the_ends_the_right_way_round(self, db):
+        # rocks.ttl's igneous states "skos:narrower basalt" — igneous is the
+        # broader end, basalt the narrower one, so the canonical row must read
+        # source=basalt, target=igneous, even though the file names igneous first.
+        import_skos(FIXTURES / "rocks.ttl")
+        igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
+        basalt = Concept.objects.get(static_uri="http://example.org/rocks/basalt")
+        assert list(basalt.broader()) == [igneous]
+        assert basalt in igneous.narrower()
+        assert ConceptRelation.objects.get(source=basalt, target=igneous, kind=ConceptRelation.Kind.BROADER)
+
+    def test_a_broader_triple_lands_with_the_ends_the_right_way_round(self, db):
+        # rocks.ttl's granite states "skos:broader igneous" directly — granite
+        # is already the narrower end, so no swap is needed.
+        import_skos(FIXTURES / "rocks.ttl")
+        igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        assert list(granite.broader()) == [igneous]
+        assert ConceptRelation.objects.get(source=granite, target=igneous, kind=ConceptRelation.Kind.BROADER)
+
+    def test_both_directions_of_one_pair_produce_exactly_one_row(self, db):
+        # relation_both_directions.ttl states the parent/child pair from both
+        # ends: parent's own "narrower child" and child's own "broader parent".
+        import_skos(FIXTURES / "relation_both_directions.ttl")
+        parent = Concept.objects.get(static_uri="http://example.org/hierarchy/parent")
+        child = Concept.objects.get(static_uri="http://example.org/hierarchy/child")
+        assert (
+            ConceptRelation.objects.filter(source=child, target=parent, kind=ConceptRelation.Kind.BROADER).count() == 1
+        )
+        assert ConceptRelation.objects.filter(kind=ConceptRelation.Kind.BROADER).count() == 1
+
+    def test_reimporting_the_identical_file_does_not_duplicate_the_relation(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        import_skos(FIXTURES / "rocks.ttl")
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
+        assert (
+            ConceptRelation.objects.filter(source=granite, target=igneous, kind=ConceptRelation.Kind.BROADER).count()
+            == 1
+        )
+
+
 class TestFixtureCorpus:
     """T005 — the published-vocabulary fixtures are discoverable and parse (FR-018, SC-016).
 

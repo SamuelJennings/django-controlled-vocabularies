@@ -749,3 +749,46 @@ read, `skos:broader`/`narrower`/`related` stop being "not yet built" and become 
 `_import_unheld_values()`'s own SKOS-namespace check will keep silently skipping them either way
 (nothing breaks if `_HANDLED_CONCEPT_PREDICATES` is left as-is), but adding them there too would
 make the set of predicates this module actually reads match what the constant claims to name.
+
+## 2026-08-04T12:20:00Z · Implementer US4 · T023
+
+**Did**: `skos.py` gains `_resolve_relation_concept` and `_import_relations`, called once from
+`_import_concepts` after every concept in the file has a primary key. `skos:broader` and
+`skos:narrower` both resolve to the single canonical `ConceptRelation.Kind.BROADER` row
+(`source` the narrower end, `target` the broader end, per models.py/research.md R4), keyed by a
+deduplicated `(narrower, broader)` pair so both directions stated for one pair collapse to one
+row (FR-010). The whole file's worth of pairs is read before any of them is written, and the
+whole reconciliation runs as one pass over every concept this run wrote — not incrementally per
+concept — because a relation is commonly asserted from only one of its two ends, and an
+incremental per-concept delete-and-recreate would delete a row a sibling concept's own pass had
+only just written (decisions.md D29). `_HANDLED_CONCEPT_PREDICATES` now names `skos:broader`/
+`skos:narrower` explicitly, finishing decisions.md D27's own "Revisit if." New fixture
+`relation_both_directions.ttl` proves the same pair stated from both ends produces exactly one
+row.
+
+decisions.md D29 (new): the whole-graph-pass design, why an incremental per-concept version would
+lose data depending on iteration order, and why a relation end resolving to a concept in a
+*different* vocabulary is treated as unresolved (`MISSING_RELATION_END`) rather than left to raise
+an uncaught `ValidationError` from `ConceptRelation`'s own cross-scheme refusal.
+
+**Concern carried forward, not resolved here**: `TestIdempotentReimport::test_a_reference_made_between_two_runs_still_resolves_after_the_second`
+(T013) manually creates a `ConceptRelation` between granite and basalt that neither fixture states,
+as a stand-in for "an arbitrary foreign key survives a re-import" — written before this importer
+read relations at all. Now that `skos:broader`/`narrower` are genuinely reconciled per FR-013, a
+plain re-import of `rocks.ttl` correctly removes that unstated relation, and this pre-existing test
+fails. This story's brief prohibits modifying a test authored in an earlier story; the failure is
+named here and in the story report rather than resolved quietly.
+
+**Verified**: `poetry run pytest -q` — 460 passed, 1 failed (the pre-existing conflict above;
+453 baseline + 4 new tests in `test_skos.py`'s new `TestBroaderAndNarrowerRelations` + 4 new
+fixture-discovery cases). `poetry run ruff check .` — all checks passed. `poetry run ruff format
+--check .` — 21 files already formatted. `poetry run mypy` — success, 9 source files. `poetry run
+deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations --check
+--dry-run --settings=tests.settings` — no changes detected.
+
+**Next**: T024 — `skos:related` stored once as a symmetric relationship, including when the file
+states it in both directions.
+
+**Watch**: the `TestIdempotentReimport` conflict above; T024 will introduce a second, matching
+conflict in `TestRecordsAbsentFromSource` once `skos:related` is reconciled the same way, for the
+same reason.

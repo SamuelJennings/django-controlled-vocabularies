@@ -655,3 +655,37 @@ rather than buried here.
 
 **Revisit if:** a fixture shared across stories needs editing again. Twice is a pattern, and the
 better answer may be a fixture per story rather than one corpus every story edits.
+
+## D29 — Relations are reconciled in one whole-graph pass, not a per-concept delete-and-recreate (T023)
+
+`skos:broader`/`narrower` are read once, after every concept this run creates or updates already
+has a primary key, rather than inside the per-concept loop `_import_labels`/`_import_notes` use. A
+relation predicate is commonly asserted from only one of its two ends — `narrower` from the parent,
+`broader` from the child — so an incremental per-concept "delete mine, recreate mine" (the shape
+T018/T019 use for labels and notes, which genuinely are owned by one concept) would delete a row a
+sibling concept's own pass had only just written, with the outcome depending on which concept the
+loop reached first. Read every desired pair from the whole file first, deduplicated by a canonical
+`(narrower, broader)` key, then reconcile once: this is also what makes both directions of one pair
+collapse to a single row regardless of which the file states first (FR-010).
+
+**Resolving the other end reuses one function for two purposes.** `_resolve_relation_concept` tries
+this run's own writes first, then falls back to `get_by_uri` for a concept an earlier import already
+created — spec Acceptance Scenario US4-6's "already in the database" case falls out of this for
+free, expected to need no new production code at T025, only the fixture and test (the same shape
+D17/T022 established for this story's predecessor: build the general mechanism where correctness
+requires it, finish it with acceptance coverage later).
+
+**A resolved match in a different vocabulary is treated as unresolved, reusing
+`MISSING_RELATION_END`.** `ConceptRelation` refuses a cross-scheme edge (research.md R4); calling
+`add_broader` on one would raise an uncaught `ValidationError`, which is exactly the "unhandled
+exception defeating FR-003/FR-015" shape D18/D22 already reject elsewhere in this file. Neither
+FR-011 nor the acceptance scenarios name this case, so a new report reason was considered and
+rejected as disproportionate: from a curator's point of view "this relationship could not be stored
+because the other end isn't available in this vocabulary" is the same practical outcome as "the
+other end doesn't exist at all," and Article II counsels against a sixth report reason for one
+untested edge. Covered by a dedicated test even though no acceptance scenario names it, because
+leaving a reachable crash in the public entry point undocumented would be worse than one extra test.
+
+**Revisit if:** T024 (`skos:related`) needs a materially different reconciliation shape than the one
+built here — it should not, since the same whole-pass/resolve/reconcile structure applies with an
+unordered pair in place of a directed one, but this is the point to check.
