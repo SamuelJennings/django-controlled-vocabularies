@@ -1735,3 +1735,64 @@ check .` — all checks passed. `poetry run ruff format --check .` — 22 files 
 detected. `poetry run pre-commit run --all-files` — all hooks passed.
 
 **This closes the last of the six fixes in this review batch (FIX 8–13).**
+
+## 2026-08-04T15:45:00Z · Forge · review fix 14 — `@import` inside an inline object `@context` bypasses `scan_json_ld` (security)
+
+**Did**: closed a critical security finding from the third review round: `safety.py::_check_context_value`
+refused a string `@context` but passed a `dict` `@context` through untouched, on the stated reasoning
+(the module's own docstring, until this fix) that an inline object context "carries nothing to
+resolve". False, and reproduced before writing any test: `import rdflib; rdflib.Graph().parse(...)`
+against a crafted document whose top-level `@context` is an inline object carrying `{"@import":
+"exfil_secret.jsonld", ...}` merges in `exfil_secret.jsonld`'s own `leaked:` prefix and resolves the
+scheme node's URI to `http://example.org/SECRET-FROM-LOCAL-FILE/scheme` — content read from a file
+the caller never named, chosen by the document itself. Confirmed `scan_json_ld()` returned `None` on
+the same document (the bug, live) before touching production code. Read
+`rdflib/plugins/shared/jsonld/context.py` (`Context._read_source`, `_fetch_context`, `_prep_sources`)
+in the installed package rather than guessing: `@import` is the only key a context dict carries that
+reaches `source_to_json`/`urlopen` — every other dict-shaped construct (`@vocab`, `@version`, `@base`,
+`@propagate`, `@protected`, a term's own `@id`/`@type`/`@container`/etc.) only assigns local `Context`
+state or routes through `_rec_expand`/`_prep_expand`, neither of which fetches anything.
+
+Wrote the failing tests first: `TestScanJsonLdRefusesContextImport` in `test_safety.py` (top-level
+dict `@context` with `@import`; `@import` inside a dict entry of an array `@context`; a term's own
+nested `@context` carrying `@import` — context inside a context; a node inside `@graph` carrying its
+own `@context` with `@import`; and the regression control, an ordinary inline-object context with no
+`@import` at all) and `TestReadGraph::test_json_ld_context_import_cannot_exfiltrate_a_local_file` in
+`test_skos.py`, calling `import_skos()` itself — the public entry point the review's own reproduction
+used — and asserting no `ConceptScheme` with the leaked URI prefix exists afterward. All five new
+`test_safety.py` cases and the `test_skos.py` case failed for the right reason (`DID NOT RAISE
+UnsafeJsonLdError` / the import silently succeeding) before the fix; `test_an_ordinary_inline_object_...`
+already passed, unaffected by the bug, confirming the regression control was correctly not broken by
+having no `@import` to trip on.
+
+Production change: `_check_context_value` now recurses into a `dict` — whether the top-level
+`@context`, an array entry, or one of `_iter_context_values`'s own nested/node-scoped discoveries —
+checking for a string `@import` key, refused under a distinct `jsonld_context_import_forbidden` code
+(kept separate from the string-`@context` refusal's `jsonld_remote_context_forbidden`, so a caller
+inspecting `err.code` can tell the two routes apart). The array branch now recurses through
+`_check_context_value` itself for a dict entry, rather than duplicating the check inline, so the
+top-level and array-entry paths cannot drift apart. Updated the module's own docstring, which
+previously stated the now-false "inline object carries nothing to resolve" reasoning.
+
+Mutation probe: reduced the new dict branch to `pass`. All four new attack-shape tests in
+`test_safety.py` failed (`DID NOT RAISE UnsafeJsonLdError`) and the `import_skos()` reproduction test
+failed the same way; the regression-control test (`inline_context.jsonld`, no `@import`) kept
+passing throughout, confirming it tests the right thing and nothing else. Restored the fix
+immediately; full suite re-ran green.
+
+New fixtures under `tests/fixtures/security/` (matching D36's own precedent — not `tests/fixtures/skos/`,
+which `TestEverySkosPredicateIsReadOrReported`/`ALL_FIXTURES` sweep on every run and which is no
+place for a document deliberately designed to reference another file): `exfil_secret.jsonld` (the
+file that must never be read — a stand-in for any server-side file an attacker cannot otherwise
+reach), `exfil_via_import.jsonld` (the exact reproduction), `context_import_array.jsonld`,
+`context_import_nested_term.jsonld`, `context_import_graph_node.jsonld`.
+
+Recorded as decisions.md D47, including the full enumeration of dict-shaped context constructs
+checked against the installed rdflib source and why each one besides `@import` was left unguarded.
+
+**Verified**: `poetry run pytest -q` — 635 passed (629 baseline + 6 new: 5 in
+`TestScanJsonLdRefusesContextImport`, 1 in `TestReadGraph`). `poetry run ruff check .` — all checks
+passed. `poetry run ruff format --check .` — all files formatted (one file needed a format pass,
+applied). `poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files
+scanned. `poetry run python -m django makemigrations --check --dry-run --settings=tests.settings` —
+no changes detected. `poetry run pre-commit run --all-files` — all hooks passed.

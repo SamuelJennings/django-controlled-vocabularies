@@ -1488,3 +1488,58 @@ asserting behaviour these fixtures were never built to have and duplicating what
 is treated as uncovered (a hard failure naming the predicate) rather than silently skipped, which is
 deliberate: a new predicate must earn its own evidence rule in `_coverage_predicate_covered`, the
 same discipline this whole fix exists to enforce on production's own classification.
+
+## D47 — An inline object `@context` is checked for `@import`, the only key in a JSON-LD context object that triggers a fetch (review fix 14, security)
+
+`safety.py::_check_context_value` refused a plain string `@context` (or a string entry inside an
+array `@context`) but passed a `dict` `@context` straight through, on the stated reasoning — the
+module's own docstring, until this fix — that an inline object context "carries nothing to resolve".
+That reasoning was false. Read against the installed `rdflib` version's own source
+(`rdflib/plugins/shared/jsonld/context.py::Context._read_source`), any dict treated as a context is
+checked for an `@import` key, and a string value there is resolved through the identical
+`urlopen`-backed `_fetch_context`/`source_to_json` path a string `@context` uses — no allowlist,
+`file://` and any local path the process can read included. Reproduced through the public entry
+point: `exfil_via_import.jsonld`'s top-level `@context` is an inline object (`{"@version": 1.1,
+"@import": "exfil_secret.jsonld", "skos": "..."}`), which the old scan waved through entirely;
+`import_skos()` on it created a `ConceptScheme` whose URI was
+`http://example.org/SECRET-FROM-LOCAL-FILE/scheme`, built from a prefix the imported file (not the
+document itself) defined. The `@import` value is a relative reference, `urljoin`-resolved against
+the document's own file location by rdflib, so the same route reads any file the process can see,
+not only ones named absolutely.
+
+**Enumerated the whole category, not only `@import` in isolation.** Every dict-shaped construct
+`_read_source` reads — `@vocab`, `@version`, `@base`, `@propagate`, `@protected`, and each term
+definition's own `@id`/`@type`/`@container`/`@index`/`@language`/`@reverse`/`@context`/`@prefix` — was
+checked against the same source file. All of them either assign local `Context` state directly or
+route through `_rec_expand`/`_prep_expand`/`_get_source_id`, none of which reach `source_to_json` or
+`urlopen`. `@import` is the only key that does. A term's own `@context` (`context = dfn.get(CONTEXT,
+UNDEF)`, consumed later by `get_context_for_term`/`_subcontext`/`load`) is a second `@context`-keyed
+value, not a fetch trigger on its own — it is exactly the "context inside a context" shape this
+scan's own `_iter_context_values` already discovers by recursing into every value, so it reaches
+`_check_context_value` again as its own entry and is checked for `@import` the same way. Nothing was
+found and deliberately left unguarded; the enumeration closed with `@import` as the only path.
+
+**Chosen: check every dict `_check_context_value` sees — top level, inside an array entry, or
+reached via `_iter_context_values`'s own recursion into a nested/node-scoped context — for a string
+`@import` key, and refuse it with its own code (`jsonld_context_import_forbidden`) distinct from the
+string-`@context` refusal's (`jsonld_remote_context_forbidden`)**, so a caller inspecting `err.code`
+can tell the two routes apart. The array branch now recurses into a dict entry via
+`_check_context_value` itself rather than duplicating the `@import` check inline, so the top-level and
+array-entry cases share one code path and cannot drift apart.
+
+**Four shapes tested, one regression control.** `exfil_via_import.jsonld` (top-level dict `@context`
+with `@import`, the exact reproduction), `context_import_array.jsonld` (`@import` inside a dict entry
+of an array `@context`), `context_import_nested_term.jsonld` (a term's own nested `@context` carrying
+`@import` — context inside a context), and `context_import_graph_node.jsonld` (a node inside `@graph`
+carrying its own `@context` with `@import`) are each refused with `jsonld_context_import_forbidden`.
+`inline_context.jsonld` — an ordinary inline object context with no `@import` at all, the shape the
+overwhelming majority of published files use — is unaffected, proven by the same test that already
+covered it before this fix.
+
+**Verified by mutation.** Reducing the new dict branch to a no-op reproduced all four new tests
+failing (`DID NOT RAISE UnsafeJsonLdError`) while the regression-control test kept passing; restored
+immediately after.
+
+**Revisit if:** a future `rdflib` upgrade adds a second dict-context key that reaches `urlopen` — the
+enumeration above is against the currently-installed version's source, not the JSON-LD 1.1 spec text,
+and rdflib's own implementation is what this application actually calls.

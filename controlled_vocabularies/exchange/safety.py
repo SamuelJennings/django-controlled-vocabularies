@@ -22,6 +22,14 @@ can read. Spec Assumptions is explicit that this feature reads "a file, not a
 URL"; :func:`scan_json_ld` is the same pre-flight-refusal shape applied to
 that hole, refusing any document that carries a string (rather than a
 locally-embedded object) ``@context`` reference before `rdflib` ever sees it.
+
+An inline *object* ``@context`` is not automatically safe, though (decisions.md
+D47): `rdflib.plugins.shared.jsonld.context.Context._read_source` reads an
+``@import`` key from any dict it treats as a context — the document's own
+top-level context, an array entry, a term's own nested ``@context``, or a
+node's own ``@context`` inside ``@graph`` — and resolves a string value
+through the identical `urlopen`-backed fetch a string ``@context`` uses.
+:func:`scan_json_ld` refuses that too, wherever in the document it appears.
 """
 
 from __future__ import annotations
@@ -113,17 +121,50 @@ def _refused_remote_context(value: str) -> None:
     )
 
 
+def _refused_context_import(value: str) -> None:
+    raise UnsafeJsonLdError(
+        _(
+            "This JSON-LD document was refused before parsing: an '@context' carries an "
+            "'@import' reference to a location ('%(context)s') that this application does "
+            "not fetch."
+        ),
+        params={"context": value},
+        code="jsonld_context_import_forbidden",
+    )
+
+
 def _check_context_value(context: Any) -> None:
-    """Refuse ``context`` if it is, or contains, a string reference (decisions.md D36).
+    """Refuse ``context`` if it is, contains, or carries a fetch-triggering reference
+    (decisions.md D36/D47).
 
     A plain string ``@context`` names a location for rdflib to fetch and parse
-    itself — the vector this scan closes. An array ``@context`` may freely mix
-    inline objects (fine, nothing to fetch) with string references (refused,
-    the same as a bare string); only the first string entry is named in the
-    refusal, consistent with :func:`scan_rdf_xml` naming only the first
-    problem it meets. A ``dict`` (an inline, locally-embedded context) or
-    ``None`` (no ``@context`` at all) carries nothing to resolve and is left
-    alone.
+    itself — the first vector this scan closes. An array ``@context`` may
+    freely mix inline objects with string references (refused, the same as a
+    bare string) and dict entries (each checked in turn, below); only the
+    first offending entry is named in the refusal, consistent with
+    :func:`scan_rdf_xml` naming only the first problem it meets.
+
+    A ``dict`` — an inline, locally-embedded context, the ordinary shape of a
+    published file — was previously left alone entirely on the reasoning that
+    it "carries nothing to resolve". That was false (decisions.md D47):
+    `rdflib.plugins.shared.jsonld.context.Context._read_source` reads
+    ``source.get('@import')`` from *any* dict it treats as a context — the
+    document's own top-level one, an array entry, a term's own nested
+    ``@context``, or a node's own ``@context`` inside ``@graph`` (every one of
+    those shapes reaches ``_read_source`` the same way, and
+    :func:`_iter_context_values` already finds every ``@context``-keyed value
+    anywhere in the document, nested or not) — and resolves a string
+    ``@import`` value through the identical `urlopen`-backed
+    ``_fetch_context``/``source_to_json`` path a string ``@context`` uses. So
+    a dict is checked for that key too. Every *other* dict-shaped context
+    construct rdflib's own ``_read_source`` reads (``@vocab``, ``@version``,
+    ``@base``, ``@propagate``, ``@protected``, term definitions and their
+    ``@id``/``@type``/``@container``/etc.) only ever assigns local state or
+    calls :func:`_rec_expand`/:func:`_prep_expand`, neither of which reaches
+    `source_to_json` or `urlopen` — ``@import`` is the only key in a context
+    object that triggers a fetch, so it is the only one guarded here.
+    ``None`` (no ``@context`` at all) carries nothing to resolve either and is
+    left alone.
     """
     if isinstance(context, str):
         _refused_remote_context(context)
@@ -131,6 +172,12 @@ def _check_context_value(context: Any) -> None:
         for entry in context:
             if isinstance(entry, str):
                 _refused_remote_context(entry)
+            elif isinstance(entry, dict):
+                _check_context_value(entry)
+    elif isinstance(context, dict):
+        imports = context.get("@import")
+        if isinstance(imports, str):
+            _refused_context_import(imports)
 
 
 def _iter_context_values(node: Any) -> list[Any]:

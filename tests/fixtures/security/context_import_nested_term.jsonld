@@ -1,0 +1,11 @@
+{
+  "@context": {
+    "skos": "http://www.w3.org/2004/02/skos/core#",
+    "scoped": {
+      "@id": "http://example.org/scoped",
+      "@context": { "@import": "exfil_secret.jsonld" }
+    }
+  },
+  "@id": "http://example.org/nested/",
+  "@type": "skos:ConceptScheme"
+}

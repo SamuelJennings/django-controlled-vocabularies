@@ -128,6 +128,24 @@ class TestReadGraph:
         graph = _read_graph(SECURITY_FIXTURES / "inline_context.jsonld", serialization="json-ld")
         assert len(graph) > 0
 
+    def test_json_ld_context_import_cannot_exfiltrate_a_local_file(self, db):
+        # FIX 14 (review, security, decisions.md D47) — the actual measured
+        # defect: an inline *object* @context was waved through the old scan
+        # entirely, but rdflib still resolves that object's own "@import" key
+        # through urlopen. Before this fix, import_skos() on this exact file
+        # succeeds and creates a scheme whose URI is
+        # 'http://example.org/SECRET-FROM-LOCAL-FILE/scheme' — content merged
+        # in from exfil_secret.jsonld, a file the caller never named, chosen
+        # entirely by the uploaded document itself. Exercised through
+        # import_skos(), the public entry point the review's own reproduction
+        # used, not only _read_graph(), so the whole pipeline is proven, not
+        # only the scan in isolation.
+        with pytest.raises(UnsafeJsonLdError):
+            import_skos(SECURITY_FIXTURES / "exfil_via_import.jsonld")
+        assert not ConceptScheme.objects.filter(
+            static_uri__startswith="http://example.org/SECRET-FROM-LOCAL-FILE/"
+        ).exists()
+
 
 class TestImportSkosVocabulary:
     """T007 — the vocabulary itself: created, updated, matched against a named
