@@ -1076,6 +1076,78 @@ class TestRelationRemovalOnReimport:
         assert companion in quarry.related()
 
 
+class TestRelationDisjointness:
+    """FIX 2 (review, decisions.md D37) — SKOS makes ``broader``/``narrower``
+    disjoint from ``related`` (models.py ``ConceptRelation._reject_disjointness_violation``):
+    a pair joined one way refuses a relation of the other kind. ``_import_relations``
+    built ``resolved_broader`` and ``resolved_related`` independently, so a pair the
+    file (or an earlier and a later run together) states both ways raised an
+    uncaught ``ValidationError`` from ``add_related``/``add_broader``, defeating
+    the "set aside and reported, never a crash" rule every other unusable value in
+    this feature already follows. The hierarchical relation wins (it is the
+    stronger statement, and SKOS itself declares the two disjoint); the related
+    statement is set aside and reported instead, in every route that can produce
+    the conflict — stated together in one file, and split across two runs, in
+    either direction.
+    """
+
+    def test_broader_and_related_stated_together_keeps_broader_and_sets_aside_related(self, db):
+        report = import_skos(FIXTURES / "relation_disjointness_conflict.ttl")
+        assert report.fatal == []
+        child = Concept.objects.get(static_uri="http://example.org/disjoint/child")
+        parent = Concept.objects.get(static_uri="http://example.org/disjoint/parent")
+        assert parent in child.broader()
+        assert parent not in child.related()
+        assert ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED).count() == 0
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.RELATION_DISJOINTNESS]
+        assert len(entries) == 1
+        assert {entries[0].subject, entries[0].params["other"]} == {
+            "http://example.org/disjoint/child",
+            "http://example.org/disjoint/parent",
+        }
+
+    def test_a_related_row_from_an_earlier_run_does_not_crash_a_later_run_stating_broader(self, db):
+        import_skos(FIXTURES / "relation_disjointness_prior_related.ttl")
+        a = Concept.objects.get(static_uri="http://example.org/disjoint2/a")
+        b = Concept.objects.get(static_uri="http://example.org/disjoint2/b")
+        assert b in a.related()
+
+        report = import_skos(FIXTURES / "relation_disjointness_prior_related_updated.ttl")
+
+        assert report.fatal == []
+        a.refresh_from_db()
+        assert b in a.broader()
+        assert b not in a.related()
+        assert ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED).count() == 0
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.RELATION_DISJOINTNESS]
+        assert len(entries) == 1
+        assert {entries[0].subject, entries[0].params["other"]} == {
+            "http://example.org/disjoint2/a",
+            "http://example.org/disjoint2/b",
+        }
+
+    def test_a_broader_row_from_an_earlier_run_does_not_crash_a_later_run_stating_related(self, db):
+        # The symmetric route: the earlier-run survivor is a BROADER row this
+        # time, and the later run states RELATED for the same pair instead.
+        import_skos(FIXTURES / "relation_disjointness_prior_broader.ttl")
+        a = Concept.objects.get(static_uri="http://example.org/disjoint3/a")
+        b = Concept.objects.get(static_uri="http://example.org/disjoint3/b")
+        assert b in a.broader()
+
+        report = import_skos(FIXTURES / "relation_disjointness_prior_broader_updated.ttl")
+
+        assert report.fatal == []
+        assert b in a.broader()
+        assert b not in a.related()
+        assert ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED).count() == 0
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.RELATION_DISJOINTNESS]
+        assert len(entries) == 1
+        assert {entries[0].subject, entries[0].params["other"]} == {
+            "http://example.org/disjoint3/a",
+            "http://example.org/disjoint3/b",
+        }
+
+
 class TestCollectionsAndMembership:
     """T027 — FR-012: a ``skos:Collection`` lands as a ``Collection`` holding
     the identifier the file gave it, inside the vocabulary being imported,

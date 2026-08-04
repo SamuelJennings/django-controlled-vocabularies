@@ -39,6 +39,12 @@ class SetAsideReason(TextChoices):
     naming a conflict at the vocabulary level rather than a value that could
     not be stored: a re-imported file's declared default language differing
     from the one already frozen on an existing, concept-bearing scheme.
+    ``RELATION_DISJOINTNESS`` (review fix, decisions.md D37) names a pair
+    stated, in one file or split across two runs, as both a hierarchical
+    (broader/narrower) and a related relation — SKOS declares the two
+    mutually exclusive (models.py ``ConceptRelation._reject_disjointness_violation``);
+    the hierarchical relation always wins and the related statement is the
+    one set aside.
     """
 
     UNCONFIGURED_LANGUAGE = "unconfigured_language", _("language not configured")
@@ -50,6 +56,7 @@ class SetAsideReason(TextChoices):
     NO_PREFERRED_LABEL = "no_preferred_label", _("no preferred label in default language")
     VOCABULARY_MISMATCH = "vocabulary_mismatch", _("belongs to a different vocabulary")
     DEFAULT_LANGUAGE_FROZEN = "default_language_frozen", _("default language already fixed")
+    RELATION_DISJOINTNESS = "relation_disjointness", _("broader/narrower and related both claimed for a pair")
 
     @property
     def template(self) -> Promise:
@@ -95,6 +102,10 @@ _REASON_TEMPLATES: dict[SetAsideReason, Promise] = {
         "'%(subject)s' declares its default language as '%(declared)s', but this vocabulary's default "
         "language is already fixed to '%(frozen)s' because it already has concepts; the declared value "
         "was not applied."
+    ),
+    SetAsideReason.RELATION_DISJOINTNESS: _(
+        "'%(subject)s' and '%(other)s' are joined as broader/narrower, so the related statement between "
+        "them was set aside; a broader/narrower pair and a related pair are mutually exclusive."
     ),
 }
 

@@ -1321,3 +1321,42 @@ auto-fixable lint on the new code, applied). `poetry run ruff format --check .` 
 formatted. `poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files
 scanned. `poetry run python -m django makemigrations --check --dry-run --settings=tests.settings` —
 no changes detected. `poetry run pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T12:05:00Z · Forge · review fix 2 — broader + related on the same pair crashes the run
+
+**Did**: closed a high-severity finding from the merged feature's review: `_import_relations` built
+`resolved_broader` and `resolved_related` independently, so a pair the file (or an earlier and a
+later run together) stated both ways raised the model's own disjointness `ValidationError`
+(`ConceptRelation._reject_disjointness_violation`) uncaught out of `add_related`/`add_broader` —
+a raw exception escaping `import_skos()`. Wrote the failing tests first — a new
+`TestRelationDisjointness` in `test_skos.py` with three cases: both stated in one file
+(`relation_disjointness_conflict.ttl`), an earlier run's `related` row surviving into a later run
+that states `broader` for the same pair (`relation_disjointness_prior_related.ttl` /
+`..._updated.ttl`), and the symmetric mirror — an earlier run's `broader` row surviving into a later
+run that states `related` (`relation_disjointness_prior_broader.ttl` / `..._updated.ttl`) — confirmed
+all three failed with the raw `ValidationError` before any production change. Decided the
+hierarchical relation wins (it is the stronger statement, and what SKOS itself declares the two
+disjoint in favour of): added `SetAsideReason.RELATION_DISJOINTNESS` to `report.py` following D26's
+pattern exactly, then made `_import_relations` write broader/narrower rows first, each one checked
+directly against — and clearing — a conflicting stored `RELATED` row for the same pair regardless of
+whether that row's ends belong to this run's own writes (closes route 2, which D30's own
+`successful_ids`-scoped bulk deletion pass cannot see, since the far end of a newly-stated broader
+edge may only be *referenced* this run, not rewritten); related rows are then written second, each
+one checked the same way against a conflicting stored `BROADER` row — including one this same call
+just wrote — and set aside rather than attempted when found (closes route 3, and route 1 falls out of
+the same two checks for free, discovered by mutation-probing an initial data-level exclusion step out
+of existence — see decisions.md D37 for why that step was deleted rather than kept). Mutation probe:
+disabled each of the two per-pair checks in turn and confirmed the test naming that exact route
+failed with the model's raw `ValidationError` each time; restored both, re-ran green. Recorded as
+decisions.md D37, including the one accepted trade-off found along the way (a compound scenario no
+fixture exercises can produce two report entries for one conflict instead of one — verbosity, not a
+defect).
+
+**Verified**: `poetry run pytest -q` — 540 passed (528 baseline + 12 new: 3 in `TestRelationDisjointness`,
+plus the four generic `SetAsideReason` sweep tests in `test_report.py` re-parametrizing automatically
+over the new `RELATION_DISJOINTNESS` member, plus five `TestFixtureCorpus` parse-sweep instances for
+the five new `relation_disjointness_*.ttl` fixtures). `poetry run ruff check .` — all checks passed.
+`poetry run ruff format --check .` — 22 files already formatted. `poetry run mypy` — success, 9 source
+files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django
+makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry run
+pre-commit run --all-files` — all hooks passed.

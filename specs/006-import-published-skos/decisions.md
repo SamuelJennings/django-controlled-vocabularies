@@ -988,3 +988,70 @@ own). Neither format needed a change.
 **Revisit if:** rdflib ships an `@context` resolution mode that consults a caller-supplied document
 loader or allowlist — at that point refusing every string reference outright may be tighter than
 necessary, the same reversibility D9 already notes for its own entity-idiom trade-off.
+
+## D37 — Broader/narrower always wins over related on the same pair, in every route that can produce the conflict (review fix 2)
+
+A review of the merged feature found that `_import_relations` built `resolved_broader` and
+`resolved_related` independently, from the same file's `skos:broader`/`skos:narrower`/`skos:related`
+triples, with nothing reconciling them against each other. `ConceptRelation._reject_disjointness_violation`
+refuses a `RELATED` row for a pair already joined as `BROADER` (SKOS itself declares the two mutually
+exclusive), and the refusal is an ordinary `ValidationError` raised inside `add_related`/`add_broader`
+that `_import_relations` never caught — a raw exception escaping `import_skos()`, exactly the defect
+shape this review found repeatedly elsewhere in the feature (D8's "only two things are fatal" rule
+has no room for this one).
+
+**Chosen: the hierarchical relation wins.** `broader`/`narrower` is the stronger statement — it
+places the two concepts in an asymmetric structural relationship, where `related` only asserts an
+undirected association — and it is SKOS's own model of what the two are disjoint *in favour of*: a
+publisher who states both for one pair has, in effect, already told this importer which one is
+authoritative. The losing `related` statement is set aside and reported under a new
+`SetAsideReason.RELATION_DISJOINTNESS` member (`code="relation_disjointness"`), naming both ends —
+the same shape every other set-aside reason in this vocabulary already carries, added following
+D26's own pattern exactly (translatable template, named `%(subject)s`/`%(other)s` placeholders,
+picked up automatically by the three vocabularies' disjointness sweep in `test_report.py` and its own
+new `_EXAMPLE_PARAMS` entry).
+
+**Three distinct routes can produce the conflict, and the fix has to close all three, not just the
+one the file states in one place.** (1) The same file states both `broader`/`narrower` and `related`
+for one pair in one run. (2) An earlier run's `RELATED` row survives (D30's "both ends" deletion rule
+never touches it, because the far end of a later run's newly-stated `broader` edge is not itself
+rewritten by that run — it is only referenced, through D29's `get_by_uri` fallback), and that later
+run then states `broader` for the same pair. (3) The mirror image of (2): an earlier run's `BROADER`
+row survives the same way, and a later run states `related` for the same pair instead.
+
+**Mechanism: broader/narrower rows are written first, each one checked directly against a
+conflicting stored `RELATED` row for the exact same pair — regardless of whether that row's ends are
+this run's own writes — deleting it and reporting the loss before `add_broader` is called.** Related
+rows are then written in a second pass, each one checked the same way against a conflicting stored
+`BROADER` row, including one this same call just wrote in its own first pass, and set aside rather
+than attempted when one is found. This closes all three routes with two small, symmetric,
+per-pair checks — deliberately **not** a query scoped to `successful_ids` the way D30's bulk deletion
+passes are, because route (2)/(3)'s whole point is that one end of the conflicting row is *outside*
+`successful_ids`, which is exactly why the bulk passes never catch it.
+
+**An initial "both resolved this run" data-level exclusion, tried first, was removed as dead code.**
+The first version of this fix computed `{frozenset(pair) for pair in resolved_broader}` and dropped
+any `resolved_related` entry matching one, before either write loop ran, to close route (1) directly.
+Mutation-probing that step — disabling it and re-running the whole `TestRelationDisjointness` class —
+left every test green, because route (1) is already closed by the two per-pair checks above: the
+broader loop runs first and writes the row with nothing yet to conflict against, and the related
+loop's own check then finds that just-written row and reports/skips exactly as it would for route
+(3). Code a test suite cannot tell apart from its absence is exactly what Article II's "no
+speculative code" rule forbids; it was deleted rather than kept for its own sake.
+
+**Accepted trade-off: a compound scenario neither this review nor any acceptance scenario names can
+produce two report entries for one underlying conflict, not one.** If a pair already carries a
+stored `RELATED` row from an earlier run, *and* the current run's file restates both `broader`/`narrower`
+*and* `related` for that same pair with both ends touched this run, the bulk `existing_related`
+deletion pass (D30) does not remove the stale row — the pair is still "desired" as far as that pass's
+own `resolved_related not in bulk-scoped view` check goes — so the broader-loop's own direct check is
+what removes it (one report entry), and the related-loop's own direct check then also fires against
+the freshly-written broader row (a second report entry) rather than silently reusing the first. Both
+entries are true statements about what happened; this is verbosity, not a defect, and no fixture in
+this feature's corpus exercises the compound case, so it is recorded here rather than built out with
+a third mechanism to collapse the two into one.
+
+**Revisit if:** a future story needs `related` to ever win over `broader`/`narrower` for some other
+reason (e.g. a curator override) — that would be new, deliberately-asymmetric behaviour, not a
+correction to this rule, and belongs in its own decision the way D30's own "Revisit if" already
+anticipates for relation reconciliation generally.

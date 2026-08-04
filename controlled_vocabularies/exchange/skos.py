@@ -710,6 +710,21 @@ def _import_relations(
     database under a matching scheme is set aside and reported, naming both
     ends, and the run continues (FR-011, finished with acceptance coverage at
     T025).
+
+    A pair resolved as broader/narrower always wins over the same pair
+    resolved as related (review fix 2, decisions.md D37): SKOS declares the
+    two disjoint, and the model itself refuses to store both
+    (:meth:`~controlled_vocabularies.models.ConceptRelation._reject_disjointness_violation`).
+    Broader/narrower rows are written first, each one checked directly
+    against, and clearing, any conflicting stored RELATED row for the same
+    pair — not only one the bulk deletion pass above would already have
+    caught, since that pass only ever considers a row a candidate when
+    *both* its ends were rewritten by this run (D30), and the far end of a
+    newly-stated broader edge may instead be a concept only referenced this
+    run (D29's ``get_by_uri`` fallback). Related rows are written after, each
+    one checked the same way against a conflicting stored BROADER row —
+    including one written earlier in this same call — and set aside and
+    reported rather than attempted when one is found.
     """
     desired_broader: dict[tuple[str, str], None] = {}
     desired_related: dict[frozenset[str], None] = {}
@@ -784,8 +799,28 @@ def _import_relations(
         already_stored = ConceptRelation.objects.filter(
             source_id=narrower_pk, target_id=broader_pk, kind=ConceptRelation.Kind.BROADER
         ).exists()
-        if not already_stored:
-            concepts_by_pk[narrower_pk].add_broader(concepts_by_pk[broader_pk])
+        if already_stored:
+            continue
+        # FIX 2, route 2 (decisions.md D37): an existing RELATED row for this
+        # exact pair may not have been a candidate for the bulk deletion pass
+        # above — that pass only ever considers a row when BOTH its ends were
+        # rewritten by this run (D30), and the far end of a newly-stated
+        # broader edge may instead be a concept an earlier import wrote and
+        # this run only references (D29's get_by_uri fallback), so it is
+        # never in successful_ids. Checked directly and unconditionally, so a
+        # stale RELATED row from an earlier run can never survive to make
+        # add_broader raise the model's own disjointness ValidationError.
+        conflicting_related = ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED).filter(
+            Q(source_id=narrower_pk, target_id=broader_pk) | Q(source_id=broader_pk, target_id=narrower_pk)
+        )
+        for row in conflicting_related:
+            report.add_set_aside(
+                SetAsideReason.RELATION_DISJOINTNESS,
+                subject=concepts_by_pk[narrower_pk].static_uri,
+                other=concepts_by_pk[broader_pk].static_uri,
+            )
+            row.delete()
+        concepts_by_pk[narrower_pk].add_broader(concepts_by_pk[broader_pk])
 
     for pk_pair in resolved_related:
         a_pk, b_pk = tuple(pk_pair)
@@ -794,8 +829,25 @@ def _import_relations(
             .filter(Q(source_id=a_pk, target_id=b_pk) | Q(source_id=b_pk, target_id=a_pk))
             .exists()
         )
-        if not already_stored:
-            concepts_by_pk[a_pk].add_related(concepts_by_pk[b_pk])
+        if already_stored:
+            continue
+        # FIX 2, the symmetric route (decisions.md D37): the mirror image of
+        # the broader-side check just above — a BROADER row surviving from an
+        # earlier run for the same D30 reason must be checked before
+        # add_related too, or the model's own guard raises here instead.
+        conflicting_broader = (
+            ConceptRelation.objects.filter(kind=ConceptRelation.Kind.BROADER)
+            .filter(Q(source_id=a_pk, target_id=b_pk) | Q(source_id=b_pk, target_id=a_pk))
+            .exists()
+        )
+        if conflicting_broader:
+            report.add_set_aside(
+                SetAsideReason.RELATION_DISJOINTNESS,
+                subject=concepts_by_pk[a_pk].static_uri,
+                other=concepts_by_pk[b_pk].static_uri,
+            )
+            continue
+        concepts_by_pk[a_pk].add_related(concepts_by_pk[b_pk])
 
 
 def _import_collections(
