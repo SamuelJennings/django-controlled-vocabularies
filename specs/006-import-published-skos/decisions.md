@@ -780,3 +780,33 @@ already made, preserved.
 **Revisit if:** a future story needs a relation row to be reconciled against only one rewritten end
 (for example, a bulk "retire everything downstream of X" operation) — that would be new,
 deliberately-asymmetric behaviour, not a correction to this rule, and belongs in its own decision.
+
+## D31 — Tamper-check triage for US-4: one pre-existing test modified, approved on the rule that broke it
+
+`forge tamper-check --base 4d80777 --head 77f89ad` raised one `modified_preexisting_test` flag, on
+`tests/test_exchange/test_skos.py`. It is approved, and the reason matters more than the flag.
+
+`TestIdempotentReimport::test_a_reference_made_between_two_runs_still_resolves_after_the_second`
+(T013, US-2) proved that a foreign-key reference made between two runs survives the second one. It
+picked a `ConceptRelation` as its illustrative reference, at a point in the feature's life when this
+importer read no relation predicates at all. US-4 gave the importer authority over exactly that
+model, and the edge the test hand-created — `granite` broader `basalt` — is stated by `rocks.ttl`
+itself, so the file legitimately overwrites it. The test's own claim was never about relations; it
+was about a concept's primary key surviving. Its reference is now a relation to a concept created
+locally in the same vocabulary that `rocks.ttl` never mentions, which the corrected D30 rule leaves
+alone. Name, assertions and class placement are unchanged.
+
+The other test that failed the same way, `TestRecordsAbsentFromSource`'s
+`test_a_concept_dropped_from_the_file_is_untouched_and_named_absent` (T015, US-2), was **not**
+modified, and that distinction is the whole point of the triage. Its reference points at `quartz`, a
+concept `rocks_updated.ttl` drops entirely, so under D30 it survives and the test passes untouched.
+One of the two tests encoded a stale assumption; the other was correctly reporting a real defect in
+the new code. Changing both to green would have deleted the finding.
+
+**Verified rather than argued:** removing the target-end constraint from both deletion filters —
+widening D30's rule back to the "either end" version the story first shipped — reproduces exactly
+those two failures and nothing else. The rule is load-bearing and its test proves it.
+
+**Revisit if:** a third story takes the importer's authority over a model an earlier story used as an
+incidental prop. Two is a coincidence; three means test fixtures should stop reaching for whatever
+model is nearest and use one the importer provably never writes.
