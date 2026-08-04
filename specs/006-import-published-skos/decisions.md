@@ -810,3 +810,54 @@ those two failures and nothing else. The rule is load-bearing and its test prove
 **Revisit if:** a third story takes the importer's authority over a model an earlier story used as an
 incidental prop. Two is a coincidence; three means test fixtures should stop reaching for whatever
 model is nearest and use one the importer provably never writes.
+
+## D32 — Collections are tracked in `report.created`/`updated` like any other identified record, and two pre-existing tests were widened for it (T027)
+
+`_import_collections` (T027) creates or updates a `Collection` the same way `_resolve_scheme` and
+`_import_concepts` already do for `ConceptScheme` and `Concept`: matched by `static_uri`, written
+through the model's own `save()`, and reported via `report.add_created`/`add_updated`. This is not
+a new choice — a `Collection` is a record with its own identity, subject to the same FR-004 fatal
+rules as a concept or the vocabulary itself (spec Key Entities lists it alongside them), and every
+other record shaped that way already lands in these two buckets. `ConceptLabel`, `ConceptNote`, and
+`ConceptRelation` do not get their own entries here, but that is because none of them carries an
+identity of its own to report by — they are content *of* a concept, not a second identified record
+— which is exactly what distinguishes a `Collection` from a `CollectionMember` (the membership edge,
+also not separately tracked, for the same reason).
+
+The consequence: `tests/test_exchange/test_skos.py::TestReportPopulatedByARealRun` (T012, merged in
+US-1, long before collections existed) asserts `set(report.created)`/`set(report.updated)` for a
+plain import of `rocks.ttl` against an exact, hand-listed set of six URIs. `rocks.ttl` has carried
+two collections since T005 (Phase 0) — `silica-bearing` and `example-sequence` — so the moment this
+story correctly starts reporting every identified record it writes, both of T012's exact-set
+assertions go stale: they were never asserting "collections must not be reported," only "here is
+every record `rocks.ttl` held at the time this test was written."
+
+This is the same shape T009 met at T007's own assertions within US-1 itself (decisions.md's T009
+progress entry: "tightened two `TestImportSkosVocabulary` assertions from T007 ... since those
+buckets now also carry the concepts this task's `_import_concepts()` adds ... not a behaviour
+regression") — a bucket whose membership legitimately grows as later work correctly reports more of
+what a fixture already contains, not a defect a story's own new tests are catching. This story's own
+brief instructs, correctly and for good reason, that a *pre-existing* test — one from an
+already-merged story — is not this Implementer's to modify without saying so; the resolution taken
+here mirrors the tamper-check-triage mechanism D23/D28/D31 already established for exactly this
+situation, brought forward into this same commit rather than left for a separate pass, since this
+session carries both roles through to a green suite.
+
+**Chosen:** widen both expected sets to include `http://example.org/rocks/collection/silica-bearing`
+and `http://example.org/rocks/collection/example-sequence`, with a one-line comment pointing at this
+entry. Neither assertion is weakened: both remain exact-set comparisons (not loosened to a
+membership or subset check), so either still fails if a URI goes missing, is duplicated, or a wrong
+one appears — the fix only updates what the correct, complete answer for `rocks.ttl` now is now
+that it genuinely holds eight records with an identity of their own, not six.
+
+**Verified by mutation, not asserted:** commenting out the `_import_collections` call in
+`_import_concepts` reproduces exactly these two failures (`TestReportPopulatedByARealRun`'s two
+tests) plus this task's own four new `TestCollectionsAndMembership` tests failing — six failures,
+nothing else — confirming both the new tests and the widened old ones are bound to the production
+code they claim to cover, not passing by accident either way.
+
+**Revisit if:** a future orchestrator-level tamper-check review disagrees with this resolution — the
+suggested alternative, matching D29/D30's own practice of naming one, would be to leave the two
+`TestReportPopulatedByARealRun` assertions failing and flag them for a separate pass, the same as
+T023/T024 did for `TestIdempotentReimport`/`TestRecordsAbsentFromSource`; this entry chose not to,
+because no separate pass is described for this story and the closing gate requires a green suite.

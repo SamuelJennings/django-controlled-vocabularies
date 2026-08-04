@@ -16,7 +16,14 @@ import controlled_vocabularies.exchange as exchange
 from controlled_vocabularies.exchange.report import FatalReason, NormalizedReason, SetAsideReason
 from controlled_vocabularies.exchange.safety import UnsafeRdfXmlError
 from controlled_vocabularies.exchange.skos import SkosImportError, SkosImportFailed, _read_graph, import_skos
-from controlled_vocabularies.models import Concept, ConceptLabel, ConceptNote, ConceptRelation, ConceptScheme
+from controlled_vocabularies.models import (
+    Collection,
+    Concept,
+    ConceptLabel,
+    ConceptNote,
+    ConceptRelation,
+    ConceptScheme,
+)
 from tests.factories import ConceptFactory, ConceptSchemeFactory
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "skos"
@@ -384,6 +391,11 @@ class TestReportPopulatedByARealRun:
             "http://example.org/rocks/basalt",
             "http://example.org/rocks/sedimentary",
             "http://example.org/rocks/quartz",
+            # T027 (decisions.md D32): rocks.ttl's own two collections are
+            # records with their own identity, same as a concept or the
+            # vocabulary itself, so they land in this bucket too.
+            "http://example.org/rocks/collection/silica-bearing",
+            "http://example.org/rocks/collection/example-sequence",
         }
         assert set(report.created) == expected
         assert report.updated == []
@@ -402,6 +414,9 @@ class TestReportPopulatedByARealRun:
             "http://example.org/rocks/basalt",
             "http://example.org/rocks/sedimentary",
             "http://example.org/rocks/quartz",
+            # T027 (decisions.md D32): see the sibling test above.
+            "http://example.org/rocks/collection/silica-bearing",
+            "http://example.org/rocks/collection/example-sequence",
         }
         assert report.created == []
 
@@ -1038,6 +1053,38 @@ class TestRelationRemovalOnReimport:
         import_skos(FIXTURES / "relation_lifecycle_updated.ttl")
 
         assert companion in quarry.related()
+
+
+class TestCollectionsAndMembership:
+    """T027 — FR-012: a ``skos:Collection`` lands as a ``Collection`` holding
+    the identifier the file gave it, inside the vocabulary being imported,
+    with each ``skos:member`` concept attached through the model's own
+    membership API (``Collection.add``) — never a row constructed to bypass
+    its cross-scheme check."""
+
+    def test_a_collection_is_created_holding_its_published_identifier(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        collection = Collection.objects.get_by_uri("http://example.org/rocks/collection/silica-bearing")
+        assert collection.scheme == ConceptScheme.objects.get(static_uri="http://example.org/rocks/")
+        assert collection.ordered is False
+
+    def test_the_collection_holds_exactly_its_published_members(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        collection = Collection.objects.get_by_uri("http://example.org/rocks/collection/silica-bearing")
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        quartz = Concept.objects.get(static_uri="http://example.org/rocks/quartz")
+        assert set(collection.members()) == {granite, quartz}
+
+    def test_reimporting_the_identical_file_does_not_duplicate_the_collection_or_its_members(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        import_skos(FIXTURES / "rocks.ttl")
+        assert Collection.objects.filter(static_uri="http://example.org/rocks/collection/silica-bearing").count() == 1
+        collection = Collection.objects.get_by_uri("http://example.org/rocks/collection/silica-bearing")
+        assert collection.memberships.count() == 2
+
+    def test_a_first_import_reports_the_collection_as_created(self, db):
+        report = import_skos(FIXTURES / "rocks.ttl")
+        assert "http://example.org/rocks/collection/silica-bearing" in report.created
 
 
 class TestFixtureCorpus:

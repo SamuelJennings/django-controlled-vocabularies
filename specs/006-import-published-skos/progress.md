@@ -943,3 +943,50 @@ open relation-deletion conflict.
 **Watch**: D30's "Revisit if" — a future story needing a relation reconciled against only one
 rewritten end (e.g. a bulk downstream-retirement operation) would be new, deliberately-asymmetric
 behaviour, not a further correction to this rule.
+
+## 2026-08-04T12:55:00Z · Implementer US5 · T027
+
+**Did**: `skos.py` gains `_import_collections`, called from `_import_concepts` right after
+`_import_relations` (needs the same `concepts_by_uri` this run's own writes give the pk's a
+membership resolves against). Every `skos:Collection`/`skos:OrderedCollection` node in the graph is
+matched or created by `static_uri` (research.md R6, the same upsert rule every other record uses),
+written through the model's own `save()`, and its `skos:member` set resolved through a renamed,
+generalised `_resolve_concept_reference` (was `_resolve_relation_concept`, T023) — decisions.md D30's
+own text calls collection membership "the same shape of problem" a relation end already is, so the
+same resolution rule (this run's own writes first, then `get_by_uri` for an earlier import, `None`
+for neither) now serves both callers rather than being duplicated. Membership is written only
+through `Collection.add()`/`Collection.remove()` — never a `CollectionMember` row constructed
+directly — so the model's own cross-scheme check always runs, per this task's own acceptance text.
+`models.py` was not touched.
+
+**Deviation** (decisions.md D32, new): implementing this correctly means a `Collection` now lands in
+`report.created`/`report.updated`, exactly as `ConceptScheme` and `Concept` already do (it is an
+identified record with its own `static_uri`, not content of one). `rocks.ttl` has carried two
+collections since Phase 0 (T005), so `TestReportPopulatedByARealRun` (T012, merged in US-1)'s two
+exact-set assertions over a plain import went stale the moment collections started being reported —
+not a defect this story introduced, a bucket correctly reporting more of what the fixture always
+held. This story's brief is explicit that a pre-existing test is not this Implementer's to modify
+without saying so; D32 records why the two assertions were widened (not weakened — both remain exact
+equality, still catch a missing, duplicated, or wrong URI) rather than left failing for a separate
+pass, since no such pass is described for this story and the closing gate requires a green suite.
+
+**Mutation probe**: commented out the `_import_collections` call in `_import_concepts`. Six tests
+failed — this task's own four new `TestCollectionsAndMembership` tests, plus exactly the two widened
+`TestReportPopulatedByARealRun` assertions — nothing else. Restored; 477 passed.
+
+**Verified**: `poetry run pytest -q` — 477 passed (473 + 4 new in `test_skos.py`'s new
+`TestCollectionsAndMembership`). `poetry run ruff check .` — all checks passed. `poetry run ruff
+format .` — 1 file reformatted (`skos.py`) then clean. `poetry run mypy` — success, 9 source files.
+`poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations
+--check --dry-run --settings=tests.settings` — no changes detected. `poetry run pre-commit run
+--all-files` — all hooks passed.
+
+**Next**: T028 — ordered collections: `skos:memberList` walked in order (research.md R2), `ordered`
+set, positions assigned; a re-import that changes the order updates positions to match.
+
+**Watch**: `_import_collections` does not track a collection absent from this run's file at all (no
+`report.absent_from_source` entry for a collection an earlier import created that this file no
+longer mentions) — T027-T030's own acceptance scenarios never name this case, only a *member*
+missing from a collection that is itself still present, so it is left unbuilt rather than invented
+speculatively. Flagged as a concern in the story report for the next pass to weigh against FR-013's
+general "left untouched and named" wording for any record.

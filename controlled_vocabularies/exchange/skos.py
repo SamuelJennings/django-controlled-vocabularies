@@ -35,6 +35,7 @@ from controlled_vocabularies.exchange.mapping import (
 from controlled_vocabularies.exchange.report import FatalReason, ImportReport, NormalizedReason, SetAsideReason
 from controlled_vocabularies.exchange.safety import scan_rdf_xml
 from controlled_vocabularies.models import (
+    Collection,
     Concept,
     ConceptLabel,
     ConceptNote,
@@ -614,24 +615,28 @@ def _import_unheld_values(graph: rdflib.Graph, node: rdflib.term.Node, uri: str,
         report.add_set_aside(SetAsideReason.UNMODELLED_PREDICATE, subject=uri, predicate=str(other_predicate))
 
 
-def _resolve_relation_concept(
+def _resolve_concept_reference(
     uri: str, successful_concepts: dict[str, Concept], target_scheme: ConceptScheme
 ) -> Concept | None:
-    """Return the :class:`Concept` ``uri`` names, or ``None`` when it cannot back a relation (FR-011).
+    """Return the :class:`Concept` ``uri`` names, or ``None`` when it cannot back a
+    relation or a collection membership (FR-011) — the same resolution rule serves
+    both, since decisions.md D30 treats a membership as "the same shape of problem"
+    a relationship already is.
 
     Tries this run's own writes first (``successful_concepts``, keyed by URI —
     every concept this run actually created or updated); when ``uri`` was not
     itself imported this run, falls back to
     :meth:`~controlled_vocabularies.models.ConceptManager.get_by_uri` for a
     concept an earlier import already created (spec Acceptance Scenario US4-6)
-    — a relationship the file restates to an end it does not separately
-    redeclare this time still lands. A match belonging to a *different*
-    vocabulary than the one being imported is treated the same as no match at
-    all: :class:`ConceptRelation` only ever joins concepts of the same scheme
-    (research.md R4), and attempting one across schemes would otherwise raise
-    a ``ValidationError`` this importer does not catch — the same
-    "collect, don't crash" discipline every other set-aside reason follows
-    (decisions.md D29).
+    — a relationship or membership the file restates to an end it does not
+    separately redeclare this time still lands. A match belonging to a
+    *different* vocabulary than the one being imported is treated the same as
+    no match at all: neither :class:`ConceptRelation` nor
+    :class:`~controlled_vocabularies.models.CollectionMember` ever joins
+    records of different schemes (research.md R4), and attempting one across
+    schemes would otherwise raise a ``ValidationError`` this importer does not
+    catch — the same "collect, don't crash" discipline every other set-aside
+    reason follows (decisions.md D29).
     """
     concept = successful_concepts.get(uri)
     if concept is None:
@@ -709,8 +714,8 @@ def _import_relations(
     concepts_by_pk: dict[int, Concept] = {}
 
     for narrower_uri, broader_uri in desired_broader:
-        narrower_concept = _resolve_relation_concept(narrower_uri, successful_concepts, target_scheme)
-        broader_concept = _resolve_relation_concept(broader_uri, successful_concepts, target_scheme)
+        narrower_concept = _resolve_concept_reference(narrower_uri, successful_concepts, target_scheme)
+        broader_concept = _resolve_concept_reference(broader_uri, successful_concepts, target_scheme)
         if narrower_concept is None or broader_concept is None:
             subject_uri = narrower_uri if narrower_concept is not None else broader_uri
             other_uri = broader_uri if narrower_concept is not None else narrower_uri
@@ -727,8 +732,8 @@ def _import_relations(
             # nothing meaningful to reconcile.
             continue
         a_uri, b_uri = tuple(pair)
-        a_concept = _resolve_relation_concept(a_uri, successful_concepts, target_scheme)
-        b_concept = _resolve_relation_concept(b_uri, successful_concepts, target_scheme)
+        a_concept = _resolve_concept_reference(a_uri, successful_concepts, target_scheme)
+        b_concept = _resolve_concept_reference(b_uri, successful_concepts, target_scheme)
         if a_concept is None or b_concept is None:
             subject_uri = a_uri if a_concept is not None else b_uri
             other_uri = b_uri if a_concept is not None else a_uri
@@ -778,6 +783,125 @@ def _import_relations(
         )
         if not already_stored:
             concepts_by_pk[a_pk].add_related(concepts_by_pk[b_pk])
+
+
+def _import_collections(
+    graph: rdflib.Graph,
+    target_scheme: ConceptScheme,
+    successful_concepts: dict[str, Concept],
+    report: ImportReport,
+) -> None:
+    """Create or update every ``skos:Collection``/``skos:OrderedCollection`` in
+    ``graph`` inside ``target_scheme``, with its membership (T027/T028,
+    FR-012).
+
+    Read after every concept this run created or updated already has a
+    primary key — membership needs :func:`_resolve_concept_reference` exactly
+    as a relationship end does. A collection's own identity is checked with
+    the same :func:`_identify` a concept or the vocabulary itself uses (D3): a
+    blank-node collection is fatal, the run collects it and continues to the
+    next one rather than stopping (FR-003). The structural exception is an
+    ordered collection's ``skos:memberList`` itself — an RDF list, made of
+    blank nodes by construction (research.md R2) — read through
+    ``graph.items()``, which yields the member *URIs* the list carries, never
+    the list's own cells, so those blank nodes never reach :func:`_identify`
+    at all (D3's own carve-out, T030).
+
+    ``skos:member`` (unordered) or ``skos:memberList`` (ordered, walked in the
+    file's own order) name the file's desired membership. Each member URI is
+    resolved through :func:`_resolve_concept_reference` — this run's own
+    writes first, then an earlier import's; one that resolves to nothing is
+    set aside and reported (:data:`SetAsideReason.MISSING_MEMBER`, naming both
+    the member and the collection) rather than failing the run (FR-011), and
+    the collection is still created holding whatever members did resolve.
+
+    Membership is written only through the model's own API —
+    :meth:`~controlled_vocabularies.models.Collection.add`,
+    :meth:`~controlled_vocabularies.models.Collection.remove`,
+    :meth:`~controlled_vocabularies.models.Collection.set_member_order` —
+    never a :class:`~controlled_vocabularies.models.CollectionMember` row
+    constructed directly, so the model's own cross-scheme check always runs.
+
+    An existing membership is only ever a *removal* candidate when its member
+    concept belongs to ``successful_concepts`` — was itself created or updated
+    by this run (decisions.md D30, carried across from relationship
+    reconciliation: "collection membership is the same shape of problem").
+    A member the file simply does not mention this run at all is not the same
+    as one the file's collection statement excludes: the former is untouched,
+    exactly as the concept at that end already is
+    (``report.absent_from_source``); only the latter is removed. This is not
+    re-derived — it is D30's own rule, applied to a second model.
+    """
+    collection_nodes = sorted(
+        set(graph.subjects(rdflib.RDF.type, SKOS.Collection))
+        | set(graph.subjects(rdflib.RDF.type, SKOS.OrderedCollection)),
+        key=str,
+    )
+    successful_ids = {concept.pk for concept in successful_concepts.values()}
+
+    for node in collection_nodes:
+        hint = _first_literal(graph, node, SKOS.prefLabel)
+        try:
+            uri = _identify(node, hint=hint)
+        except _FatalIdentity as exc:
+            report.add_fatal(exc.reason, exc.subject, **exc.params)
+            continue
+
+        ordered = (node, rdflib.RDF.type, SKOS.OrderedCollection) in graph
+
+        try:
+            row = Collection.objects.get_by_uri(uri)
+            created = False
+        except Collection.DoesNotExist:
+            row = Collection(scheme=target_scheme)
+            created = True
+        row.scheme = target_scheme
+        row.static_uri = uri
+        name = _first_literal(graph, node, SKOS.prefLabel, language=target_scheme.effective_default_language)
+        if not name:
+            name = _first_literal(graph, node, SKOS.prefLabel)
+        if name:
+            row.name = name
+        row.ordered = ordered
+        row.save()
+        if created:
+            report.add_created(uri)
+        else:
+            report.add_updated(uri)
+
+        if ordered:
+            member_list_node = graph.value(node, SKOS.memberList)
+            member_uris = [str(item) for item in graph.items(member_list_node)] if member_list_node is not None else []
+        else:
+            member_uris = sorted({str(obj) for obj in graph.objects(node, SKOS.member)})
+
+        resolved: list[Concept] = []
+        seen_pks: set[int] = set()
+        for member_uri in member_uris:
+            concept = _resolve_concept_reference(member_uri, successful_concepts, target_scheme)
+            if concept is None:
+                report.add_set_aside(SetAsideReason.MISSING_MEMBER, subject=member_uri, collection=uri)
+                continue
+            if concept.pk in seen_pks:
+                continue
+            seen_pks.add(concept.pk)
+            resolved.append(concept)
+
+        resolved_pks = {concept.pk for concept in resolved}
+        for membership in list(row.memberships.select_related("concept")):
+            if membership.concept_id in successful_ids and membership.concept_id not in resolved_pks:
+                row.remove(membership.concept)
+
+        for concept in resolved:
+            row.add(concept)
+
+        if ordered:
+            current = [
+                membership.concept
+                for membership in row.memberships.select_related("concept").order_by("position", "id")
+            ]
+            survivors = [concept for concept in current if concept.pk not in resolved_pks]
+            row.set_member_order(resolved + survivors)
 
 
 def _import_concept_content(
@@ -878,6 +1002,7 @@ def _import_concepts(
             report.add_updated(uri)
 
     _import_relations(graph, target_scheme, concepts_by_uri, report)
+    _import_collections(graph, target_scheme, concepts_by_uri, report)
 
     absent = Concept.objects.filter(scheme=target_scheme).exclude(static_uri__in=mentioned_uris)
     for uri in absent.order_by("static_uri").values_list("static_uri", flat=True):
