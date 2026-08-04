@@ -1996,3 +1996,52 @@ ruff format --check .` — all files formatted (one file needed a format pass, a
 mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run
 python -m django makemigrations --check --dry-run --settings=tests.settings` — no changes detected.
 `poetry run pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T18:20:00Z · Forge · review fix 19 — the safety exceptions are neither exported nor documented
+
+**Did**: `UnsafeRdfXmlError`/`UnsafeJsonLdError` propagate out of `import_skos()` but were in neither
+`controlled_vocabularies.exchange.__all__` nor the README/CHANGELOG, and were plain `ValidationError`
+subclasses unrelated to `SkosImportError`. A consumer writing the package's own documented `except
+(SkosImportError, SkosImportFailed)` did not catch a hostile file — the exact case the safety scan
+exists to guard against.
+
+Wrote the failing tests first: `TestSafetyExceptionsAreExportedAndPartOfTheDocumentedHierarchy` in
+`test_skos.py` — both `Unsafe*Error` types are `SkosImportError` subclasses, both are exported from
+`controlled_vocabularies.exchange` and listed in `__all__`, and (the actual consumer-facing proof)
+`import_skos()` on a hostile RDF/XML file and a hostile JSON-LD file, each wrapped only in `except
+(SkosImportError, SkosImportFailed)`, is actually caught. All five failed for the right reason before
+the production change (two `AttributeError`s, two `assert False`s, two uncaught exceptions escaping
+the `except` clause in the consumer-simulation tests).
+
+Decided, recorded as decisions.md D52: **make them subclasses of the documented hierarchy** (the
+task's own recommended option) rather than merely exporting and documenting a third independent type
+— existing consumer code becomes correct by construction with no changes needed on their side.
+`SkosImportError`'s own definition moved from `skos.py` to `safety.py` to make the subclassing
+possible without a circular import (`skos.py` already imports from `safety.py`; the reverse was never
+true and must not become true) — `skos.py` now imports and re-exports the same name, so no existing
+`from ...skos import SkosImportError` call site needed to change. `SkosImportFailed` was deliberately
+left as a separate `ValidationError` sibling, not folded into the same tree — it names a structurally
+different situation (fatal findings collected while processing an already-read file), and nothing in
+the fix's brief asks the two to be related. `exchange/__init__.py`'s `__all__` gains both `Unsafe*Error`
+names, imported directly from `safety.py`.
+
+Mutation probe: reverted both classes to plain `ValidationError` subclasses. Both subclass-relationship
+assertions failed, and both consumer-simulation tests failed with the exception escaping their `except`
+clause entirely — reproducing the exact consumer-facing failure this fix closes. Restored immediately;
+full suite re-ran green.
+
+Updated README and CHANGELOG in the same commit (Article VI), documenting the exception hierarchy for
+the first time (`SkosImportError` itself was previously undocumented by name) and correcting one
+sentence found stale while editing: the README's "A JSON-LD document that carries its context inline
+imports normally" no longer held after decisions.md D47 (an inline context carrying `@import` is
+refused) and was updated regardless of this fix's own scope, since both edits touch the same
+paragraph. Ran the humanizer skill on both files' new prose before committing, catching and fixing a
+semicolon clause-join and an em-dash-heavy passage in the CHANGELOG bullet, plus two contractions
+inconsistent with the rest of the document's formal register.
+
+**Verified**: `poetry run pytest -q` — 667 passed (662 baseline-after-FIX-18 + 5 new, all in
+`TestSafetyExceptionsAreExportedAndPartOfTheDocumentedHierarchy`). `poetry run ruff check .` — all
+checks passed. `poetry run ruff format --check .` — 22 files already formatted. `poetry run mypy` —
+success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m
+django makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry run
+pre-commit run --all-files` — all hooks passed.

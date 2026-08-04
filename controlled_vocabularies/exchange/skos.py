@@ -39,7 +39,13 @@ from controlled_vocabularies.exchange.mapping import (
     SKOS,
 )
 from controlled_vocabularies.exchange.report import FatalReason, ImportReport, NormalizedReason, SetAsideReason
-from controlled_vocabularies.exchange.safety import UnsafeJsonLdError, UnsafeRdfXmlError, scan_json_ld, scan_rdf_xml
+from controlled_vocabularies.exchange.safety import (
+    SkosImportError,
+    UnsafeJsonLdError,
+    UnsafeRdfXmlError,
+    scan_json_ld,
+    scan_rdf_xml,
+)
 from controlled_vocabularies.models import (
     Collection,
     Concept,
@@ -56,17 +62,6 @@ from controlled_vocabularies.models import (
 #: run rather than being handed to rdflib on the chance it understands it:
 #: FR-002 names exactly these three, not "whatever rdflib happens to parse".
 _SUPPORTED_FORMATS = frozenset({"turtle", "xml", "json-ld"})
-
-
-class SkosImportError(ValidationError):
-    """Raised when a candidate file cannot be read as SKOS at all (FR-002).
-
-    Covers a missing file, a serialization that cannot be determined or is
-    not one of the three this feature reads, and a file that fails to parse
-    as the serialization it is read as. A :class:`~django.core.exceptions.ValidationError`
-    subclass so it carries the same translatable, named-placeholder message
-    shape as the rest of the package (Article XII).
-    """
 
 
 def _read_graph(file: str | Path, *, serialization: str | None = None) -> rdflib.Graph:

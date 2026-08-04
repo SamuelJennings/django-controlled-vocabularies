@@ -2513,6 +2513,49 @@ class TestExchangePackage:
         assert exchange.__doc__, "controlled_vocabularies.exchange has no module docstring"
 
 
+class TestSafetyExceptionsAreExportedAndPartOfTheDocumentedHierarchy:
+    """FIX 19 (review, decisions.md D52) — ``UnsafeRdfXmlError``/``UnsafeJsonLdError``
+    propagate out of ``import_skos()`` but were in neither
+    ``controlled_vocabularies.exchange.__all__`` nor a subclass of
+    ``SkosImportError``. A consumer writing the package's own documented
+    ``except (SkosImportError, SkosImportFailed)`` — the shape every other
+    test in this module already exercises — did not catch a hostile file,
+    precisely the case the safety scan exists to guard against."""
+
+    def test_unsaferdfxmlerror_is_a_skosimporterror(self):
+        assert issubclass(UnsafeRdfXmlError, SkosImportError)
+
+    def test_unsafejsonlderror_is_a_skosimporterror(self):
+        assert issubclass(UnsafeJsonLdError, SkosImportError)
+
+    def test_both_are_exported_from_the_exchange_package(self):
+        assert exchange.UnsafeRdfXmlError is UnsafeRdfXmlError
+        assert exchange.UnsafeJsonLdError is UnsafeJsonLdError
+        assert "UnsafeRdfXmlError" in exchange.__all__
+        assert "UnsafeJsonLdError" in exchange.__all__
+
+    def test_a_consumer_catching_only_the_documented_pair_still_catches_a_hostile_rdf_xml_file(self, db):
+        # The actual consumer-facing failure this fix closes: code written
+        # against only the two documented exception types must not let a
+        # hostile file through as an unhandled exception.
+        try:
+            import_skos(SECURITY_FIXTURES / "entity_bomb.rdf", serialization="xml")
+        except (SkosImportError, SkosImportFailed):
+            caught = True
+        else:
+            caught = False
+        assert caught, "a hostile RDF/XML file escaped the documented (SkosImportError, SkosImportFailed) pair"
+
+    def test_a_consumer_catching_only_the_documented_pair_still_catches_a_hostile_json_ld_file(self, db):
+        try:
+            import_skos(SECURITY_FIXTURES / "exfil_via_import.jsonld")
+        except (SkosImportError, SkosImportFailed):
+            caught = True
+        else:
+            caught = False
+        assert caught, "a hostile JSON-LD file escaped the documented (SkosImportError, SkosImportFailed) pair"
+
+
 def _write_deeply_nested_jsonld(tmp_path: Path, depth: int) -> Path:
     """A JSON-LD document nesting one object inside another ``depth`` times
     (FIX 18, review, decisions.md D51). Built as raw text, not via

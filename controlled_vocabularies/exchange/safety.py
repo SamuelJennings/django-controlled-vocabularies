@@ -44,22 +44,48 @@ from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 
 
-class UnsafeRdfXmlError(ValidationError):
+class SkosImportError(ValidationError):
+    """Raised when a candidate file cannot be turned into usable SKOS at all (FR-002).
+
+    The base of this package's whole "could not read this file" exception
+    hierarchy (review fix 19, decisions.md D52) — defined here, in
+    ``safety.py``, rather than in ``skos.py`` where it originally lived,
+    specifically so :class:`UnsafeRdfXmlError`/:class:`UnsafeJsonLdError` can
+    subclass it without a circular import (``skos.py`` already imports from
+    this module; the reverse was never true and must not become true).
+    ``skos.py`` re-exports this name rather than redefining it, so
+    ``controlled_vocabularies.exchange.skos.SkosImportError`` remains the
+    same object it always was for every existing caller.
+
+    Covers a missing file, a serialization that cannot be determined or is
+    not one of the three this feature reads, and a file that fails to parse
+    as the serialization it is read as — plus, through its two subclasses
+    below, a file the pre-flight safety scan refuses outright. A
+    :class:`~django.core.exceptions.ValidationError` subclass so it carries
+    the same translatable, named-placeholder message shape as the rest of
+    the package (Article XII).
+    """
+
+
+class UnsafeRdfXmlError(SkosImportError):
     """Raised when a candidate RDF/XML document fails the pre-flight safety scan.
 
-    A :class:`~django.core.exceptions.ValidationError` subclass so it carries the
-    same translatable-message-plus-named-params shape as the rest of the package
+    A :class:`SkosImportError` subclass (review fix 19, decisions.md D52) —
+    a consumer that only catches the package's documented
+    ``(SkosImportError, SkosImportFailed)`` pair still catches a hostile
+    file, without needing to know this scan exists at all. Carries the same
+    translatable-message-plus-named-params shape as the rest of the package
     (Article XII); the underlying `defusedxml` exception is chained via
     ``__cause__`` for developer diagnostics, which are exempt from translation.
     """
 
 
-class UnsafeJsonLdError(ValidationError):
+class UnsafeJsonLdError(SkosImportError):
     """Raised when a candidate JSON-LD document carries a remote ``@context`` reference
-    (decisions.md D36).
+    (decisions.md D36) or an ``@import`` reference inside an inline context (decisions.md D47).
 
-    A :class:`~django.core.exceptions.ValidationError` subclass, the same shape
-    :class:`UnsafeRdfXmlError` uses (Article XII).
+    A :class:`SkosImportError` subclass, the same shape and the same reasoning
+    :class:`UnsafeRdfXmlError` uses (review fix 19, decisions.md D52, Article XII).
     """
 
 

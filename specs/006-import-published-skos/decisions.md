@@ -1815,3 +1815,57 @@ few frames from where it originates.
 **Revisit if:** a fourth crafted-input shape reaching outside `SkosImportError`/`SkosImportFailed` is
 found — the same "enumerate the actual mechanism, not just the reported symptom" discipline FIX 14
 already applied to `safety.py` applies here too, rather than patching only the exact three cases named.
+
+## D52 — `UnsafeRdfXmlError`/`UnsafeJsonLdError` become exported `SkosImportError` subclasses (review fix 19)
+
+`UnsafeRdfXmlError` and `UnsafeJsonLdError` propagate out of `import_skos()` (they are raised inside
+`_read_graph`, uncaught) but were in neither `controlled_vocabularies.exchange.__all__` nor the
+README/CHANGELOG, and were plain `ValidationError` subclasses with no relation to `SkosImportError`.
+A consumer writing the package's own documented `except (SkosImportError, SkosImportFailed)` — the
+exact shape this package's own docstrings and every existing test already use — did not catch a
+hostile file, precisely the case the safety scan exists to guard against.
+
+**Chosen the recommended option: make them `SkosImportError` subclasses**, rather than merely
+exporting and documenting them as a third, independent type. A consumer that already wrote the
+documented two-exception `except` clause is correct by construction the moment this ships, with no
+code change on their side required — the alternative (export-and-document only) would still leave
+every *existing* piece of consumer code silently wrong until someone reads the changelog and adds a
+third type to their `except` clause, which is exactly the gap this fix exists to close, not merely
+relabel.
+
+**Where `SkosImportError` itself now lives, and why.** `SkosImportError` was defined in `skos.py`;
+`UnsafeRdfXmlError`/`UnsafeJsonLdError` are defined in `safety.py`, a module `skos.py` already imports
+from. Subclassing across that boundary in the naive direction would need `safety.py` to import
+`SkosImportError` from `skos.py` — a circular import, since `skos.py` already imports `scan_rdf_xml`/
+`scan_json_ld` from `safety.py`. **`SkosImportError`'s definition moved to `safety.py`** (the
+lower-level module of the two, with no dependency on `skos.py` at all) rather than introducing a
+third module purely to hold one class: `skos.py` now imports `SkosImportError` from `safety.py`
+alongside the two `Unsafe*Error` types it already imported, and re-exports it under the same name —
+`controlled_vocabularies.exchange.skos.SkosImportError` is the identical object it always was, so no
+existing `from ...skos import SkosImportError` import site anywhere (including every test in
+`test_skos.py`) needed to change. `SkosImportFailed` was deliberately left where it is, still a plain
+`ValidationError` sibling of `SkosImportError`, not folded into the same subclass tree — it names a
+structurally different situation (the file *was* read; the run collected fatal findings while
+processing it) and nothing in the fix's brief or the spec's own exception contract asks the two to be
+related.
+
+**`exchange/__init__.py`'s `__all__` gains both names**, imported from `safety.py` directly (not
+re-exported a second time through `skos.py`), matching the module each is actually defined in.
+
+**Verified by mutation.** Reverted both classes to plain `ValidationError` subclasses (leaving the
+export and the module relocation otherwise untouched) — `issubclass(UnsafeRdfXmlError,
+SkosImportError)`/`issubclass(UnsafeJsonLdError, SkosImportError)` both failed, and the two
+consumer-simulation tests (`import_skos()` on a hostile RDF/XML and a hostile JSON-LD file, each
+wrapped in `except (SkosImportError, SkosImportFailed)`) failed with the exception escaping the
+`except` clause entirely — reproducing the exact consumer-facing failure this fix closes. Restored
+immediately; full suite re-ran green.
+
+**README and CHANGELOG updated in the same commit (Article VI)**, including one correction beyond
+this fix's own scope found while editing: the README's existing "A JSON-LD document that carries its
+context inline imports normally" sentence was no longer fully accurate after decisions.md D47 (an
+inline context carrying `@import` is refused) and needed updating regardless of FIX 19 — fixed here
+rather than left inaccurate, since both edits touch the same paragraph.
+
+**Revisit if:** a future safety scan (a third serialization, say) adds its own refusal exception —
+the same "subclass the documented hierarchy, export it, document it" pattern applies without
+needing a fresh decision.

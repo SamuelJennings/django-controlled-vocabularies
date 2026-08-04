@@ -156,9 +156,20 @@ such as a collection in one file and a concept in another. Both are set aside an
 a record between vocabularies is a curatorial decision, not a side effect of reading a file.
 
 An imported file is treated as untrusted input. RDF/XML is scanned for entity expansion and
-external references before a parser sees it, and a JSON-LD document whose `@context` names a remote
-location is refused rather than fetched. Importing a file never makes a network request. A JSON-LD
-document that carries its context inline imports normally.
+external references before a parser sees it. A JSON-LD document is refused rather than fetched if
+its `@context` names a remote location, whether that is a plain string reference or an `@import`
+reference tucked inside an inline object context. Importing a file never makes a network request.
+An ordinary inline JSON-LD context, carrying no such reference, imports normally.
+
+`import_skos()` raises one of two exceptions, both `ValidationError` subclasses carrying a
+translatable message. `SkosImportError` covers every reason a file cannot be turned into usable SKOS
+at all: not found, not in a supported serialization, unparseable, or refused by the safety scan
+above. `SkosImportFailed` covers the case where the file parses but the run collects one or more
+fatal problems (a missing or blank-node identity, or a vocabulary that cannot be resolved), and
+carries the same `ImportReport` its `fatal` bucket names them in. `UnsafeRdfXmlError` and
+`UnsafeJsonLdError`, the two exceptions the safety scan itself raises, are exported
+`SkosImportError` subclasses, so code that only catches `(SkosImportError, SkosImportFailed)`
+already catches a file the safety scan refuses too.
 
 ## Relationship to other packages
 
