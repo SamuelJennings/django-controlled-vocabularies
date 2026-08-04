@@ -1543,3 +1543,72 @@ immediately after.
 **Revisit if:** a future `rdflib` upgrade adds a second dict-context key that reaches `urlopen` — the
 enumeration above is against the currently-installed version's source, not the JSON-LD 1.1 spec text,
 and rdflib's own implementation is what this application actually calls.
+
+## D48 — An untagged (or non-literal) label/note value is set aside and reported, never guessed into the default language (review fix 15)
+
+`_import_labels` and `_import_notes` both `continue`d on a `graph.objects()` value that was not an
+`rdflib.Literal`, or that carried no `.language`, with no `report.set_aside`/`report.normalized` entry
+either way — dropped exactly as silently as if `_import_unheld_values` had never been built.
+`_report_unmodelled_predicates` could not catch it: it skips every predicate inside the SKOS namespace
+unconditionally, on the reasoning (D45's own words) that "the models do have a place for it" — true
+of the *predicate*, not of a specific *value* on it that carries nothing the models can key a language
+by. Reproduced before any test: a concept carrying a tagged `skos:prefLabel "Alpha"@en` alongside an
+untagged `skos:altLabel "plain alt"` and an untagged `skos:definition "plain definition"` imported
+with `report.set_aside == []` and `report.normalized == []` — both values gone with no trace, exactly
+the silent-drop Article XI and the README's own "nothing a file contains is ever dropped in silence"
+forbid. A `skos:definition <some-uri>` — an object that is not a `Literal` at all — falls through the
+identical branch and is silently dropped the same way.
+
+**Two options, decided from FR-008/FR-009 and the models rather than picked for convenience.**
+FR-008: "Preferred, alternative, and hidden labels MUST be stored against their concept, each with its
+language and kind." FR-009: notes "MUST be stored against their concept... each with its language."
+Both require a language; an untagged value carries none — not an unconfigured one, none at all — so
+neither requirement can be met by storing it as given. The alternative, storing it against the
+vocabulary's effective default language, would be inventing a fact the file never asserted, and it is
+not merely a stylistic overreach: for a `PREFERRED` value specifically, the default-language slot is
+already spoken for by `Concept.label` (`_preferred_label_in`'s own deterministic pick from *tagged*
+default-language literals only), and `ConceptLabel._reject_default_language_preferred` refuses a
+`PREFERRED` row in that language outright — so treating an untagged `prefLabel` as "default language"
+would either silently collide with an already-chosen `Concept.label` or have to be set aside anyway
+the moment it is attempted, making "store it" not even a real option for that one kind, and applying
+it only to `altLabel`/`hiddenLabel`/notes while refusing it for `prefLabel` would be an inconsistent
+half-measure for what is one defect. **Chosen: set aside and report, uniformly, under a new
+`SetAsideReason.NO_LANGUAGE_TAG`** — the same "unusable value, never dropped in silence, never
+crashes the run" treatment this feature already gives every other value it cannot store, applied here
+without inventing a language the publisher never wrote down. The non-`Literal` case (`skos:definition
+<uri>`) gets the same reason and the same treatment: it is not language-tagged text either, for a
+different reason than a missing tag, but the outcome the models can offer it is identical.
+
+**One report entry per predicate per subject, naming the predicate's own CURIE** (`skos:altLabel`,
+`skos:definition`, ...) via a new `_skos_curie()` helper in `skos.py` — every `LABEL_PREDICATES`/
+`NOTE_PREDICATES` key is a SKOS predicate, so a lookup table is unnecessary; this mirrors the
+readable-CURIE convention `MAPPING_PREDICATES` already established for its own reports. The
+`dcterms:description` alias loop in `_import_notes` carries the identical defect one predicate over —
+same silent `continue`, same governing FR-009 wording — and is fixed the same way, reporting
+`predicate="dcterms:description"` (the literal string constant already used for its
+`NormalizedReason.FOREIGN_DEFINITION` report, kept consistent).
+
+**The predicate-coverage gate's own blind spot closed too.**
+`TestEverySkosPredicateIsReadOrReported`'s `_coverage_predicate_covered` skipped any label/note
+triple whose object was untagged or non-literal outright (`or not isinstance(literal, rdflib.Literal)
+or not literal.language: continue`) before ever asking whether it had evidence — which is exactly why
+no existing fixture or test noticed this defect despite that gate's own stated purpose (D46: "read by
+the importer, or named in the report"). Replaced with a call to a new `_coverage_untagged_covered`
+helper, checking for a matching `NO_LANGUAGE_TAG` entry instead of skipping; a new
+`_COVERAGE_LABEL_NOTE_CURIE` table restates the predicate→CURIE mapping independently in the test
+file (D46's own "no shared classification with production" discipline), rather than importing
+`_skos_curie` from `skos.py`. `untagged_literal_values.ttl` — the new fixture, auto-discovered by
+`ALL_FIXTURES` — now exercises this gate too.
+
+**Verified by mutation, at two layers.** Reverted the `report.add_set_aside(NO_LANGUAGE_TAG, ...)`
+call in both `_import_labels` and `_import_notes` (all three sites: the label loop, the native note
+loop, the `dcterms:description` loop) back to a bare `continue`. Three of the five new
+`TestUntaggedOrNonLiteralValuesAreSetAside` tests failed (`0 == 2`/`0 == 1`), and, independently, the
+predicate-coverage gate's own new parametrized instance for `untagged_literal_values.ttl` failed too,
+naming both `skos:altLabel` and `skos:definition` on `alpha` as uncovered — proving the gate itself,
+not only the dedicated test class, would have caught this regressing. Restored immediately; full
+suite re-ran green.
+
+**Revisit if:** a future story gives the models a real place to store a value with no language (a
+language-neutral text field, or an explicit "unknown language" marker) — that is new modelling
+capability, not a correction to this decision's reading of FR-008/FR-009 as written today.

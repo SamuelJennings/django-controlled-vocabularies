@@ -1796,3 +1796,64 @@ passed. `poetry run ruff format --check .` — all files formatted (one file nee
 applied). `poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files
 scanned. `poetry run python -m django makemigrations --check --dry-run --settings=tests.settings` —
 no changes detected. `poetry run pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T16:10:00Z · Forge · review fix 15 — an untagged literal is dropped with no report entry
+
+**Did**: `_import_labels` and `_import_notes` both `continue`d on a label/note object that was not an
+`rdflib.Literal`, or carried no `.language`, with no report entry either way — nothing stored, nothing
+named, and `_report_unmodelled_predicates` blind to it by design (it skips every SKOS-namespace
+predicate unconditionally). Reproduced before writing any test: a concept with a tagged
+`skos:prefLabel "Alpha"@en`, an untagged `skos:altLabel "plain alt"`, and an untagged
+`skos:definition "plain definition"` imported with `report.set_aside == []` and `report.normalized ==
+[]` — both values silently gone.
+
+Wrote the failing tests first: new fixture `tests/fixtures/skos/untagged_literal_values.ttl` (three
+concepts — "alpha" with an untagged altLabel and an untagged definition, "beta" with a
+`skos:definition` object that is a URI rather than a literal at all, "gamma" with no
+`skos:definition` of its own but an untagged `dcterms:description`) and a new
+`TestUntaggedOrNonLiteralValuesAreSetAside` class in `test_skos.py` (five tests: the two untagged
+label/note values are set aside and named with their predicate CURIE; nothing was stored under any
+language; the non-Literal `skos:definition` object gets the same treatment; the untagged
+`dcterms:description` alias gets it too; the concepts still import successfully on their usable
+content). All three assertions expecting `NO_LANGUAGE_TAG` entries failed (`0 == 2`/`0 == 1`) before
+the production change — `SetAsideReason.NO_LANGUAGE_TAG` did not yet exist, and the two trivially-true
+"nothing was stored" tests confirmed the drop was total.
+
+Decided, argued from FR-008/FR-009 and the models rather than picked for convenience (recorded in
+full as decisions.md D48): **set aside and report under a new `SetAsideReason.NO_LANGUAGE_TAG`**,
+never guessed into the vocabulary's default language. Both FRs require a label/note to be stored
+"with its language"; an untagged value has none. Storing a `PREFERRED` value under the default
+language specifically would either collide with `Concept.label` (already chosen deterministically
+from *tagged* literals only) or hit `ConceptLabel._reject_default_language_preferred`'s own refusal —
+so "store it" was never a uniform option across every label kind, and applying it only to
+non-preferred kinds would be an inconsistent half-measure for one defect. The non-Literal case
+(`skos:definition <uri>`) gets identical treatment: not language-tagged text, for a different reason,
+same unusable outcome.
+
+Production change: both `_import_labels`'s loop and `_import_notes`'s two loops (the native
+`NOTE_PREDICATES` loop and the separate `dcterms:description` alias loop) now call
+`report.add_set_aside(SetAsideReason.NO_LANGUAGE_TAG, subject=uri, predicate=...)` in place of the
+bare `continue`, naming the predicate's own CURIE via a new `_skos_curie()` helper (mirroring the
+readable-CURIE convention `MAPPING_PREDICATES` already uses). Also closed the coverage gate's own
+matching blind spot: `TestEverySkosPredicateIsReadOrReported`'s `_coverage_predicate_covered` used to
+skip any untagged/non-literal label or note triple outright, before ever asking for evidence — exactly
+why nothing noticed this defect despite the gate's stated purpose. Replaced the skip with a call to a
+new `_coverage_untagged_covered` helper checking for a matching `NO_LANGUAGE_TAG` entry, backed by an
+independently-restated `_COVERAGE_LABEL_NOTE_CURIE` table in the test file (not imported from
+`skos.py`, the same "no shared classification with production" rule D46 already applies).
+
+Mutation probe, at both layers: reverted all three `report.add_set_aside(NO_LANGUAGE_TAG, ...)` call
+sites back to a bare `continue`. Three of the five new dedicated tests failed, and — independently —
+the predicate-coverage gate's own new parametrized instance for `untagged_literal_values.ttl` failed
+too, naming `skos:altLabel` and `skos:definition` on `alpha` as uncovered, proving the gate itself
+would have caught this regressing, not only the dedicated test class. Restored immediately; full
+suite re-ran green.
+
+**Verified**: `poetry run pytest -q` — 646 passed (635 baseline-after-FIX-14 + 11 new: 5 in
+`TestUntaggedOrNonLiteralValuesAreSetAside`, 1 new predicate-coverage-gate parametrized instance, 1
+new fixture-corpus-discovery parametrized instance, 4 new `SetAsideReason` template-sweep parametrized
+instances in `test_report.py`). `poetry run ruff check .` — all checks passed. `poetry run ruff format
+--check .` — all files formatted (one file needed a format pass, applied). `poetry run mypy` —
+success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m
+django makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry run
+pre-commit run --all-files` — all hooks passed.

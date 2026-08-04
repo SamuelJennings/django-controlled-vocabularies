@@ -859,6 +859,83 @@ class TestUnconfiguredLanguageValuesAreSetAside:
         assert schist.notes("es") == []
 
 
+class TestUntaggedOrNonLiteralValuesAreSetAside:
+    """FIX 15 (review, decisions.md D48) — ``_import_labels`` and
+    ``_import_notes`` both ``continue`` on an object that is not an
+    ``rdflib.Literal``, or that carries no ``.language``, with no report entry
+    at all: a plain literal with no language tag, or a triple whose object is
+    a URI where the predicate is a label or note predicate, vanished from a
+    successful run with nothing in ``report.set_aside`` and nothing in
+    ``report.normalized`` to show for it. Plain (untagged) literals are
+    widespread in published SKOS, and FR-008/FR-009 both require a label or
+    note to be stored "with its language" — a value with none cannot meet
+    that requirement, so (argued in decisions.md D48) it is set aside and
+    reported under the new ``SetAsideReason.NO_LANGUAGE_TAG``, the same
+    "unusable value, never dropped in silence" treatment every other kind of
+    unusable value in this feature already gets, rather than guessed into the
+    vocabulary's default language — a guess the file never asserted, and one
+    that risks colliding with ``ConceptLabel``'s own per-language cardinality
+    rules for a ``PREFERRED`` value in particular.
+    """
+
+    def test_an_untagged_alternative_label_is_set_aside_and_named(self, db):
+        report = import_skos(FIXTURES / "untagged_literal_values.ttl")
+        alpha_uri = "http://example.org/untagged/alpha"
+        entries = [
+            entry
+            for entry in report.set_aside
+            if entry.reason is SetAsideReason.NO_LANGUAGE_TAG and entry.subject == alpha_uri
+        ]
+        assert len(entries) == 2, "expected one entry for the untagged altLabel and one for the untagged definition"
+        assert {entry.params.get("predicate") for entry in entries} == {"skos:altLabel", "skos:definition"}
+
+    def test_the_untagged_alternative_label_is_not_stored_under_any_language(self, db):
+        import_skos(FIXTURES / "untagged_literal_values.ttl")
+        alpha = Concept.objects.get(static_uri="http://example.org/untagged/alpha")
+        assert list(alpha.labels.all()) == []
+        assert alpha.notes("en") == []
+
+    def test_a_non_literal_definition_object_is_set_aside_the_same_way(self, db):
+        # skos:definition <some-uri> — not language-tagged text at all, the
+        # same branch an untagged Literal falls through, and the same
+        # unusable-value treatment applies.
+        report = import_skos(FIXTURES / "untagged_literal_values.ttl")
+        beta_uri = "http://example.org/untagged/beta"
+        entries = [
+            entry
+            for entry in report.set_aside
+            if entry.reason is SetAsideReason.NO_LANGUAGE_TAG and entry.subject == beta_uri
+        ]
+        assert len(entries) == 1
+        assert entries[0].params["predicate"] == "skos:definition"
+        beta = Concept.objects.get(static_uri=beta_uri)
+        assert beta.notes("en") == []
+
+    def test_an_untagged_foreign_description_is_also_set_aside(self, db):
+        # The dcterms:description alias _import_notes reads separately from
+        # the native NOTE_PREDICATES loop has the identical defect — an
+        # untagged value there was dropped with no report entry either.
+        report = import_skos(FIXTURES / "untagged_literal_values.ttl")
+        gamma_uri = "http://example.org/untagged/gamma"
+        entries = [
+            entry
+            for entry in report.set_aside
+            if entry.reason is SetAsideReason.NO_LANGUAGE_TAG and entry.subject == gamma_uri
+        ]
+        assert len(entries) == 1
+        assert entries[0].params["predicate"] == "dcterms:description"
+        gamma = Concept.objects.get(static_uri=gamma_uri)
+        assert gamma.notes("en") == []
+        assert report.normalized == [] or all(entry.subject != gamma_uri for entry in report.normalized)
+
+    def test_the_concepts_still_import_successfully_on_their_usable_content(self, db):
+        report = import_skos(FIXTURES / "untagged_literal_values.ttl")
+        assert report.fatal == []
+        assert Concept.objects.filter(scheme__static_uri="http://example.org/untagged/").count() == 3
+        alpha = Concept.objects.get(static_uri="http://example.org/untagged/alpha")
+        assert alpha.label == "Alpha"
+
+
 class TestUnheldValuesAndNormalisation:
     """T021 — FR-014: a notation, a mapping to another vocabulary, and a
     predicate from outside SKOS entirely are each set aside and reported
@@ -1916,6 +1993,22 @@ _COVERAGE_NOTE_KIND = {
     SKOS.changeNote: ConceptNote.Kind.CHANGE,
     SKOS.note: ConceptNote.Kind.NOTE,
 }
+# FIX 15 (review, decisions.md D48) — independent CURIE naming for the same
+# label/note predicates above, restated rather than borrowed from skos.py's
+# own _skos_curie helper (the same "no shared classification" discipline FIX
+# 13 already applies to _COVERAGE_MAPPING_CURIE below).
+_COVERAGE_LABEL_NOTE_CURIE = {
+    SKOS.prefLabel: "skos:prefLabel",
+    SKOS.altLabel: "skos:altLabel",
+    SKOS.hiddenLabel: "skos:hiddenLabel",
+    SKOS.definition: "skos:definition",
+    SKOS.scopeNote: "skos:scopeNote",
+    SKOS.example: "skos:example",
+    SKOS.editorialNote: "skos:editorialNote",
+    SKOS.historyNote: "skos:historyNote",
+    SKOS.changeNote: "skos:changeNote",
+    SKOS.note: "skos:note",
+}
 _COVERAGE_MAPPING_CURIE = {
     SKOS.exactMatch: "skos:exactMatch",
     SKOS.closeMatch: "skos:closeMatch",
@@ -2038,6 +2131,20 @@ def _coverage_note_covered(
     )
 
 
+def _coverage_untagged_covered(subject_uri: str, predicate_curie: str, excluded_subjects: set[str], report) -> bool:
+    """Direct evidence that a label/note object with no language tag — or one that is not
+    even a Literal — was reported set aside under ``NO_LANGUAGE_TAG`` (FIX 15, decisions.md
+    D48), rather than silently skipped the way this gate used to skip it too."""
+    if subject_uri in excluded_subjects:
+        return True
+    return any(
+        entry.subject == subject_uri
+        and entry.params.get("predicate") == predicate_curie
+        and entry.reason is SetAsideReason.NO_LANGUAGE_TAG
+        for entry in report.set_aside
+    )
+
+
 def _coverage_predicate_covered(
     predicate: rdflib.URIRef,
     graph: rdflib.Graph,
@@ -2053,7 +2160,16 @@ def _coverage_predicate_covered(
         kind = _COVERAGE_LABEL_KIND[predicate]
         for subject_node, literal in graph.subject_objects(predicate):
             subject_uri = str(subject_node)
-            if subject_uri not in in_scope or not isinstance(literal, rdflib.Literal) or not literal.language:
+            if subject_uri not in in_scope:
+                continue
+            if not isinstance(literal, rdflib.Literal) or not literal.language:
+                # FIX 15 (review, decisions.md D48): previously skipped outright
+                # — the exact blind spot that let an untagged/non-literal value
+                # go unreported and unnoticed by this gate.
+                if not _coverage_untagged_covered(
+                    subject_uri, _COVERAGE_LABEL_NOTE_CURIE[predicate], excluded_subjects, report
+                ):
+                    return False, subject_uri
                 continue
             if not _coverage_label_covered(
                 subject_uri, literal.language, str(literal), kind, excluded_subjects, report
@@ -2065,7 +2181,14 @@ def _coverage_predicate_covered(
         kind = _COVERAGE_NOTE_KIND[predicate]
         for subject_node, literal in graph.subject_objects(predicate):
             subject_uri = str(subject_node)
-            if subject_uri not in in_scope or not isinstance(literal, rdflib.Literal) or not literal.language:
+            if subject_uri not in in_scope:
+                continue
+            if not isinstance(literal, rdflib.Literal) or not literal.language:
+                # FIX 15 (review, decisions.md D48): same blind spot, the note side.
+                if not _coverage_untagged_covered(
+                    subject_uri, _COVERAGE_LABEL_NOTE_CURIE[predicate], excluded_subjects, report
+                ):
+                    return False, subject_uri
                 continue
             if not _coverage_note_covered(subject_uri, literal.language, str(literal), kind, excluded_subjects, report):
                 return False, subject_uri

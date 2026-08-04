@@ -460,6 +460,15 @@ def _scheme_refs(graph: rdflib.Graph, concept_node: rdflib.term.Node) -> set[str
     return refs
 
 
+def _skos_curie(predicate: rdflib.URIRef) -> str:
+    """The ``skos:xxx`` CURIE for a predicate in the SKOS namespace (report display only,
+    FIX 15, decisions.md D48) — every :data:`LABEL_PREDICATES`/`NOTE_PREDICATES` key is one,
+    so a lookup table is unnecessary; this mirrors the readable-CURIE convention
+    :data:`MAPPING_PREDICATES` already uses for its own reported predicates.
+    """
+    return f"skos:{str(predicate)[len(str(SKOS)) :]}"
+
+
 def _preferred_label_in(graph: rdflib.Graph, node: rdflib.term.Node, language: str) -> str | None:
     """The lexicographically-first ``skos:prefLabel`` value on ``node`` in ``language``, or ``None``."""
     values = sorted(
@@ -533,6 +542,13 @@ def _import_labels(
     for predicate, kind in LABEL_PREDICATES.items():
         for literal in graph.objects(node, predicate):
             if not isinstance(literal, rdflib.Literal) or not literal.language:
+                # FIX 15 (review, decisions.md D48): a plain literal with no
+                # language tag, or an object that is not even a Literal (e.g.
+                # skos:altLabel pointing at a URI), was previously dropped
+                # with no report entry — the same "unusable value, never
+                # silent" rule every other kind of unusable value in this
+                # feature already gets.
+                report.add_set_aside(SetAsideReason.NO_LANGUAGE_TAG, subject=uri, predicate=_skos_curie(predicate))
                 continue
             language = literal.language
             if kind == ConceptLabel.Kind.PREFERRED and language == default_language:
@@ -583,6 +599,10 @@ def _import_notes(
     for predicate, kind in NOTE_PREDICATES.items():
         for literal in graph.objects(node, predicate):
             if not isinstance(literal, rdflib.Literal) or not literal.language:
+                # FIX 15 (review, decisions.md D48): same defect as
+                # _import_labels's identical branch — a note value with no
+                # language tag, or no text at all, was dropped in silence.
+                report.add_set_aside(SetAsideReason.NO_LANGUAGE_TAG, subject=uri, predicate=_skos_curie(predicate))
                 continue
             language = literal.language
             if kind == ConceptNote.Kind.DEFINITION:
@@ -594,6 +614,9 @@ def _import_notes(
 
     for literal in graph.objects(node, DCTERMS.description):
         if not isinstance(literal, rdflib.Literal) or not literal.language:
+            # FIX 15 (review, decisions.md D48): the dcterms:description alias
+            # carries the identical defect, one predicate over.
+            report.add_set_aside(SetAsideReason.NO_LANGUAGE_TAG, subject=uri, predicate="dcterms:description")
             continue
         language = literal.language
         if language in definition_languages:

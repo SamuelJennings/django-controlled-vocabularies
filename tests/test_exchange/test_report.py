@@ -41,6 +41,7 @@ _EXAMPLE_PARAMS = {
         "target": "https://example.org/vocab/target",
     },
     SetAsideReason.URI_HELD_BY_DIFFERENT_KIND: {},
+    SetAsideReason.NO_LANGUAGE_TAG: {"predicate": "skos:altLabel"},
 }
 
 # One example params dict per fatal reason (T007), the same shape as _EXAMPLE_PARAMS.
