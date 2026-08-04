@@ -471,3 +471,31 @@ doing nothing with it.
 **Revisit if:** a curator-facing workflow wants to *act* on this conflict (e.g. offer to migrate the
 vocabulary's frozen language) rather than only see it in the report — that is new capability, not a
 fix to this one.
+
+## D23 — Tamper-check triage for US-2: two additive flags approved, one orchestrator restructure recorded
+
+`forge tamper-check --base ef3e2da --head cfbbc4e` raised two
+`modified_preexisting_test` flags, and the US-2 merge was followed by an orchestrator commit that
+modified pre-existing tests far more widely. Both are recorded here rather than left as unexplained
+flags, per the guardrail's own triage rule.
+
+**The two Implementer flags are additive and approved.** `tests/test_exchange/test_report.py` gained
+exactly one line — a `_EXAMPLE_PARAMS` entry for the new `SetAsideReason.DEFAULT_LANGUAGE_FROZEN`
+member, the same pattern T007 used for `_EXAMPLE_FATAL_PARAMS`, and the table is what makes the
+existing parametrized coverage total over the enum. `tests/test_exchange/test_skos.py` gained five
+test classes at the end of the file. Across both files the whole range removes exactly one line: the
+`from controlled_vocabularies.models import Concept, ConceptScheme` import, replaced by the same
+import widened to include `ConceptRelation`. No assertion was weakened, removed or skipped.
+
+**The Article X restructure (426775b) is an orchestrator refactor, approved on measured evidence.**
+The foundational phase left 31 module-level test functions and two test modules mirroring no source
+module, which `forge verify --steps conformance` flags. Grouping them into `Test<Subject>` classes,
+and folding `test_fixtures.py` and `test_package.py` into `test_skos.py`, rewrites files the earlier
+stories wrote. It was verified as a pure move rather than asserted to be one: the collected test-name
+set is identical either side (427 = 427, empty symmetric difference), and the set of assertion lines
+is identical apart from renaming `test_fixtures.py`'s `ROCKS_URI` to `ROCKS_SCHEME_URI` where it met
+`test_skos.py`'s own constant of that name — `ROCKS_SCHEME_URI = rdflib.URIRef(ROCKS_URI)`, the same
+identifier.
+
+**Revisit if:** conformance drift of this kind reaches a story merge again — the gate belongs at each
+story's stage exit, where it would have caught this at US-0 instead of two stories later.
