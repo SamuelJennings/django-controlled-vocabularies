@@ -477,3 +477,37 @@ class TestAuthoritativeUpdateForContainedRecords:
         assert granite_after.label == "Granite (revised)"
         assert "http://example.org/rocks/granite" in report.updated
         assert "http://example.org/rocks/granite" not in report.created
+
+
+class TestRecordsAbsentFromSource:
+    """T015 — FR-013: a record the file no longer mentions is left exactly as
+    it is and named in the report's absent-from-source bucket. `rocks_updated.ttl`
+    drops quartz entirely; a concept elsewhere already referencing it (standing in
+    for "something downstream may already reference it", D5's own reasoning) must
+    still resolve to it afterward."""
+
+    def test_a_concept_dropped_from_the_file_is_untouched_and_named_absent(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        quartz = Concept.objects.get(static_uri="http://example.org/rocks/quartz")
+        quartz_pk, quartz_label = quartz.pk, quartz.label
+        basalt = Concept.objects.get(static_uri="http://example.org/rocks/basalt")
+        reference = ConceptRelation.objects.create(source=basalt, target=quartz, kind=ConceptRelation.Kind.RELATED)
+
+        report = import_skos(FIXTURES / "rocks_updated.ttl")
+
+        quartz_after = Concept.objects.get(static_uri="http://example.org/rocks/quartz")
+        assert quartz_after.pk == quartz_pk
+        assert quartz_after.label == quartz_label
+        assert "http://example.org/rocks/quartz" in report.absent_from_source
+        assert "http://example.org/rocks/quartz" not in report.updated
+        assert "http://example.org/rocks/quartz" not in report.created
+
+        reference.refresh_from_db()
+        assert reference.target_id == quartz_pk
+        assert reference.target.static_uri == "http://example.org/rocks/quartz"
+
+    def test_a_concept_still_mentioned_in_the_file_is_not_reported_absent(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        report = import_skos(FIXTURES / "rocks_updated.ttl")
+        assert "http://example.org/rocks/granite" not in report.absent_from_source
+        assert "http://example.org/rocks/basalt" not in report.absent_from_source

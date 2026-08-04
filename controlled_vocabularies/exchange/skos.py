@@ -433,7 +433,15 @@ def _import_concepts(
     created :class:`Concept` is given a deterministic, scheme-unique slug
     (:func:`_assign_unique_slug`, FR-007) and written through the model's own
     ``save()``.
+
+    Finally (T013/FR-013), every existing concept of ``target_scheme`` whose
+    identity was never seen among ``concept_nodes`` — the file simply does not
+    mention it, as opposed to mentioning and setting it aside — is left
+    completely untouched and named in ``report.absent_from_source``. A concept
+    set aside for claiming a *different* vocabulary is not "absent from
+    source": the file does mention it, just not as a member of this one.
     """
+    mentioned_uris: set[str] = set()
     for node in concept_nodes:
         hint = _first_literal(graph, node, SKOS.prefLabel)
         try:
@@ -441,6 +449,7 @@ def _import_concepts(
         except _FatalIdentity as exc:
             report.add_fatal(exc.reason, exc.subject, **exc.params)
             continue
+        mentioned_uris.add(uri)
 
         other = _conflicting_scheme_ref(graph, node, target_scheme_uri)
         if other is not None:
@@ -471,6 +480,10 @@ def _import_concepts(
             report.add_created(uri)
         else:
             report.add_updated(uri)
+
+    absent = Concept.objects.filter(scheme=target_scheme).exclude(static_uri__in=mentioned_uris)
+    for uri in absent.order_by("static_uri").values_list("static_uri", flat=True):
+        report.add_absent_from_source(uri)
 
 
 def _assign_unique_slug(concept: Concept, scheme: ConceptScheme) -> None:

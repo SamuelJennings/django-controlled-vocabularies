@@ -492,3 +492,27 @@ absent-from-source bucket.
 
 **Watch**: `report.absent_from_source` exists (T003) but nothing populates it yet — T015 is genuine
 new production code, unlike T013/T014.
+
+## 2026-08-04T10:20:00Z · Implementer US2 · T015
+
+**Did**: `_import_concepts()` now tracks every successfully-identified concept URI it sees this run
+(`mentioned_uris`, added the moment `_identify()` succeeds — before the vocabulary-mismatch/
+no-preferred-label checks, so a concept set aside for either reason still counts as "mentioned", not
+absent) and, after the walk, reports every existing concept of `target_scheme` whose URI was never
+seen as `absent_from_source` — left completely untouched, only named (FR-013). Two tests:
+`rocks_updated.ttl` drops quartz entirely; quartz keeps its primary key and label, is named in
+`report.absent_from_source`, is in neither `created` nor `updated`, and a `ConceptRelation` created
+against it *between* the two runs (basalt→quartz, standing in for D5's "something downstream may
+already reference it") still resolves afterward. A second test confirms a still-mentioned concept
+(granite) is never reported absent merely because it happened to update.
+
+**Verified**: `poetry run pytest -q` — 414 passed (412 + 2 new). `poetry run ruff check .` — all
+checks passed. `poetry run ruff format --check .` — 23 files already formatted. `poetry run mypy` —
+success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m
+django makemigrations --check --dry-run --settings=tests.settings` — no changes detected.
+
+**Next**: T016 — the vocabulary's own name and description update from the file, identifier
+unchanged; also D22 (carried from US-1 review): a re-imported file whose declared default language
+conflicts with the one frozen on an existing scheme must be reported as set-aside.
+
+**Watch**: none.
