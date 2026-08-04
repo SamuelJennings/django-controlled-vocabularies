@@ -215,8 +215,8 @@
       "id": "US4",
       "priority": "P2",
       "issue": 64,
-      "worktree": "/home/sam/projects/samueljennings/dcv-fs006-us4",
-      "status": "in_progress",
+      "worktree": null,
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
@@ -245,8 +245,8 @@
       "id": "US5",
       "priority": "P2",
       "issue": 65,
-      "worktree": null,
-      "status": "todo",
+      "worktree": "/home/sam/projects/samueljennings/dcv-fs006-us5",
+      "status": "in_progress",
       "replans": 0,
       "tasks": [
         {
