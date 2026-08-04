@@ -145,33 +145,33 @@
       "id": "US2",
       "priority": "P1",
       "issue": 62,
-      "worktree": "/home/sam/projects/samueljennings/dcv-fs006-us2",
-      "status": "in_progress",
+      "worktree": null,
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T013",
-          "status": "todo",
+          "status": "done",
           "attempts": 0
         },
         {
           "id": "T014",
-          "status": "todo",
+          "status": "done",
           "attempts": 0
         },
         {
           "id": "T015",
-          "status": "todo",
+          "status": "done",
           "attempts": 0
         },
         {
           "id": "T016",
-          "status": "todo",
+          "status": "done",
           "attempts": 0
         },
         {
           "id": "T017",
-          "status": "todo",
+          "status": "done",
           "attempts": 0
         }
       ]
@@ -180,8 +180,8 @@
       "id": "US3",
       "priority": "P2",
       "issue": 63,
-      "worktree": null,
-      "status": "todo",
+      "worktree": "/home/sam/projects/samueljennings/dcv-fs006-us3",
+      "status": "in_progress",
       "replans": 0,
       "tasks": [
         {
