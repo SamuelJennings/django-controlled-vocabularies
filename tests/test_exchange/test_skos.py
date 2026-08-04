@@ -16,7 +16,7 @@ import controlled_vocabularies.exchange as exchange
 from controlled_vocabularies.exchange.report import FatalReason, SetAsideReason
 from controlled_vocabularies.exchange.safety import UnsafeRdfXmlError
 from controlled_vocabularies.exchange.skos import SkosImportError, SkosImportFailed, _read_graph, import_skos
-from controlled_vocabularies.models import Concept, ConceptRelation, ConceptScheme
+from controlled_vocabularies.models import Concept, ConceptLabel, ConceptRelation, ConceptScheme
 from tests.factories import ConceptFactory, ConceptSchemeFactory
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "skos"
@@ -617,6 +617,49 @@ class TestAtomicityOnAPopulatedDatabase:
         assert not Concept.objects.filter(label="Ghost concept").exists()
         scheme.refresh_from_db()
         assert scheme.name == name_before
+
+
+class TestConceptLabels:
+    """T018 — FR-008/research.md R5: preferred labels in configured languages
+    other than the default, and alternative and hidden labels, are stored
+    against their concept through ``Concept.add_label``, each with its own
+    kind and language. The preferred label in the vocabulary's default
+    language is ``Concept.label`` itself (T009) and is never also written as
+    a ``ConceptLabel`` row — ``ConceptLabel.clean()`` refuses that (models.py
+    ``_reject_default_language_preferred``), and this importer must not even
+    attempt it."""
+
+    def test_preferred_labels_in_other_configured_languages_are_stored(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
+        others = {(row.language, row.text) for row in igneous.labels.filter(kind=ConceptLabel.Kind.PREFERRED)}
+        assert others == {("de", "Magmatisches Gestein"), ("fr", "Roche ignée")}
+
+    def test_default_language_preferred_label_is_not_duplicated_as_a_concept_label(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
+        assert igneous.label == "Igneous rock"
+        assert not igneous.labels.filter(language="en", kind=ConceptLabel.Kind.PREFERRED).exists()
+
+    def test_alternative_and_hidden_labels_are_stored_with_their_own_kind_and_language(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        quartz = Concept.objects.get(static_uri="http://example.org/rocks/quartz")
+        assert granite.alt_labels("en") == ["Magma rock"]
+        assert granite.hidden_labels("en") == ["Granit rock"]
+        assert quartz.alt_labels("de") == ["Quartz"]
+
+    def test_reimport_removes_an_alternative_label_the_publisher_dropped_leaving_the_concept_intact(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        granite_pk = Concept.objects.get(static_uri="http://example.org/rocks/granite").pk
+        assert Concept.objects.get(pk=granite_pk).alt_labels("en") == ["Magma rock"]
+
+        import_skos(FIXTURES / "rocks_updated.ttl")
+
+        granite = Concept.objects.get(pk=granite_pk)
+        assert granite.alt_labels("en") == []
+        assert granite.hidden_labels("en") == ["Granit rock"]
+        assert granite.pk == granite_pk
 
 
 class TestFixtureCorpus:

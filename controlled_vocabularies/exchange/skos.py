@@ -24,10 +24,10 @@ from django.db import transaction
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 
-from controlled_vocabularies.exchange.mapping import DCTERMS, SKOS
+from controlled_vocabularies.exchange.mapping import DCTERMS, LABEL_PREDICATES, SKOS
 from controlled_vocabularies.exchange.report import FatalReason, ImportReport, SetAsideReason
 from controlled_vocabularies.exchange.safety import scan_rdf_xml
-from controlled_vocabularies.models import Concept, ConceptScheme, validate_static_uri
+from controlled_vocabularies.models import Concept, ConceptLabel, ConceptScheme, validate_static_uri
 
 #: The three serializations FR-002 requires this feature to read. Anything
 #: else — an unrecognised extension with no explicit ``format``, or an
@@ -438,6 +438,63 @@ def _preferred_label_in(graph: rdflib.Graph, node: rdflib.term.Node, language: s
     return values[0] if values else None
 
 
+def _import_labels(
+    graph: rdflib.Graph,
+    node: rdflib.term.Node,
+    concept: Concept,
+    default_language: str,
+    uri: str,
+    report: ImportReport,
+) -> None:
+    """Store ``concept``'s labels other than its own default-language preferred one (T018, FR-008).
+
+    Replaces whatever labels this concept already held: a label carries no
+    identifier of its own to upsert by (unlike the concept itself, R6), and
+    the file is authoritative for what it contains (FR-013) — a value the
+    publisher has since dropped must not linger. :attr:`LABEL_PREDICATES`
+    covers ``skos:prefLabel``/``altLabel``/``hiddenLabel``; a preferred label
+    in ``default_language`` is skipped rather than written as a
+    :class:`~controlled_vocabularies.models.ConceptLabel` row, because that
+    value is already ``concept.label`` (T009) and the model itself refuses a
+    second preferred row in that language (models.py
+    ``_reject_default_language_preferred``) — this importer must not even
+    attempt it.
+
+    A language this application is not configured for is not filtered here
+    yet (tasks.md T020 adds that): every fixture this task reads from is
+    already in a configured language, so writing through
+    :meth:`~controlled_vocabularies.models.Concept.add_label` unconditionally
+    is correct for now.
+    """
+    concept.labels.all().delete()
+    for predicate, kind in LABEL_PREDICATES.items():
+        for literal in graph.objects(node, predicate):
+            if not isinstance(literal, rdflib.Literal) or not literal.language:
+                continue
+            language = literal.language
+            if kind == ConceptLabel.Kind.PREFERRED and language == default_language:
+                continue
+            concept.add_label(language=language, kind=kind, text=str(literal))
+
+
+def _import_concept_content(
+    graph: rdflib.Graph,
+    node: rdflib.term.Node,
+    concept: Concept,
+    target_scheme: ConceptScheme,
+    uri: str,
+    report: ImportReport,
+) -> None:
+    """Import everything about ``concept`` beyond its identity and default-language label.
+
+    Called once per created-or-updated concept, after it has a primary key
+    (T018's label replacement needs one). Grows one call at a time as
+    Phase US-3 lands: T018 (labels) first, T019 (notes) and T021
+    (notation/mappings/unmodelled predicates) alongside it.
+    """
+    _import_labels(graph, node, concept, target_scheme.effective_default_language, uri, report)
+
+
 def _import_concepts(
     graph: rdflib.Graph,
     target_scheme: ConceptScheme,
@@ -501,6 +558,7 @@ def _import_concepts(
         concept.label = label
         _assign_unique_slug(concept, target_scheme)
         concept.save()
+        _import_concept_content(graph, node, concept, target_scheme, uri, report)
         if created:
             report.add_created(uri)
         else:
