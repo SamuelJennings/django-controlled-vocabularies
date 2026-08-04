@@ -1688,3 +1688,64 @@ restored the fix immediately, full suite re-ran green.
 **Revisit if:** a future story needs `_assign_unique_slug` reachable outside `_import_concepts`'s own
 per-concept loop (it currently has exactly one caller) — `taken_slugs` would need seeding at whatever
 new call site takes on that responsibility, the same discipline this fix already applies here.
+
+## D50 — A node identified as a concept only through a scheme-membership predicate, never through `rdf:type`, is imported rather than left invisible (review fix 17)
+
+`concept_nodes` came only from `graph.subjects(rdflib.RDF.type, SKOS.Concept)`. A node the file
+identifies as a concept through `skos:inScheme`, `skos:topConceptOf`, or the scheme's own
+`skos:hasTopConcept` — the identical three predicates `_scheme_refs` already reads to check for a
+vocabulary mismatch — but which never states `rdf:type` at all, was invisible to the whole import: not
+created, not set aside, not named anywhere in the report. A curator importing such a file got a green
+result naming only the scheme, no concepts, and no explanation. This is not a hypothetical corner:
+omitting `rdf:type` on a concept while still declaring its scheme membership is a real shape a
+published file can take, and the governing rule stated across this whole review batch — "an unusable
+value is set aside and reported; it is never dropped in silence" — applies just as much to a whole
+*record* the file plainly means to include as it does to one field on a record already found.
+
+**Decided: treat such a node as a concept, not merely report that one was skipped.** The silent no-op
+was ruled out from the start (the review brief's own words); between "import it" and "refuse/report
+it without importing", importing it is what the file's own membership predicates already say to do —
+`skos:inScheme`/`skos:topConceptOf` on the node itself, or `skos:hasTopConcept` naming it from the
+scheme, are not ambiguous about intent the way, say, an untyped node with no predicates at all would
+be. A node reporting *itself* as a set-aside "found but not classified" case would be strictly less
+useful than simply completing the classification the file's own predicates already supply, and every
+downstream check this importer already runs (`_conflicting_scheme_ref`, `NO_PREFERRED_LABEL`,
+`_identify`'s own blank-node/refused-identity fatal checks) applies to it exactly as it would to an
+explicitly-typed concept — nothing about the rest of the pipeline needs to know the difference.
+
+**Chosen: a new `_implied_concept_nodes(graph)` helper, folded into `concept_nodes` before scheme
+disambiguation runs**, restricted to a node carrying **no** `rdf:type` triple whatsoever — a node the
+file *does* type, as anything other than `skos:Concept`, is left entirely to whatever that type
+already makes of it (a `skos:Collection`, a `skos:ConceptScheme`), never reclassified. Computed
+graph-wide (`graph.subjects(SKOS.inScheme, None)` / `graph.subjects(SKOS.topConceptOf, None)` /
+`graph.objects(None, SKOS.hasTopConcept)`), not scoped to one already-chosen scheme, because there is
+no `declared_node` decided yet at the point this must run — `_choose_declared_scheme` itself already
+uses `concept_nodes` to break a tie between multiple declared schemes by counting each one's members
+(`_scheme_refs`), so folding the implied nodes in *before* that call, not after, means an implied
+concept correctly counts toward its own scheme's membership tally too, not only toward whether it gets
+imported at all.
+
+**A node implied into a *foreign* scheme is not a special case — it falls through to the same
+`VOCABULARY_MISMATCH` check an explicitly-typed foreign concept already gets**, since nothing about
+`_conflicting_scheme_ref`/`_import_concepts` depends on how a node arrived in `concept_nodes`.
+Likewise a node with no usable identity (a blank node, or a refused URI scheme) reaches the same
+`_identify`-driven fatal path any other concept node does — no special-casing needed there either.
+
+**One limitation, named rather than hidden.** This does not attempt to distinguish "this untyped node
+is really a `Collection`, not a `Concept`" — a node with, say, `skos:memberList` but no `rdf:type` and
+no scheme-membership predicate of its own stays entirely outside this fix's scope (and outside the
+whole import, as before), since nothing here claims to guess a *collection's* implied type the way
+`skos:inScheme`/`topConceptOf`/`hasTopConcept` specifically imply concept-hood. No fixture material
+motivates guessing that case yet.
+
+**Verified by mutation, at two independent layers.** Reverted `concept_nodes` to the original
+type-only query. Four of the five new `TestConceptsImpliedByMembershipButNeverGivenAnRdfType` tests
+failed (`Concept.DoesNotExist` / a `report.created` set missing all three implied concepts), and,
+independently, `TestEverySkosPredicateIsReadOrReported`'s own new parametrized instance for the new
+fixture failed too, naming `skos:hasTopConcept` on the scheme as neither reflected in a record nor
+reported — proving the coverage gate itself, not only the dedicated test class, would have caught this
+regressing. Restored immediately; full suite re-ran green.
+
+**Revisit if:** a real published vocabulary motivates guessing collection-hood the same way — that is
+new scope, not a correction to this decision's deliberate concept-only reading of the three
+membership predicates.

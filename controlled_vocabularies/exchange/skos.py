@@ -460,6 +460,30 @@ def _scheme_refs(graph: rdflib.Graph, concept_node: rdflib.term.Node) -> set[str
     return refs
 
 
+def _implied_concept_nodes(graph: rdflib.Graph) -> set[rdflib.term.Node]:
+    """Nodes the file identifies as concepts through a scheme-membership
+    predicate, but never types with ``rdf:type skos:Concept`` at all (review
+    fix 17, decisions.md D50).
+
+    ``concept_nodes`` used to come only from ``graph.subjects(rdflib.RDF.type,
+    SKOS.Concept)`` — a node reachable only through its own
+    ``skos:inScheme``/``skos:topConceptOf``, or as the object of some
+    scheme's own ``skos:hasTopConcept`` (the identical three predicates
+    :func:`_scheme_refs` already reads, here read graph-wide rather than for
+    one concept at a time, since there is no target scheme decided yet at
+    the point this runs — it feeds :func:`_choose_declared_scheme` too), was
+    invisible to the whole import: not created, not set aside, not named in
+    the report at all. Restricted to a node carrying **no** ``rdf:type``
+    whatsoever — one the file does type, as something other than
+    ``skos:Concept``, is left entirely to whatever that type already makes
+    of it, never reclassified.
+    """
+    candidates: set[rdflib.term.Node] = set(graph.subjects(SKOS.inScheme, None))
+    candidates |= set(graph.subjects(SKOS.topConceptOf, None))
+    candidates |= set(graph.objects(None, SKOS.hasTopConcept))
+    return {node for node in candidates if next(graph.objects(node, rdflib.RDF.type), None) is None}
+
+
 def _skos_curie(predicate: rdflib.URIRef) -> str:
     """The ``skos:xxx`` CURIE for a predicate in the SKOS namespace (report display only,
     FIX 15, decisions.md D48) — every :data:`LABEL_PREDICATES`/`NOTE_PREDICATES` key is one,
@@ -1445,7 +1469,14 @@ def import_skos(
 
     with transaction.atomic():
         declared_nodes = sorted(graph.subjects(rdflib.RDF.type, SKOS.ConceptScheme), key=str)
-        concept_nodes = sorted(graph.subjects(rdflib.RDF.type, SKOS.Concept), key=str)
+        # FIX 17 (review, decisions.md D50): a node the file identifies as a
+        # concept only through skos:inScheme/topConceptOf/hasTopConcept —
+        # never through rdf:type skos:Concept — is folded in here, before
+        # scheme disambiguation runs, so it is neither invisible to the
+        # import nor to _choose_declared_scheme's own membership count.
+        concept_nodes = sorted(
+            set(graph.subjects(rdflib.RDF.type, SKOS.Concept)) | _implied_concept_nodes(graph), key=str
+        )
 
         declared_node = _choose_declared_scheme(
             graph, declared_nodes, concept_nodes, scheme, report, source_label=source_label

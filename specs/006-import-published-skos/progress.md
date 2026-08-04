@@ -1903,3 +1903,46 @@ passed. `poetry run ruff format --check .` — 22 files already formatted. `poet
 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django
 makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry run
 pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T17:15:00Z · Forge · review fix 17 — a concept with no `rdf:type` is invisible, and the run reports success
+
+**Did**: `concept_nodes` came only from `graph.subjects(rdflib.RDF.type, SKOS.Concept)`. A node the
+file identifies as a concept only through `skos:inScheme`, `skos:topConceptOf`, or the scheme's own
+`skos:hasTopConcept` — never through `rdf:type` — was invisible to the whole import: not created, not
+set aside, nothing in the report. Reproduced with the review's own shape: a scheme declaring
+`skos:hasTopConcept ex:a`, `ex:a` carrying `skos:inScheme` and a preferred label but no `rdf:type`,
+imported as `created == ['…/scheme']`, zero concepts, `set_aside == []`.
+
+Wrote the failing tests first: new fixture `tests/fixtures/skos/concept_implied_by_membership_no_rdf_type.ttl`
+(three concepts, each reachable through exactly one of the three predicates and none carrying `a
+skos:Concept`) and `TestConceptsImpliedByMembershipButNeverGivenAnRdfType` in `test_skos.py` (one test
+per predicate route, one asserting all three are named `created` with no fatal findings, and a
+regression control confirming a node the file *does* type as something else is never reclassified).
+Four of five failed for the right reason (`Concept.DoesNotExist`) before the production change.
+
+Decided, recorded as decisions.md D50: **treat such a node as a concept, not merely report it as
+skipped** — the file's own membership predicates already say what it means, and every downstream check
+(vocabulary-mismatch, no-preferred-label, blank-node/refused-identity) applies to it exactly as to an
+explicitly-typed concept. Production change: a new `_implied_concept_nodes(graph)` helper (computed
+graph-wide, mirroring `_scheme_refs`'s own three predicates but not scoped to any one already-chosen
+scheme, since none is chosen yet), folded into `concept_nodes` in `import_skos` *before*
+`_choose_declared_scheme` runs — so an implied concept also counts toward its own scheme's membership
+tally when disambiguating between multiple declared schemes, not only toward whether it gets imported
+at all. Restricted to a node carrying no `rdf:type` triple whatsoever, so a node the file does type as
+something else (a `Collection`, a `ConceptScheme`) is never reclassified.
+
+Mutation probe, at two layers: reverted `concept_nodes` to the type-only query. Four dedicated tests
+failed, and — independently — `TestEverySkosPredicateIsReadOrReported`'s own new auto-swept
+parametrized instance for the new fixture failed too, naming `skos:hasTopConcept` as neither reflected
+in a record nor reported, proving the coverage gate itself would have caught this regressing. Restored
+immediately; full suite re-ran green. Named one honest limitation in decisions.md D50: this does not
+attempt to guess collection-hood for an untyped node with no scheme-membership predicate of its own —
+out of this fix's scope, no fixture material motivating it yet.
+
+**Verified**: `poetry run pytest -q` — 655 passed (648 baseline-after-FIX-16 + 7 new: 5 in
+`TestConceptsImpliedByMembershipButNeverGivenAnRdfType`, 1 new predicate-coverage-gate parametrized
+instance, 1 new fixture-corpus-discovery parametrized instance). `poetry run ruff check .` — all
+checks passed. `poetry run ruff format --check .` — 22 files already formatted. `poetry run mypy` —
+success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m
+django makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry run
+pre-commit run --all-files` — all hooks passed.

@@ -334,6 +334,57 @@ class TestImportConcepts:
         assert "http://example.org/rocks/granite" not in report.created
 
 
+class TestConceptsImpliedByMembershipButNeverGivenAnRdfType:
+    """FIX 17 (review, decisions.md D50) — ``concept_nodes`` used to come only
+    from ``graph.subjects(rdf.RDF.type, SKOS.Concept)``. A node the file
+    identifies as a concept through ``skos:inScheme``, ``skos:topConceptOf``,
+    or the scheme's own ``skos:hasTopConcept`` — the identical three
+    predicates ``_scheme_refs`` already reads — but which never states
+    ``rdf:type`` at all, was invisible to the whole import: not created, not
+    set aside, not named anywhere in the report. A curator importing such a
+    file got a green result reporting only the scheme, with no explanation
+    for the missing concepts at all."""
+
+    def test_a_node_reachable_only_through_hastopconcept_is_imported_as_a_concept(self, db):
+        import_skos(FIXTURES / "concept_implied_by_membership_no_rdf_type.ttl")
+        alpha = Concept.objects.get(static_uri="http://example.org/implied/alpha")
+        assert alpha.label == "Alpha"
+        assert alpha.scheme.static_uri == "http://example.org/implied/"
+
+    def test_a_node_reachable_only_through_its_own_inscheme_is_imported_as_a_concept(self, db):
+        import_skos(FIXTURES / "concept_implied_by_membership_no_rdf_type.ttl")
+        beta = Concept.objects.get(static_uri="http://example.org/implied/beta")
+        assert beta.label == "Beta"
+        assert beta.scheme.static_uri == "http://example.org/implied/"
+
+    def test_a_node_reachable_only_through_its_own_topconceptof_is_imported_as_a_concept(self, db):
+        import_skos(FIXTURES / "concept_implied_by_membership_no_rdf_type.ttl")
+        gamma = Concept.objects.get(static_uri="http://example.org/implied/gamma")
+        assert gamma.label == "Gamma"
+        assert gamma.scheme.static_uri == "http://example.org/implied/"
+
+    def test_all_three_are_named_created_and_the_run_reports_no_fatal_findings(self, db):
+        report = import_skos(FIXTURES / "concept_implied_by_membership_no_rdf_type.ttl")
+        assert report.fatal == []
+        assert set(report.created) == {
+            "http://example.org/implied/",
+            "http://example.org/implied/alpha",
+            "http://example.org/implied/beta",
+            "http://example.org/implied/gamma",
+        }
+
+    def test_a_node_already_typed_as_something_else_is_never_reclassified(self, db):
+        # A node the file does give an rdf:type is never overridden by this
+        # widened discovery — mixed_scheme_membership.ttl's own concepts are
+        # all explicitly typed, and the scheme nodes there must stay schemes,
+        # not be swept up as concepts merely for appearing as an inScheme
+        # object (they never do — inScheme's *subject* is the candidate, not
+        # its object — but this asserts the outcome, not only the mechanism).
+        import_skos(FIXTURES / "mixed_scheme_membership.ttl")
+        assert not Concept.objects.filter(static_uri="http://example.org/minerals/").exists()
+        assert ConceptScheme.objects.filter(static_uri="http://example.org/minerals/").exists()
+
+
 class TestConceptSlugs:
     """T010 — FR-007/decisions.md D6: an imported concept's slug is derived
     from its label by the model's own rule, disambiguated by a deterministic
