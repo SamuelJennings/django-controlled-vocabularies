@@ -1196,3 +1196,48 @@ publisher's file dropped it" from "absent because it was never externally identi
 place" — right now both land in the same bucket under the same shape of value (a URI, static or
 dynamic), which this fix treats as correct per `CONTEXT.md`'s identity model, not as a gap to close
 here.
+
+## D42 — Reassigning a concept to a different vocabulary is never a side effect of reading a file (review fix 8)
+
+A second review of the merged feature found that `_import_concepts` assigned `concept.scheme =
+target_scheme` unconditionally on a `Concept.objects.get_by_uri` match, with no check that the
+matched record already belonged to a *different* vocabulary. FR-005 lets a file that declares no
+vocabulary of its own be imported into any caller-named target, so importing the identical file
+first into one vocabulary and then into a second silently emptied the first: every concept moved,
+and `report.updated` named the move with a bucket that means "content refreshed", not "record
+relocated" — nothing in the report distinguished the two.
+
+The spec's Edge Cases are the nearest governing text, and they point the same direction without
+naming this exact shape: a contradictory source is set aside and reported while reading, not acted
+on. Moving a record between vocabularies is a curatorial act — the maintainer's own word for it,
+carried from the spec's broader stance that deletion, deprecation, and reassignment are each
+deliberate acts a curator takes, never incidental consequences of running an importer (D5's
+authoritative-for-what-it-contains rule governs *content*, not which vocabulary a record belongs to
+at all).
+
+**Chosen: a concept matched by `get_by_uri` that already belongs to a different vocabulary than the
+one being imported is left exactly where it is.** It is set aside and reported under a new
+`SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY` member, naming both the vocabulary it currently
+belongs to and the one the run was importing into, and the run continues with everything else in the
+file. Its content (labels, notes, relationships) is not touched either — the whole record is
+untouched, the same "not created, not updated, but mentioned so never `absent_from_source`" shape
+`VOCABULARY_MISMATCH`/`NO_PREFERRED_LABEL`/`EMPTY_SLUG` already established (T009/D17/D39).
+
+**Where the check sits:** after the `get_by_uri` match/create branch resolves (so a *newly created*
+concept never trips it — there is nothing to conflict with), before the row is mutated at all.
+`target_scheme.pk` is always populated by this point, because `_resolve_scheme` has already saved it
+before `_import_concepts` is ever called.
+
+**Reproduced before the fix.** A no-scheme Turtle file with two concepts (`ex:a`/`ex:b`, `ex:b
+skos:broader ex:a`) imported first into scheme "first", then into scheme "second": before the fix,
+both concepts' `scheme_id` became "second"'s, `first.concepts.count()` went to zero, and
+`report.updated` listed both URIs with nothing naming the move.
+
+**Revisit if:** `_import_collections` turns out to need the identical rule — a collection is a
+record with its own identity for the same reasons a concept is (D32), so the same defect shape is
+plausible there too; if so, the same `SetAsideReason` should be reused rather than a second one
+minted, since the underlying question ("does this record's identity already belong to a different
+vocabulary?") does not change with the kind of record asking it. Also revisit if a future workflow
+wants an explicit, curator-triggered "move this record to another vocabulary" operation — that is new
+functionality with its own review of what happens to relationships on the far side of the move, not a
+correction to this rule, which only ever concerns what an *import* run does on its own.

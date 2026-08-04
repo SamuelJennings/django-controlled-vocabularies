@@ -1493,6 +1493,62 @@ class TestAbsentFromSourceNeverContainsNone:
         assert local.uri in report.absent_from_source
 
 
+class TestExistingConceptIsNotSilentlyMovedBetweenVocabularies:
+    """FIX 8 (review, decisions.md D42) — ``_import_concepts`` assigned
+    ``concept.scheme = target_scheme`` unconditionally on a ``get_by_uri``
+    match, with no check that the matched record already belonged to a
+    *different* vocabulary. FR-005 lets a file that declares no vocabulary
+    of its own be imported into any caller-named target, so importing the
+    same file into a second target silently emptied the first — the report
+    called it ``updated``, indistinguishable from an ordinary content
+    refresh. Moving a record between vocabularies is a curatorial act, not
+    something reading a file should do as a side effect: a concept whose
+    URI already belongs to a different vocabulary is left exactly where it
+    is, set aside and reported naming both vocabularies."""
+
+    def test_a_concept_already_in_another_vocabulary_is_not_moved(self, db):
+        first = ConceptSchemeFactory(name="First")
+        second = ConceptSchemeFactory(name="Second")
+        import_skos(FIXTURES / "vocabulary_reassignment.ttl", scheme=first)
+
+        import_skos(FIXTURES / "vocabulary_reassignment.ttl", scheme=second)
+
+        a = Concept.objects.get(static_uri="http://example.org/reassignment/a")
+        b = Concept.objects.get(static_uri="http://example.org/reassignment/b")
+        assert a.scheme_id == first.pk
+        assert b.scheme_id == first.pk
+        assert first.concepts.count() == 2
+        assert second.concepts.count() == 0
+
+    def test_the_conflict_is_reported_naming_both_vocabularies(self, db):
+        first = ConceptSchemeFactory(name="First")
+        second = ConceptSchemeFactory(name="Second")
+        import_skos(FIXTURES / "vocabulary_reassignment.ttl", scheme=first)
+
+        report = import_skos(FIXTURES / "vocabulary_reassignment.ttl", scheme=second)
+
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY]
+        assert {entry.subject for entry in entries} == {
+            "http://example.org/reassignment/a",
+            "http://example.org/reassignment/b",
+        }
+        for entry in entries:
+            assert entry.params["current"] == first.uri
+            assert entry.params["target"] == second.uri
+
+    def test_report_updated_does_not_claim_the_move_happened(self, db):
+        first = ConceptSchemeFactory(name="First")
+        second = ConceptSchemeFactory(name="Second")
+        import_skos(FIXTURES / "vocabulary_reassignment.ttl", scheme=first)
+
+        report = import_skos(FIXTURES / "vocabulary_reassignment.ttl", scheme=second)
+
+        assert "http://example.org/reassignment/a" not in report.updated
+        assert "http://example.org/reassignment/b" not in report.updated
+        assert "http://example.org/reassignment/a" not in report.created
+        assert "http://example.org/reassignment/b" not in report.created
+
+
 class TestBlankNodeCollectionFails:
     """T030 — decisions.md D3: a collection identified only by a blank node
     fails the run, on the same rule that governs a concept. An ordered

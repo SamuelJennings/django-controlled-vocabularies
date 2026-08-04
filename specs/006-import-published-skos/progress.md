@@ -1514,3 +1514,35 @@ sweep re-parametrization). `poetry run ruff check .` — all checks passed. `poe
 deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations --check
 --dry-run --settings=tests.settings` — no changes detected. `poetry run pre-commit run --all-files` —
 all hooks passed.
+
+## 2026-08-04T14:05:00Z · Forge · review fix 8 — an existing concept is silently moved between vocabularies
+
+**Did**: closed a high-severity finding from the review's second batch: `_import_concepts` assigned
+`concept.scheme = target_scheme` unconditionally on a `Concept.objects.get_by_uri` match, with no
+check that the matched record already belonged to a *different* vocabulary — FR-005 lets a file
+declaring no vocabulary of its own be imported into any caller-named target, so importing the same
+file into a second target silently emptied the first, and `report.updated` named the move with a
+bucket that means "content refreshed", indistinguishable from an ordinary corrected label. Wrote the
+failing tests first — `TestExistingConceptIsNotSilentlyMovedBetweenVocabularies` in `test_skos.py`,
+using a new `vocabulary_reassignment.ttl` fixture (no scheme declared, two concepts `a`/`b`, `b
+skos:broader a`) imported first into a scheme "First" then a scheme "Second" — confirmed all three
+failed before any production change: both concepts' `scheme_id` became "Second"'s,
+`first.concepts.count()` went to zero, and `report.updated` listed both URIs with nothing naming the
+move. Made the production change: `_import_concepts` now checks, right after the `get_by_uri`
+match/create branch resolves and before anything is mutated, whether a *matched* (not newly created)
+concept's `scheme_id` already differs from `target_scheme.pk`; if so it is set aside under a new
+`SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY` member, naming both vocabularies, and left completely
+untouched. Recorded as decisions.md D42, including a "Revisit if" flagging that `_import_collections`
+plausibly needs the identical rule (checked next).
+
+**Mutation probe**: disabled the new guard (`if False and not created and concept.scheme_id != ...`),
+re-ran the new test class, confirmed all three tests failed the same way as before the fix; restored,
+re-ran green.
+
+**Verified**: `poetry run pytest -q` — 576 passed (569 baseline-with-untracked-fixtures + 3 new in
+`TestExistingConceptIsNotSilentlyMovedBetweenVocabularies`, plus 4 generic `SetAsideReason` sweep
+tests re-parametrizing over the new `ALREADY_IN_ANOTHER_VOCABULARY` member). `poetry run ruff check .`
+— all checks passed. `poetry run ruff format .` — 1 file reformatted (`test_skos.py`) then clean.
+`poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned.
+`poetry run python -m django makemigrations --check --dry-run --settings=tests.settings` — no changes
+detected. `poetry run pre-commit run --all-files` — all hooks passed.

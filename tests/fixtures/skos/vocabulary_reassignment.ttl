@@ -1,0 +1,15 @@
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+# FIX 8 (review, decisions.md D42). Declares no vocabulary of its own — FR-005
+# lets this be imported into any caller-named target — so the same file can
+# be imported first into one vocabulary, then into a second, and the fixed
+# rule under test is what happens to "a"/"b" the second time.
+
+<http://example.org/reassignment/a>
+    a skos:Concept ;
+    skos:prefLabel "A"@en .
+
+<http://example.org/reassignment/b>
+    a skos:Concept ;
+    skos:prefLabel "B"@en ;
+    skos:broader <http://example.org/reassignment/a> .

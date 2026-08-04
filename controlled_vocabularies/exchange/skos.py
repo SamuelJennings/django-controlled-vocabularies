@@ -1072,7 +1072,10 @@ def _import_concepts(
     dedicated to this case is T022's (decisions.md D17). A matched or newly
     created :class:`Concept` is given a deterministic, scheme-unique slug
     (:func:`_assign_unique_slug`, FR-007) and written through the model's own
-    ``save()``.
+    ``save()``. A URI matching an *existing* record that already belongs to a
+    different vocabulary is left there, set aside and reported naming both
+    vocabularies, rather than silently moved (review fix 8, decisions.md D42,
+    :data:`SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY`).
 
     Finally (T013/FR-013), every existing concept of ``target_scheme`` whose
     identity was never seen among ``concept_nodes`` — the file simply does not
@@ -1132,6 +1135,23 @@ def _import_concepts(
         except Concept.DoesNotExist:
             concept = Concept(scheme=target_scheme)
             created = True
+
+        if not created and concept.scheme_id != target_scheme.pk:
+            # FIX 8 (review, decisions.md D42): a concept matched here
+            # already belongs to a *different* vocabulary than the one being
+            # imported. FR-005 lets a file declaring no vocabulary of its
+            # own be imported into any caller-named target, so importing the
+            # same file into a second target must not silently empty the
+            # first — moving a record between vocabularies is a curatorial
+            # act, never a side effect of reading a file.
+            report.add_set_aside(
+                SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY,
+                subject=uri,
+                current=concept.scheme.uri,
+                target=target_scheme.uri,
+            )
+            continue
+
         concept.scheme = target_scheme
         concept.static_uri = uri
         concept.label = label

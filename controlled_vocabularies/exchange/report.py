@@ -54,6 +54,12 @@ class SetAsideReason(TextChoices):
     of characters ``slugify()`` strips — the label itself is fine, but the
     slug it derives is empty, which the model refuses to store; the concept
     is set aside rather than crash the run on that refusal.
+    ``ALREADY_IN_ANOTHER_VOCABULARY`` (review fix 8/9, decisions.md D42) names
+    a concept or collection whose identity is already held by a *different*
+    vocabulary than the one being imported: moving a record between
+    vocabularies is a curatorial act, never a side effect of reading a file,
+    so the existing record is left exactly where it is rather than
+    reassigned.
     """
 
     UNCONFIGURED_LANGUAGE = "unconfigured_language", _("language not configured")
@@ -68,6 +74,7 @@ class SetAsideReason(TextChoices):
     RELATION_DISJOINTNESS = "relation_disjointness", _("broader/narrower and related both claimed for a pair")
     SURPLUS_PREFERRED_LABEL = "surplus_preferred_label", _("surplus preferred label in a language")
     EMPTY_SLUG = "empty_slug", _("preferred label produces no usable slug")
+    ALREADY_IN_ANOTHER_VOCABULARY = "already_in_another_vocabulary", _("already belongs to another vocabulary")
 
     @property
     def template(self) -> Promise:
@@ -125,6 +132,10 @@ _REASON_TEMPLATES: dict[SetAsideReason, Promise] = {
     SetAsideReason.EMPTY_SLUG: _(
         "'%(subject)s' has a preferred label made up only of characters this application strips when "
         "deriving a URL slug, so no usable slug could be derived from it; it was set aside."
+    ),
+    SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY: _(
+        "'%(subject)s' already belongs to the vocabulary '%(current)s'; importing it into '%(target)s' "
+        "would move it between vocabularies, so it was left where it is."
     ),
 }
 

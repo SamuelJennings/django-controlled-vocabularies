@@ -36,6 +36,10 @@ _EXAMPLE_PARAMS = {
     SetAsideReason.RELATION_DISJOINTNESS: {"other": "https://example.org/vocab/other"},
     SetAsideReason.SURPLUS_PREFERRED_LABEL: {"language": "de"},
     SetAsideReason.EMPTY_SLUG: {},
+    SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY: {
+        "current": "https://example.org/vocab/current",
+        "target": "https://example.org/vocab/target",
+    },
 }
 
 # One example params dict per fatal reason (T007), the same shape as _EXAMPLE_PARAMS.
