@@ -570,6 +570,7 @@ _HANDLED_CONCEPT_PREDICATES = frozenset(
         DCTERMS.description,
         SKOS.broader,
         SKOS.narrower,
+        SKOS.related,
     }
     | set(LABEL_PREDICATES)
     | set(NOTE_PREDICATES)
@@ -649,10 +650,10 @@ def _import_relations(
     successful_concepts: dict[str, Concept],
     report: ImportReport,
 ) -> None:
-    """Reconcile ``skos:broader``/``skos:narrower`` into the single canonical
-    :attr:`~controlled_vocabularies.models.ConceptRelation.Kind.BROADER` row
-    research.md R4 defines, for every concept this run created or updated
-    (T023, FR-010/FR-011/FR-013).
+    """Reconcile ``skos:broader``/``skos:narrower``/``skos:related`` into the
+    single canonical :class:`~controlled_vocabularies.models.ConceptRelation`
+    row research.md R4 defines for each pair, for every concept this run
+    created or updated (T023/T024, FR-010/FR-011/FR-013).
 
     Read only from the concepts this run itself just wrote — a concept set
     aside for another reason (a vocabulary mismatch, no preferred label) has
@@ -660,40 +661,48 @@ def _import_relations(
     read here: its identity is simply never a key of ``successful_concepts``.
 
     ``skos:broader`` and ``skos:narrower`` both resolve to the same stored
-    row: :meth:`~controlled_vocabularies.models.Concept.add_broader`'s own
-    contract is ``source`` the narrower end, ``target`` the broader end, so a
-    ``narrower`` triple's ends are swapped before the pair is looked up. Both
-    directions stated for the same pair collapse to the same dict key, so
-    exactly one row results (FR-010) — the whole file's worth of pairs is read
-    before any of them is written, rather than creating one and then the
-    other, so which direction the file happened to state first never matters.
+    BROADER row: :meth:`~controlled_vocabularies.models.Concept.add_broader`'s
+    own contract is ``source`` the narrower end, ``target`` the broader end,
+    so a ``narrower`` triple's ends are swapped before the pair is looked up.
+    ``skos:related`` is symmetric and keyed by an unordered pair for the same
+    reason (T024). Both directions stated for the same pair — either shape —
+    collapse to the same dict key, so exactly one row results per pair
+    (FR-010): the whole file's worth of pairs is read before any of them is
+    written, rather than creating one and then the other, so which direction
+    the file happened to state first never matters.
 
-    Every BROADER relation touching a concept this run wrote is then made to
-    match the file exactly (FR-013): an existing row the file no longer
-    restates is deleted, and a row the file newly states is created. This is
-    computed as one whole pass over every concept this run touched, rather
-    than incrementally per concept, because a relation is commonly asserted
-    from only one of its two ends (``narrower`` from the parent, ``broader``
-    from the child) — an incremental per-concept delete-and-recreate would
-    delete a row a sibling concept's own pass had only just written,
-    depending on which concept happened to be reached first.
+    Every relation touching a concept this run wrote is then made to match
+    the file exactly (FR-013): an existing row the file no longer restates is
+    deleted, and a row the file newly states is created. This is computed as
+    one whole pass over every concept this run touched, rather than
+    incrementally per concept, because a relation is commonly asserted from
+    only one of its two ends (``narrower`` from the parent, ``broader`` from
+    the child; either end for ``related``) — an incremental per-concept
+    delete-and-recreate would delete a row a sibling concept's own pass had
+    only just written, depending on which concept happened to be reached
+    first.
 
     An end neither reachable through this run's own writes nor already in the
     database under a matching scheme is set aside and reported, naming both
     ends, and the run continues (FR-011, finished with acceptance coverage at
-    T025, decisions.md D29).
+    T025).
     """
-    desired: dict[tuple[str, str], None] = {}
+    desired_broader: dict[tuple[str, str], None] = {}
+    desired_related: dict[frozenset[str], None] = {}
     for uri in successful_concepts:
         node = rdflib.URIRef(uri)
         for other in graph.objects(node, SKOS.broader):
-            desired[(uri, str(other))] = None
+            desired_broader[(uri, str(other))] = None
         for other in graph.objects(node, SKOS.narrower):
-            desired[(str(other), uri)] = None
+            desired_broader[(str(other), uri)] = None
+        for other in graph.objects(node, SKOS.related):
+            desired_related[frozenset({uri, str(other)})] = None
 
-    resolved: set[tuple[int, int]] = set()
+    resolved_broader: set[tuple[int, int]] = set()
+    resolved_related: set[frozenset[int]] = set()
     concepts_by_pk: dict[int, Concept] = {}
-    for narrower_uri, broader_uri in desired:
+
+    for narrower_uri, broader_uri in desired_broader:
         narrower_concept = _resolve_relation_concept(narrower_uri, successful_concepts, target_scheme)
         broader_concept = _resolve_relation_concept(broader_uri, successful_concepts, target_scheme)
         if narrower_concept is None or broader_concept is None:
@@ -701,24 +710,60 @@ def _import_relations(
             other_uri = broader_uri if narrower_concept is not None else narrower_uri
             report.add_set_aside(SetAsideReason.MISSING_RELATION_END, subject=subject_uri, other=other_uri)
             continue
-        resolved.add((narrower_concept.pk, broader_concept.pk))
+        resolved_broader.add((narrower_concept.pk, broader_concept.pk))
         concepts_by_pk[narrower_concept.pk] = narrower_concept
         concepts_by_pk[broader_concept.pk] = broader_concept
 
+    for pair in desired_related:
+        if len(pair) < 2:
+            # A concept stating skos:related about itself — not a real
+            # association (the model's own _reject_self would refuse it);
+            # nothing meaningful to reconcile.
+            continue
+        a_uri, b_uri = tuple(pair)
+        a_concept = _resolve_relation_concept(a_uri, successful_concepts, target_scheme)
+        b_concept = _resolve_relation_concept(b_uri, successful_concepts, target_scheme)
+        if a_concept is None or b_concept is None:
+            subject_uri = a_uri if a_concept is not None else b_uri
+            other_uri = b_uri if a_concept is not None else a_uri
+            report.add_set_aside(SetAsideReason.MISSING_RELATION_END, subject=subject_uri, other=other_uri)
+            continue
+        resolved_related.add(frozenset({a_concept.pk, b_concept.pk}))
+        concepts_by_pk[a_concept.pk] = a_concept
+        concepts_by_pk[b_concept.pk] = b_concept
+
     successful_ids = {concept.pk for concept in successful_concepts.values()}
-    existing = ConceptRelation.objects.filter(kind=ConceptRelation.Kind.BROADER).filter(
+
+    existing_broader = ConceptRelation.objects.filter(kind=ConceptRelation.Kind.BROADER).filter(
         Q(source_id__in=successful_ids) | Q(target_id__in=successful_ids)
     )
-    for row in existing:
-        if (row.source_id, row.target_id) not in resolved:
+    for row in existing_broader:
+        if (row.source_id, row.target_id) not in resolved_broader:
             row.delete()
 
-    for narrower_pk, broader_pk in resolved:
+    existing_related = ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED).filter(
+        Q(source_id__in=successful_ids) | Q(target_id__in=successful_ids)
+    )
+    for row in existing_related:
+        if frozenset({row.source_id, row.target_id}) not in resolved_related:
+            row.delete()
+
+    for narrower_pk, broader_pk in resolved_broader:
         already_stored = ConceptRelation.objects.filter(
             source_id=narrower_pk, target_id=broader_pk, kind=ConceptRelation.Kind.BROADER
         ).exists()
         if not already_stored:
             concepts_by_pk[narrower_pk].add_broader(concepts_by_pk[broader_pk])
+
+    for pk_pair in resolved_related:
+        a_pk, b_pk = tuple(pk_pair)
+        already_stored = (
+            ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED)
+            .filter(Q(source_id=a_pk, target_id=b_pk) | Q(source_id=b_pk, target_id=a_pk))
+            .exists()
+        )
+        if not already_stored:
+            concepts_by_pk[a_pk].add_related(concepts_by_pk[b_pk])
 
 
 def _import_concept_content(

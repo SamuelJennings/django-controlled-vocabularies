@@ -792,3 +792,35 @@ states it in both directions.
 **Watch**: the `TestIdempotentReimport` conflict above; T024 will introduce a second, matching
 conflict in `TestRecordsAbsentFromSource` once `skos:related` is reconciled the same way, for the
 same reason.
+
+## 2026-08-04T12:30:00Z · Implementer US4 · T024
+
+**Did**: `_import_relations` gains a second, parallel branch for `skos:related`: a symmetric
+association keyed by an unordered pair (a `frozenset` of the two URIs, then of the two resolved
+primary keys) rather than `BROADER`'s directed `(narrower, broader)` tuple. Reuses
+`_resolve_relation_concept` unchanged. `_HANDLED_CONCEPT_PREDICATES` now also names
+`skos:related`. A `skos:related` triple naming the same node twice is skipped rather than stored
+or reported (decisions.md D29, extended). `relation_both_directions.ttl` (built at T023) already
+carries a related pair stated from both ends, so this task needed no new fixture.
+
+decisions.md D29 extended: the prediction that `skos:related` would reuse the same
+whole-pass/resolve/reconcile shape held exactly, and a second pre-existing test
+(`TestRecordsAbsentFromSource`, T015) now conflicts with FR-013 for the identical reason
+`TestIdempotentReimport` did at T023 — a manually-created `ConceptRelation` (kind `related`,
+basalt-quartz) that neither fixture states is correctly removed by the same reconciliation.
+
+**Concern carried forward, not resolved here**: the same as T023's, now affecting two tests total
+(`TestIdempotentReimport` for `BROADER`, `TestRecordsAbsentFromSource` for `RELATED`). Neither
+modified, per this story's brief. Both named in the story report's `concerns`.
+
+**Verified**: `poetry run pytest -q` — 462 passed, 2 failed (the two pre-existing conflicts above;
+460 + 3 new tests in `test_skos.py`'s new `TestRelatedRelations`, reusing T023's fixture, no new
+fixture-discovery cases). `poetry run ruff check .` — all checks passed. `poetry run ruff format
+--check .` — 21 files already formatted. `poetry run mypy` — success, 9 source files. `poetry run
+deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations --check
+--dry-run --settings=tests.settings` — no changes detected.
+
+**Next**: T025 — a relationship end neither in the file nor in the database is set aside and
+reported with both ends; an end already in the database from an earlier import is stored.
+
+**Watch**: the two pre-existing test conflicts above remain open for orchestrator review.

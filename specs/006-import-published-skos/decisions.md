@@ -689,3 +689,30 @@ leaving a reachable crash in the public entry point undocumented would be worse 
 **Revisit if:** T024 (`skos:related`) needs a materially different reconciliation shape than the one
 built here — it should not, since the same whole-pass/resolve/reconcile structure applies with an
 unordered pair in place of a directed one, but this is the point to check.
+
+**Extended at T024.** The prediction above held: `skos:related` reuses the identical shape, keyed
+by an unordered pair (a `frozenset` of the two URIs, then of the two resolved primary keys) rather
+than `BROADER`'s directed `(narrower, broader)` tuple, and `_resolve_relation_concept` needed no
+change at all. One addition specific to `related`: a `skos:related` triple naming the same node
+twice (a concept stating it is related to itself) is skipped rather than stored or reported — SKOS
+never intends this, the model's own `_reject_self` would refuse it if attempted, and no fixture in
+this story's corpus or its predecessors exercises it, so it is treated as a no-op consistent with
+D8's "the fatal set is deliberately small" rather than given a reported outcome nothing asks for.
+
+**A second pre-existing test now conflicts with FR-013 for the same reason T023's did, and was not
+modified.** `TestRecordsAbsentFromSource::test_a_concept_dropped_from_the_file_is_untouched_and_named_absent`
+(T015) manually creates a `ConceptRelation` (kind `related`) between basalt and quartz that neither
+`rocks.ttl` nor `rocks_updated.ttl` ever states, as the same kind of "arbitrary foreign key survives
+a re-import" stand-in `TestIdempotentReimport`'s test used (see the T023 entry above). Basalt is a
+concept the re-imported `rocks_updated.ttl` still contains and carries zero `related` predicates of
+its own in either file, so FR-013's authority over "relationships ... MUST end up matching the
+file" now correctly removes this manually-injected row on the second `import_skos()` call in that
+test. This is the same conflict, the same cause, and the same resolution: not modified, per this
+story's brief; named here and in the story report's `concerns` for the orchestrator's tamper-check
+triage (D23/D28's established mechanism) to review, with the same suggested fix — repoint the
+illustrative foreign key at a model this importer does not yet reconcile (`CollectionMember`,
+pending US-5) rather than `ConceptRelation`.
+
+**Revisit if (updated):** the orchestrator's tamper-check triage reviews the two failures named
+across this entry (T013's and T015's) and either approves a fix or directs a different one — at
+that point this entry should say what was done, not merely record the fix that was possible.

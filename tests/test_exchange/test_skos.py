@@ -871,6 +871,33 @@ class TestBroaderAndNarrowerRelations:
         )
 
 
+class TestRelatedRelations:
+    """T024 — FR-010: ``skos:related`` is stored once as a symmetric
+    association, including when the file states it from both concepts."""
+
+    def test_a_related_pair_stated_once_is_stored_as_one_symmetric_relation(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        quartz = Concept.objects.get(static_uri="http://example.org/rocks/quartz")
+        assert quartz in granite.related()
+        assert granite in quartz.related()
+        assert ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED).count() == 1
+
+    def test_both_directions_of_one_related_pair_produce_exactly_one_row(self, db):
+        # relation_both_directions.ttl states east-related-west AND
+        # west-related-east — both name the same unordered pair.
+        import_skos(FIXTURES / "relation_both_directions.ttl")
+        east = Concept.objects.get(static_uri="http://example.org/hierarchy/east")
+        west = Concept.objects.get(static_uri="http://example.org/hierarchy/west")
+        assert west in east.related()
+        assert ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED).count() == 1
+
+    def test_reimporting_the_identical_file_does_not_duplicate_the_related_row(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        import_skos(FIXTURES / "rocks.ttl")
+        assert ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED).count() == 1
+
+
 class TestFixtureCorpus:
     """T005 — the published-vocabulary fixtures are discoverable and parse (FR-018, SC-016).
 
