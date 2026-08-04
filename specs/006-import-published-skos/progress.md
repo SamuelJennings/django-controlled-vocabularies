@@ -1280,3 +1280,44 @@ origin/main` — conformance, lint, typecheck, test, build all green. `ruff form
 `makemigrations --check`, `pre-commit run --all-files` all clean.
 
 **Next**: convergence — merge US-6 to the feature branch and open the PR.
+
+## 2026-08-04T11:40:00Z · Forge · review fix 1 — JSON-LD remote `@context`
+
+**Did**: closed a critical security finding from the merged feature's review: `_read_graph` gated
+the pre-flight safety scan on RDF/XML only, leaving JSON-LD's own remote-fetch route wide open —
+rdflib's JSON-LD parser resolves a string `@context` through `urlopen` with no allowlist, against a
+remote host or a local `file://` path alike. Reproduced directly against `rdflib.Graph.parse()`
+before writing any test: a doc pointed at an unreachable port raised a connection error (proving the
+fetch fired), and one pointed at `file:///tmp/...` read the local file and parsed cleanly. Wrote the
+failing tests first — `TestScanJsonLd` in `test_safety.py` (a string `@context`, a string inside an
+array `@context`, an inline-object `@context`, no `@context`, and malformed JSON) and
+`TestReadGraph::test_json_ld_is_routed_through_the_safety_scan_before_rdflib_sees_it` /
+`..._with_an_inline_context_is_unaffected...` in `test_skos.py` — confirmed they failed for the
+right reason (`ImportError` for the not-yet-written `scan_json_ld`/`UnsafeJsonLdError`, then a real
+connection-refused error once those existed but `_read_graph` wasn't wired to call them), then made
+the production change: `safety.py` gains `scan_json_ld()`/`UnsafeJsonLdError`, structured exactly
+like `scan_rdf_xml`/`UnsafeRdfXmlError` — refuses any string `@context` value found anywhere in the
+document (including nested inside an embedded node object, not only at the top level), leaves an
+inline object or absent `@context` alone, and leaves malformed JSON for rdflib's own parser to
+report. `_read_graph` now calls it on the `json-ld` branch alongside the existing `xml` one. Mutation
+probe: replaced the new `elif` branch with `pass`, re-ran the wiring test — it failed with the same
+raw `urlopen error [Errno 111] Connection refused>` the reproduction showed, proving the test
+actually detects the hole reopening; restored the fix, re-ran green. Checked Turtle and RDF/XML for
+the same class of hole rather than assuming them clean (the brief asked for this explicitly): a
+Turtle `@prefix` pointed at an unreachable host parsed without any fetch attempt (prefixes are never
+dereferenced), and RDF/XML's own remote-reference surface is exactly the external-entity/DTD routes
+D9 already closes — no third route found. Recorded as decisions.md D36, including the negative
+findings for Turtle/RDF/XML rather than leaving them unstated.
+
+New fixtures under `tests/fixtures/security/` (not `tests/fixtures/skos/` — a remote-context fixture
+placed under the swept `skos/` corpus would make `TestFixtureCorpus`'s own parse sweep attempt the
+real network fetch on every test run, exactly the outcome this fix exists to prevent):
+`remote_context_string.jsonld`, `remote_context_array.jsonld`, `inline_context.jsonld`.
+
+**Verified**: `poetry run pytest -q` — 528 passed (520 baseline + 8 new: 5 in `TestScanJsonLd`, 1
+placeholder-sweep addition in `TestRefusalMessagesUseOnlyNamedPlaceholders`, 2 in `TestReadGraph`).
+`poetry run ruff check .` — all checks passed (one
+auto-fixable lint on the new code, applied). `poetry run ruff format --check .` — 22 files already
+formatted. `poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files
+scanned. `poetry run python -m django makemigrations --check --dry-run --settings=tests.settings` —
+no changes detected. `poetry run pre-commit run --all-files` — all hooks passed.

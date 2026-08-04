@@ -15,7 +15,7 @@ from django.utils.functional import Promise
 
 import controlled_vocabularies.exchange as exchange
 from controlled_vocabularies.exchange.report import FatalReason, NormalizedReason, SetAsideReason
-from controlled_vocabularies.exchange.safety import UnsafeRdfXmlError
+from controlled_vocabularies.exchange.safety import UnsafeJsonLdError, UnsafeRdfXmlError
 from controlled_vocabularies.exchange.skos import (
     _HANDLED_CONCEPT_PREDICATES,
     SkosImportError,
@@ -112,6 +112,20 @@ class TestReadGraph:
 
     def test_ordinary_rdf_xml_is_unaffected_by_the_safety_scan(self):
         graph = _read_graph(SECURITY_FIXTURES / "ordinary.rdf", serialization="xml")
+        assert len(graph) > 0
+
+    def test_json_ld_is_routed_through_the_safety_scan_before_rdflib_sees_it(self):
+        # FIX 1 (review, decisions.md D36) — a string @context is a location
+        # rdflib's own JSON-LD parser would fetch via urlopen with no
+        # allowlist. Reinstates that exact document against the public
+        # reading path, the same proof-of-wiring shape used above for
+        # RDF/XML: if this were not actually wired in, the failure would be
+        # a connection error from the real fetch attempt, not this refusal.
+        with pytest.raises(UnsafeJsonLdError):
+            _read_graph(SECURITY_FIXTURES / "remote_context_string.jsonld", serialization="json-ld")
+
+    def test_json_ld_with_an_inline_context_is_unaffected_by_the_safety_scan(self):
+        graph = _read_graph(SECURITY_FIXTURES / "inline_context.jsonld", serialization="json-ld")
         assert len(graph) > 0
 
 

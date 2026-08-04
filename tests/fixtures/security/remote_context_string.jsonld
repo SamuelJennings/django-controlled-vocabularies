@@ -1,0 +1,5 @@
+{
+  "@context": "http://127.0.0.1:1/x.json",
+  "@id": "http://example.org/rocks/",
+  "@type": "http://www.w3.org/2004/02/skos/core#ConceptScheme"
+}

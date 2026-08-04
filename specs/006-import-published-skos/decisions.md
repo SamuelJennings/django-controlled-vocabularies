@@ -944,3 +944,47 @@ longer exists.
 **Revisit if:** `exchange` grows a real `standards` module, or the sweep grows past what reads
 naturally as a trailing class in each module — at which point the mirror rule would itself supply
 the file.
+
+## D36 — JSON-LD's remote `@context` is closed the same way D9 closed RDF/XML's entity bomb (review fix 1)
+
+A review of the merged feature found that `_read_graph` gated the pre-flight safety scan on
+`resolved_format == "xml"` only. rdflib's JSON-LD parser resolves a string `@context` — at the
+document's top level or nested inside any embedded node object — through `urlopen`, with no
+allowlist: pointed at an unreachable host it raises a connection error proving the fetch was
+attempted; pointed at `file:///tmp/ctx.json` it reads the local file and parses cleanly. Both are
+reproduced directly against `rdflib.Graph.parse()`, not inferred. Spec Assumptions says this feature
+reads "a file, not a URL"; this is exactly the same class of hole D9 closed for RDF/XML — untrusted
+input driving an outbound request and a local-file read the caller never asked for — reached through
+a different parser and a different construct.
+
+**Chosen: the same pre-flight-refusal shape D9 used, not a parser workaround.** A new
+`scan_json_ld(data: bytes)` in `safety.py`, structured like `scan_rdf_xml`: parse the raw bytes as
+plain JSON (not RDF), walk every value keyed `@context` anywhere in the document — a JSON-LD context
+may sit on any embedded node object, not only the top level — and refuse with a new
+`UnsafeJsonLdError` (`code="jsonld_remote_context_forbidden"`) if any of them is a string, or an
+array containing one. A `dict` (an inline, locally-embedded context — the overwhelmingly common
+shape a published file actually uses) or `None` (no `@context` at all) is left alone. Malformed JSON
+is not this scan's problem to diagnose — `json.loads` failing is treated as "nothing to refuse" and
+the document is left for rdflib's own parser to raise its own, already-translated parse error against,
+the same division `scan_rdf_xml` draws for a malformed RDF/XML document. Wired into `_read_graph`
+alongside the existing `xml` branch, gated on `resolved_format == "json-ld"`.
+
+**Why not resolve the two remote-fetch holes with one shared scan?** RDF/XML's is an XML-entity
+construct `defusedxml.sax` already understands; JSON-LD's is a plain-JSON key with no XML involved at
+all. A single scan spanning both serializations would need to branch on format internally anyway —
+no simpler than two small, format-named functions, and D9's own file already frames the RDF/XML scan
+around what `defusedxml` specifically closes, not a general "untrusted RDF" scan this document's
+`@context` never claimed to be part of.
+
+**Turtle and RDF/XML were checked for the equivalent hole, not assumed clean.** Turtle has no
+`@context`-shaped construct at all, and a probe against rdflib's Turtle parser with a `@prefix`
+pointing at an unreachable host (`http://127.0.0.1:1/ns#`) parsed without attempting any fetch —
+prefixes are namespace strings, never dereferenced during a plain `parse()`. RDF/XML's own
+remote-reference surface is the external-entity and external-DTD-subset routes D9 already measured
+and `scan_rdf_xml` already refuses; no third route was found (rdflib's RDF/XML parser calls
+`xml.sax.make_parser()` directly and does no separate XInclude or remote-schema resolution of its
+own). Neither format needed a change.
+
+**Revisit if:** rdflib ships an `@context` resolution mode that consults a caller-supplied document
+loader or allowlist — at that point refusing every string reference outright may be tighter than
+necessary, the same reversibility D9 already notes for its own entity-idiom trade-off.

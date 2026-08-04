@@ -39,7 +39,7 @@ from controlled_vocabularies.exchange.mapping import (
     SKOS,
 )
 from controlled_vocabularies.exchange.report import FatalReason, ImportReport, NormalizedReason, SetAsideReason
-from controlled_vocabularies.exchange.safety import scan_rdf_xml
+from controlled_vocabularies.exchange.safety import scan_json_ld, scan_rdf_xml
 from controlled_vocabularies.models import (
     Collection,
     Concept,
@@ -80,12 +80,14 @@ def _read_graph(file: str | Path, *, serialization: str | None = None) -> rdflib
     "cannot be determined" half).
 
     RDF/XML input is scanned by :func:`~controlled_vocabularies.exchange.safety.scan_rdf_xml`
-    before rdflib ever sees it (research.md R3, decisions.md D9) — the file is
-    read from ``path`` a second time by rdflib itself afterwards, deliberately,
-    rather than parsed from the bytes already in memory: rdflib's own
-    file-based parse establishes its base URI from the file's own location,
-    the behaviour decisions.md D13 measured and future fatal-path fixtures
-    may come to depend on, and passing pre-read ``data=`` bytes instead would
+    before rdflib ever sees it (research.md R3, decisions.md D9), and JSON-LD
+    input is scanned by :func:`~controlled_vocabularies.exchange.safety.scan_json_ld`
+    the same way (decisions.md D36) — either way the file is read from
+    ``path`` a second time by rdflib itself afterwards, deliberately, rather
+    than parsed from the bytes already in memory: rdflib's own file-based
+    parse establishes its base URI from the file's own location, the
+    behaviour decisions.md D13 measured and future fatal-path fixtures may
+    come to depend on, and passing pre-read ``data=`` bytes instead would
     silently change that base.
 
     A file that cannot be found, or one that fails to parse as its
@@ -112,6 +114,11 @@ def _read_graph(file: str | Path, *, serialization: str | None = None) -> rdflib
         # (see the base-URI note above), so a second, larger read is a
         # deliberate, small cost on RDF/XML input only.
         scan_rdf_xml(path.read_bytes())
+    elif resolved_format == "json-ld":
+        # Same pre-flight discipline, closing the equivalent hole D36 found
+        # in JSON-LD's own remote-`@context` route (see the module docstring
+        # above and safety.py's own).
+        scan_json_ld(path.read_bytes())
     graph = rdflib.Graph()
     try:
         graph.parse(str(path), format=resolved_format)
