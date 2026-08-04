@@ -39,7 +39,7 @@ from controlled_vocabularies.exchange.mapping import (
     SKOS,
 )
 from controlled_vocabularies.exchange.report import FatalReason, ImportReport, NormalizedReason, SetAsideReason
-from controlled_vocabularies.exchange.safety import scan_json_ld, scan_rdf_xml
+from controlled_vocabularies.exchange.safety import UnsafeJsonLdError, UnsafeRdfXmlError, scan_json_ld, scan_rdf_xml
 from controlled_vocabularies.models import (
     Collection,
     Concept,
@@ -93,7 +93,20 @@ def _read_graph(file: str | Path, *, serialization: str | None = None) -> rdflib
     A file that cannot be found, or one that fails to parse as its
     serialization, raises :class:`SkosImportError` (FR-002's "cannot be
     read" half) rather than letting rdflib's own exception — untranslated,
-    shaped for a developer — escape to the caller.
+    shaped for a developer — escape to the caller. The same holds for the
+    pre-flight safety scan itself (review fix 18, decisions.md D51): a
+    document that is not well-formed at all — a Turtle file merely renamed
+    to ``.rdf``, say — makes ``scan_rdf_xml`` raise a bare
+    ``xml.sax.SAXParseException`` neither of its own guards is built to
+    catch, and a deeply nested JSON-LD document can exhaust Python's own
+    recursion limit inside ``scan_json_ld``'s recursive walk. Both used to
+    escape uncaught, outside this function's own try/except; both are now
+    wrapped the same way an unparseable file already was. The *deliberate*
+    refusals, :class:`~controlled_vocabularies.exchange.safety.UnsafeRdfXmlError`
+    and :class:`~controlled_vocabularies.exchange.safety.UnsafeJsonLdError`,
+    are excluded from that wrapping and continue to propagate as themselves
+    (decisions.md D36) — only a scan-stage failure that is not one of those
+    two deliberate refusals gets wrapped here.
     """
     path = Path(file)
     if not path.is_file():
@@ -109,19 +122,21 @@ def _read_graph(file: str | Path, *, serialization: str | None = None) -> rdflib
             params={"file": str(path)},
             code="skos_format_unsupported",
         )
-    if resolved_format == "xml":
-        # Pre-flight only — the bytes read here are not what gets parsed
-        # (see the base-URI note above), so a second, larger read is a
-        # deliberate, small cost on RDF/XML input only.
-        scan_rdf_xml(path.read_bytes())
-    elif resolved_format == "json-ld":
-        # Same pre-flight discipline, closing the equivalent hole D36 found
-        # in JSON-LD's own remote-`@context` route (see the module docstring
-        # above and safety.py's own).
-        scan_json_ld(path.read_bytes())
     graph = rdflib.Graph()
     try:
+        if resolved_format == "xml":
+            # Pre-flight only — the bytes read here are not what gets parsed
+            # (see the base-URI note above), so a second, larger read is a
+            # deliberate, small cost on RDF/XML input only.
+            scan_rdf_xml(path.read_bytes())
+        elif resolved_format == "json-ld":
+            # Same pre-flight discipline, closing the equivalent hole D36 found
+            # in JSON-LD's own remote-`@context` route (see the module docstring
+            # above and safety.py's own).
+            scan_json_ld(path.read_bytes())
         graph.parse(str(path), format=resolved_format)
+    except (UnsafeRdfXmlError, UnsafeJsonLdError):
+        raise
     except Exception as exc:
         raise SkosImportError(
             _("'%(file)s' could not be parsed as %(format)s: %(error)s"),
@@ -1139,7 +1154,28 @@ def _import_collections(
         if ordered:
             member_list_node = graph.value(node, SKOS.memberList)
             if member_list_node is not None:
-                ordered_uris = [str(item) for item in graph.items(member_list_node)]
+                try:
+                    ordered_uris = [str(item) for item in graph.items(member_list_node)]
+                except ValueError as exc:
+                    # FIX 18 (review, decisions.md D51): a malformed
+                    # skos:memberList whose rdf:rest chain loops back on
+                    # itself instead of terminating in rdf:nil makes
+                    # graph.items() raise a bare ValueError — outside the
+                    # documented SkosImportError/SkosImportFailed contract.
+                    # Not collected as a per-record set-aside: an infinite
+                    # list has no well-defined membership to import "the
+                    # rest of", so the whole run is refused rather than
+                    # silently importing the collection with whatever
+                    # partial membership happened to be read before the
+                    # cycle was detected.
+                    raise SkosImportError(
+                        _(
+                            "'%(subject)s' has a skos:memberList that does not terminate (its rdf:rest "
+                            "chain loops back on itself); the import was refused."
+                        ),
+                        params={"subject": uri},
+                        code="skos_cyclic_member_list",
+                    ) from exc
                 # FIX 11 (review, decisions.md D44): skos:memberList narrows
                 # skos:member rather than replacing it (the SKOS reference's
                 # own wording) — a skos:member the memberList omits is still

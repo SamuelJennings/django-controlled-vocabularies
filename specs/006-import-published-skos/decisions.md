@@ -1749,3 +1749,69 @@ regressing. Restored immediately; full suite re-ran green.
 **Revisit if:** a real published vocabulary motivates guessing collection-hood the same way — that is
 new scope, not a correction to this decision's deliberate concept-only reading of the three
 membership predicates.
+
+## D51 — Three crafted-file failure paths are wrapped into the documented exception hierarchy (review fix 18)
+
+Three verified paths raised an exception that is neither `SkosImportError` nor `SkosImportFailed`, so
+a caller catching only the documented pair — a downstream upload form, say, exactly the shape the
+package's own docstrings describe — got an unhandled exception instead of a translatable refusal:
+
+1. `defusedxml.sax.parseString` (`scan_rdf_xml`, called from `_read_graph`) ran *before* the function's
+   own try/except, and only catches `EntitiesForbidden`/`ExternalReferenceForbidden` itself, so a
+   document that is not well-formed XML at all — including a Turtle file merely renamed to `.rdf` —
+   raised a bare `xml.sax.SAXParseException` straight out of the package.
+2. A cyclic `skos:memberList` (an `rdf:rest` chain looping back on itself instead of terminating in
+   `rdf:nil`) made `graph.items()`, deep inside `_import_collections`, raise a bare
+   `ValueError("List contains a recursive rdf:rest reference")`.
+3. A deeply nested JSON-LD document exhausted Python's own recursion limit inside `scan_json_ld`'s
+   recursive `_iter_context_values` walk (also called from `_read_graph`, also before its own
+   try/except), raising a bare `RecursionError`.
+
+**Chosen: wrap each at the point it is raised, with a translatable message and its own `code`,
+chaining the original onto `__cause__` — the pattern the module already uses for the unparseable-file
+case, applied to the two paths that used to sit outside the try/except that pattern already lived
+in, plus the one entirely new path.** For (1) and (3): widened `_read_graph`'s existing try/except to
+also cover the `scan_rdf_xml`/`scan_json_ld` calls, not only `graph.parse()`. The *deliberate* safety
+refusals — `UnsafeRdfXmlError`/`UnsafeJsonLdError` (decisions.md D36/D47) — are explicitly excluded
+from that wrapping (`except (UnsafeRdfXmlError, UnsafeJsonLdError): raise` ahead of the general
+`except Exception`), so a caller distinguishing "unsafe" from "merely unreadable" keeps working
+exactly as before; both existing `TestReadGraph` tests asserting the specific `Unsafe*Error` types
+still pass unchanged. Both failures reuse the identical `skos_parse_failed` code and message template
+the unparseable-file case already uses — from a caller's perspective it is the same experience ("this
+file could not be parsed"), and introducing a second code for the same experience would be a
+distinction with no behavioural difference to key off. For (2): a new
+`SkosImportError`/`skos_cyclic_member_list`, raised at the `graph.items()` call site itself, naming
+the collection's own URI.
+
+**Not turned into a per-record `SetAsideReason`, deliberately.** Every other kind of unusable value
+this feature meets is set aside and the rest of the file still imports (the governing rule this whole
+review batch states repeatedly). A cyclic list is different in kind: `graph.items()` cannot produce
+even a partial, well-defined membership to fall back to — the cycle means there is no principled
+"read what came before the loop and stop" semantics, only an arbitrary point where rdflib's own guard
+happened to detect it. Refusing the whole run, exactly as a missing/refused identity already does
+(D3/D8), keeps the invariant that what *is* written is always something the file actually,
+unambiguously asserted.
+
+**Raised inside the same `transaction.atomic()` block `import_skos()` already wraps every write in**,
+so no special rollback handling was needed for the cyclic-`memberList` case: an exception propagating
+out of a `with transaction.atomic():` block rolls it back regardless of its type, the same mechanism
+`SkosImportFailed` already relies on for a collected fatal finding.
+
+**Verified by mutation, independently for each of the three paths.** Reverted `_read_graph`'s
+try/except back to covering only `graph.parse()` — both the malformed-XML-renamed-to-`.rdf` test and
+the deeply-nested-JSON-LD test failed, each with the original bare exception, while both
+`Unsafe*Error`-still-propagates regression-control tests kept passing. Restored, then separately
+reverted the `graph.items()` wrapping — both cyclic-`memberList` tests failed with the original bare
+`ValueError`. Restored both; full suite re-ran green.
+
+**One measurement note, not a defect:** reproducing the `RecursionError` case as a test needed a
+document nested roughly 3,000 levels deep — built as raw text, not via `json.dump`, since the
+encoder's own recursive descent hits the same recursion limit before the file is even written, at a
+depth well below what is needed to reproduce the *parser's own* failure. Before this fix, the test
+took ~37s (pytest formatting a ~3,000-frame traceback for the uncaught `RecursionError`); after the
+fix, the same test runs in well under a second, since the exception is now caught and wrapped only a
+few frames from where it originates.
+
+**Revisit if:** a fourth crafted-input shape reaching outside `SkosImportError`/`SkosImportFailed` is
+found — the same "enumerate the actual mechanism, not just the reported symptom" discipline FIX 14
+already applied to `safety.py` applies here too, rather than patching only the exact three cases named.

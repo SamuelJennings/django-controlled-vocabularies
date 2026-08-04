@@ -1946,3 +1946,53 @@ checks passed. `poetry run ruff format --check .` — 22 files already formatted
 success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m
 django makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry run
 pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T17:50:00Z · Forge · review fix 18 — crafted files escape import_skos() outside the documented exception contract
+
+**Did**: three verified paths raised an exception that is neither `SkosImportError` nor
+`SkosImportFailed` — a downstream caller catching only the documented pair got an unhandled exception
+instead. (1) `scan_rdf_xml` (called before `_read_graph`'s own try/except) raised a bare
+`xml.sax.SAXParseException` for a document that is not well-formed XML at all, including a Turtle
+file merely renamed to `.rdf`. (2) A cyclic `skos:memberList` (`rdf:rest` looping back on itself)
+raised a bare `ValueError` from `graph.items()` deep inside `_import_collections`. (3) A deeply
+nested JSON-LD document raised a bare `RecursionError` from `scan_json_ld`'s own recursive walk
+(also before `_read_graph`'s try/except).
+
+Wrote the failing tests first: new fixture `tests/fixtures/skos/cyclic_member_list.ttl` (a genuinely
+cyclic `rdf:rest` chain on a `skos:memberList`, added to `_PREDICATE_COVERAGE_EXCLUDED_FIXTURES` since
+it raises rather than returning a report) and `TestCraftedFilesStayInsideTheExceptionContract` in
+`test_skos.py`: a Turtle file renamed to `.rdf`, a 3,000-level-deep JSON-LD document (built as raw
+text — `json.dump`'s own recursive encoder hits Python's recursion limit before the file is even
+written), the cyclic-memberList fixture (both its own exception type/code and that the whole run rolls
+back), plus two regression controls confirming `UnsafeRdfXmlError`/`UnsafeJsonLdError` still propagate
+as themselves rather than getting swallowed into the new wrapping. Four of six failed for the right
+reason before the production change (the two `Unsafe*Error` regression controls already passed).
+
+Production change: widened `_read_graph`'s existing try/except to cover the `scan_rdf_xml`/
+`scan_json_ld` calls too, not only `graph.parse()`, reusing the identical `skos_parse_failed` code and
+message — from a caller's perspective it is the same "could not be parsed" experience either way — but
+explicitly re-raising `UnsafeRdfXmlError`/`UnsafeJsonLdError` unchanged first, so the deliberate safety
+refusals keep their own specific type. Wrapped the `graph.items(member_list_node)` call in
+`_import_collections` in its own try/except, raising a new `SkosImportError`/`skos_cyclic_member_list`
+naming the collection's URI — decided (recorded in decisions.md D51) to refuse the whole run rather
+than set the collection aside and continue, since a cyclic list has no principled partial membership
+to fall back to, unlike every other set-aside case this feature already handles. Raised inside the
+same `transaction.atomic()` block the whole run already sits in, so no separate rollback handling was
+needed for the cyclic-memberList case.
+
+Mutation probe, independently for each path: reverted `_read_graph`'s widened try/except back to
+covering only `graph.parse()` — both the malformed-XML and deep-JSON-LD tests failed with their
+original bare exceptions, while both `Unsafe*Error` regression controls kept passing. Restored, then
+separately reverted the `graph.items()` wrapping — both cyclic-memberList tests failed with the
+original bare `ValueError`. Restored both; full suite re-ran green. Noted one measurement detail, not
+a defect: the RecursionError reproduction took ~37s before the fix (pytest formatting a ~3,000-frame
+traceback) and well under a second after, since the exception is now caught only a few frames from
+where it originates.
+
+**Verified**: `poetry run pytest -q` — 662 passed (655 baseline-after-FIX-17 + 7 new: 6 in
+`TestCraftedFilesStayInsideTheExceptionContract`, 1 new fixture-corpus-discovery parametrized
+instance for `cyclic_member_list.ttl`). `poetry run ruff check .` — all checks passed. `poetry run
+ruff format --check .` — all files formatted (one file needed a format pass, applied). `poetry run
+mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run
+python -m django makemigrations --check --dry-run --settings=tests.settings` — no changes detected.
+`poetry run pre-commit run --all-files` — all hooks passed.

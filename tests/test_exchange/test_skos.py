@@ -2175,6 +2175,7 @@ _PREDICATE_COVERAGE_EXCLUDED_FIXTURES = frozenset(
         "two_vocabularies.ttl",  # TestChoosingBetweenDeclaredVocabularies
         "no_scheme_declared.ttl",  # TestImportSkosVocabulary
         "vocabulary_reassignment.ttl",  # TestExistingConceptIsNotSilentlyMovedBetweenVocabularies
+        "cyclic_member_list.ttl",  # TestCraftedFilesStayInsideTheExceptionContract (FIX 18) — raises, no report
     }
 )
 
@@ -2510,6 +2511,92 @@ class TestExchangePackage:
         # A public package gets documented (Article VI); this catches an
         # accidentally-empty __init__.py before anything is re-exported from it.
         assert exchange.__doc__, "controlled_vocabularies.exchange has no module docstring"
+
+
+def _write_deeply_nested_jsonld(tmp_path: Path, depth: int) -> Path:
+    """A JSON-LD document nesting one object inside another ``depth`` times
+    (FIX 18, review, decisions.md D51). Built as raw text, not via
+    ``json.dump`` — the encoder's own recursive descent hits Python's
+    recursion limit before the file is even written, at a depth well below
+    what is needed to reproduce the *parser's* own recursion failure."""
+    open_frag = '{"@id":"http://example.org/deep/","nested":'
+    close_frag = "}"
+    parts = [open_frag] * depth
+    parts.append('{"val":0}')
+    parts.extend([close_frag] * depth)
+    path = tmp_path / "deep.jsonld"
+    path.write_text("".join(parts))
+    return path
+
+
+class TestCraftedFilesStayInsideTheExceptionContract:
+    """FIX 18 (review, decisions.md D51) — three verified paths raised an
+    exception that is neither ``SkosImportError`` nor ``SkosImportFailed``,
+    so a caller catching only the documented pair (a downstream upload form,
+    say) got an unhandled exception instead: a non-well-formed RDF/XML
+    document (including a Turtle file merely renamed to ``.rdf``) raised a
+    bare ``xml.sax.SAXParseException`` from ``scan_rdf_xml`` at
+    ``_read_graph`` time, before the surrounding try/except that already
+    wraps ``graph.parse()``'s own failures; a deeply nested JSON-LD document
+    raised a bare ``RecursionError`` from ``scan_json_ld``'s own recursive
+    walk, the same "outside the try/except" shape; and a cyclic
+    ``skos:memberList`` (an ``rdf:rest`` chain that loops back on itself
+    instead of terminating in ``rdf:nil``) raised a bare
+    ``ValueError("List contains a recursive rdf:rest reference")`` from
+    ``graph.items()`` deep inside ``_import_collections``, well after the
+    scan stage entirely.
+    """
+
+    def test_a_turtle_file_renamed_to_rdf_raises_skosimporterror_not_a_bare_sax_exception(self, tmp_path):
+        # Not well-formed XML at all — no angle brackets, no doctype, nothing
+        # defusedxml.sax's own EntitiesForbidden/ExternalReferenceForbidden
+        # guards were built to catch. This is scan_rdf_xml's own parser
+        # rejecting malformed input, a different failure than either guard.
+        bad = tmp_path / "not_actually_xml.rdf"
+        bad.write_text("@prefix ex: <http://example.org/> .\nex:a ex:b ex:c .\n")
+        with pytest.raises(SkosImportError) as excinfo:
+            _read_graph(bad)
+        err = excinfo.value
+        assert err.code == "skos_parse_failed"
+        assert err.__cause__ is not None, "the underlying SAX exception must be chained for developer diagnostics"
+
+    def test_a_deeply_nested_json_ld_document_raises_skosimporterror_not_a_bare_recursionerror(self, tmp_path):
+        path = _write_deeply_nested_jsonld(tmp_path, 3000)
+        with pytest.raises(SkosImportError) as excinfo:
+            _read_graph(path, serialization="json-ld")
+        err = excinfo.value
+        assert err.code == "skos_parse_failed"
+        assert err.__cause__ is not None, "the underlying RecursionError must be chained for developer diagnostics"
+
+    def test_an_unsafe_rdf_xml_document_still_raises_unsaferdfxmlerror_not_wrapped(self):
+        # The wrapping added for the malformed-XML case above must not
+        # swallow the *deliberate* safety refusal into a generic
+        # SkosImportError — a caller distinguishing "unsafe" from "merely
+        # unreadable" needs the specific type to keep working.
+        with pytest.raises(UnsafeRdfXmlError):
+            _read_graph(SECURITY_FIXTURES / "entity_bomb.rdf", serialization="xml")
+
+    def test_an_unsafe_json_ld_document_still_raises_unsafejsonlderror_not_wrapped(self):
+        with pytest.raises(UnsafeJsonLdError):
+            _read_graph(SECURITY_FIXTURES / "remote_context_string.jsonld", serialization="json-ld")
+
+    @pytest.mark.django_db
+    def test_a_cyclic_memberlist_raises_skosimporterror_not_a_bare_valueerror(self):
+        with pytest.raises(SkosImportError) as excinfo:
+            import_skos(FIXTURES / "cyclic_member_list.ttl")
+        err = excinfo.value
+        assert err.code == "skos_cyclic_member_list"
+        assert err.__cause__ is not None, "the underlying ValueError must be chained for developer diagnostics"
+
+    @pytest.mark.django_db
+    def test_a_cyclic_memberlist_rolls_back_the_whole_run(self):
+        # research.md R7/FR-003: the run is all-or-nothing. The scheme and
+        # concept that import cleanly before the cyclic collection is reached
+        # must not survive if the run as a whole is refused.
+        with pytest.raises(SkosImportError):
+            import_skos(FIXTURES / "cyclic_member_list.ttl")
+        assert not ConceptScheme.objects.filter(static_uri="http://example.org/cyclic/").exists()
+        assert not Concept.objects.filter(static_uri="http://example.org/cyclic/a").exists()
 
 
 class TestFailureMessagesUseOnlyNamedPlaceholders:
