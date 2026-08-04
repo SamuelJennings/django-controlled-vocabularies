@@ -702,6 +702,36 @@ class TestConceptNotes:
         assert basalt.pk == basalt_pk
 
 
+class TestUnconfiguredLanguageValuesAreSetAside:
+    """T020 — FR-014: a label or note in a language the site is not configured
+    for is stored nowhere and is named in the report with its language, and
+    the concept still imports on whatever configured-language content it
+    carries. Filtered ahead of the write rather than caught from the models'
+    own refusal (decisions.md D25) — ``ConceptLabel.clean()``/``ConceptNote.clean()``
+    would refuse these too, but the importer must not rely on that exception
+    as its control flow."""
+
+    def test_labels_and_notes_in_an_unconfigured_language_are_set_aside_and_named(self, db):
+        report = import_skos(FIXTURES / "unconfigured_language_values.ttl")
+        schist = Concept.objects.get(static_uri="http://example.org/quarry3/schist")
+        entries = [
+            entry
+            for entry in report.set_aside
+            if entry.reason is SetAsideReason.UNCONFIGURED_LANGUAGE and entry.subject == schist.static_uri
+        ]
+        # Two alternative labels and one scope note, each named individually
+        # rather than merged into a single "some values were dropped" entry.
+        assert len(entries) == 3
+        assert all(entry.params["language"] == "es" for entry in entries)
+
+    def test_the_concept_still_imports_on_its_configured_language_content(self, db):
+        import_skos(FIXTURES / "unconfigured_language_values.ttl")
+        schist = Concept.objects.get(static_uri="http://example.org/quarry3/schist")
+        assert schist.label == "Schist"
+        assert schist.alt_labels("es") == []
+        assert schist.notes("es") == []
+
+
 class TestFixtureCorpus:
     """T005 — the published-vocabulary fixtures are discoverable and parse (FR-018, SC-016).
 

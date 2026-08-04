@@ -642,3 +642,33 @@ run deptry .` — no issues, 15 files scanned. `poetry run python -m django make
 named in the report with its language and a count.
 
 **Watch**: none.
+
+## 2026-08-04T11:35:00Z · Implementer US3 · T020
+
+**Did**: `_import_labels()` and `_import_notes()` now check each value's language against
+`settings.LANGUAGES` before calling `Concept.add_label`/`add_note` at all, rather than calling
+unconditionally and catching the model's own `ValidationError` refusal. An unconfigured-language
+value is set aside (`SetAsideReason.UNCONFIGURED_LANGUAGE`, naming the language) one entry per
+value — two alternative labels and a note in the same unconfigured language on one concept produce
+three separate entries, so a caller counts them via `report.set_aside_by_reason()` without the
+importer needing to pre-aggregate. New fixture `unconfigured_language_values.ttl`: a concept with a
+configured-language preferred label plus two alternative labels and a scope note all in Spanish,
+which the test site's `LANGUAGES` does not include.
+
+decisions.md D25 (new): filtering ahead of the write, not catching the model's refusal, chosen for
+three reasons — the exception isn't shaped to isolate "wrong language" from any other row defect a
+future `clean()` rule might add, a caught exception per attempt still needs the same per-value loop
+this importer already has, and Article XI/D2 both already call this filtering "mechanical," which a
+plain membership check is and a caught exception is not.
+
+**Verified**: `poetry run pytest -q` — 436 passed (433 + 2 new in `test_skos.py`'s new
+`TestUnconfiguredLanguageValuesAreSetAside`, plus 1 new fixture-discovery case). `poetry run ruff
+check .` — all checks passed. `poetry run ruff format --check .` — 21 files already formatted.
+`poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned.
+`poetry run python -m django makemigrations --check --dry-run --settings=tests.settings` — no
+changes detected.
+
+**Next**: T021 — notation, mappings, and unmodelled predicates set aside and reported; the
+`dcterms:description`-as-`definition` normalisation reported, never applied silently.
+
+**Watch**: none.

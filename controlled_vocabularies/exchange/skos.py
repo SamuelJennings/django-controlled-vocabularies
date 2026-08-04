@@ -460,12 +460,14 @@ def _import_labels(
     ``_reject_default_language_preferred``) — this importer must not even
     attempt it.
 
-    A language this application is not configured for is not filtered here
-    yet (tasks.md T020 adds that): every fixture this task reads from is
-    already in a configured language, so writing through
-    :meth:`~controlled_vocabularies.models.Concept.add_label` unconditionally
-    is correct for now.
+    A value in a language this application is not configured for is not
+    written at all: it is set aside and reported by its own language,
+    checked ahead of the write rather than let ``ConceptLabel.clean()``'s own
+    refusal raise (T020, FR-014, decisions.md D25) — that exception exists to
+    protect a direct, out-of-band write, not to be this importer's control
+    flow.
     """
+    configured = _configured_language_codes()
     concept.labels.all().delete()
     for predicate, kind in LABEL_PREDICATES.items():
         for literal in graph.objects(node, predicate):
@@ -473,6 +475,9 @@ def _import_labels(
                 continue
             language = literal.language
             if kind == ConceptLabel.Kind.PREFERRED and language == default_language:
+                continue
+            if language not in configured:
+                report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, subject=uri, language=language)
                 continue
             concept.add_label(language=language, kind=kind, text=str(literal))
 
@@ -495,17 +500,22 @@ def _import_notes(
     alias for a concept with no ``skos:definition`` of its own is a separate,
     reported normalisation (T021, FR-009), not folded in here.
 
-    A language this application is not configured for is not filtered here
-    yet (T020 adds that, the same deferral :func:`_import_labels` makes for
-    labels): every fixture this task reads from already uses a configured
-    language.
+    A value in a language this application is not configured for is set
+    aside and reported by its own language rather than written, the same
+    ahead-of-the-write filter :func:`_import_labels` applies and for the same
+    reason (T020, FR-014, decisions.md D25).
     """
+    configured = _configured_language_codes()
     concept.concept_notes.all().delete()
     for predicate, kind in NOTE_PREDICATES.items():
         for literal in graph.objects(node, predicate):
             if not isinstance(literal, rdflib.Literal) or not literal.language:
                 continue
-            concept.add_note(language=literal.language, kind=kind, value=str(literal))
+            language = literal.language
+            if language not in configured:
+                report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, subject=uri, language=language)
+                continue
+            concept.add_note(language=language, kind=kind, value=str(literal))
 
 
 def _import_concept_content(

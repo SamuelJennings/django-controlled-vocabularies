@@ -529,3 +529,40 @@ one example of each of the seven note kinds landing untouched on a plain re-impo
 **Revisit if:** a later story needs a *second* concept in this pair to lose a note, or needs the
 lost note to be a different kind than `example` — the same "not pinned" latitude D20 grants applies
 here too.
+
+## D25 — Labels and notes are filtered by language *before* the write, never by catching the model's own refusal (T020)
+
+FR-014 requires a value in an unconfigured language to be set aside and reported, not stored. Both
+paths to that outcome are available: check `language in settings.LANGUAGES` before calling
+`Concept.add_label`/`add_note` at all, or call it unconditionally and catch the `ValidationError`
+`ConceptLabel.clean()`/`ConceptNote.clean()` already raise for exactly this case (the same check,
+duplicated). The brief for this task names the choice explicitly rather than letting it default to
+whichever came out of T018/T019's first draft (both left the filter out entirely, since every
+fixture up to T020 used only configured languages — decisions.md's T018/T019 entries flag this as
+their own known gap, not an oversight).
+
+Chosen: filter ahead of the write. Three reasons.
+
+1. **The exception is not shaped for this.** `full_clean()` raises one `ValidationError` naming
+   every invalid field on the row at once (language *and*, independently, kind/kind-specific rules).
+   Catching it and assuming the language is *why* it failed would silently swallow a genuinely
+   different defect — a future rule added to `clean()` would then get misreported as
+   "unconfigured language" instead of surfacing on its own terms.
+2. **A caught exception cannot cheaply say *how many*.** FR-014/T020 both ask for a count, and the
+   report's own contract (D7) already counts via `set_aside_by_reason()` grouping one entry per
+   value — catching per-attempt still works for that, but only because the importer already loops
+   value-by-value; the filter-ahead version needs no `try`/`except` scaffolding to get there, since
+   the check and the report call sit next to each other in the same branch.
+3. **Article XI's own language**, restated by decisions.md D2, is that this filtering is
+   "mechanical" — a plain membership check *is* mechanical; reacting to an exception the model
+   raises for its own protection is treating a safety net as a routing decision, which the T020
+   brief calls out directly ("the importer must not rely on the exception as its control flow").
+
+`ConceptLabel.clean()`/`ConceptNote.clean()`'s own language check is not redundant with this: it
+remains the backstop for every write path that is *not* this importer (the admin, a future editing
+UI, a factory), exactly as it already was before this decision.
+
+**Revisit if:** a future note/label rule needs richer set-aside detail than "the language was
+wrong" (e.g. distinguishing an invalid language code from a merely unconfigured one) — at that
+point the filter-ahead check may need to grow past a plain membership test, but should still stay
+ahead of the write rather than move to a catch.
