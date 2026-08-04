@@ -44,7 +44,12 @@ class SetAsideReason(TextChoices):
     (broader/narrower) and a related relation — SKOS declares the two
     mutually exclusive (models.py ``ConceptRelation._reject_disjointness_violation``);
     the hierarchical relation always wins and the related statement is the
-    one set aside.
+    one set aside. ``SURPLUS_PREFERRED_LABEL`` (review fix, decisions.md D38)
+    names a preferred label beyond the first a concept carries in one
+    language — the model allows only one ``PREFERRED`` row per (concept,
+    language) — whichever value is not the deterministically-kept one is
+    the one set aside, in the vocabulary's default language exactly as much
+    as in any other configured language.
     """
 
     UNCONFIGURED_LANGUAGE = "unconfigured_language", _("language not configured")
@@ -57,6 +62,7 @@ class SetAsideReason(TextChoices):
     VOCABULARY_MISMATCH = "vocabulary_mismatch", _("belongs to a different vocabulary")
     DEFAULT_LANGUAGE_FROZEN = "default_language_frozen", _("default language already fixed")
     RELATION_DISJOINTNESS = "relation_disjointness", _("broader/narrower and related both claimed for a pair")
+    SURPLUS_PREFERRED_LABEL = "surplus_preferred_label", _("surplus preferred label in a language")
 
     @property
     def template(self) -> Promise:
@@ -106,6 +112,10 @@ _REASON_TEMPLATES: dict[SetAsideReason, Promise] = {
     SetAsideReason.RELATION_DISJOINTNESS: _(
         "'%(subject)s' and '%(other)s' are joined as broader/narrower, so the related statement between "
         "them was set aside; a broader/narrower pair and a related pair are mutually exclusive."
+    ),
+    SetAsideReason.SURPLUS_PREFERRED_LABEL: _(
+        "'%(subject)s' carries more than one preferred label in the language '%(language)s'; only one is "
+        "kept and the surplus value was set aside."
     ),
 }
 

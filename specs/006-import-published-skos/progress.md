@@ -1360,3 +1360,34 @@ the five new `relation_disjointness_*.ttl` fixtures). `poetry run ruff check .` 
 files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django
 makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry run
 pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T12:35:00Z · Forge · review fix 3 — two preferred labels in one non-default language crashes the run
+
+**Did**: closed a high-severity finding from the merged feature's review: D25 filtered an
+unconfigured language ahead of the write for `skos:prefLabel`/`altLabel`/`hiddenLabel` alike, but
+never implemented the cardinality half of the same discipline for `PREFERRED` labels — a second
+`skos:prefLabel` in one non-default *configured* language reached `Concept.add_label` twice, and the
+second raised `ConceptLabel.clean()`'s own uncaught `ValidationError` ("A preferred label in the
+language 'de' already exists for this concept."), a raw exception escaping `import_skos()`. Wrote the
+failing tests first — `TestSurplusPreferredLabelInAnotherConfiguredLanguage` in `test_skos.py`, using
+a new `surplus_preferred_label.ttl` fixture (a concept with two German `skos:prefLabel` values,
+"Gerät" and "Apparat") — confirmed both tests failed with that exact `ValidationError` before any
+production change. Made the production change: `_import_labels` now groups every `skos:prefLabel`
+literal by language and keeps the lexicographically-first value in each (the same rule
+`_preferred_label_in` already uses for the default language, so the same file always imports the same
+way); every other value in a *configured*, non-default language is set aside and reported under a new
+`SetAsideReason.SURPLUS_PREFERRED_LABEL` member added to `report.py` following D26's pattern exactly.
+The default-language branch is deliberately untouched by this commit — it still silently skips every
+literal in that language, the FIX 4 gap named next. Mutation probe: disabled the new surplus check
+(`if False and kind == PREFERRED and ...`), re-ran the new test class, confirmed both tests failed
+with the same raw `ValidationError`; restored, re-ran green. Recorded as decisions.md D38 (covers both
+FIX 3 and FIX 4, since one surplus-label mechanism serves both).
+
+**Verified**: `poetry run pytest -q` — 547 passed (540 baseline + 7 new: 2 in
+`TestSurplusPreferredLabelInAnotherConfiguredLanguage`, four generic `SetAsideReason` sweep tests
+re-parametrizing over the new member, one `TestFixtureCorpus` parse-sweep instance for the new
+fixture). `poetry run ruff check .` — all checks passed. `poetry run ruff format .` — one file
+(`test_skos.py`, a line over length) reformatted, then `--check` clean. `poetry run mypy` — success, 9
+source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django
+makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry run
+pre-commit run --all-files` — all hooks passed.

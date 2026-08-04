@@ -713,6 +713,34 @@ class TestConceptLabels:
         assert granite.pk == granite_pk
 
 
+class TestSurplusPreferredLabelInAnotherConfiguredLanguage:
+    """FIX 3 (review, decisions.md D38/D25) — ``ConceptLabel.clean()`` allows
+    at most one ``PREFERRED`` row per (concept, language); D25 filters an
+    unconfigured language ahead of the write for exactly this "don't rely on
+    the model's own refusal as control flow" reason, but never implemented
+    this — the cardinality — half of the same rule. Two ``skos:prefLabel``
+    values in one non-default *configured* language reached ``add_label``
+    twice, and the second raised the model's own uncaught ``ValidationError``.
+    One is kept deterministically — the lexicographically first, the same
+    rule ``_preferred_label_in`` already uses for the default language — and
+    the rest are set aside and reported."""
+
+    def test_one_value_is_kept_deterministically_and_the_run_does_not_crash(self, db):
+        report = import_skos(FIXTURES / "surplus_preferred_label.ttl")
+        assert report.fatal == []
+        gadget = Concept.objects.get(static_uri="http://example.org/surplus/gadget")
+        assert gadget.preferred_label("de") == "Apparat"
+        assert ConceptLabel.objects.filter(concept=gadget, language="de", kind=ConceptLabel.Kind.PREFERRED).count() == 1
+
+    def test_the_surplus_value_is_set_aside_and_reported(self, db):
+        report = import_skos(FIXTURES / "surplus_preferred_label.ttl")
+        gadget_uri = "http://example.org/surplus/gadget"
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.SURPLUS_PREFERRED_LABEL]
+        assert len(entries) == 1
+        assert entries[0].subject == gadget_uri
+        assert entries[0].params["language"] == "de"
+
+
 class TestConceptNotes:
     """T019 — FR-009/research.md R5: the definition and each of the six SKOS
     documentary note kinds are stored against their concept, each in its own

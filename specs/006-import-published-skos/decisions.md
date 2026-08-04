@@ -1055,3 +1055,50 @@ a third mechanism to collapse the two into one.
 reason (e.g. a curator override) — that would be new, deliberately-asymmetric behaviour, not a
 correction to this rule, and belongs in its own decision the way D30's own "Revisit if" already
 anticipates for relation reconciliation generally.
+
+## D38 — A surplus preferred label is kept deterministically and reported, in every configured language (review fixes 3/4)
+
+A review of the merged feature found that D25 only implemented half of what FR-014 requires for a
+second `skos:prefLabel` in one language. `ConceptLabel.clean()` allows at most one `PREFERRED` row
+per (concept, language) — the default language via `Concept.label`'s own identity anchor, any other
+configured language via the model's own uniqueness check — but `_import_labels` wrote every
+non-default-language `PREFERRED` literal unconditionally, so a second one in the same language raised
+the model's own uncaught `ValidationError` (FIX 3). Worse, in the default language the surplus was not
+even an exception: `_import_labels`'s own `if kind == PREFERRED and language == default_language:
+continue` line skips *every* literal in that language, including the ones `_preferred_label_in`
+(`_import_concepts`) never chose for `Concept.label` — dropped with no report at all, a plain
+violation of Article XI's "never applied silently" and the README's own "nothing a file contains is
+ever dropped in silence" (FIX 4).
+
+**Chosen: one deterministic winner per language, the same rule already used for the default
+language.** `_import_labels` now groups every `skos:prefLabel` literal on a concept node by language
+and keeps the lexicographically-first value in each — exactly `_preferred_label_in`'s own
+sort-and-first-value rule (T009), so a re-import of the identical file always keeps the identical
+value, and the default language's own winner computed this way is guaranteed to equal `concept.label`
+without recomputing it a second time. Every other value in that language — surplus, never a winner —
+is set aside and reported under a new `SetAsideReason.SURPLUS_PREFERRED_LABEL` member, added following
+D26's pattern exactly (translatable template, named `%(subject)s`/`%(language)s` placeholders, an
+`_EXAMPLE_PARAMS` entry in `test_report.py`). One reason serves both fixes deliberately: a surplus
+preferred label is the same defect in the default language as in any other — "more than one value
+claims to be the one preferred label in this language" — and giving FIX 4 its own reason would draw a
+distinction the two cases do not actually have.
+
+**Landed as two separate commits, not one, even though both are one function's worth of change.**
+FIX 3 (the crash: a second preferred label in a *non-default* configured language) was implemented,
+tested, mutation-probed, and committed first, deliberately leaving the default-language branch's
+silent skip untouched — reproducing exactly the review's own numbered order and letting each fix's
+own test and mutation probe stand against a minimal, isolated diff. FIX 4 (the silent drop in the
+*default* language) is the second commit, extending the same `preferred_by_language`/`preferred_kept`
+machinery FIX 3 already introduced to also report — never write, `Concept.label` already holds the
+winner — a default-language surplus.
+
+**The unconfigured-language check still runs first, per literal, unchanged.** A `skos:prefLabel` in a
+language the site is not configured for is reported once per literal via the existing
+`SetAsideReason.UNCONFIGURED_LANGUAGE` path regardless of how many there are — cardinality does not
+matter there, since none of them would ever reach `add_label` anyway — so `SURPLUS_PREFERRED_LABEL`
+is only ever reported for a language that *is* configured, avoiding a double report of the same
+unusable value under two different reasons.
+
+**Revisit if:** a future story needs to know *which* value was kept, not only that a surplus one was
+dropped — the template currently names the language and the concept but not the winning text, matching
+every other set-aside reason's own convention of not carrying the value at fault as a param.

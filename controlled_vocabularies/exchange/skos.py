@@ -494,9 +494,31 @@ def _import_labels(
     refusal raise (T020, FR-014, decisions.md D25) — that exception exists to
     protect a direct, out-of-band write, not to be this importer's control
     flow.
+
+    A second ``skos:prefLabel`` in one non-default configured language is
+    the same shape of problem, for a cardinality reason rather than a
+    language one (FIX 3, review, decisions.md D38): ``ConceptLabel.clean()``
+    allows only one ``PREFERRED`` row per (concept, language), so only the
+    lexicographically-first value in each such language — the same
+    deterministic rule :func:`_preferred_label_in` already uses for the
+    default language, so the same file always imports the same way — is
+    ever attempted; every other value in that language is set aside and
+    reported instead, ahead of the write, the same D25 discipline applied to
+    the same class of refusal.
     """
     configured = _configured_language_codes()
     concept.labels.all().delete()
+
+    # One deterministic winner per language this concept carries a
+    # skos:prefLabel in (including default_language, whose winner already
+    # equals concept.label — see _import_concepts's own call to
+    # _preferred_label_in, the identical sort-and-first-value rule).
+    preferred_by_language: dict[str, list[str]] = {}
+    for literal in graph.objects(node, SKOS.prefLabel):
+        if isinstance(literal, rdflib.Literal) and literal.language:
+            preferred_by_language.setdefault(literal.language, []).append(str(literal))
+    preferred_kept = {language: sorted(values)[0] for language, values in preferred_by_language.items()}
+
     for predicate, kind in LABEL_PREDICATES.items():
         for literal in graph.objects(node, predicate):
             if not isinstance(literal, rdflib.Literal) or not literal.language:
@@ -506,6 +528,9 @@ def _import_labels(
                 continue
             if language not in configured:
                 report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, subject=uri, language=language)
+                continue
+            if kind == ConceptLabel.Kind.PREFERRED and str(literal) != preferred_kept[language]:
+                report.add_set_aside(SetAsideReason.SURPLUS_PREFERRED_LABEL, subject=uri, language=language)
                 continue
             concept.add_label(language=language, kind=kind, text=str(literal))
 
