@@ -749,3 +749,197 @@ read, `skos:broader`/`narrower`/`related` stop being "not yet built" and become 
 `_import_unheld_values()`'s own SKOS-namespace check will keep silently skipping them either way
 (nothing breaks if `_HANDLED_CONCEPT_PREDICATES` is left as-is), but adding them there too would
 make the set of predicates this module actually reads match what the constant claims to name.
+
+## 2026-08-04T12:20:00Z · Implementer US4 · T023
+
+**Did**: `skos.py` gains `_resolve_relation_concept` and `_import_relations`, called once from
+`_import_concepts` after every concept in the file has a primary key. `skos:broader` and
+`skos:narrower` both resolve to the single canonical `ConceptRelation.Kind.BROADER` row
+(`source` the narrower end, `target` the broader end, per models.py/research.md R4), keyed by a
+deduplicated `(narrower, broader)` pair so both directions stated for one pair collapse to one
+row (FR-010). The whole file's worth of pairs is read before any of them is written, and the
+whole reconciliation runs as one pass over every concept this run wrote — not incrementally per
+concept — because a relation is commonly asserted from only one of its two ends, and an
+incremental per-concept delete-and-recreate would delete a row a sibling concept's own pass had
+only just written (decisions.md D29). `_HANDLED_CONCEPT_PREDICATES` now names `skos:broader`/
+`skos:narrower` explicitly, finishing decisions.md D27's own "Revisit if." New fixture
+`relation_both_directions.ttl` proves the same pair stated from both ends produces exactly one
+row.
+
+decisions.md D29 (new): the whole-graph-pass design, why an incremental per-concept version would
+lose data depending on iteration order, and why a relation end resolving to a concept in a
+*different* vocabulary is treated as unresolved (`MISSING_RELATION_END`) rather than left to raise
+an uncaught `ValidationError` from `ConceptRelation`'s own cross-scheme refusal.
+
+**Concern carried forward, not resolved here**: `TestIdempotentReimport::test_a_reference_made_between_two_runs_still_resolves_after_the_second`
+(T013) manually creates a `ConceptRelation` between granite and basalt that neither fixture states,
+as a stand-in for "an arbitrary foreign key survives a re-import" — written before this importer
+read relations at all. Now that `skos:broader`/`narrower` are genuinely reconciled per FR-013, a
+plain re-import of `rocks.ttl` correctly removes that unstated relation, and this pre-existing test
+fails. This story's brief prohibits modifying a test authored in an earlier story; the failure is
+named here and in the story report rather than resolved quietly.
+
+**Verified**: `poetry run pytest -q` — 460 passed, 1 failed (the pre-existing conflict above;
+453 baseline + 4 new tests in `test_skos.py`'s new `TestBroaderAndNarrowerRelations` + 4 new
+fixture-discovery cases). `poetry run ruff check .` — all checks passed. `poetry run ruff format
+--check .` — 21 files already formatted. `poetry run mypy` — success, 9 source files. `poetry run
+deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations --check
+--dry-run --settings=tests.settings` — no changes detected.
+
+**Next**: T024 — `skos:related` stored once as a symmetric relationship, including when the file
+states it in both directions.
+
+**Watch**: the `TestIdempotentReimport` conflict above; T024 will introduce a second, matching
+conflict in `TestRecordsAbsentFromSource` once `skos:related` is reconciled the same way, for the
+same reason.
+
+## 2026-08-04T12:30:00Z · Implementer US4 · T024
+
+**Did**: `_import_relations` gains a second, parallel branch for `skos:related`: a symmetric
+association keyed by an unordered pair (a `frozenset` of the two URIs, then of the two resolved
+primary keys) rather than `BROADER`'s directed `(narrower, broader)` tuple. Reuses
+`_resolve_relation_concept` unchanged. `_HANDLED_CONCEPT_PREDICATES` now also names
+`skos:related`. A `skos:related` triple naming the same node twice is skipped rather than stored
+or reported (decisions.md D29, extended). `relation_both_directions.ttl` (built at T023) already
+carries a related pair stated from both ends, so this task needed no new fixture.
+
+decisions.md D29 extended: the prediction that `skos:related` would reuse the same
+whole-pass/resolve/reconcile shape held exactly, and a second pre-existing test
+(`TestRecordsAbsentFromSource`, T015) now conflicts with FR-013 for the identical reason
+`TestIdempotentReimport` did at T023 — a manually-created `ConceptRelation` (kind `related`,
+basalt-quartz) that neither fixture states is correctly removed by the same reconciliation.
+
+**Concern carried forward, not resolved here**: the same as T023's, now affecting two tests total
+(`TestIdempotentReimport` for `BROADER`, `TestRecordsAbsentFromSource` for `RELATED`). Neither
+modified, per this story's brief. Both named in the story report's `concerns`.
+
+**Verified**: `poetry run pytest -q` — 462 passed, 2 failed (the two pre-existing conflicts above;
+460 + 3 new tests in `test_skos.py`'s new `TestRelatedRelations`, reusing T023's fixture, no new
+fixture-discovery cases). `poetry run ruff check .` — all checks passed. `poetry run ruff format
+--check .` — 21 files already formatted. `poetry run mypy` — success, 9 source files. `poetry run
+deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations --check
+--dry-run --settings=tests.settings` — no changes detected.
+
+**Next**: T025 — a relationship end neither in the file nor in the database is set aside and
+reported with both ends; an end already in the database from an earlier import is stored.
+
+**Watch**: the two pre-existing test conflicts above remain open for orchestrator review.
+
+## 2026-08-04T12:38:00Z · Implementer US4 · T025
+
+**Did**: No production change — T023's `_resolve_relation_concept`/`_import_relations` already
+had to make the missing-end/known-end/cross-scheme distinctions to avoid crashing on an ordinary,
+partial published file (decisions.md D29), the same shape decisions.md D17/T022 established for
+this story's predecessor (build the general mechanism where correctness requires it, finish it
+with acceptance coverage later). New fixture pair `relation_endpoints.ttl` /
+`relation_endpoints_updated.ttl`: alpha and beta both land on the first import with a broader
+relationship between them; the re-import drops beta from the file entirely (already in the
+database, so the relationship still lands) and adds a related edge to a URI that has never existed
+anywhere (set aside naming both ends, run still succeeds). A third fixture,
+`relation_cross_scheme_target.ttl`, exercises D29's cross-scheme guard directly: a concept in a
+second vocabulary stating a relationship to `rocks.ttl`'s granite is set aside rather than
+crashing on the model's own cross-scheme refusal.
+
+All four tests passed on first execution, confirming T023's design already covers this task's
+acceptance criteria in full.
+
+**Verified**: `poetry run pytest -q` — 466 passed, 2 failed (the two pre-existing conflicts named
+at T023/T024, unchanged and not touched; 462 + 4 new tests in `test_skos.py`'s new
+`TestRelationEndpointsMissingOrKnown` + 3 new fixture-discovery cases). `poetry run ruff check .`
+— all checks passed. `poetry run ruff format --check .` — 21 files already formatted. `poetry run
+mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run
+python -m django makemigrations --check --dry-run --settings=tests.settings` — no changes
+detected.
+
+**Next**: T026 — a re-import with a relationship removed removes it, leaving both concepts.
+
+**Watch**: the two pre-existing test conflicts remain open for orchestrator review; unaffected by
+this task.
+
+## 2026-08-04T12:45:00Z · Implementer US4 · T026
+
+**Did**: No production or fixture change. Checked `rocks_updated.ttl` against the task's own
+instruction before writing anything: it already drops granite's `related` edge to quartz (D20),
+and it fits this task exactly, so nothing further was needed. `TestRelationRemovalOnReimport`:
+re-importing `rocks.ttl` then `rocks_updated.ttl` removes the granite-quartz related row while
+both concepts remain in the database, and granite's still-stated broader edge to igneous survives
+the same re-import — proving the removal is selective (T023/T024's reconciliation), not a
+wholesale wipe of every relation touching a concept the file still contains.
+
+Both tests passed on first execution, the fourth task across this story's two most recent phases
+to do so (with T013/T014/T017/T022 in earlier phases), each proving a piece of behaviour a prior
+task already built generally rather than needing new code of its own.
+
+**Phase US-4 complete (T023-T026).** `skos:broader`, `skos:narrower`, and `skos:related` all land
+as the single canonical `ConceptRelation` row the models define, reconciled in one whole-graph
+pass per run so both directions of a hierarchy pair and both directions of a related pair each
+collapse to exactly one row (FR-010). A relationship end resolves against this run's own writes
+first, then an earlier import's, then is set aside and reported by both ends when neither resolves
+— including when the resolved match belongs to a different vocabulary (decisions.md D29). A
+re-import removes a relationship the file no longer restates while leaving every relationship it
+still states, and leaves both concepts in place either way (FR-013). `models.py` was not touched.
+
+**Concerns not resolved in this story, carried to the story report**: two pre-existing tests
+(`TestIdempotentReimport::test_a_reference_made_between_two_runs_still_resolves_after_the_second`,
+T013; `TestRecordsAbsentFromSource::test_a_concept_dropped_from_the_file_is_untouched_and_named_absent`,
+T015) each manually created a `ConceptRelation` not stated by any fixture, as a stand-in for
+"an arbitrary foreign key survives a re-import" written before this importer read relations at
+all. FR-013's authority over relationships, which this story is required to build, now correctly
+removes both manually-injected rows on re-import — decisions.md D29 records the full reasoning and
+a suggested fix. Neither test was modified, per this story's brief.
+
+**Verified**: `poetry run pytest -q` — 468 passed, 2 failed (the two pre-existing conflicts above,
+unchanged since T023/T024; 466 + 2 new tests in `test_skos.py`'s new
+`TestRelationRemovalOnReimport`, no new fixtures). `poetry run ruff check .` — all checks passed.
+`poetry run ruff format --check .` — 21 files already formatted. `poetry run mypy` — success, 9
+source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django
+makemigrations --check --dry-run --settings=tests.settings` — no changes detected.
+
+**Next**: US-5 (T027-T030) — collections arrive, ordered ones in order.
+
+**Watch**: US-5's Implementer inherits the two open pre-existing-test conflicts above unless they
+are resolved before then; they are unrelated to collections and should not block US-5's own work.
+
+## Relation-deletion design fault corrected (D30)
+
+**Did**: fixed the "either end" defect D29 named and left open at the end of US-4:
+`_import_relations`'s deletion queries selected an existing `ConceptRelation` row when *either*
+its source or its target belonged to this run's own writes, and removed it if the run's resolved
+pairs no longer included it. That deletes an edge between a concept the file mentions and one it
+does not mention at all — only half spoken about — which contradicts FR-013/D5's authority rule
+and, worse, does it silently, which D1 forbids. Both the `BROADER` and `RELATED` deletion queries
+in `controlled_vocabularies/exchange/skos.py` now require **both** ends to be in
+`successful_ids`, not either. Recorded as decisions.md D30, including what it means for a curator:
+a re-import of a partial export no longer severs the imported slice from the rest of the
+vocabulary the export never retracted.
+
+`TestIdempotentReimport::test_a_reference_made_between_two_runs_still_resolves_after_the_second`
+(T013) is modified, minimally: its illustrative reference moved from granite-basalt (an edge
+`rocks.ttl` itself states and the importer is correctly authoritative over) to a concept created
+locally in granite's own scheme that the file never mentions. Its name, assertions, and place in
+the class are unchanged; only the prop and its docstring changed.
+`TestRecordsAbsentFromSource::test_a_concept_dropped_from_the_file_is_untouched_and_named_absent`
+(T015) needed no change — it already asserted exactly the behaviour D30 introduces.
+
+`TestRelationRemovalOnReimport` (T026) is rebuilt on a new dedicated fixture pair,
+`relation_lifecycle.ttl`/`relation_lifecycle_updated.ttl` (decisions.md D28 counsels against a
+third edit to the shared `rocks.ttl`/`rocks_updated.ttl` corpus): one test for the genuine
+retraction the class is named for, one new test for the D30 survival case its old scenario used to
+get backwards, and one carried-over selectivity check, all three now correctly targeted.
+
+Mutation-probed before closing: widened both deletion queries back to `Q(...) | Q(...)`, confirmed
+`TestRecordsAbsentFromSource`'s test fails (`ConceptRelation.DoesNotExist` on the manually-created
+reference), then restored the `&`-equivalent filter. The rule bites; it is not a test that would
+pass either way.
+
+**Verified**: `poetry run pytest -q` — 473 passed, 0 failed. `poetry run ruff check .` / `ruff
+format --check .` / `mypy` / `deptry .` — all clean. `makemigrations --check --dry-run` — no
+changes detected. `pre-commit run --all-files` — all hooks passed. `forge verify --base
+origin/main` — conformance, lint, typecheck, test, and build all passed.
+
+**Next**: US-5 (T027-T030) — collections arrive, ordered ones in order. No longer blocked by any
+open relation-deletion conflict.
+
+**Watch**: D30's "Revisit if" — a future story needing a relation reconciled against only one
+rewritten end (e.g. a bulk downstream-retirement operation) would be new, deliberately-asymmetric
+behaviour, not a further correction to this rule.

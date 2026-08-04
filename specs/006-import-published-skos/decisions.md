@@ -655,3 +655,158 @@ rather than buried here.
 
 **Revisit if:** a fixture shared across stories needs editing again. Twice is a pattern, and the
 better answer may be a fixture per story rather than one corpus every story edits.
+
+## D29 — Relations are reconciled in one whole-graph pass, not a per-concept delete-and-recreate (T023)
+
+`skos:broader`/`narrower` are read once, after every concept this run creates or updates already
+has a primary key, rather than inside the per-concept loop `_import_labels`/`_import_notes` use. A
+relation predicate is commonly asserted from only one of its two ends — `narrower` from the parent,
+`broader` from the child — so an incremental per-concept "delete mine, recreate mine" (the shape
+T018/T019 use for labels and notes, which genuinely are owned by one concept) would delete a row a
+sibling concept's own pass had only just written, with the outcome depending on which concept the
+loop reached first. Read every desired pair from the whole file first, deduplicated by a canonical
+`(narrower, broader)` key, then reconcile once: this is also what makes both directions of one pair
+collapse to a single row regardless of which the file states first (FR-010).
+
+**Resolving the other end reuses one function for two purposes.** `_resolve_relation_concept` tries
+this run's own writes first, then falls back to `get_by_uri` for a concept an earlier import already
+created — spec Acceptance Scenario US4-6's "already in the database" case falls out of this for
+free, expected to need no new production code at T025, only the fixture and test (the same shape
+D17/T022 established for this story's predecessor: build the general mechanism where correctness
+requires it, finish it with acceptance coverage later).
+
+**A resolved match in a different vocabulary is treated as unresolved, reusing
+`MISSING_RELATION_END`.** `ConceptRelation` refuses a cross-scheme edge (research.md R4); calling
+`add_broader` on one would raise an uncaught `ValidationError`, which is exactly the "unhandled
+exception defeating FR-003/FR-015" shape D18/D22 already reject elsewhere in this file. Neither
+FR-011 nor the acceptance scenarios name this case, so a new report reason was considered and
+rejected as disproportionate: from a curator's point of view "this relationship could not be stored
+because the other end isn't available in this vocabulary" is the same practical outcome as "the
+other end doesn't exist at all," and Article II counsels against a sixth report reason for one
+untested edge. Covered by a dedicated test even though no acceptance scenario names it, because
+leaving a reachable crash in the public entry point undocumented would be worse than one extra test.
+
+**Revisit if:** T024 (`skos:related`) needs a materially different reconciliation shape than the one
+built here — it should not, since the same whole-pass/resolve/reconcile structure applies with an
+unordered pair in place of a directed one, but this is the point to check.
+
+**Extended at T024.** The prediction above held: `skos:related` reuses the identical shape, keyed
+by an unordered pair (a `frozenset` of the two URIs, then of the two resolved primary keys) rather
+than `BROADER`'s directed `(narrower, broader)` tuple, and `_resolve_relation_concept` needed no
+change at all. One addition specific to `related`: a `skos:related` triple naming the same node
+twice (a concept stating it is related to itself) is skipped rather than stored or reported — SKOS
+never intends this, the model's own `_reject_self` would refuse it if attempted, and no fixture in
+this story's corpus or its predecessors exercises it, so it is treated as a no-op consistent with
+D8's "the fatal set is deliberately small" rather than given a reported outcome nothing asks for.
+
+**A second pre-existing test now conflicts with FR-013 for the same reason T023's did, and was not
+modified.** `TestRecordsAbsentFromSource::test_a_concept_dropped_from_the_file_is_untouched_and_named_absent`
+(T015) manually creates a `ConceptRelation` (kind `related`) between basalt and quartz that neither
+`rocks.ttl` nor `rocks_updated.ttl` ever states, as the same kind of "arbitrary foreign key survives
+a re-import" stand-in `TestIdempotentReimport`'s test used (see the T023 entry above). Basalt is a
+concept the re-imported `rocks_updated.ttl` still contains and carries zero `related` predicates of
+its own in either file, so FR-013's authority over "relationships ... MUST end up matching the
+file" now correctly removes this manually-injected row on the second `import_skos()` call in that
+test. This is the same conflict, the same cause, and the same resolution: not modified, per this
+story's brief; named here and in the story report's `concerns` for the orchestrator's tamper-check
+triage (D23/D28's established mechanism) to review, with the same suggested fix — repoint the
+illustrative foreign key at a model this importer does not yet reconcile (`CollectionMember`,
+pending US-5) rather than `ConceptRelation`.
+
+**Revisit if (updated):** the orchestrator's tamper-check triage reviews the two failures named
+across this entry (T013's and T015's) and either approves a fix or directs a different one — at
+that point this entry should say what was done, not merely record the fix that was possible.
+
+## D30 — A relation is only deleted when both its ends were rewritten by this run, not when either was (T023's own review)
+
+D29's original deletion query selected an existing row when *either* `source` or `target` matched
+this run's own writes (`successful_ids`), and removed it if the run's own resolved pairs no longer
+included it. That is wrong: an edge between a concept the file mentions and one it does not mention
+at all is only half spoken about, and FR-013's authority rule ("MUST be authoritative for that
+record's own content ... a record the file does not mention MUST be left untouched") only ever
+covers what a record's own end has to say. FR-011 exists precisely because publishers routinely
+export a slice of a larger vocabulary; an "either end" deletion means importing that slice silently
+destroys every edge from the imported concepts out to the rest of the vocabulary the export never
+retracted — and silently, since nothing in the report named it. D1 forbids exactly this.
+
+Confirmed by the two tests D29 already flagged as conflicting with FR-013 and left unresolved
+(`TestIdempotentReimport`'s and `TestRecordsAbsentFromSource`'s): both fail under "either end", for
+the same underlying reason — an edge with one end this run never touched was being deleted anyway.
+That was not two coincidentally-broken tests; it was the "either end" rule doing exactly what it
+says, and what it says is wrong.
+
+**Chosen: a row is only ever a deletion candidate when both its ends belong to
+`successful_concepts`.** Both the `BROADER` and the `RELATED` deletion queries in
+`_import_relations` now filter on `source_id__in=successful_ids` **and**
+`target_id__in=successful_ids`, not `Q(...) | Q(...)`. This follows directly from D5: the file is
+authoritative for a record it contains and silent about one it does not, and a relation row's two
+ends are two records — the row is "contained" by the file's authority only when the file had the
+chance to speak about both of them this run. An end reachable only through an earlier import
+(`_resolve_relation_concept`'s `get_by_uri` fallback, D29) is exactly such a case, and it already
+gets the same treatment as the concept at that end itself: left alone, named in
+`report.absent_from_source`, never silently touched.
+
+**What this means for a curator:** re-importing a partial export of a larger vocabulary no longer
+severs the imported slice from the rest of it. An edge into a concept this file's slice does not
+cover survives a re-import of that slice, exactly as the concept at the far end already does.
+
+**The two tests D29 flagged are resolved as follows, not left open.**
+`TestRecordsAbsentFromSource::test_a_concept_dropped_from_the_file_is_untouched_and_named_absent`
+(T015) needed no change at all: its manually-created basalt-quartz `related` row has quartz absent
+from `rocks_updated.ttl`, so under "both ends" it now survives untouched, which is exactly what the
+test already asserted. `TestIdempotentReimport::test_a_reference_made_between_two_runs_still_resolves_after_the_second`
+(T013) is modified, minimally: its illustrative granite-basalt `broader` row was a bad choice of
+prop from the start — `rocks.ttl` states that exact hierarchy edge itself, so the file is
+authoritative for it and the importer correctly overwrites it every run, "either end" or "both
+ends" alike; the test was never actually proving what its docstring claims. It now points the same
+foreign key at a concept created locally in granite's own scheme that `rocks.ttl` never mentions,
+which does prove a reference made between two runs surviving untouched. The test's name, its
+assertions' shape (primary keys and static URIs, both sides, after `refresh_from_db()`), and its
+place in `TestIdempotentReimport` are all unchanged; only the concept it points at is different, and
+its docstring now says why.
+
+**`TestRelationRemovalOnReimport` (T026) needed more than a tweak.** Its own reused
+`rocks_updated.ttl` scenario — granite's related edge to quartz, with quartz dropped from the file
+entirely — was exactly the "either end" bug's own shape: under "both ends" that edge now survives,
+the opposite of what the test asserted. Reusing `rocks.ttl`/`rocks_updated.ttl` a third time was
+rejected per D28's own "Revisit if" (a fixture shared across stories needing yet another edit is a
+pattern, and the better answer is a fixture per story). A new pair,
+`relation_lifecycle.ttl`/`relation_lifecycle_updated.ttl`, carries three related pairs side by side:
+quarry-vein is genuinely retracted (both concepts stay, the edge does not — this class's own
+purpose); quarry-outlier is the D30 survival case, now its own dedicated test rather than folded
+into the removal test as before; quarry-companion is unchanged, the selectivity check the class
+already made, preserved.
+
+**Revisit if:** a future story needs a relation row to be reconciled against only one rewritten end
+(for example, a bulk "retire everything downstream of X" operation) — that would be new,
+deliberately-asymmetric behaviour, not a correction to this rule, and belongs in its own decision.
+
+## D31 — Tamper-check triage for US-4: one pre-existing test modified, approved on the rule that broke it
+
+`forge tamper-check --base 4d80777 --head 77f89ad` raised one `modified_preexisting_test` flag, on
+`tests/test_exchange/test_skos.py`. It is approved, and the reason matters more than the flag.
+
+`TestIdempotentReimport::test_a_reference_made_between_two_runs_still_resolves_after_the_second`
+(T013, US-2) proved that a foreign-key reference made between two runs survives the second one. It
+picked a `ConceptRelation` as its illustrative reference, at a point in the feature's life when this
+importer read no relation predicates at all. US-4 gave the importer authority over exactly that
+model, and the edge the test hand-created — `granite` broader `basalt` — is stated by `rocks.ttl`
+itself, so the file legitimately overwrites it. The test's own claim was never about relations; it
+was about a concept's primary key surviving. Its reference is now a relation to a concept created
+locally in the same vocabulary that `rocks.ttl` never mentions, which the corrected D30 rule leaves
+alone. Name, assertions and class placement are unchanged.
+
+The other test that failed the same way, `TestRecordsAbsentFromSource`'s
+`test_a_concept_dropped_from_the_file_is_untouched_and_named_absent` (T015, US-2), was **not**
+modified, and that distinction is the whole point of the triage. Its reference points at `quartz`, a
+concept `rocks_updated.ttl` drops entirely, so under D30 it survives and the test passes untouched.
+One of the two tests encoded a stale assumption; the other was correctly reporting a real defect in
+the new code. Changing both to green would have deleted the finding.
+
+**Verified rather than argued:** removing the target-end constraint from both deletion filters —
+widening D30's rule back to the "either end" version the story first shipped — reproduces exactly
+those two failures and nothing else. The rule is load-bearing and its test proves it.
+
+**Revisit if:** a third story takes the importer's authority over a model an earlier story used as an
+incidental prop. Two is a coincidence; three means test fixtures should stop reaching for whatever
+model is nearest and use one the importer provably never writes.

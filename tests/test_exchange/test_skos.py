@@ -435,7 +435,14 @@ class TestIdempotentReimport:
     nothing new and recreates nothing. Every record's primary key is stable
     across both runs, and a foreign-key reference made *between* the two
     runs still resolves to the same row afterward — the acceptance scenario
-    specifically distinguishes this from merely re-reading the same URI."""
+    specifically distinguishes this from merely re-reading the same URI.
+
+    (decisions.md D30) The second test's illustrative reference was
+    originally made between granite and basalt, an edge rocks.ttl itself
+    states and is therefore authoritative over; it has since been repointed
+    at a locally created concept the file never mentions, so the test still
+    proves a foreign key surviving a re-import untouched rather than a
+    relationship the importer now correctly overwrites."""
 
     def test_every_primary_key_is_stable_across_two_identical_runs(self, db):
         import_skos(FIXTURES / "rocks.ttl")
@@ -453,18 +460,26 @@ class TestIdempotentReimport:
             assert Concept.objects.get(static_uri=uri).pk == pk
 
     def test_a_reference_made_between_two_runs_still_resolves_after_the_second(self, db):
+        # The illustrative reference is deliberately made to a concept
+        # created locally in granite's own scheme rather than to basalt:
+        # rocks.ttl states granite's own hierarchy down to basalt, so the
+        # importer has since taken ownership of that edge (decisions.md D30)
+        # and would correctly overwrite, not merely leave, it. "outsider"
+        # here is never mentioned by rocks.ttl at all, so it stands in for a
+        # foreign key genuinely made between two runs, outside anything the
+        # file speaks about.
         import_skos(FIXTURES / "rocks.ttl")
         granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
-        basalt = Concept.objects.get(static_uri="http://example.org/rocks/basalt")
-        relation = ConceptRelation.objects.create(source=granite, target=basalt, kind=ConceptRelation.Kind.BROADER)
+        outsider = ConceptFactory(scheme=granite.scheme, label="Local outsider")
+        relation = ConceptRelation.objects.create(source=granite, target=outsider, kind=ConceptRelation.Kind.BROADER)
 
         import_skos(FIXTURES / "rocks.ttl")
 
         relation.refresh_from_db()
         assert relation.source_id == granite.pk
-        assert relation.target_id == basalt.pk
+        assert relation.target_id == outsider.pk
         assert relation.source.static_uri == "http://example.org/rocks/granite"
-        assert relation.target.static_uri == "http://example.org/rocks/basalt"
+        assert relation.target.static_uri == outsider.static_uri
 
 
 class TestAuthoritativeUpdateForContainedRecords:
@@ -820,6 +835,209 @@ class TestNoPreferredLabelFinishedByUS3:
         b = Concept.objects.get(static_uri="http://example.org/quarry/b")
         assert b.label == "B"
         assert b.alt_labels("en") == ["B-alt"]
+
+
+class TestBroaderAndNarrowerRelations:
+    """T023 — FR-010/research.md R4: ``skos:broader`` and ``skos:narrower`` both
+    land as the single ``ConceptRelation`` row the models define, ``source`` the
+    narrower end and ``target`` the broader end, whichever direction the file
+    states it from. Both directions stated for the same pair still produce
+    exactly one row, never two."""
+
+    def test_a_narrower_triple_lands_with_the_ends_the_right_way_round(self, db):
+        # rocks.ttl's igneous states "skos:narrower basalt" — igneous is the
+        # broader end, basalt the narrower one, so the canonical row must read
+        # source=basalt, target=igneous, even though the file names igneous first.
+        import_skos(FIXTURES / "rocks.ttl")
+        igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
+        basalt = Concept.objects.get(static_uri="http://example.org/rocks/basalt")
+        assert list(basalt.broader()) == [igneous]
+        assert basalt in igneous.narrower()
+        assert ConceptRelation.objects.get(source=basalt, target=igneous, kind=ConceptRelation.Kind.BROADER)
+
+    def test_a_broader_triple_lands_with_the_ends_the_right_way_round(self, db):
+        # rocks.ttl's granite states "skos:broader igneous" directly — granite
+        # is already the narrower end, so no swap is needed.
+        import_skos(FIXTURES / "rocks.ttl")
+        igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        assert list(granite.broader()) == [igneous]
+        assert ConceptRelation.objects.get(source=granite, target=igneous, kind=ConceptRelation.Kind.BROADER)
+
+    def test_both_directions_of_one_pair_produce_exactly_one_row(self, db):
+        # relation_both_directions.ttl states the parent/child pair from both
+        # ends: parent's own "narrower child" and child's own "broader parent".
+        import_skos(FIXTURES / "relation_both_directions.ttl")
+        parent = Concept.objects.get(static_uri="http://example.org/hierarchy/parent")
+        child = Concept.objects.get(static_uri="http://example.org/hierarchy/child")
+        assert (
+            ConceptRelation.objects.filter(source=child, target=parent, kind=ConceptRelation.Kind.BROADER).count() == 1
+        )
+        assert ConceptRelation.objects.filter(kind=ConceptRelation.Kind.BROADER).count() == 1
+
+    def test_reimporting_the_identical_file_does_not_duplicate_the_relation(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        import_skos(FIXTURES / "rocks.ttl")
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
+        assert (
+            ConceptRelation.objects.filter(source=granite, target=igneous, kind=ConceptRelation.Kind.BROADER).count()
+            == 1
+        )
+
+
+class TestRelatedRelations:
+    """T024 — FR-010: ``skos:related`` is stored once as a symmetric
+    association, including when the file states it from both concepts."""
+
+    def test_a_related_pair_stated_once_is_stored_as_one_symmetric_relation(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        quartz = Concept.objects.get(static_uri="http://example.org/rocks/quartz")
+        assert quartz in granite.related()
+        assert granite in quartz.related()
+        assert ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED).count() == 1
+
+    def test_both_directions_of_one_related_pair_produce_exactly_one_row(self, db):
+        # relation_both_directions.ttl states east-related-west AND
+        # west-related-east — both name the same unordered pair.
+        import_skos(FIXTURES / "relation_both_directions.ttl")
+        east = Concept.objects.get(static_uri="http://example.org/hierarchy/east")
+        west = Concept.objects.get(static_uri="http://example.org/hierarchy/west")
+        assert west in east.related()
+        assert ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED).count() == 1
+
+    def test_reimporting_the_identical_file_does_not_duplicate_the_related_row(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        import_skos(FIXTURES / "rocks.ttl")
+        assert ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED).count() == 1
+
+
+class TestRelationEndpointsMissingOrKnown:
+    """T025 — FR-011: a relationship end that is neither in the file nor
+    already in the database is set aside and reported, naming both ends, and
+    the run still succeeds; a relationship end already in the database from
+    an earlier import is stored even when this file does not separately
+    redeclare it. Builds no new production behaviour of its own — T023's
+    ``_resolve_relation_concept``/``_import_relations`` (research.md R4,
+    decisions.md D29) already has to make exactly this distinction to avoid
+    crashing on an ordinary, partial published file, so this task's own job
+    is acceptance coverage proving it, the same shape decisions.md D17/T022
+    already established for this story's predecessor."""
+
+    def test_an_end_already_in_the_database_from_an_earlier_import_is_stored(self, db):
+        import_skos(FIXTURES / "relation_endpoints.ttl")
+        alpha_pk = Concept.objects.get(static_uri="http://example.org/relendpoints/alpha").pk
+        beta_pk = Concept.objects.get(static_uri="http://example.org/relendpoints/beta").pk
+
+        import_skos(FIXTURES / "relation_endpoints_updated.ttl")
+
+        assert ConceptRelation.objects.filter(
+            source_id=alpha_pk, target_id=beta_pk, kind=ConceptRelation.Kind.BROADER
+        ).exists()
+        # beta is untouched — the file no longer mentions it as a concept at all.
+        assert Concept.objects.filter(pk=beta_pk).exists()
+
+    def test_an_end_neither_in_the_file_nor_the_database_is_set_aside_naming_both_ends(self, db):
+        import_skos(FIXTURES / "relation_endpoints.ttl")
+
+        report = import_skos(FIXTURES / "relation_endpoints_updated.ttl")
+
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.MISSING_RELATION_END]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/relendpoints/alpha"
+        assert entries[0].params["other"] == "http://example.org/relendpoints/ghost"
+        assert not Concept.objects.filter(static_uri="http://example.org/relendpoints/ghost").exists()
+
+    def test_the_run_succeeds_and_every_other_relationship_still_lands(self, db):
+        import_skos(FIXTURES / "relation_endpoints.ttl")
+
+        report = import_skos(FIXTURES / "relation_endpoints_updated.ttl")
+
+        assert report.fatal == []
+        alpha = Concept.objects.get(static_uri="http://example.org/relendpoints/alpha")
+        beta = Concept.objects.get(static_uri="http://example.org/relendpoints/beta")
+        assert beta in alpha.broader()
+
+    def test_an_end_that_exists_but_in_a_different_vocabulary_is_set_aside_not_a_crash(self, db):
+        # ConceptRelation only ever joins concepts of the same scheme
+        # (models.py _reject_cross_scheme); asserting one across vocabularies
+        # must not raise an uncaught ValidationError (decisions.md D29).
+        import_skos(FIXTURES / "rocks.ttl")
+
+        report = import_skos(FIXTURES / "relation_cross_scheme_target.ttl")
+
+        assert report.fatal == []
+        outsider = Concept.objects.get(static_uri="http://example.org/outsiders/outsider")
+        assert list(outsider.broader()) == []
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.MISSING_RELATION_END]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/outsiders/outsider"
+        assert entries[0].params["other"] == "http://example.org/rocks/granite"
+
+
+class TestRelationRemovalOnReimport:
+    """T026 — FR-013: a re-import of a file from which a relationship has
+    been removed removes it, leaving both concepts. This is the third case
+    decisions.md D20 deferred out of T014.
+
+    (decisions.md D30) `rocks_updated.ttl`'s dropped granite-quartz edge no
+    longer proves this: quartz leaves the file entirely, and correcting
+    `_import_relations` to require *both* ends of a row to have been written
+    by this run before deleting it means that edge now survives instead —
+    exactly the "leaves both concepts" wording this class's own docstring
+    already promised, just not for the case this class used to test. This
+    class now uses its own dedicated `relation_lifecycle.ttl`/
+    `relation_lifecycle_updated.ttl` fixture pair rather than a third edit to
+    the shared rocks corpus (decisions.md D28), covering the genuine
+    retraction this class is named for, the D30 survival case, and the
+    selectivity check the original third test made, side by side."""
+
+    def test_a_removed_related_edge_is_gone_and_both_concepts_remain(self, db):
+        import_skos(FIXTURES / "relation_lifecycle.ttl")
+        quarry = Concept.objects.get(static_uri="http://example.org/lifecycle/quarry")
+        vein = Concept.objects.get(static_uri="http://example.org/lifecycle/vein")
+        assert vein in quarry.related()
+
+        import_skos(FIXTURES / "relation_lifecycle_updated.ttl")
+
+        assert not ConceptRelation.objects.filter(
+            kind=ConceptRelation.Kind.RELATED,
+            source_id__in=(quarry.pk, vein.pk),
+            target_id__in=(quarry.pk, vein.pk),
+        ).exists()
+        assert Concept.objects.filter(pk=quarry.pk).exists()
+        assert Concept.objects.filter(pk=vein.pk).exists()
+
+    def test_an_edge_whose_other_end_left_the_file_entirely_survives(self, db):
+        # decisions.md D30: quarry-outlier is not restated by
+        # relation_lifecycle_updated.ttl, but outlier itself is not written
+        # by that run either — the file's silence about outlier is not the
+        # same as the file retracting quarry's edge to it, so the edge is
+        # left exactly as it was rather than deleted.
+        import_skos(FIXTURES / "relation_lifecycle.ttl")
+        quarry = Concept.objects.get(static_uri="http://example.org/lifecycle/quarry")
+        outlier = Concept.objects.get(static_uri="http://example.org/lifecycle/outlier")
+        assert outlier in quarry.related()
+
+        report = import_skos(FIXTURES / "relation_lifecycle_updated.ttl")
+
+        assert outlier in quarry.related()
+        assert Concept.objects.filter(pk=outlier.pk).exists()
+        assert "http://example.org/lifecycle/outlier" in report.absent_from_source
+
+    def test_a_relationship_the_file_still_states_survives_the_same_reimport(self, db):
+        # quarry's related edge to companion is unchanged between
+        # relation_lifecycle.ttl and relation_lifecycle_updated.ttl — the
+        # removal above must be selective, not a wholesale wipe of every
+        # relation touching quarry.
+        import_skos(FIXTURES / "relation_lifecycle.ttl")
+        quarry = Concept.objects.get(static_uri="http://example.org/lifecycle/quarry")
+        companion = Concept.objects.get(static_uri="http://example.org/lifecycle/companion")
+
+        import_skos(FIXTURES / "relation_lifecycle_updated.ttl")
+
+        assert companion in quarry.related()
 
 
 class TestFixtureCorpus:
