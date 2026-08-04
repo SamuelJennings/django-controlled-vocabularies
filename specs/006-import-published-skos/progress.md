@@ -1022,3 +1022,39 @@ membership matching the file, and a member's concept the file no longer mentions
 (decisions.md D30's rule, applied here).
 
 **Watch**: none.
+
+## 2026-08-04T13:15:00Z · Implementer US5 · T029
+
+**Did**: No new production code. T027's `_import_collections` already had to resolve every member
+URI through `_resolve_concept_reference` and set aside a `None` result under
+`SetAsideReason.MISSING_MEMBER` (naming both the member and the collection), and already only ever
+removes an existing membership when its concept belongs to `successful_concepts` — exactly the
+brief's own D30-equivalent rule, applied from the start rather than re-derived here, per the story
+brief's explicit instruction. New fixture pair `collection_lifecycle.ttl`/
+`collection_lifecycle_updated.ttl` (decisions.md D28's own "prefer a new fixture" counsel, rather
+than a third edit to `rocks.ttl`/`rocks_updated.ttl`): four members side by side in one collection —
+alpha stays a member across both files, beta stays present as a concept but is genuinely dropped
+from the collection statement (removed), gamma leaves the file entirely (survives, per D30), delta
+is added on the second run, and "missing" never exists anywhere (set aside on the first run). Seven
+tests, all passing on first execution — the same shape T025 was for relationship endpoints, this
+task's own acceptance criteria proving a mechanism the previous task already had to build correctly
+to avoid crashing on an ordinary, partial file.
+
+**Mutation probe, two separate**: (1) dropped the `successful_ids` guard from the removal condition
+(widening it back to "membership not in resolved_pks", the pre-D30-equivalent "either end" shape) —
+the survivor test and the "final membership" test both failed (gamma wrongly removed), the other five
+unaffected; restored. (2) dropped the `report.add_set_aside(MISSING_MEMBER, ...)` call — the
+missing-member test failed (`0 == 1`), the other six unaffected; restored. Full suite green again
+after each restore.
+
+**Verified**: `poetry run pytest -q` — 490 passed (481 + 7 new in `test_skos.py`'s new
+`TestCollectionMembershipMissingOrAbsentEnds`, + 2 new fixture-discovery cases). `poetry run ruff
+check .` — all checks passed. `poetry run ruff format --check .` — 21 files already formatted.
+`poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned.
+`poetry run python -m django makemigrations --check --dry-run --settings=tests.settings` — no
+changes detected. `poetry run pre-commit run --all-files` — all hooks passed.
+
+**Next**: T030 — a blank-node collection fails the run, on the same rule as concepts (D3); an
+ordered collection's blank-node list cells are read normally.
+
+**Watch**: none.

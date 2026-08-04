@@ -1129,6 +1129,93 @@ class TestOrderedCollectionMemberOrder:
         assert after.static_uri == before.static_uri
 
 
+class TestCollectionMembershipMissingOrAbsentEnds:
+    """T029 — FR-011: a collection member neither in the file nor already in
+    the database is set aside and reported, and the collection is still
+    created; the run succeeds. FR-013: a re-import that adds and removes
+    members leaves membership matching the file, except that decisions.md
+    D30's own rule — settled for relationship reconciliation and carried
+    here unchanged, not re-derived — means a member whose concept the file no
+    longer mentions *at all* survives, exactly as that concept itself
+    survives (``report.absent_from_source``)."""
+
+    def test_a_member_neither_in_the_file_nor_the_database_is_set_aside_naming_both(self, db):
+        report = import_skos(FIXTURES / "collection_lifecycle.ttl")
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.MISSING_MEMBER]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/lifecycle-collections/missing"
+        assert entries[0].params["collection"] == "http://example.org/lifecycle-collections/collection/group"
+
+    def test_the_collection_is_still_created_and_the_run_succeeds(self, db):
+        report = import_skos(FIXTURES / "collection_lifecycle.ttl")
+        assert report.fatal == []
+        collection = Collection.objects.get_by_uri("http://example.org/lifecycle-collections/collection/group")
+        alpha = Concept.objects.get(static_uri="http://example.org/lifecycle-collections/alpha")
+        beta = Concept.objects.get(static_uri="http://example.org/lifecycle-collections/beta")
+        gamma = Concept.objects.get(static_uri="http://example.org/lifecycle-collections/gamma")
+        assert set(collection.members()) == {alpha, beta, gamma}
+        assert not Concept.objects.filter(static_uri="http://example.org/lifecycle-collections/missing").exists()
+
+    def test_a_member_the_file_still_states_survives_the_reimport(self, db):
+        import_skos(FIXTURES / "collection_lifecycle.ttl")
+        collection = Collection.objects.get_by_uri("http://example.org/lifecycle-collections/collection/group")
+        alpha = Concept.objects.get(static_uri="http://example.org/lifecycle-collections/alpha")
+
+        import_skos(FIXTURES / "collection_lifecycle_updated.ttl")
+
+        assert alpha in collection.members()
+
+    def test_a_member_the_file_still_contains_but_excludes_is_removed(self, db):
+        # beta stays a concept in collection_lifecycle_updated.ttl, but
+        # "group"'s own member list no longer names it — a genuine
+        # retraction, since beta was mentioned (and rewritten) this run.
+        import_skos(FIXTURES / "collection_lifecycle.ttl")
+        collection = Collection.objects.get_by_uri("http://example.org/lifecycle-collections/collection/group")
+        beta = Concept.objects.get(static_uri="http://example.org/lifecycle-collections/beta")
+
+        import_skos(FIXTURES / "collection_lifecycle_updated.ttl")
+
+        assert beta not in collection.members()
+        assert Concept.objects.filter(pk=beta.pk).exists()
+
+    def test_a_member_whose_concept_the_file_no_longer_mentions_at_all_survives(self, db):
+        # decisions.md D30's rule, applied to membership rather than a
+        # relation: gamma leaves collection_lifecycle_updated.ttl entirely,
+        # so this run never rewrites gamma at all — the file's silence about
+        # gamma is not the same as "group" retracting its membership, and the
+        # membership is left exactly as it was, same as gamma's own concept
+        # row (report.absent_from_source).
+        import_skos(FIXTURES / "collection_lifecycle.ttl")
+        collection = Collection.objects.get_by_uri("http://example.org/lifecycle-collections/collection/group")
+        gamma = Concept.objects.get(static_uri="http://example.org/lifecycle-collections/gamma")
+
+        report = import_skos(FIXTURES / "collection_lifecycle_updated.ttl")
+
+        assert gamma in collection.members()
+        assert Concept.objects.filter(pk=gamma.pk).exists()
+        assert "http://example.org/lifecycle-collections/gamma" in report.absent_from_source
+
+    def test_a_new_member_is_added_on_reimport(self, db):
+        import_skos(FIXTURES / "collection_lifecycle.ttl")
+        collection = Collection.objects.get_by_uri("http://example.org/lifecycle-collections/collection/group")
+
+        import_skos(FIXTURES / "collection_lifecycle_updated.ttl")
+
+        delta = Concept.objects.get(static_uri="http://example.org/lifecycle-collections/delta")
+        assert delta in collection.members()
+
+    def test_the_final_membership_matches_the_updated_file_plus_the_survivor(self, db):
+        import_skos(FIXTURES / "collection_lifecycle.ttl")
+        collection = Collection.objects.get_by_uri("http://example.org/lifecycle-collections/collection/group")
+
+        import_skos(FIXTURES / "collection_lifecycle_updated.ttl")
+
+        alpha = Concept.objects.get(static_uri="http://example.org/lifecycle-collections/alpha")
+        gamma = Concept.objects.get(static_uri="http://example.org/lifecycle-collections/gamma")
+        delta = Concept.objects.get(static_uri="http://example.org/lifecycle-collections/delta")
+        assert set(collection.members()) == {alpha, gamma, delta}
+
+
 class TestFixtureCorpus:
     """T005 — the published-vocabulary fixtures are discoverable and parse (FR-018, SC-016).
 
