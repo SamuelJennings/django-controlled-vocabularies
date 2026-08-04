@@ -281,8 +281,20 @@
       "tasks": [
         {
           "id": "T031",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": ["tests/test_exchange/test_standards.py"],
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy",
+              "poetry run deptry .",
+              "poetry run python -m django makemigrations --check --dry-run --settings=tests.settings",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
         },
         {
           "id": "T032",

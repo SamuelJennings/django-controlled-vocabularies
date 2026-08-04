@@ -1113,3 +1113,45 @@ widened two pre-existing `TestReportPopulatedByARealRun` assertions (T012, US-1)
 collections in the created/updated bucket; flagged for the next tamper-check triage pass to review
 alongside D23/D28/D31's own precedent, even though this session applied and verified the fix itself
 rather than leaving it open, since no separate orchestrator pass is described for this story.
+
+## 2026-08-04T12:50:00Z · Implementer US6 · T031
+
+**Did**: `tests/test_exchange/test_standards.py` — a closed-world standards sweep (FR-016, spec
+User Story 6 Acceptance Scenarios 1 and 4) that complements the many per-message assertions already
+scattered across `test_report.py`/`test_skos.py`/`test_safety.py`. `TestReportReasonTemplatesUseOnlyNamedPlaceholders`
+parametrizes over `list(SetAsideReason) + list(FatalReason) + list(NormalizedReason)` — every member
+of all three closed report-reason vocabularies, so a reason added later without its own dedicated
+test is still caught — and asserts each template carries *only* named `%(name)s` placeholders, never
+a bare positional one (the existing tests check `%(subject)s` is present; this additionally checks
+nothing else in the string is un-named). `TestFailureMessagesUseOnlyNamedPlaceholders` exercises
+every `raise …Error(_("…"), …)` call site in the `exchange` package once (the four `SkosImportError`/
+`SkosImportFailed` messages in `skos.py`, the two `UnsafeRdfXmlError` messages in `safety.py`) with
+the same check. Acceptance Scenario 4's developer-diagnostics exemption — the raw upstream `rdflib`/
+`defusedxml` exception each of the two chained refusals carries on `__cause__` — is asserted present
+explicitly rather than left an unstated gap, naming it as the one thing this feature shows a person
+that Article XII does not hold to a translatable, named-placeholder standard.
+
+No new production code: every message the earlier US0-US5 Implementers wrote already meets the
+standard this sweep checks (matching T013/T014/T017/T022/T028/T029's own precedent of an
+acceptance-coverage-only task). Proven a real check with a mutation probe: temporarily reverted
+`SkosImportError`'s "could not be found" message from `%(file)s` to a bare `%s`; the new sweep's
+`test_missing_file_message` failed naming the positional placeholder, the other 20 new tests were
+unaffected; reverted, full suite green again.
+
+**Verified**: `poetry run pytest -q` — 514 passed (493 + 21 new in the new `test_standards.py`).
+`poetry run ruff check .` — all checks passed. `poetry run ruff format .` — 1 file reformatted
+(`test_standards.py`) then clean. `poetry run mypy` — success, 9 source files. `poetry run deptry .`
+— no issues, 15 files scanned. `poetry run python -m django makemigrations --check --dry-run
+--settings=tests.settings` — no changes detected. `poetry run pre-commit run --all-files` — all
+hooks passed.
+
+**Next**: T033 (was T031a in tasks.md prose) — every SKOS predicate in the fixture corpus is either
+read or reported, closing decisions.md D27's own gap.
+
+**Watch**: `specs/006-import-published-skos/feature-state.json`'s US6 story only lists tasks T031
+and T032 — T033 and T034 (added mid-run by the US4/US5 Implementers as T031a/T031b, per this
+story's own brief) are not yet entries in the ledger. Restructuring `stories[].tasks` is Forge's own
+job, not an Implementer's (feature-state.schema.json's own description), so this Implementer flips
+status/attempts/evidence only on the two task ids the ledger already has and records T033/T034's own
+progress here in prose instead — flagged for Forge to reconcile the ledger's task list with
+tasks.md's own T031/T033/T034/T032 numbering.
