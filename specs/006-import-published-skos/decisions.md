@@ -861,3 +861,31 @@ suggested alternative, matching D29/D30's own practice of naming one, would be t
 `TestReportPopulatedByARealRun` assertions failing and flag them for a separate pass, the same as
 T023/T024 did for `TestIdempotentReimport`/`TestRecordsAbsentFromSource`; this entry chose not to,
 because no separate pass is described for this story and the closing gate requires a green suite.
+
+## D33 — Tamper-check triage for US-5: two expected-set assertions extended, not weakened
+
+`forge tamper-check --base 621c43c --head f49e760` raised one `modified_preexisting_test` flag, on
+`tests/test_exchange/test_skos.py`. Approved.
+
+`TestReportPopulatedByARealRun`'s two exact-set assertions (T012, US-1) listed every identifier a
+plain import of `rocks.ttl` reports as created or updated. T027 made the importer read the two
+collections that file has always carried, and a collection is a record with its own identity, so it
+lands in those buckets exactly as a concept does. The two expected sets gained those two
+identifiers. The assertion is still `set(report.created) == expected` — exact equality, not a
+subset — and its sibling `len(report.created) == len(expected)` still guards against a duplicate
+slipping in. Across the whole story range, the only line removed from any test file is one `import`
+statement, replaced by the same import widened.
+
+The tamper flag did the job it exists for: this is the second story in a row where correct new
+behaviour changed what an earlier story's test could assume, and both times the Implementer stopped
+and reported instead of quietly adjusting.
+
+**One gap this story named and did not fill.** A collection an earlier import created that the
+current file no longer mentions is reported nowhere. A concept in that position is named in
+`report.absent_from_source`, and a collection has its own identity for the same reasons. It was
+outside every acceptance scenario T027-T030 states, so it was correctly left unbuilt rather than
+invented, and it is now T031b in the standards phase rather than a note nobody owns.
+
+**Revisit if:** the report grows a third record type with identity — the "which buckets does this
+belong in" question has now been answered twice by hand, and a third time is a sign the report
+should ask the record rather than the importer remembering to.
