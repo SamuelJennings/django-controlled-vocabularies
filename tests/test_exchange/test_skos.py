@@ -15,7 +15,7 @@ import rdflib
 from controlled_vocabularies.exchange.report import FatalReason, SetAsideReason
 from controlled_vocabularies.exchange.safety import UnsafeRdfXmlError
 from controlled_vocabularies.exchange.skos import SkosImportError, SkosImportFailed, _read_graph, import_skos
-from controlled_vocabularies.models import Concept, ConceptScheme
+from controlled_vocabularies.models import Concept, ConceptRelation, ConceptScheme
 from tests.factories import ConceptFactory, ConceptSchemeFactory
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "skos"
@@ -410,3 +410,40 @@ class TestReportPopulatedByARealRun:
         assert {"http://example.org/minerals/feldspar", "http://example.org/minerals/mica"} <= set(report.created)
         assert any(entry.reason is SetAsideReason.VOCABULARY_MISMATCH for entry in report.set_aside)
         assert report.fatal == []
+
+
+class TestIdempotentReimport:
+    """T013 — FR-004/FR-013: importing an identical file twice creates
+    nothing new and recreates nothing. Every record's primary key is stable
+    across both runs, and a foreign-key reference made *between* the two
+    runs still resolves to the same row afterward — the acceptance scenario
+    specifically distinguishes this from merely re-reading the same URI."""
+
+    def test_every_primary_key_is_stable_across_two_identical_runs(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        scheme_pk = ConceptScheme.objects.get(static_uri=ROCKS_URI).pk
+        concept_pks = {c.static_uri: c.pk for c in Concept.objects.filter(scheme_id=scheme_pk)}
+        assert len(concept_pks) == 5
+
+        import_skos(FIXTURES / "rocks.ttl")
+
+        scheme = ConceptScheme.objects.get(static_uri=ROCKS_URI)
+        assert scheme.pk == scheme_pk
+        assert ConceptScheme.objects.filter(static_uri=ROCKS_URI).count() == 1
+        assert Concept.objects.filter(scheme=scheme).count() == len(concept_pks)
+        for uri, pk in concept_pks.items():
+            assert Concept.objects.get(static_uri=uri).pk == pk
+
+    def test_a_reference_made_between_two_runs_still_resolves_after_the_second(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        basalt = Concept.objects.get(static_uri="http://example.org/rocks/basalt")
+        relation = ConceptRelation.objects.create(source=granite, target=basalt, kind=ConceptRelation.Kind.BROADER)
+
+        import_skos(FIXTURES / "rocks.ttl")
+
+        relation.refresh_from_db()
+        assert relation.source_id == granite.pk
+        assert relation.target_id == basalt.pk
+        assert relation.source.static_uri == "http://example.org/rocks/granite"
+        assert relation.target.static_uri == "http://example.org/rocks/basalt"

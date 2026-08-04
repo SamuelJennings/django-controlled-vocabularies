@@ -442,3 +442,26 @@ files), deptry, `makemigrations --check --dry-run`, `pre-commit run --all-files`
 whose declared default language differs from the one frozen on the existing vocabulary must be
 reported as set aside, not silently ignored — silence is what D1 forbids. D17's `NO_PREFERRED_LABEL`
 set-aside is minimal and belongs to T022 to finish.
+
+## 2026-08-04T09:50:00Z · Implementer US2 · T013
+
+**Did**: `TestIdempotentReimport` in `test_skos.py` — two tests: every scheme and concept primary key
+is stable across two identical runs of `rocks.ttl` (5 concepts, no duplication); a `ConceptRelation`
+created directly between two runs (granite→basalt, `BROADER`) still resolves to the same rows after
+the second run. No new production code — `import_skos()`'s upsert-by-`static_uri` path (`get_by_uri`
+matching, T007/T009) already gives every record a stable PK across an identical re-run, so both tests
+passed on first execution. This is confirmatory acceptance coverage for FR-004/FR-013's already-built
+behaviour, the same shape T011 was for atomicity — not every task in this phase needs new code, and
+forcing a contrived failure first would mean writing a deliberately-broken test rather than a real one.
+
+**Verified**: `poetry run pytest -q` — 411 passed (409 + 2 new). `poetry run ruff check .` — all
+checks passed. `poetry run ruff format --check .` — 23 files already formatted. `poetry run mypy` —
+success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m
+django makemigrations --check --dry-run --settings=tests.settings` — no changes detected.
+
+**Next**: T014 — authoritative update for records the file contains.
+
+**Watch**: T014's acceptance text (tasks.md) names alternative-label/note/relationship removal
+alongside the preferred-label correction; those predicates are not read by `import_skos()` at all yet
+(US-3/US-4 scope, explicitly prohibited here) — see the decision recorded at T014 for how that's
+scoped.
