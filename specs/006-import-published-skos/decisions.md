@@ -1102,3 +1102,34 @@ unusable value under two different reasons.
 **Revisit if:** a future story needs to know *which* value was kept, not only that a surplus one was
 dropped — the template currently names the language and the concept but not the winning text, matching
 every other set-aside reason's own convention of not carrying the value at fault as a param.
+
+## D39 — A preferred label that slugifies to empty is set aside, and the reported reason names the slug, not the label (review fix 5)
+
+A review of the merged feature found that `_assign_unique_slug` sets `slug_is_manual = True` with a
+`base` that may be the empty string — `slugify(concept.label, allow_unicode=True)` returns `""` for a
+label made up only of characters `slugify()` strips (a bare `"±"` is the reproduction case; a label of
+punctuation, or of characters outside Unicode's word-character classes, produces the same result).
+`Concept.save()` then raises `ValidationError({'slug': 'An explicit slug must not be empty.'})` for a
+manual slug that is empty (research R4's own guard, protecting the composed local URL from corruption)
+— uncaught, another raw exception escaping `import_skos()`.
+
+**Chosen: check ahead of the write, the same D25 discipline every other unusable value in this
+feature already gets, and set the concept aside rather than let the model's own guard raise.**
+`_import_concepts` now checks `slugify(label, allow_unicode=True)` immediately after resolving
+`label` — the same point `NO_PREFERRED_LABEL` is already checked, and for the same shape of reason:
+a concept this run cannot usefully create is set aside and reported, `mentioned_uris` still records
+it (so it is never *also* reported `absent_from_source` — the file does mention it, it just cannot be
+used), and no lookup or write against it is attempted at all. A new `SetAsideReason.EMPTY_SLUG`
+member was added to `report.py` following D26's pattern exactly.
+
+**The reported reason names the slug, not the label — deliberately correcting, not repeating, the
+model's own framing.** `Concept.save()`'s message is field-scoped ("An explicit slug must not be
+empty") because that is the field the constraint lives on; read in isolation, that message points a
+curator at the wrong thing; the label carries no defect at all — a bare `"±"` is a legitimate SKOS
+`prefLabel` value, on its face — a curator told the *label* is the problem would find nothing wrong
+with it and be no closer to understanding what actually blocked the concept. This importer's own
+report entry says plainly what is actually true: the label is fine, the *derived* slug is not.
+
+**Revisit if:** a future story wants a curator to be able to supply an explicit fallback slug for
+this case (rather than the concept simply not importing) — that would be new functionality, not a
+correction to this rule.

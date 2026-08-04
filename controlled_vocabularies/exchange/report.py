@@ -49,7 +49,11 @@ class SetAsideReason(TextChoices):
     language — the model allows only one ``PREFERRED`` row per (concept,
     language) — whichever value is not the deterministically-kept one is
     the one set aside, in the vocabulary's default language exactly as much
-    as in any other configured language.
+    as in any other configured language. ``EMPTY_SLUG`` (review fix,
+    decisions.md D39) names a concept whose preferred label is made up only
+    of characters ``slugify()`` strips — the label itself is fine, but the
+    slug it derives is empty, which the model refuses to store; the concept
+    is set aside rather than crash the run on that refusal.
     """
 
     UNCONFIGURED_LANGUAGE = "unconfigured_language", _("language not configured")
@@ -63,6 +67,7 @@ class SetAsideReason(TextChoices):
     DEFAULT_LANGUAGE_FROZEN = "default_language_frozen", _("default language already fixed")
     RELATION_DISJOINTNESS = "relation_disjointness", _("broader/narrower and related both claimed for a pair")
     SURPLUS_PREFERRED_LABEL = "surplus_preferred_label", _("surplus preferred label in a language")
+    EMPTY_SLUG = "empty_slug", _("preferred label produces no usable slug")
 
     @property
     def template(self) -> Promise:
@@ -116,6 +121,10 @@ _REASON_TEMPLATES: dict[SetAsideReason, Promise] = {
     SetAsideReason.SURPLUS_PREFERRED_LABEL: _(
         "'%(subject)s' carries more than one preferred label in the language '%(language)s'; only one is "
         "kept and the surplus value was set aside."
+    ),
+    SetAsideReason.EMPTY_SLUG: _(
+        "'%(subject)s' has a preferred label made up only of characters this application strips when "
+        "deriving a URL slug, so no usable slug could be derived from it; it was set aside."
     ),
 }
 

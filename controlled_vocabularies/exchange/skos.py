@@ -1097,6 +1097,20 @@ def _import_concepts(
             )
             continue
 
+        if not slugify(label, allow_unicode=True):
+            # FIX 5 (review, decisions.md D39): a label made up only of
+            # characters slugify() strips (e.g. a bare "±") derives an empty
+            # slug, which Concept.save() refuses once slug_is_manual is set
+            # (research R4's own "must not be empty" guard) — checked ahead
+            # of the write, the same D25 discipline every other unusable
+            # value in this feature already gets, rather than letting that
+            # guard's own ValidationError escape. The label itself is not
+            # the problem — it is perfectly good text — so the reported
+            # reason names the slug, not the label, unlike the model's own
+            # message, which is field-scoped and therefore misnames it.
+            report.add_set_aside(SetAsideReason.EMPTY_SLUG, subject=uri)
+            continue
+
         try:
             concept = Concept.objects.get_by_uri(uri)
             created = False

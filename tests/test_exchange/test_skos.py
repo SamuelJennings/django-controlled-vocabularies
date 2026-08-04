@@ -931,6 +931,34 @@ class TestNoPreferredLabelFinishedByUS3:
         assert b.alt_labels("en") == ["B-alt"]
 
 
+class TestEmptySlugLabelIsSetAsideNotCrashed:
+    """FIX 5 (review, decisions.md D39) — ``_assign_unique_slug`` derives a
+    concept's slug from its preferred label with ``slugify()``, then sets
+    ``slug_is_manual = True`` and lets ``Concept.save()`` write it.
+    ``save()`` refuses an *explicit* (manual) slug that is empty — a label
+    made up only of characters ``slugify()`` strips (e.g. ``"±"``) produces
+    exactly that. The label itself is perfectly fine; it is the *derived
+    slug* that is unusable, so the concept must be set aside and reported —
+    under a reason that names the real problem, not the model's own
+    slug-shaped message — rather than crashing the run on an uncaught
+    ``ValidationError``."""
+
+    def test_a_label_that_slugifies_to_empty_is_set_aside_and_named(self, db):
+        report = import_skos(FIXTURES / "empty_slug_label.ttl")
+        assert report.fatal == []
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.EMPTY_SLUG]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/emptyslug/symbol"
+        assert not Concept.objects.filter(static_uri="http://example.org/emptyslug/symbol").exists()
+
+    def test_the_rest_of_the_vocabulary_imports_with_its_own_content_intact(self, db):
+        import_skos(FIXTURES / "empty_slug_label.ttl")
+        assert Concept.objects.filter(scheme__static_uri="http://example.org/emptyslug/").count() == 1
+        normal = Concept.objects.get(static_uri="http://example.org/emptyslug/normal")
+        assert normal.label == "Normal"
+        assert normal.alt_labels("en") == ["Normal-alt"]
+
+
 class TestBroaderAndNarrowerRelations:
     """T023 — FR-010/research.md R4: ``skos:broader`` and ``skos:narrower`` both
     land as the single ``ConceptRelation`` row the models define, ``source`` the

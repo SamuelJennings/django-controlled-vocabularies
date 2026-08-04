@@ -1422,3 +1422,31 @@ new fixture — no new `SetAsideReason` member this time, so no further sweep re
 formatted. `poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files
 scanned. `poetry run python -m django makemigrations --check --dry-run --settings=tests.settings` —
 no changes detected. `poetry run pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T13:10:00Z · Forge · review fix 5 — a preferred label that slugifies to empty crashes the run
+
+**Did**: closed a medium-severity finding from the merged feature's review: `_assign_unique_slug`
+sets `slug_is_manual = True` with a `base` from `slugify(concept.label, allow_unicode=True)` that may
+be empty (a label of only characters `slugify()` strips, e.g. `"±"`), and `Concept.save()` then
+raises `ValidationError({'slug': 'An explicit slug must not be empty.'})` uncaught. Wrote the failing
+test first — `TestEmptySlugLabelIsSetAsideNotCrashed` in `test_skos.py`, using a new
+`empty_slug_label.ttl` fixture (one concept whose only default-language `skos:prefLabel` is `"±"`,
+one normal sibling concept to prove the rest of the vocabulary still imports) — confirmed both tests
+failed with exactly that raw `ValidationError` before any production change. Made the production
+change: `_import_concepts` now checks `slugify(label, allow_unicode=True)` right after resolving
+`label`, at the same point and in the same shape as the existing `NO_PREFERRED_LABEL` check —
+`mentioned_uris` still records the concept (so it is never additionally reported
+`absent_from_source`) but nothing is looked up or written for it — and sets it aside under a new
+`SetAsideReason.EMPTY_SLUG` member. The reported message deliberately names the *slug*, not the
+label, as the problem: the model's own message is field-scoped to `slug` and would misdirect a
+curator into scrutinising a label that is not actually at fault. Mutation probe: disabled the new
+check (`if False and not slugify(...)`), re-ran the new test class, confirmed both tests failed with
+the same raw `ValidationError`; restored, re-ran green. Recorded as decisions.md D39.
+
+**Verified**: `poetry run pytest -q` — 557 passed (550 baseline + 7 new: 2 in
+`TestEmptySlugLabelIsSetAsideNotCrashed`, four generic `SetAsideReason` sweep tests re-parametrizing
+over the new `EMPTY_SLUG` member, one `TestFixtureCorpus` parse-sweep instance for the new fixture).
+`poetry run ruff check .` — all checks passed. `poetry run ruff format --check .` — 22 files already
+formatted. `poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files
+scanned. `poetry run python -m django makemigrations --check --dry-run --settings=tests.settings` —
+no changes detected. `poetry run pre-commit run --all-files` — all hooks passed.

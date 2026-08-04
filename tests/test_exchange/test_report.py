@@ -35,6 +35,7 @@ _EXAMPLE_PARAMS = {
     SetAsideReason.DEFAULT_LANGUAGE_FROZEN: {"declared": "fr", "frozen": "en"},
     SetAsideReason.RELATION_DISJOINTNESS: {"other": "https://example.org/vocab/other"},
     SetAsideReason.SURPLUS_PREFERRED_LABEL: {"language": "de"},
+    SetAsideReason.EMPTY_SLUG: {},
 }
 
 # One example params dict per fatal reason (T007), the same shape as _EXAMPLE_PARAMS.
