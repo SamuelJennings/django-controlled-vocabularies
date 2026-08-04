@@ -623,3 +623,35 @@ falling through to the generic, less specific `UNMODELLED_PREDICATE`.
 **Revisit if:** a later story (US-4/US-5) lands and a SKOS predicate remains genuinely unbuilt with
 no story left to claim it — at that point silently skipping it stops being "deferred" and starts
 being "actually has no place," and it should move to being reported.
+
+## D28 — Tamper-check triage for US-3, and the spec amendment D26 required
+
+`forge tamper-check --base e2f4e8e --head 1033161` raised four `modified_preexisting_test` flags.
+All four are approved, and the reasoning is recorded here rather than left implicit.
+
+**Two are test modules, both purely additive.** Across `tests/test_exchange/test_report.py` and
+`tests/test_exchange/test_skos.py` the whole range removes exactly two lines, both `import`
+statements replaced by the same imports widened. No assertion was weakened, removed or skipped.
+
+**Two are shared fixtures used by earlier stories' tests, and those are the ones that needed
+checking.** `rocks_updated.ttl` lost basalt's `skos:example` note, because the four original
+re-import edits covered no case of a note dropped from a concept that stays present, which is
+exactly what T019 has to prove (D24). `no_default_language_label.ttl` gained an alternative label on
+concept "b", so T022 proves the rest of the vocabulary lands with its content rather than only its
+identity. Every test reading either fixture still passes, and the suite is green at 453.
+
+**One check the flags did not raise, and should have been asked anyway:** the behaviour US-3 added
+was probed by mutation rather than trusted from a green suite. Removing the label-import call, the
+note-import call, the unheld-value reporting call, and widening the configured-language set so the
+filter stops filtering, each produced failures in the tests that claim to cover them. A test that
+passes when its subject is deleted is not coverage.
+
+**Spec amended, per D26.** `NormalizedReason` adds a fifth report outcome, and `spec.md` named only
+four in FR-015, SC-014 and Key Entities. The spec was amended in place rather than left to disagree
+with the code, with the amendment marked as made during implementation and pointing at D26. This
+does not change any behaviour Sam signed off at the spec gate — it adds a channel that tells the
+curator more than the signed-off report did — but the amendment is flagged in the story report
+rather than buried here.
+
+**Revisit if:** a fixture shared across stories needs editing again. Twice is a pattern, and the
+better answer may be a fixture per story rather than one corpus every story edits.
