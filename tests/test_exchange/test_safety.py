@@ -13,7 +13,7 @@ import pytest
 from django.core.exceptions import ValidationError
 from django.utils.functional import Promise
 
-from controlled_vocabularies.exchange.safety import UnsafeRdfXmlError, scan_rdf_xml
+from controlled_vocabularies.exchange.safety import UnsafeJsonLdError, UnsafeRdfXmlError, scan_json_ld, scan_rdf_xml
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "security"
 
@@ -71,6 +71,52 @@ class TestScanRdfXml:
         assert err.code == "rdf_xml_external_reference_forbidden"
 
 
+class TestScanJsonLd:
+    """FIX 1 (review) — JSON-LD's ``@context`` can name a remote location that
+    rdflib's parser resolves through ``urlopen`` with no allowlist (a string
+    ``@context``, or a string entry inside an array ``@context``, is a URL
+    rdflib will fetch during parsing). Spec Assumptions says "a file, not a
+    URL": this application never fetches network resources or reads
+    caller-uncontrolled local files as a side effect of reading one it was
+    handed. The same pre-flight-refusal shape D9 used for RDF/XML — refuse
+    before rdflib ever sees the bytes, rather than patch the parser.
+
+    An inline, locally-embedded ``@context`` object — the overwhelmingly
+    common shape in a published file — carries no reference to resolve and
+    must be unaffected.
+    """
+
+    def test_a_string_context_naming_a_remote_location_is_refused(self):
+        with pytest.raises(UnsafeJsonLdError) as excinfo:
+            scan_json_ld(_read("remote_context_string.jsonld"))
+        err = excinfo.value
+        assert isinstance(err, ValidationError)
+        assert isinstance(err.message, Promise), "remote-context refusal message is not lazily translatable"
+        assert "%(context)s" in str(err.message)
+        assert err.params == {"context": "http://127.0.0.1:1/x.json"}
+        assert "http://127.0.0.1:1/x.json" in err.messages[0]
+        assert err.code == "jsonld_remote_context_forbidden"
+
+    def test_a_remote_string_inside_an_array_context_is_refused(self):
+        with pytest.raises(UnsafeJsonLdError) as excinfo:
+            scan_json_ld(_read("remote_context_array.jsonld"))
+        err = excinfo.value
+        assert err.params == {"context": "http://127.0.0.1:1/x.json"}
+        assert err.code == "jsonld_remote_context_forbidden"
+
+    def test_an_inline_object_context_is_unaffected(self):
+        assert scan_json_ld(_read("inline_context.jsonld")) is None
+
+    def test_a_document_with_no_context_at_all_is_unaffected(self):
+        assert scan_json_ld(b'{"@id": "http://example.org/rocks/"}') is None
+
+    def test_malformed_json_is_left_for_rdflibs_own_parser_to_report(self):
+        # scan_json_ld only refuses unsafe *content*; a document that is not even
+        # valid JSON is not this scan's problem to diagnose — rdflib's own parse
+        # raises its own error for that, exactly as an unparseable Turtle file does.
+        assert scan_json_ld(b"not json at all {{{") is None
+
+
 class TestRefusalMessagesUseOnlyNamedPlaceholders:
     """T031 (FR-016, spec User Story 6 Acceptance Scenarios 1 and 4) — the
     "named, not positional" check applied to the messages this module raises
@@ -106,3 +152,11 @@ class TestRefusalMessagesUseOnlyNamedPlaceholders:
         assert err.__cause__ is not None, (
             "the underlying defusedxml exception must be chained for developer diagnostics"
         )
+
+    def test_remote_context_message_uses_only_named_placeholders(self, uses_only_named_placeholders):
+        with pytest.raises(UnsafeJsonLdError) as excinfo:
+            scan_json_ld(_read("remote_context_string.jsonld"))
+        err = excinfo.value
+        assert isinstance(err.message, Promise)
+        assert uses_only_named_placeholders(str(err.message))
+        assert err.code == "jsonld_remote_context_forbidden"

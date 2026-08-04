@@ -944,3 +944,547 @@ longer exists.
 **Revisit if:** `exchange` grows a real `standards` module, or the sweep grows past what reads
 naturally as a trailing class in each module — at which point the mirror rule would itself supply
 the file.
+
+## D36 — JSON-LD's remote `@context` is closed the same way D9 closed RDF/XML's entity bomb (review fix 1)
+
+A review of the merged feature found that `_read_graph` gated the pre-flight safety scan on
+`resolved_format == "xml"` only. rdflib's JSON-LD parser resolves a string `@context` — at the
+document's top level or nested inside any embedded node object — through `urlopen`, with no
+allowlist: pointed at an unreachable host it raises a connection error proving the fetch was
+attempted; pointed at `file:///tmp/ctx.json` it reads the local file and parses cleanly. Both are
+reproduced directly against `rdflib.Graph.parse()`, not inferred. Spec Assumptions says this feature
+reads "a file, not a URL"; this is exactly the same class of hole D9 closed for RDF/XML — untrusted
+input driving an outbound request and a local-file read the caller never asked for — reached through
+a different parser and a different construct.
+
+**Chosen: the same pre-flight-refusal shape D9 used, not a parser workaround.** A new
+`scan_json_ld(data: bytes)` in `safety.py`, structured like `scan_rdf_xml`: parse the raw bytes as
+plain JSON (not RDF), walk every value keyed `@context` anywhere in the document — a JSON-LD context
+may sit on any embedded node object, not only the top level — and refuse with a new
+`UnsafeJsonLdError` (`code="jsonld_remote_context_forbidden"`) if any of them is a string, or an
+array containing one. A `dict` (an inline, locally-embedded context — the overwhelmingly common
+shape a published file actually uses) or `None` (no `@context` at all) is left alone. Malformed JSON
+is not this scan's problem to diagnose — `json.loads` failing is treated as "nothing to refuse" and
+the document is left for rdflib's own parser to raise its own, already-translated parse error against,
+the same division `scan_rdf_xml` draws for a malformed RDF/XML document. Wired into `_read_graph`
+alongside the existing `xml` branch, gated on `resolved_format == "json-ld"`.
+
+**Why not resolve the two remote-fetch holes with one shared scan?** RDF/XML's is an XML-entity
+construct `defusedxml.sax` already understands; JSON-LD's is a plain-JSON key with no XML involved at
+all. A single scan spanning both serializations would need to branch on format internally anyway —
+no simpler than two small, format-named functions, and D9's own file already frames the RDF/XML scan
+around what `defusedxml` specifically closes, not a general "untrusted RDF" scan this document's
+`@context` never claimed to be part of.
+
+**Turtle and RDF/XML were checked for the equivalent hole, not assumed clean.** Turtle has no
+`@context`-shaped construct at all, and a probe against rdflib's Turtle parser with a `@prefix`
+pointing at an unreachable host (`http://127.0.0.1:1/ns#`) parsed without attempting any fetch —
+prefixes are namespace strings, never dereferenced during a plain `parse()`. RDF/XML's own
+remote-reference surface is the external-entity and external-DTD-subset routes D9 already measured
+and `scan_rdf_xml` already refuses; no third route was found (rdflib's RDF/XML parser calls
+`xml.sax.make_parser()` directly and does no separate XInclude or remote-schema resolution of its
+own). Neither format needed a change.
+
+**Revisit if:** rdflib ships an `@context` resolution mode that consults a caller-supplied document
+loader or allowlist — at that point refusing every string reference outright may be tighter than
+necessary, the same reversibility D9 already notes for its own entity-idiom trade-off.
+
+## D37 — Broader/narrower always wins over related on the same pair, in every route that can produce the conflict (review fix 2)
+
+A review of the merged feature found that `_import_relations` built `resolved_broader` and
+`resolved_related` independently, from the same file's `skos:broader`/`skos:narrower`/`skos:related`
+triples, with nothing reconciling them against each other. `ConceptRelation._reject_disjointness_violation`
+refuses a `RELATED` row for a pair already joined as `BROADER` (SKOS itself declares the two mutually
+exclusive), and the refusal is an ordinary `ValidationError` raised inside `add_related`/`add_broader`
+that `_import_relations` never caught — a raw exception escaping `import_skos()`, exactly the defect
+shape this review found repeatedly elsewhere in the feature (D8's "only two things are fatal" rule
+has no room for this one).
+
+**Chosen: the hierarchical relation wins.** `broader`/`narrower` is the stronger statement — it
+places the two concepts in an asymmetric structural relationship, where `related` only asserts an
+undirected association — and it is SKOS's own model of what the two are disjoint *in favour of*: a
+publisher who states both for one pair has, in effect, already told this importer which one is
+authoritative. The losing `related` statement is set aside and reported under a new
+`SetAsideReason.RELATION_DISJOINTNESS` member (`code="relation_disjointness"`), naming both ends —
+the same shape every other set-aside reason in this vocabulary already carries, added following
+D26's own pattern exactly (translatable template, named `%(subject)s`/`%(other)s` placeholders,
+picked up automatically by the three vocabularies' disjointness sweep in `test_report.py` and its own
+new `_EXAMPLE_PARAMS` entry).
+
+**Three distinct routes can produce the conflict, and the fix has to close all three, not just the
+one the file states in one place.** (1) The same file states both `broader`/`narrower` and `related`
+for one pair in one run. (2) An earlier run's `RELATED` row survives (D30's "both ends" deletion rule
+never touches it, because the far end of a later run's newly-stated `broader` edge is not itself
+rewritten by that run — it is only referenced, through D29's `get_by_uri` fallback), and that later
+run then states `broader` for the same pair. (3) The mirror image of (2): an earlier run's `BROADER`
+row survives the same way, and a later run states `related` for the same pair instead.
+
+**Mechanism: broader/narrower rows are written first, each one checked directly against a
+conflicting stored `RELATED` row for the exact same pair — regardless of whether that row's ends are
+this run's own writes — deleting it and reporting the loss before `add_broader` is called.** Related
+rows are then written in a second pass, each one checked the same way against a conflicting stored
+`BROADER` row, including one this same call just wrote in its own first pass, and set aside rather
+than attempted when one is found. This closes all three routes with two small, symmetric,
+per-pair checks — deliberately **not** a query scoped to `successful_ids` the way D30's bulk deletion
+passes are, because route (2)/(3)'s whole point is that one end of the conflicting row is *outside*
+`successful_ids`, which is exactly why the bulk passes never catch it.
+
+**An initial "both resolved this run" data-level exclusion, tried first, was removed as dead code.**
+The first version of this fix computed `{frozenset(pair) for pair in resolved_broader}` and dropped
+any `resolved_related` entry matching one, before either write loop ran, to close route (1) directly.
+Mutation-probing that step — disabling it and re-running the whole `TestRelationDisjointness` class —
+left every test green, because route (1) is already closed by the two per-pair checks above: the
+broader loop runs first and writes the row with nothing yet to conflict against, and the related
+loop's own check then finds that just-written row and reports/skips exactly as it would for route
+(3). Code a test suite cannot tell apart from its absence is exactly what Article II's "no
+speculative code" rule forbids; it was deleted rather than kept for its own sake.
+
+**Accepted trade-off: a compound scenario neither this review nor any acceptance scenario names can
+produce two report entries for one underlying conflict, not one.** If a pair already carries a
+stored `RELATED` row from an earlier run, *and* the current run's file restates both `broader`/`narrower`
+*and* `related` for that same pair with both ends touched this run, the bulk `existing_related`
+deletion pass (D30) does not remove the stale row — the pair is still "desired" as far as that pass's
+own `resolved_related not in bulk-scoped view` check goes — so the broader-loop's own direct check is
+what removes it (one report entry), and the related-loop's own direct check then also fires against
+the freshly-written broader row (a second report entry) rather than silently reusing the first. Both
+entries are true statements about what happened; this is verbosity, not a defect, and no fixture in
+this feature's corpus exercises the compound case, so it is recorded here rather than built out with
+a third mechanism to collapse the two into one.
+
+**Revisit if:** a future story needs `related` to ever win over `broader`/`narrower` for some other
+reason (e.g. a curator override) — that would be new, deliberately-asymmetric behaviour, not a
+correction to this rule, and belongs in its own decision the way D30's own "Revisit if" already
+anticipates for relation reconciliation generally.
+
+## D38 — A surplus preferred label is kept deterministically and reported, in every configured language (review fixes 3/4)
+
+A review of the merged feature found that D25 only implemented half of what FR-014 requires for a
+second `skos:prefLabel` in one language. `ConceptLabel.clean()` allows at most one `PREFERRED` row
+per (concept, language) — the default language via `Concept.label`'s own identity anchor, any other
+configured language via the model's own uniqueness check — but `_import_labels` wrote every
+non-default-language `PREFERRED` literal unconditionally, so a second one in the same language raised
+the model's own uncaught `ValidationError` (FIX 3). Worse, in the default language the surplus was not
+even an exception: `_import_labels`'s own `if kind == PREFERRED and language == default_language:
+continue` line skips *every* literal in that language, including the ones `_preferred_label_in`
+(`_import_concepts`) never chose for `Concept.label` — dropped with no report at all, a plain
+violation of Article XI's "never applied silently" and the README's own "nothing a file contains is
+ever dropped in silence" (FIX 4).
+
+**Chosen: one deterministic winner per language, the same rule already used for the default
+language.** `_import_labels` now groups every `skos:prefLabel` literal on a concept node by language
+and keeps the lexicographically-first value in each — exactly `_preferred_label_in`'s own
+sort-and-first-value rule (T009), so a re-import of the identical file always keeps the identical
+value, and the default language's own winner computed this way is guaranteed to equal `concept.label`
+without recomputing it a second time. Every other value in that language — surplus, never a winner —
+is set aside and reported under a new `SetAsideReason.SURPLUS_PREFERRED_LABEL` member, added following
+D26's pattern exactly (translatable template, named `%(subject)s`/`%(language)s` placeholders, an
+`_EXAMPLE_PARAMS` entry in `test_report.py`). One reason serves both fixes deliberately: a surplus
+preferred label is the same defect in the default language as in any other — "more than one value
+claims to be the one preferred label in this language" — and giving FIX 4 its own reason would draw a
+distinction the two cases do not actually have.
+
+**Landed as two separate commits, not one, even though both are one function's worth of change.**
+FIX 3 (the crash: a second preferred label in a *non-default* configured language) was implemented,
+tested, mutation-probed, and committed first, deliberately leaving the default-language branch's
+silent skip untouched — reproducing exactly the review's own numbered order and letting each fix's
+own test and mutation probe stand against a minimal, isolated diff. FIX 4 (the silent drop in the
+*default* language) is the second commit, extending the same `preferred_by_language`/`preferred_kept`
+machinery FIX 3 already introduced to also report — never write, `Concept.label` already holds the
+winner — a default-language surplus.
+
+**The unconfigured-language check still runs first, per literal, unchanged.** A `skos:prefLabel` in a
+language the site is not configured for is reported once per literal via the existing
+`SetAsideReason.UNCONFIGURED_LANGUAGE` path regardless of how many there are — cardinality does not
+matter there, since none of them would ever reach `add_label` anyway — so `SURPLUS_PREFERRED_LABEL`
+is only ever reported for a language that *is* configured, avoiding a double report of the same
+unusable value under two different reasons.
+
+**Revisit if:** a future story needs to know *which* value was kept, not only that a surplus one was
+dropped — the template currently names the language and the concept but not the winning text, matching
+every other set-aside reason's own convention of not carrying the value at fault as a param.
+
+## D39 — A preferred label that slugifies to empty is set aside, and the reported reason names the slug, not the label (review fix 5)
+
+A review of the merged feature found that `_assign_unique_slug` sets `slug_is_manual = True` with a
+`base` that may be the empty string — `slugify(concept.label, allow_unicode=True)` returns `""` for a
+label made up only of characters `slugify()` strips (a bare `"±"` is the reproduction case; a label of
+punctuation, or of characters outside Unicode's word-character classes, produces the same result).
+`Concept.save()` then raises `ValidationError({'slug': 'An explicit slug must not be empty.'})` for a
+manual slug that is empty (research R4's own guard, protecting the composed local URL from corruption)
+— uncaught, another raw exception escaping `import_skos()`.
+
+**Chosen: check ahead of the write, the same D25 discipline every other unusable value in this
+feature already gets, and set the concept aside rather than let the model's own guard raise.**
+`_import_concepts` now checks `slugify(label, allow_unicode=True)` immediately after resolving
+`label` — the same point `NO_PREFERRED_LABEL` is already checked, and for the same shape of reason:
+a concept this run cannot usefully create is set aside and reported, `mentioned_uris` still records
+it (so it is never *also* reported `absent_from_source` — the file does mention it, it just cannot be
+used), and no lookup or write against it is attempted at all. A new `SetAsideReason.EMPTY_SLUG`
+member was added to `report.py` following D26's pattern exactly.
+
+**The reported reason names the slug, not the label — deliberately correcting, not repeating, the
+model's own framing.** `Concept.save()`'s message is field-scoped ("An explicit slug must not be
+empty") because that is the field the constraint lives on; read in isolation, that message points a
+curator at the wrong thing; the label carries no defect at all — a bare `"±"` is a legitimate SKOS
+`prefLabel` value, on its face — a curator told the *label* is the problem would find nothing wrong
+with it and be no closer to understanding what actually blocked the concept. This importer's own
+report entry says plainly what is actually true: the label is fine, the *derived* slug is not.
+
+**Revisit if:** a future story wants a curator to be able to supply an explicit fallback slug for
+this case (rather than the concept simply not importing) — that would be new functionality, not a
+correction to this rule.
+
+## D40 — Self-referential broader/narrower is skipped, the same no-op decisions.md D29 already applies to self-referential related (review fix 6)
+
+A review of the merged feature found an asymmetry between how `_import_relations` treats a
+self-referential `skos:related` triple and a self-referential `skos:broader`/`skos:narrower` one.
+`desired_related`'s keys are a `frozenset({uri, str(other)})`, so a concept naming itself as related
+to itself collapses to a single-element set, and D29's own `if len(pair) < 2: continue` already
+treats that as a deliberate no-op, consistent with the model's own `_reject_self` refusing it if
+attempted. `desired_broader`'s keys are a directed `(narrower_uri, broader_uri)` tuple, which never
+collapses the same way — a self-referential `skos:broader` reaches `_resolve_concept_reference`
+twice (resolving to the same `Concept` both times), lands in `resolved_broader` as `(pk, pk)`, and
+`add_broader` then raises the model's own uncaught `ValidationError` ("A concept cannot be in a
+relation with itself.").
+
+**Chosen: make the two consistent, treating self-referential broader/narrower as the same kind of
+no-op D29 already chose for self-referential related — not fatal, not set aside and reported, simply
+skipped.** A `narrower_uri == broader_uri` check is added at the top of the broader/narrower
+resolution loop, before `_resolve_concept_reference` is even called. Skipped rather than reported
+because that is exactly D29's own reasoning for the `related` case, restated here rather than
+re-argued: SKOS never intends a concept to be broader/narrower than itself, no fixture in this
+feature's corpus or its predecessors exercises the shape, and D8's "the fatal set is deliberately
+small" already leans against inventing a report reason nothing asks for. The asymmetry was a gap in
+FIX 6's own predecessor task (T023/T024), not a deliberate choice recorded anywhere — nothing in
+decisions.md ever argued broader should behave differently from related here, which is exactly why it
+counts as the review-found inconsistency it is, not a considered design point being revisited.
+
+**Revisit if:** a future story finds a real published vocabulary that states a self-referential
+`skos:broader` deliberately (unlikely, since SKOS's own semantics make it meaningless) — at that
+point silently skipping it may need to become reporting it instead, matching whatever `related`'s own
+equivalent revisit would look like.
+
+## D41 — `report.absent_from_source` names a record's `.uri`, never its raw (possibly-NULL) `static_uri` column (review fix 7)
+
+A review of the merged feature found that `_import_concepts` and `_import_collections` share an
+identical query bug: `Concept.objects.filter(scheme=target_scheme).exclude(static_uri__in=mentioned_uris)`
+(and the same shape for `Collection`) also selects a row whose `static_uri` is `NULL`. Django compiles
+`exclude(field__in=[...])` to `NOT (field IN (...) AND field IS NOT NULL)`, which evaluates true for a
+NULL row regardless of what `mentioned_uris` contains — confirmed directly against the query, not
+assumed from a reading of SQL's `NOT IN` semantics. A locally authored concept or collection (one
+never given an externally published identifier) therefore always matched "not mentioned by this
+file", which is even correct in one sense — the file genuinely never could mention it, having no
+identifier to name it by — but the value the two functions then appended to
+`report.absent_from_source: list[str]` was the raw column itself, `None`, not a URI at all.
+`CONTEXT.md`'s own glossary entry for **URI** is explicit: "always present, never `None`. ... Every
+record has one; it is never 'missing,' only dynamic or static."
+
+**Chosen: report `.uri`, the `StaticUriModel` property every record already has, not the raw
+column.** `.uri` returns `self.static_uri or self.local_url` — a locally authored record's dynamic,
+site-composed URL when it has no static one, exactly the "dynamic or static, never missing" contract
+`CONTEXT.md` states. Both call sites now iterate the queryset as model instances and report
+`record.uri`, sorted in Python (`.uri` is a Python property, not a database column `.order_by()` can
+reach) rather than via `.values_list("static_uri", flat=True).order_by("static_uri")` as before —
+determinism preserved, just computed after the fetch rather than by the database. This does not
+change *which* records are reported absent, only the string logged for the ones that were already
+being caught by the query: a locally authored record with no publisher identity was already, correctly,
+being treated as "the file cannot possibly speak about this" under FR-013's own authority rule; only
+the value standing in for its identity in the report was wrong.
+
+**Revisit if:** a future story wants to distinguish, in the report itself, "absent because the
+publisher's file dropped it" from "absent because it was never externally identified in the first
+place" — right now both land in the same bucket under the same shape of value (a URI, static or
+dynamic), which this fix treats as correct per `CONTEXT.md`'s identity model, not as a gap to close
+here.
+
+## D42 — Reassigning a concept or collection to a different vocabulary is never a side effect of reading a file (review fixes 8/9)
+
+A second review of the merged feature found that `_import_concepts` assigned `concept.scheme =
+target_scheme` unconditionally on a `Concept.objects.get_by_uri` match, with no check that the
+matched record already belonged to a *different* vocabulary. FR-005 lets a file that declares no
+vocabulary of its own be imported into any caller-named target, so importing the identical file
+first into one vocabulary and then into a second silently emptied the first: every concept moved,
+and `report.updated` named the move with a bucket that means "content refreshed", not "record
+relocated" — nothing in the report distinguished the two.
+
+The spec's Edge Cases are the nearest governing text, and they point the same direction without
+naming this exact shape: a contradictory source is set aside and reported while reading, not acted
+on. Moving a record between vocabularies is a curatorial act — the maintainer's own word for it,
+carried from the spec's broader stance that deletion, deprecation, and reassignment are each
+deliberate acts a curator takes, never incidental consequences of running an importer (D5's
+authoritative-for-what-it-contains rule governs *content*, not which vocabulary a record belongs to
+at all).
+
+**Chosen: a concept matched by `get_by_uri` that already belongs to a different vocabulary than the
+one being imported is left exactly where it is.** It is set aside and reported under a new
+`SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY` member, naming both the vocabulary it currently
+belongs to and the one the run was importing into, and the run continues with everything else in the
+file. Its content (labels, notes, relationships) is not touched either — the whole record is
+untouched, the same "not created, not updated, but mentioned so never `absent_from_source`" shape
+`VOCABULARY_MISMATCH`/`NO_PREFERRED_LABEL`/`EMPTY_SLUG` already established (T009/D17/D39).
+
+**Where the check sits:** after the `get_by_uri` match/create branch resolves (so a *newly created*
+concept never trips it — there is nothing to conflict with), before the row is mutated at all.
+`target_scheme.pk` is always populated by this point, because `_resolve_scheme` has already saved it
+before `_import_concepts` is ever called.
+
+**Reproduced before the fix.** A no-scheme Turtle file with two concepts (`ex:a`/`ex:b`, `ex:b
+skos:broader ex:a`) imported first into scheme "first", then into scheme "second": before the fix,
+both concepts' `scheme_id` became "second"'s, `first.concepts.count()` went to zero, and
+`report.updated` listed both URIs with nothing naming the move.
+
+**Extended for review fix 9: `_import_collections` carried the identical defect, with a sharper
+consequence.** `Collection.objects.get_by_uri` matched, `row.scheme = target_scheme` overwrote it
+unconditionally, and the collection's *pre-existing* membership — rows written when the collection
+genuinely belonged to its old vocabulary — was left exactly as it was, now spanning two schemes. That
+is precisely the state `CollectionMember._reject_cross_scheme` exists to prevent, produced through
+the package's own public API (`Collection.add`) with no report entry, because the membership rows a
+re-import doesn't rewrite are never re-validated. The prediction in this entry's own original
+"Revisit if" held: the same `SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY` is reused rather than a
+second reason minted, following D38's own precedent (one reason serving two structurally identical
+defects at two call sites) — "this record's identity is already held by a different vocabulary than
+the one this run is writing into" is the same question for a concept and a collection. The check sits
+in the identical place, `_import_collections`'s own `get_by_uri` match/create branch, before the row
+is mutated; for a collection this additionally means its membership is left completely intact — no
+half-migration, because the collection row itself is never rewritten.
+
+**Reproduced before the fix (review fix 9).** Two files declaring different vocabularies but the
+identical collection identifier, each with its own member: before the fix, the collection's `scheme`
+became whichever file imported last, and its membership spanned both vocabularies — a state the model
+itself refuses to create directly, produced anyway through the public import API.
+
+**Revisit if:** a future workflow wants an explicit, curator-triggered "move this record to another
+vocabulary" operation — that is new functionality with its own review of what happens to relationships
+and collection membership on the far side of the move, not a correction to this rule, which only ever
+concerns what an *import* run does on its own.
+
+## D43 — A URI already held by a record of a different kind is detected while reading, not left to a constraint (review fix 10)
+
+The spec's own Edge Cases name this exactly: "later a concept's identifier is found to be held by a
+record of a different kind — a collection in one file, a concept in another. This is a contradictory
+source and is reported while reading, rather than surfacing as a database constraint violation."
+`_import_concepts` consulted only `Concept.objects.get_by_uri`, and `_import_collections` only
+`Collection.objects.get_by_uri` — each model's own `static_uri` uniqueness constraint is scoped to
+that model alone, so the two identity spaces never collide at the database level, and nothing
+compared them to each other. A file that types `ex:thing` as a `skos:Collection`, imported, followed
+by a second file that types the identical `ex:thing` as a `skos:Concept`, produced two real, live
+records asserting the same static URI — the sole identity Article IX establishes — with the run
+reporting nothing at all.
+
+**Chosen: before minting a new record for a URI, check the *other* model's identity space too.**
+`_import_concepts`, on a `Concept.DoesNotExist` from `get_by_uri`, now also tries
+`Collection.objects.get_by_uri` for the same URI before creating a `Concept`; `_import_collections`
+carries the exact mirror check the other way. A hit in the other model sets the URI aside and
+reported under a new `SetAsideReason.URI_HELD_BY_DIFFERENT_KIND` member, naming only the subject —
+there is nothing else useful to name, since the point is precisely that a curator did not expect two
+kinds of record to share this identifier — and the second record is never created. The check runs
+only on the "would create a new record" branch: a URI that already matches a record of the *same*
+kind is an ordinary update, not a clash, so this adds no cost to the common case.
+
+**Why not check both directions from one place, once, up front?** `_import_concepts` and
+`_import_collections` run at different points in `import_skos` (concepts first, collections last,
+within the same `_import_concepts` call), and a URI can only be *about to be created* from inside the
+function that owns that creation. A single shared pre-pass would either duplicate the two loops'
+own identity resolution or run before concepts exist for a same-file clash to be caught against, so
+the check stays local to each creation site, the same "checked at the point of the write, not
+gathered separately" discipline every other set-aside-ahead-of-write check in this module already
+follows (D25).
+
+**This also closes the same-file case, not only the cross-file one the spec's own wording leads
+with.** Because concepts are always fully written before `_import_collections` runs (within the same
+`_import_concepts` call), a single file that types one URI as both a `skos:Concept` and a
+`skos:Collection` is caught the same way: the concept is created first, and when the collection node
+for the identical URI is reached, `Concept.objects.get_by_uri` already finds it. No fixture in this
+corpus exercises this shape specifically — the review's own reproduction is cross-file — but the
+mechanism does not need a same-file/cross-file distinction to work correctly either way.
+
+**Verified independently for each direction, by mutation.** Disabling the concept-side check alone
+left `test_a_concept_uri_already_held_by_a_collection_is_refused` failing while
+`test_a_collection_uri_already_held_by_a_concept_is_refused` stayed green; disabling the
+collection-side check alone reproduced the opposite pattern — confirming the two checks are
+independently load-bearing, not a copy that happens to also pass by luck.
+
+**Revisit if:** a future feature wants to *resolve* the clash (e.g., let a curator choose which kind
+wins, or merge the two) rather than refuse the second record — that is new curatorial functionality,
+not a correction to this rule, which only ever refuses silently colliding on one identifier.
+
+## D44 — An ordered collection falls back to `skos:member` when it has no `memberList`, and `memberList` narrows rather than replaces `member` when both are present (review fix 11)
+
+`_import_collections`'s `if ordered:` branch read membership exclusively from `skos:memberList`,
+falling back to an empty list when the collection carried none at all — even though `skos:member` is
+the general SKOS membership predicate, valid on an ordered collection exactly as much as an
+unordered one, and a publisher who states only `skos:member` on a `skos:OrderedCollection` (a real,
+unremarkable shape — not every export bothers with an RDF list for a two- or three-member group) has
+made a perfectly good, explicit membership assertion that this importer dropped entirely. Worse on a
+re-import: because the reconciliation pass (D30) removes a membership the file "no longer states"
+whenever the member concept was itself rewritten this run, reading an empty `member_uris` for such a
+collection didn't just fail to add anything — it actively stripped membership an earlier,
+correctly-read import (of the same file, before this defect, or of a different collection reached
+via `skos:member` alone) had written.
+
+The SKOS reference itself settles what the fallback should be: `skos:memberList` is documented as
+*narrowing* `skos:member`, not replacing it — an ordered collection's list is understood to restate,
+in order, the same members `skos:member` already asserts, and a publisher is free to assert both, or
+a less careful export may assert only one or the other.
+
+**Chosen: read both, with `memberList` — when present — deciding the order, and any `skos:member`
+it omits appended afterward.** Three cases:
+
+1. **`memberList` present, `skos:member` absent or a subset of it.** Unchanged from before this fix:
+   `memberList`'s own order is `member_uris` in full.
+2. **`memberList` present, `skos:member` also present and naming something `memberList` omits.**
+   `memberList`'s own order comes first; any `skos:member` value not already named by `memberList`
+   is appended after it, deduplicated against `memberList`'s own values by URI, in the same
+   deterministic sorted order the unordered branch already uses for a value that carries no order of
+   its own (a member asserted only via `skos:member` has none to prefer).
+3. **`memberList` absent, `skos:member` present.** The new case this fix exists for: read the same
+   deterministic sorted way as case 2's appended tail and as the unordered branch — there is no order
+   to read, so there is nothing to lose by picking the same rule already used everywhere else a
+   member carries none.
+
+**What happens to a `skos:member` the `memberList` omits, decided explicitly rather than left
+implicit:** it is *kept*, not dropped and not separately reported. Article XI's "nothing a file
+contains is ever dropped in silence" is the operative rule, and `skos:member` is a real, explicit
+membership assertion — omitting it from `memberList` is not the same shape of problem as a value the
+models have no place for (that is what `SetAsideReason` names); it is simply a member whose *order*
+the file did not additionally state through the ordered mechanism. No new report reason was added for
+this: the member lands, visibly, as a `CollectionMember` row like any other, and a caller inspecting
+the collection's own membership sees it there, which is a stronger form of "not silent" than a report
+entry pointing at a value that was never actually withheld.
+
+**Reproduced before the fix:** an `OrderedCollection` stated only with `skos:member` (no
+`memberList` at all) imported with zero members, and a second import of the identical file produced
+zero members again rather than staying at whatever the first import (correctly, once fixed) wrote —
+confirming this was not only a missing-on-first-import defect but a lifecycle one. A second fixture,
+asserting both predicates with `memberList` naming two of three members, confirmed the third
+(`skos:member`-only) member was dropped entirely before the fix and lands after `memberList`'s own
+two, in deterministic order, once fixed.
+
+**Revisit if:** a future story finds a real published vocabulary where a `skos:member`-only member's
+absence from `memberList` is meant to signal something other than "the publisher didn't bother
+including it in the ordered list too" (for instance, a convention where `memberList` is deliberately
+partial and authoritative for exactly what it names) — that would be evidence for treating the
+omission as a set-aside-worthy discrepancy rather than a plain append, and belongs in its own
+decision built against that evidence.
+
+## D45 — Unmodelled-predicate reporting is generalised past the concept-only walk it was built for (review fix 12)
+
+`_import_unheld_values` — the function that reports a predicate genuinely outside SKOS under
+`SetAsideReason.UNMODELLED_PREDICATE` — was called exactly once, from `_import_concept_content`, so
+it only ever walked a *concept* node's own predicates. Neither `_resolve_scheme` nor
+`_import_collections` ran an equivalent walk over the vocabulary's own scheme node or a collection
+node, so a non-SKOS predicate asserted on either — a curator's own `ex:owner` on the scheme, an
+`ex:curatedBy` on a collection — was read by nothing and reported by nothing: dropped exactly as
+silently as an unmodelled concept predicate would have been before T021 built this mechanism at all.
+FR-014's own wording ("predicates the models have no place for") names no node kind restriction, and
+D27's justification for the one deliberate exclusion this mechanism already carries — a SKOS
+predicate with a model home but no read path yet, silently skipped rather than reported, because "a
+later story will claim it" — has no equivalent argument for a predicate genuinely outside SKOS
+entirely: no story was ever going to claim `ex:owner`, on any node kind.
+
+**Chosen: extract the third, node-kind-agnostic clause of `_import_unheld_values`'s own walk into a
+shared `_report_unmodelled_predicates(graph, node, uri, handled, report)`, parameterised by a
+per-node-kind `handled` set, and call it once for each of the three record kinds this module
+creates.** `_HANDLED_CONCEPT_PREDICATES` (unchanged) still gates the concept-level call;
+`_HANDLED_SCHEME_PREDICATES` (new — identity, `skos:prefLabel`, `skos:hasTopConcept`,
+`dcterms:description`) gates a new call at the end of `_resolve_scheme`; `_HANDLED_COLLECTION_PREDICATES`
+(new — identity, `skos:prefLabel`, `skos:member`, `skos:memberList`) gates a new call inside
+`_import_collections`'s own per-collection loop. Deliberately *not* extended to the `skos:notation`/
+mapping-predicate checks that also live in `_import_unheld_values`: those two are concept-specific
+SKOS constructs by the vocabulary's own semantics (a mapping links one *concept* to another across
+vocabularies; a notation identifies a *concept*), the review finding names only the generic
+"unmodelled predicate" gap, and extending notation/mapping reporting to scheme and collection nodes
+with no fixture material motivating it would be exactly the speculative reporting D27 already argues
+against for a predicate nothing asks to see reported.
+
+**Placement of the new calls matters.** The scheme call runs only once the scheme row itself has
+been resolved and saved — a scheme that cannot be resolved at all (`VOCABULARY_UNDETERMINED`/
+`VOCABULARY_TARGET_MISMATCH`/`VOCABULARY_AMBIGUOUS`) never reaches it, consistent with every other
+predicate-level check in this module only running for a record that is actually going to exist. The
+collection call runs only for a collection that passed both this fix's own D42/D43 identity checks
+and was actually saved — a collection set aside for belonging to another vocabulary, or for its URI
+clashing with a concept's, has no row for a non-SKOS predicate to be "on" in any sense a curator
+would recognise, so it is not walked either.
+
+**Reproduced before the fix:** a fixture carrying a scheme node with `ex:owner` and a collection node
+with `ex:curatedBy` imported cleanly, with neither predicate appearing anywhere in
+`report.set_aside` — confirmed by two failing tests before the production change, one per node kind.
+
+**Verified independently for each node kind, by mutation.** Disabling only the scheme-level call left
+the collection-level test green and only the scheme-level test failing; disabling only the
+collection-level call reproduced the opposite pattern — confirming the two calls are independently
+load-bearing.
+
+**Revisit if:** a future story finds a real published vocabulary using `skos:notation` or a mapping
+predicate on a scheme or collection node with a use worth modelling — that is new capability
+(a place to *store* it, or a considered reason to report it under NOTATION/MAPPING rather than the
+generic UNMODELLED_PREDICATE), not a correction to this decision's deliberate scope limit.
+
+## D46 — The predicate-coverage gate is rewritten to check actual evidence, not membership in production's own exclusion set (review fix 13)
+
+`tests/test_exchange/test_skos.py::TestEverySkosPredicateIsReadOrReported` (T033, D34) computed a
+`recognised` set from `_HANDLED_CONCEPT_PREDICATES | _READ_BUT_NOT_AT_CONCEPT_LEVEL` — the first
+imported directly from `skos.py`, the second a small hand-kept set naming the three predicates read
+at a node kind other than a concept's own — and asserted every SKOS predicate found anywhere in the
+fixture corpus was a member. D34's own account of this test says plainly what membership means:
+"not double-reported by `_import_unheld_values`." That is a different claim than the one FR-014 and
+this test's own docstring actually make — "read by the importer, or named in the report" — and the
+gap between the two is exactly the shape of defect this fix's brief names: adding a predicate to
+`_HANDLED_CONCEPT_PREDICATES` with no read path behind it makes the predicate "recognised" and the
+test pass, in the same edit that makes the importer silently stop accounting for it. The test's own
+"recognised" set and the constant a regression would touch were the same object; the test could not,
+structurally, ever catch that shape of regression.
+
+**Chosen: rebuild the test on independent evidence.** For every fixture that can succeed standing
+alone (`scheme=None`, no pre-seeded database — the same discovery walk `ALL_FIXTURES` already uses,
+now filtered to exclude the fatal-path fixtures and the two that need a caller-supplied target this
+sweep does not attempt to construct, each already exercised directly by its own dedicated test
+class), the test imports it and, for every SKOS predicate the graph carries on a node this importer
+actually treats as a record (a concept, the vocabulary's own resolved scheme node — never a second,
+merely-referenced declared scheme, as in `mixed_scheme_membership.ttl`'s "other" — or a collection),
+requires direct evidence: a matching `ConceptLabel`/`ConceptNote`/`ConceptRelation`/`CollectionMember`
+row, a matching `Concept.label` or `ConceptScheme.name`/`Collection.name` value, or a matching
+`report.set_aside`/`report.normalized` entry naming the same subject and, where the reason carries
+one, the same language or predicate. None of this evidence-gathering imports anything from `skos.py`:
+`_COVERAGE_LABEL_KIND`/`_COVERAGE_NOTE_KIND`/`_COVERAGE_MAPPING_CURIE` restate the SKOS
+specification's own predicate-to-kind vocabulary independently, in the test file, so a future
+regression in production's own classification has no matching classification in the test to hide
+behind.
+
+**A record entirely excluded this run — set aside under `NO_PREFERRED_LABEL`, `VOCABULARY_MISMATCH`,
+`EMPTY_SLUG`, or this fix's own `ALREADY_IN_ANOTHER_VOCABULARY`/`URI_HELD_BY_DIFFERENT_KIND` — blanket-
+covers every one of its own predicates.** There is no record for any of them to have landed against,
+and the set-aside entry already explains why the whole node was skipped; requiring separate evidence
+per predicate on a node that was never created would be checking for something that cannot exist.
+This is narrower than it might look: a record that *was* created, with only one specific value set
+aside (`UNCONFIGURED_LANGUAGE`, `SURPLUS_PREFERRED_LABEL`, `NOTATION`, `MAPPING`, `MISSING_MEMBER`,
+`MISSING_RELATION_END`, `RELATION_DISJOINTNESS`) does **not** get this blanket treatment — every one
+of *that* node's other predicates still needs its own evidence, exactly the distinction a first draft
+of this rewrite missed (treating any subject appearing in *any* set-aside entry as wholly excused,
+which would have let `unmodelled_and_normalised_values.ttl`'s own `widget` concept's `prefLabel` pass
+unverified merely because `widget` also carries a separately-reported notation).
+
+**Proven stronger by mutation, not merely argued.** Disabling `skos:broader`/`skos:narrower` reading
+in `_import_relations` (commenting out the two `graph.objects(node, SKOS.broader/narrower)` loops)
+while leaving `_HANDLED_CONCEPT_PREDICATES` completely unchanged — the exact shape of regression this
+fix exists to catch — reproduces the old test's own logic (rebuilt inline against the unmodified
+constant) still passing, `unrecognised == set()`, while the new, rewritten test fails on eleven
+fixtures, naming `skos:broader`/`skos:narrower` on the concepts whose relation no longer lands or is
+reported. Reverted immediately after recording the result; no production code was left changed by
+this probe.
+
+**One honest limitation, not hidden in new clothes.** The rewrite is fixture-by-fixture, not a single
+global sweep, and it excludes the fatal-path fixtures and two target-requiring ones
+(`_PREDICATE_COVERAGE_EXCLUDED_FIXTURES`) because a failed run has no resulting record and no
+non-fatal report entry for a predicate's coverage to appear in — there is nothing behavioural left to
+check on a run that wrote nothing. Their own predicates are still exercised, just by the test classes
+built to exercise those specific fixtures directly (named in the exclusion set's own comments), not
+by this generic sweep. A fully global, no-exclusions version was not attempted: it would need this
+test to also supply a synthetic target scheme for the ambiguous/undeclared cases, which risks
+asserting behaviour these fixtures were never built to have and duplicating what
+`TestChoosingBetweenDeclaredVocabularies`/`TestImportSkosVocabulary` already cover on purpose.
+
+**Revisit if:** a SKOS predicate this dispatcher has no case for yet reaches the fixture corpus — it
+is treated as uncovered (a hard failure naming the predicate) rather than silently skipped, which is
+deliberate: a new predicate must earn its own evidence rule in `_coverage_predicate_covered`, the
+same discipline this whole fix exists to enforce on production's own classification.

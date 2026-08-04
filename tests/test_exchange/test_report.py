@@ -33,6 +33,14 @@ _EXAMPLE_PARAMS = {
     SetAsideReason.NO_PREFERRED_LABEL: {"language": "en"},
     SetAsideReason.VOCABULARY_MISMATCH: {"other": "https://example.org/vocab/other"},
     SetAsideReason.DEFAULT_LANGUAGE_FROZEN: {"declared": "fr", "frozen": "en"},
+    SetAsideReason.RELATION_DISJOINTNESS: {"other": "https://example.org/vocab/other"},
+    SetAsideReason.SURPLUS_PREFERRED_LABEL: {"language": "de"},
+    SetAsideReason.EMPTY_SLUG: {},
+    SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY: {
+        "current": "https://example.org/vocab/current",
+        "target": "https://example.org/vocab/target",
+    },
+    SetAsideReason.URI_HELD_BY_DIFFERENT_KIND: {},
 }
 
 # One example params dict per fatal reason (T007), the same shape as _EXAMPLE_PARAMS.

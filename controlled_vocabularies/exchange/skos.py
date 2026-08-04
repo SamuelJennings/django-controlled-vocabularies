@@ -39,7 +39,7 @@ from controlled_vocabularies.exchange.mapping import (
     SKOS,
 )
 from controlled_vocabularies.exchange.report import FatalReason, ImportReport, NormalizedReason, SetAsideReason
-from controlled_vocabularies.exchange.safety import scan_rdf_xml
+from controlled_vocabularies.exchange.safety import scan_json_ld, scan_rdf_xml
 from controlled_vocabularies.models import (
     Collection,
     Concept,
@@ -80,12 +80,14 @@ def _read_graph(file: str | Path, *, serialization: str | None = None) -> rdflib
     "cannot be determined" half).
 
     RDF/XML input is scanned by :func:`~controlled_vocabularies.exchange.safety.scan_rdf_xml`
-    before rdflib ever sees it (research.md R3, decisions.md D9) — the file is
-    read from ``path`` a second time by rdflib itself afterwards, deliberately,
-    rather than parsed from the bytes already in memory: rdflib's own
-    file-based parse establishes its base URI from the file's own location,
-    the behaviour decisions.md D13 measured and future fatal-path fixtures
-    may come to depend on, and passing pre-read ``data=`` bytes instead would
+    before rdflib ever sees it (research.md R3, decisions.md D9), and JSON-LD
+    input is scanned by :func:`~controlled_vocabularies.exchange.safety.scan_json_ld`
+    the same way (decisions.md D36) — either way the file is read from
+    ``path`` a second time by rdflib itself afterwards, deliberately, rather
+    than parsed from the bytes already in memory: rdflib's own file-based
+    parse establishes its base URI from the file's own location, the
+    behaviour decisions.md D13 measured and future fatal-path fixtures may
+    come to depend on, and passing pre-read ``data=`` bytes instead would
     silently change that base.
 
     A file that cannot be found, or one that fails to parse as its
@@ -112,6 +114,11 @@ def _read_graph(file: str | Path, *, serialization: str | None = None) -> rdflib
         # (see the base-URI note above), so a second, larger read is a
         # deliberate, small cost on RDF/XML input only.
         scan_rdf_xml(path.read_bytes())
+    elif resolved_format == "json-ld":
+        # Same pre-flight discipline, closing the equivalent hole D36 found
+        # in JSON-LD's own remote-`@context` route (see the module docstring
+        # above and safety.py's own).
+        scan_json_ld(path.read_bytes())
     graph = rdflib.Graph()
     try:
         graph.parse(str(path), format=resolved_format)
@@ -424,6 +431,10 @@ def _resolve_scheme(
         report.add_created(row.uri)
     else:
         report.add_updated(row.uri)
+    # FIX 12 (review, decisions.md D45): the scheme node itself can carry a
+    # non-SKOS predicate this module has no place for, exactly as a concept
+    # or a collection can; _import_unheld_values only ever walked a concept.
+    _report_unmodelled_predicates(graph, declared_node, declared_uri, _HANDLED_SCHEME_PREDICATES, report)
     return row, declared_uri
 
 
@@ -487,18 +498,55 @@ def _import_labels(
     refusal raise (T020, FR-014, decisions.md D25) — that exception exists to
     protect a direct, out-of-band write, not to be this importer's control
     flow.
+
+    A second ``skos:prefLabel`` in one non-default configured language is
+    the same shape of problem, for a cardinality reason rather than a
+    language one (FIX 3, review, decisions.md D38): ``ConceptLabel.clean()``
+    allows only one ``PREFERRED`` row per (concept, language), so only the
+    lexicographically-first value in each such language — the same
+    deterministic rule :func:`_preferred_label_in` already uses for the
+    default language, so the same file always imports the same way — is
+    ever attempted; every other value in that language is set aside and
+    reported instead, ahead of the write, the same D25 discipline applied to
+    the same class of refusal. A surplus ``skos:prefLabel`` in
+    ``default_language`` itself (FIX 4, review, decisions.md D38) is the
+    same defect, not a different one: :func:`_import_concepts` already chose
+    one such value, by the identical rule, as ``Concept.label`` before this
+    function ever runs, so every other one is reported here too — never
+    written (that would duplicate the identity anchor, exactly what
+    ``ConceptLabel.clean()`` itself refuses), but never silently dropped
+    either (Article XI).
     """
     configured = _configured_language_codes()
     concept.labels.all().delete()
+
+    # One deterministic winner per language this concept carries a
+    # skos:prefLabel in (including default_language, whose winner already
+    # equals concept.label — see _import_concepts's own call to
+    # _preferred_label_in, the identical sort-and-first-value rule).
+    preferred_by_language: dict[str, list[str]] = {}
+    for literal in graph.objects(node, SKOS.prefLabel):
+        if isinstance(literal, rdflib.Literal) and literal.language:
+            preferred_by_language.setdefault(literal.language, []).append(str(literal))
+    preferred_kept = {language: sorted(values)[0] for language, values in preferred_by_language.items()}
+
     for predicate, kind in LABEL_PREDICATES.items():
         for literal in graph.objects(node, predicate):
             if not isinstance(literal, rdflib.Literal) or not literal.language:
                 continue
             language = literal.language
             if kind == ConceptLabel.Kind.PREFERRED and language == default_language:
+                if str(literal) != preferred_kept[language]:
+                    # FIX 4 (review, decisions.md D38): the winner already
+                    # lives as concept.label; a loser in this language must
+                    # still be named, not merely skipped.
+                    report.add_set_aside(SetAsideReason.SURPLUS_PREFERRED_LABEL, subject=uri, language=language)
                 continue
             if language not in configured:
                 report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, subject=uri, language=language)
+                continue
+            if kind == ConceptLabel.Kind.PREFERRED and str(literal) != preferred_kept[language]:
+                report.add_set_aside(SetAsideReason.SURPLUS_PREFERRED_LABEL, subject=uri, language=language)
                 continue
             concept.add_label(language=language, kind=kind, text=str(literal))
 
@@ -584,6 +632,65 @@ _HANDLED_CONCEPT_PREDICATES = frozenset(
     | set(MAPPING_PREDICATES)
 )
 
+#: Every predicate the vocabulary's own scheme node carries that
+#: :func:`_resolve_scheme` already reads and accounts for (FIX 12, review,
+#: decisions.md D45): its own identity, name (``skos:prefLabel``), top
+#: concepts, and description. ``skos:hasTopConcept`` is read *about* a
+#: concept, not held for the concept the way ``_HANDLED_CONCEPT_PREDICATES``
+#: is scoped, so it is named separately here rather than shared with it.
+_HANDLED_SCHEME_PREDICATES = frozenset(
+    {
+        rdflib.RDF.type,
+        SKOS.prefLabel,
+        SKOS.hasTopConcept,
+        DCTERMS.description,
+    }
+)
+
+#: Every predicate a collection node carries that :func:`_import_collections`
+#: already reads and accounts for (FIX 12, review, decisions.md D45): its own
+#: identity, name, and membership (both ``skos:member`` and
+#: ``skos:memberList``, per FIX 11).
+_HANDLED_COLLECTION_PREDICATES = frozenset(
+    {
+        rdflib.RDF.type,
+        SKOS.prefLabel,
+        SKOS.member,
+        SKOS.memberList,
+    }
+)
+
+
+def _report_unmodelled_predicates(
+    graph: rdflib.Graph,
+    node: rdflib.term.Node,
+    uri: str,
+    handled: frozenset[rdflib.URIRef],
+    report: ImportReport,
+) -> None:
+    """Set aside and report a predicate ``node`` carries that is neither in
+    ``handled`` — already accounted for elsewhere, for whatever kind of node
+    this is — nor itself a SKOS predicate this module has no read path for
+    *yet* (FIX 12, review, decisions.md D45; generalises D27's own concept-only
+    rule past the single node kind it was written for). A SKOS predicate with
+    no read path is deliberately not reported: the models do have a place for
+    it, so FR-014's "the models have no place for" does not apply, only "not
+    yet built" does. A predicate genuinely outside SKOS — with no model home
+    regardless of the node's own kind — is reported under
+    :data:`SetAsideReason.UNMODELLED_PREDICATE`, naming the predicate's own
+    URI (there is no curated CURIE table for a predicate this module has
+    never seen before). Called once per node this module treats as a record
+    with its own identity: a concept, the vocabulary's own scheme node, and a
+    collection, each with its own ``handled`` set naming what it already
+    reads.
+    """
+    for other_predicate, _obj in graph.predicate_objects(node):
+        if other_predicate in handled:
+            continue
+        if str(other_predicate).startswith(str(SKOS)):
+            continue
+        report.add_set_aside(SetAsideReason.UNMODELLED_PREDICATE, subject=uri, predicate=str(other_predicate))
+
 
 def _import_unheld_values(graph: rdflib.Graph, node: rdflib.term.Node, uri: str, report: ImportReport) -> None:
     """Set aside and report the values on ``concept`` the models have no place for (T021, FR-014).
@@ -594,9 +701,8 @@ def _import_unheld_values(graph: rdflib.Graph, node: rdflib.term.Node, uri: str,
     mapping (:data:`MAPPING_PREDICATES`, :data:`SetAsideReason.MAPPING`,
     naming the predicate's CURIE); and any predicate this concept carries
     that is neither handled elsewhere in this module nor itself a SKOS
-    predicate (:data:`SetAsideReason.UNMODELLED_PREDICATE`, naming the
-    predicate's own URI — there is no curated CURIE table for a predicate
-    this module has never seen before).
+    predicate (:func:`_report_unmodelled_predicates`,
+    :data:`SetAsideReason.UNMODELLED_PREDICATE`).
 
     A SKOS predicate this module simply does not read *yet* —
     ``skos:broader``/``narrower``/``related`` (US-4) and
@@ -613,12 +719,7 @@ def _import_unheld_values(graph: rdflib.Graph, node: rdflib.term.Node, uri: str,
         for _obj in graph.objects(node, mapping_predicate):
             report.add_set_aside(SetAsideReason.MAPPING, subject=uri, predicate=name)
 
-    for other_predicate, _obj in graph.predicate_objects(node):
-        if other_predicate in _HANDLED_CONCEPT_PREDICATES:
-            continue
-        if str(other_predicate).startswith(str(SKOS)):
-            continue
-        report.add_set_aside(SetAsideReason.UNMODELLED_PREDICATE, subject=uri, predicate=str(other_predicate))
+    _report_unmodelled_predicates(graph, node, uri, _HANDLED_CONCEPT_PREDICATES, report)
 
 
 def _resolve_concept_reference(
@@ -703,6 +804,21 @@ def _import_relations(
     database under a matching scheme is set aside and reported, naming both
     ends, and the run continues (FR-011, finished with acceptance coverage at
     T025).
+
+    A pair resolved as broader/narrower always wins over the same pair
+    resolved as related (review fix 2, decisions.md D37): SKOS declares the
+    two disjoint, and the model itself refuses to store both
+    (:meth:`~controlled_vocabularies.models.ConceptRelation._reject_disjointness_violation`).
+    Broader/narrower rows are written first, each one checked directly
+    against, and clearing, any conflicting stored RELATED row for the same
+    pair — not only one the bulk deletion pass above would already have
+    caught, since that pass only ever considers a row a candidate when
+    *both* its ends were rewritten by this run (D30), and the far end of a
+    newly-stated broader edge may instead be a concept only referenced this
+    run (D29's ``get_by_uri`` fallback). Related rows are written after, each
+    one checked the same way against a conflicting stored BROADER row —
+    including one written earlier in this same call — and set aside and
+    reported rather than attempted when one is found.
     """
     desired_broader: dict[tuple[str, str], None] = {}
     desired_related: dict[frozenset[str], None] = {}
@@ -720,6 +836,14 @@ def _import_relations(
     concepts_by_pk: dict[int, Concept] = {}
 
     for narrower_uri, broader_uri in desired_broader:
+        if narrower_uri == broader_uri:
+            # FIX 6 (review, decisions.md D40): a concept stating
+            # skos:broader/skos:narrower about itself — not a real
+            # hierarchy edge, the same no-op decisions.md D29 already
+            # applies to the equivalent skos:related shape (the model's
+            # own _reject_self would refuse it if attempted); nothing
+            # meaningful to reconcile.
+            continue
         narrower_concept = _resolve_concept_reference(narrower_uri, successful_concepts, target_scheme)
         broader_concept = _resolve_concept_reference(broader_uri, successful_concepts, target_scheme)
         if narrower_concept is None or broader_concept is None:
@@ -777,8 +901,28 @@ def _import_relations(
         already_stored = ConceptRelation.objects.filter(
             source_id=narrower_pk, target_id=broader_pk, kind=ConceptRelation.Kind.BROADER
         ).exists()
-        if not already_stored:
-            concepts_by_pk[narrower_pk].add_broader(concepts_by_pk[broader_pk])
+        if already_stored:
+            continue
+        # FIX 2, route 2 (decisions.md D37): an existing RELATED row for this
+        # exact pair may not have been a candidate for the bulk deletion pass
+        # above — that pass only ever considers a row when BOTH its ends were
+        # rewritten by this run (D30), and the far end of a newly-stated
+        # broader edge may instead be a concept an earlier import wrote and
+        # this run only references (D29's get_by_uri fallback), so it is
+        # never in successful_ids. Checked directly and unconditionally, so a
+        # stale RELATED row from an earlier run can never survive to make
+        # add_broader raise the model's own disjointness ValidationError.
+        conflicting_related = ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED).filter(
+            Q(source_id=narrower_pk, target_id=broader_pk) | Q(source_id=broader_pk, target_id=narrower_pk)
+        )
+        for row in conflicting_related:
+            report.add_set_aside(
+                SetAsideReason.RELATION_DISJOINTNESS,
+                subject=concepts_by_pk[narrower_pk].static_uri,
+                other=concepts_by_pk[broader_pk].static_uri,
+            )
+            row.delete()
+        concepts_by_pk[narrower_pk].add_broader(concepts_by_pk[broader_pk])
 
     for pk_pair in resolved_related:
         a_pk, b_pk = tuple(pk_pair)
@@ -787,8 +931,25 @@ def _import_relations(
             .filter(Q(source_id=a_pk, target_id=b_pk) | Q(source_id=b_pk, target_id=a_pk))
             .exists()
         )
-        if not already_stored:
-            concepts_by_pk[a_pk].add_related(concepts_by_pk[b_pk])
+        if already_stored:
+            continue
+        # FIX 2, the symmetric route (decisions.md D37): the mirror image of
+        # the broader-side check just above — a BROADER row surviving from an
+        # earlier run for the same D30 reason must be checked before
+        # add_related too, or the model's own guard raises here instead.
+        conflicting_broader = (
+            ConceptRelation.objects.filter(kind=ConceptRelation.Kind.BROADER)
+            .filter(Q(source_id=a_pk, target_id=b_pk) | Q(source_id=b_pk, target_id=a_pk))
+            .exists()
+        )
+        if conflicting_broader:
+            report.add_set_aside(
+                SetAsideReason.RELATION_DISJOINTNESS,
+                subject=concepts_by_pk[a_pk].static_uri,
+                other=concepts_by_pk[b_pk].static_uri,
+            )
+            continue
+        concepts_by_pk[a_pk].add_related(concepts_by_pk[b_pk])
 
 
 def _import_collections(
@@ -811,15 +972,30 @@ def _import_collections(
     blank nodes by construction (research.md R2) — read through
     ``graph.items()``, which yields the member *URIs* the list carries, never
     the list's own cells, so those blank nodes never reach :func:`_identify`
-    at all (D3's own carve-out, T030).
+    at all (D3's own carve-out, T030). A URI matching an *existing* collection
+    that already belongs to a different vocabulary is left there, untouched —
+    membership included — set aside and reported naming both vocabularies
+    (review fix 9, decisions.md D42, :data:`SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY`),
+    the same rule :func:`_import_concepts` applies to a concept in the same
+    position. A URI matching no existing collection but already held by a
+    :class:`Concept` instead is set aside and reported rather than made to
+    identify two records at once (review fix 10, decisions.md D43,
+    :data:`SetAsideReason.URI_HELD_BY_DIFFERENT_KIND`).
 
     ``skos:member`` (unordered) or ``skos:memberList`` (ordered, walked in the
-    file's own order) name the file's desired membership. Each member URI is
-    resolved through :func:`_resolve_concept_reference` — this run's own
-    writes first, then an earlier import's; one that resolves to nothing is
-    set aside and reported (:data:`SetAsideReason.MISSING_MEMBER`, naming both
-    the member and the collection) rather than failing the run (FR-011), and
-    the collection is still created holding whatever members did resolve.
+    file's own order) name the file's desired membership. An ordered
+    collection with no ``skos:memberList`` at all falls back to
+    ``skos:member``, read in the same deterministic sorted order the
+    unordered branch uses; when both are present, ``skos:memberList``
+    governs the order of the members it names, and any ``skos:member`` it
+    omits is appended after them, sorted the same way (review fix 11,
+    decisions.md D44 — ``memberList`` narrows ``member`` rather than
+    replacing it). Each member URI is resolved through
+    :func:`_resolve_concept_reference` — this run's own writes first, then
+    an earlier import's; one that resolves to nothing is set aside and
+    reported (:data:`SetAsideReason.MISSING_MEMBER`, naming both the member
+    and the collection) rather than failing the run (FR-011), and the
+    collection is still created holding whatever members did resolve.
 
     Membership is written only through the model's own API —
     :meth:`~controlled_vocabularies.models.Collection.add`,
@@ -867,8 +1043,37 @@ def _import_collections(
             row = Collection.objects.get_by_uri(uri)
             created = False
         except Collection.DoesNotExist:
+            # FIX 10 (review, decisions.md D43): the mirror image of the same
+            # check in _import_concepts — this URI may already be held by a
+            # Concept instead. See that function's own comment; the two
+            # identity spaces are checked independently of each other.
+            try:
+                Concept.objects.get_by_uri(uri)
+            except Concept.DoesNotExist:
+                pass
+            else:
+                report.add_set_aside(SetAsideReason.URI_HELD_BY_DIFFERENT_KIND, subject=uri)
+                continue
             row = Collection(scheme=target_scheme)
             created = True
+
+        if not created and row.scheme_id != target_scheme.pk:
+            # FIX 9 (review, decisions.md D42): the same rule FIX 8 gives a
+            # concept, applied to a collection — a collection matched here
+            # already belongs to a different vocabulary. Reassigning it (and
+            # its membership) to target_scheme is exactly the state
+            # CollectionMember._reject_cross_scheme exists to prevent,
+            # reachable here only because nothing checked the collection's
+            # own scheme before this fix. Left in place, untouched,
+            # membership included; set aside and reported naming both.
+            report.add_set_aside(
+                SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY,
+                subject=uri,
+                current=row.scheme.uri,
+                target=target_scheme.uri,
+            )
+            continue
+
         row.scheme = target_scheme
         row.static_uri = uri
         name = _first_literal(graph, node, SKOS.prefLabel, language=target_scheme.effective_default_language)
@@ -882,10 +1087,29 @@ def _import_collections(
             report.add_created(uri)
         else:
             report.add_updated(uri)
+        _report_unmodelled_predicates(graph, node, uri, _HANDLED_COLLECTION_PREDICATES, report)
 
         if ordered:
             member_list_node = graph.value(node, SKOS.memberList)
-            member_uris = [str(item) for item in graph.items(member_list_node)] if member_list_node is not None else []
+            if member_list_node is not None:
+                ordered_uris = [str(item) for item in graph.items(member_list_node)]
+                # FIX 11 (review, decisions.md D44): skos:memberList narrows
+                # skos:member rather than replacing it (the SKOS reference's
+                # own wording) — a skos:member the memberList omits is still
+                # an explicit membership assertion and must not disappear
+                # (Article XI). Appended after memberList's own order, in the
+                # same deterministic sorted order the unordered branch below
+                # already uses, since a member named only through
+                # skos:member carries no order of its own to prefer.
+                member_only = sorted({str(obj) for obj in graph.objects(node, SKOS.member)} - set(ordered_uris))
+                member_uris = ordered_uris + member_only
+            else:
+                # FIX 11 (review, decisions.md D44): an ordered collection
+                # asserted only with skos:member — no memberList at all —
+                # still has real, explicit membership to import; read the
+                # same deterministic sorted way the unordered branch already
+                # reads skos:member, since there is no order to read.
+                member_uris = sorted({str(obj) for obj in graph.objects(node, SKOS.member)})
         else:
             member_uris = sorted({str(obj) for obj in graph.objects(node, SKOS.member)})
 
@@ -917,9 +1141,16 @@ def _import_collections(
             survivors = [concept for concept in current if concept.pk not in resolved_pks]
             row.set_member_order(resolved + survivors)
 
+    # FIX 7 (review, decisions.md D41): .exclude(static_uri__in=mentioned_uris)
+    # also selects a row whose static_uri is NULL — a locally authored
+    # collection the file could never mention at all, since it carries no
+    # external identifier for the file to name. Reported by its own .uri
+    # (StaticUriModel's property, always present per CONTEXT.md), never the
+    # raw column, which for such a row would be None; sorted in Python since
+    # .uri is not a database column .order_by() can reach.
     absent = Collection.objects.filter(scheme=target_scheme).exclude(static_uri__in=mentioned_uris)
-    for uri in absent.order_by("static_uri").values_list("static_uri", flat=True):
-        report.add_absent_from_source(uri)
+    for collection in sorted(absent, key=lambda row: row.uri):
+        report.add_absent_from_source(collection.uri)
 
 
 def _import_concept_content(
@@ -961,7 +1192,13 @@ def _import_concepts(
     dedicated to this case is T022's (decisions.md D17). A matched or newly
     created :class:`Concept` is given a deterministic, scheme-unique slug
     (:func:`_assign_unique_slug`, FR-007) and written through the model's own
-    ``save()``.
+    ``save()``. A URI matching an *existing* record that already belongs to a
+    different vocabulary is left there, set aside and reported naming both
+    vocabularies, rather than silently moved (review fix 8, decisions.md D42,
+    :data:`SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY`). A URI matching no
+    existing concept but already held by a :class:`Collection` is set aside
+    and reported rather than made to identify two records at once (review
+    fix 10, decisions.md D43, :data:`SetAsideReason.URI_HELD_BY_DIFFERENT_KIND`).
 
     Finally (T013/FR-013), every existing concept of ``target_scheme`` whose
     identity was never seen among ``concept_nodes`` — the file simply does not
@@ -1001,12 +1238,56 @@ def _import_concepts(
             )
             continue
 
+        if not slugify(label, allow_unicode=True):
+            # FIX 5 (review, decisions.md D39): a label made up only of
+            # characters slugify() strips (e.g. a bare "±") derives an empty
+            # slug, which Concept.save() refuses once slug_is_manual is set
+            # (research R4's own "must not be empty" guard) — checked ahead
+            # of the write, the same D25 discipline every other unusable
+            # value in this feature already gets, rather than letting that
+            # guard's own ValidationError escape. The label itself is not
+            # the problem — it is perfectly good text — so the reported
+            # reason names the slug, not the label, unlike the model's own
+            # message, which is field-scoped and therefore misnames it.
+            report.add_set_aside(SetAsideReason.EMPTY_SLUG, subject=uri)
+            continue
+
         try:
             concept = Concept.objects.get_by_uri(uri)
             created = False
         except Concept.DoesNotExist:
+            # FIX 10 (review, decisions.md D43): before minting a new record
+            # for this URI, check the *other* identity space — a Collection
+            # may already hold it (spec Edge Cases' own example: "a
+            # collection in one file, a concept in another"). Concept's and
+            # Collection's per-model unique constraints on static_uri never
+            # collide with each other, so nothing else would ever catch this.
+            try:
+                Collection.objects.get_by_uri(uri)
+            except Collection.DoesNotExist:
+                pass
+            else:
+                report.add_set_aside(SetAsideReason.URI_HELD_BY_DIFFERENT_KIND, subject=uri)
+                continue
             concept = Concept(scheme=target_scheme)
             created = True
+
+        if not created and concept.scheme_id != target_scheme.pk:
+            # FIX 8 (review, decisions.md D42): a concept matched here
+            # already belongs to a *different* vocabulary than the one being
+            # imported. FR-005 lets a file declaring no vocabulary of its
+            # own be imported into any caller-named target, so importing the
+            # same file into a second target must not silently empty the
+            # first — moving a record between vocabularies is a curatorial
+            # act, never a side effect of reading a file.
+            report.add_set_aside(
+                SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY,
+                subject=uri,
+                current=concept.scheme.uri,
+                target=target_scheme.uri,
+            )
+            continue
+
         concept.scheme = target_scheme
         concept.static_uri = uri
         concept.label = label
@@ -1022,9 +1303,12 @@ def _import_concepts(
     _import_relations(graph, target_scheme, concepts_by_uri, report)
     _import_collections(graph, target_scheme, concepts_by_uri, report)
 
+    # FIX 7 (review, decisions.md D41): same fix as _import_collections's
+    # identical query earlier in this module — see that comment for why
+    # .uri, computed in Python, replaces the raw static_uri column here.
     absent = Concept.objects.filter(scheme=target_scheme).exclude(static_uri__in=mentioned_uris)
-    for uri in absent.order_by("static_uri").values_list("static_uri", flat=True):
-        report.add_absent_from_source(uri)
+    for concept in sorted(absent, key=lambda row: row.uri):
+        report.add_absent_from_source(concept.uri)
 
 
 def _assign_unique_slug(concept: Concept, scheme: ConceptScheme) -> None:

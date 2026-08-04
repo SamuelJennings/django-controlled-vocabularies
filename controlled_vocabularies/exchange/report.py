@@ -39,6 +39,31 @@ class SetAsideReason(TextChoices):
     naming a conflict at the vocabulary level rather than a value that could
     not be stored: a re-imported file's declared default language differing
     from the one already frozen on an existing, concept-bearing scheme.
+    ``RELATION_DISJOINTNESS`` (review fix, decisions.md D37) names a pair
+    stated, in one file or split across two runs, as both a hierarchical
+    (broader/narrower) and a related relation — SKOS declares the two
+    mutually exclusive (models.py ``ConceptRelation._reject_disjointness_violation``);
+    the hierarchical relation always wins and the related statement is the
+    one set aside. ``SURPLUS_PREFERRED_LABEL`` (review fix, decisions.md D38)
+    names a preferred label beyond the first a concept carries in one
+    language — the model allows only one ``PREFERRED`` row per (concept,
+    language) — whichever value is not the deterministically-kept one is
+    the one set aside, in the vocabulary's default language exactly as much
+    as in any other configured language. ``EMPTY_SLUG`` (review fix,
+    decisions.md D39) names a concept whose preferred label is made up only
+    of characters ``slugify()`` strips — the label itself is fine, but the
+    slug it derives is empty, which the model refuses to store; the concept
+    is set aside rather than crash the run on that refusal.
+    ``ALREADY_IN_ANOTHER_VOCABULARY`` (review fix 8/9, decisions.md D42) names
+    a concept or collection whose identity is already held by a *different*
+    vocabulary than the one being imported: moving a record between
+    vocabularies is a curatorial act, never a side effect of reading a file,
+    so the existing record is left exactly where it is rather than
+    reassigned. ``URI_HELD_BY_DIFFERENT_KIND`` (review fix 10, decisions.md
+    D43) names a URI already held by a record of a different kind — a
+    collection where this file asserts a concept, or the reverse — a
+    contradictory source reported while reading rather than surfacing as a
+    database constraint violation (spec Edge Cases).
     """
 
     UNCONFIGURED_LANGUAGE = "unconfigured_language", _("language not configured")
@@ -50,6 +75,11 @@ class SetAsideReason(TextChoices):
     NO_PREFERRED_LABEL = "no_preferred_label", _("no preferred label in default language")
     VOCABULARY_MISMATCH = "vocabulary_mismatch", _("belongs to a different vocabulary")
     DEFAULT_LANGUAGE_FROZEN = "default_language_frozen", _("default language already fixed")
+    RELATION_DISJOINTNESS = "relation_disjointness", _("broader/narrower and related both claimed for a pair")
+    SURPLUS_PREFERRED_LABEL = "surplus_preferred_label", _("surplus preferred label in a language")
+    EMPTY_SLUG = "empty_slug", _("preferred label produces no usable slug")
+    ALREADY_IN_ANOTHER_VOCABULARY = "already_in_another_vocabulary", _("already belongs to another vocabulary")
+    URI_HELD_BY_DIFFERENT_KIND = "uri_held_by_different_kind", _("identifier held by a different kind of record")
 
     @property
     def template(self) -> Promise:
@@ -95,6 +125,26 @@ _REASON_TEMPLATES: dict[SetAsideReason, Promise] = {
         "'%(subject)s' declares its default language as '%(declared)s', but this vocabulary's default "
         "language is already fixed to '%(frozen)s' because it already has concepts; the declared value "
         "was not applied."
+    ),
+    SetAsideReason.RELATION_DISJOINTNESS: _(
+        "'%(subject)s' and '%(other)s' are joined as broader/narrower, so the related statement between "
+        "them was set aside; a broader/narrower pair and a related pair are mutually exclusive."
+    ),
+    SetAsideReason.SURPLUS_PREFERRED_LABEL: _(
+        "'%(subject)s' carries more than one preferred label in the language '%(language)s'; only one is "
+        "kept and the surplus value was set aside."
+    ),
+    SetAsideReason.EMPTY_SLUG: _(
+        "'%(subject)s' has a preferred label made up only of characters this application strips when "
+        "deriving a URL slug, so no usable slug could be derived from it; it was set aside."
+    ),
+    SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY: _(
+        "'%(subject)s' already belongs to the vocabulary '%(current)s'; importing it into '%(target)s' "
+        "would move it between vocabularies, so it was left where it is."
+    ),
+    SetAsideReason.URI_HELD_BY_DIFFERENT_KIND: _(
+        "'%(subject)s' is already held by a record of a different kind in this application; a second "
+        "record was not created for it."
     ),
 }
 

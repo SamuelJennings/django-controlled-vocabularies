@@ -1280,3 +1280,458 @@ origin/main` — conformance, lint, typecheck, test, build all green. `ruff form
 `makemigrations --check`, `pre-commit run --all-files` all clean.
 
 **Next**: convergence — merge US-6 to the feature branch and open the PR.
+
+## 2026-08-04T11:40:00Z · Forge · review fix 1 — JSON-LD remote `@context`
+
+**Did**: closed a critical security finding from the merged feature's review: `_read_graph` gated
+the pre-flight safety scan on RDF/XML only, leaving JSON-LD's own remote-fetch route wide open —
+rdflib's JSON-LD parser resolves a string `@context` through `urlopen` with no allowlist, against a
+remote host or a local `file://` path alike. Reproduced directly against `rdflib.Graph.parse()`
+before writing any test: a doc pointed at an unreachable port raised a connection error (proving the
+fetch fired), and one pointed at `file:///tmp/...` read the local file and parsed cleanly. Wrote the
+failing tests first — `TestScanJsonLd` in `test_safety.py` (a string `@context`, a string inside an
+array `@context`, an inline-object `@context`, no `@context`, and malformed JSON) and
+`TestReadGraph::test_json_ld_is_routed_through_the_safety_scan_before_rdflib_sees_it` /
+`..._with_an_inline_context_is_unaffected...` in `test_skos.py` — confirmed they failed for the
+right reason (`ImportError` for the not-yet-written `scan_json_ld`/`UnsafeJsonLdError`, then a real
+connection-refused error once those existed but `_read_graph` wasn't wired to call them), then made
+the production change: `safety.py` gains `scan_json_ld()`/`UnsafeJsonLdError`, structured exactly
+like `scan_rdf_xml`/`UnsafeRdfXmlError` — refuses any string `@context` value found anywhere in the
+document (including nested inside an embedded node object, not only at the top level), leaves an
+inline object or absent `@context` alone, and leaves malformed JSON for rdflib's own parser to
+report. `_read_graph` now calls it on the `json-ld` branch alongside the existing `xml` one. Mutation
+probe: replaced the new `elif` branch with `pass`, re-ran the wiring test — it failed with the same
+raw `urlopen error [Errno 111] Connection refused>` the reproduction showed, proving the test
+actually detects the hole reopening; restored the fix, re-ran green. Checked Turtle and RDF/XML for
+the same class of hole rather than assuming them clean (the brief asked for this explicitly): a
+Turtle `@prefix` pointed at an unreachable host parsed without any fetch attempt (prefixes are never
+dereferenced), and RDF/XML's own remote-reference surface is exactly the external-entity/DTD routes
+D9 already closes — no third route found. Recorded as decisions.md D36, including the negative
+findings for Turtle/RDF/XML rather than leaving them unstated.
+
+New fixtures under `tests/fixtures/security/` (not `tests/fixtures/skos/` — a remote-context fixture
+placed under the swept `skos/` corpus would make `TestFixtureCorpus`'s own parse sweep attempt the
+real network fetch on every test run, exactly the outcome this fix exists to prevent):
+`remote_context_string.jsonld`, `remote_context_array.jsonld`, `inline_context.jsonld`.
+
+**Verified**: `poetry run pytest -q` — 528 passed (520 baseline + 8 new: 5 in `TestScanJsonLd`, 1
+placeholder-sweep addition in `TestRefusalMessagesUseOnlyNamedPlaceholders`, 2 in `TestReadGraph`).
+`poetry run ruff check .` — all checks passed (one
+auto-fixable lint on the new code, applied). `poetry run ruff format --check .` — 22 files already
+formatted. `poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files
+scanned. `poetry run python -m django makemigrations --check --dry-run --settings=tests.settings` —
+no changes detected. `poetry run pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T12:05:00Z · Forge · review fix 2 — broader + related on the same pair crashes the run
+
+**Did**: closed a high-severity finding from the merged feature's review: `_import_relations` built
+`resolved_broader` and `resolved_related` independently, so a pair the file (or an earlier and a
+later run together) stated both ways raised the model's own disjointness `ValidationError`
+(`ConceptRelation._reject_disjointness_violation`) uncaught out of `add_related`/`add_broader` —
+a raw exception escaping `import_skos()`. Wrote the failing tests first — a new
+`TestRelationDisjointness` in `test_skos.py` with three cases: both stated in one file
+(`relation_disjointness_conflict.ttl`), an earlier run's `related` row surviving into a later run
+that states `broader` for the same pair (`relation_disjointness_prior_related.ttl` /
+`..._updated.ttl`), and the symmetric mirror — an earlier run's `broader` row surviving into a later
+run that states `related` (`relation_disjointness_prior_broader.ttl` / `..._updated.ttl`) — confirmed
+all three failed with the raw `ValidationError` before any production change. Decided the
+hierarchical relation wins (it is the stronger statement, and what SKOS itself declares the two
+disjoint in favour of): added `SetAsideReason.RELATION_DISJOINTNESS` to `report.py` following D26's
+pattern exactly, then made `_import_relations` write broader/narrower rows first, each one checked
+directly against — and clearing — a conflicting stored `RELATED` row for the same pair regardless of
+whether that row's ends belong to this run's own writes (closes route 2, which D30's own
+`successful_ids`-scoped bulk deletion pass cannot see, since the far end of a newly-stated broader
+edge may only be *referenced* this run, not rewritten); related rows are then written second, each
+one checked the same way against a conflicting stored `BROADER` row — including one this same call
+just wrote — and set aside rather than attempted when found (closes route 3, and route 1 falls out of
+the same two checks for free, discovered by mutation-probing an initial data-level exclusion step out
+of existence — see decisions.md D37 for why that step was deleted rather than kept). Mutation probe:
+disabled each of the two per-pair checks in turn and confirmed the test naming that exact route
+failed with the model's raw `ValidationError` each time; restored both, re-ran green. Recorded as
+decisions.md D37, including the one accepted trade-off found along the way (a compound scenario no
+fixture exercises can produce two report entries for one conflict instead of one — verbosity, not a
+defect).
+
+**Verified**: `poetry run pytest -q` — 540 passed (528 baseline + 12 new: 3 in `TestRelationDisjointness`,
+plus the four generic `SetAsideReason` sweep tests in `test_report.py` re-parametrizing automatically
+over the new `RELATION_DISJOINTNESS` member, plus five `TestFixtureCorpus` parse-sweep instances for
+the five new `relation_disjointness_*.ttl` fixtures). `poetry run ruff check .` — all checks passed.
+`poetry run ruff format --check .` — 22 files already formatted. `poetry run mypy` — success, 9 source
+files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django
+makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry run
+pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T12:35:00Z · Forge · review fix 3 — two preferred labels in one non-default language crashes the run
+
+**Did**: closed a high-severity finding from the merged feature's review: D25 filtered an
+unconfigured language ahead of the write for `skos:prefLabel`/`altLabel`/`hiddenLabel` alike, but
+never implemented the cardinality half of the same discipline for `PREFERRED` labels — a second
+`skos:prefLabel` in one non-default *configured* language reached `Concept.add_label` twice, and the
+second raised `ConceptLabel.clean()`'s own uncaught `ValidationError` ("A preferred label in the
+language 'de' already exists for this concept."), a raw exception escaping `import_skos()`. Wrote the
+failing tests first — `TestSurplusPreferredLabelInAnotherConfiguredLanguage` in `test_skos.py`, using
+a new `surplus_preferred_label.ttl` fixture (a concept with two German `skos:prefLabel` values,
+"Gerät" and "Apparat") — confirmed both tests failed with that exact `ValidationError` before any
+production change. Made the production change: `_import_labels` now groups every `skos:prefLabel`
+literal by language and keeps the lexicographically-first value in each (the same rule
+`_preferred_label_in` already uses for the default language, so the same file always imports the same
+way); every other value in a *configured*, non-default language is set aside and reported under a new
+`SetAsideReason.SURPLUS_PREFERRED_LABEL` member added to `report.py` following D26's pattern exactly.
+The default-language branch is deliberately untouched by this commit — it still silently skips every
+literal in that language, the FIX 4 gap named next. Mutation probe: disabled the new surplus check
+(`if False and kind == PREFERRED and ...`), re-ran the new test class, confirmed both tests failed
+with the same raw `ValidationError`; restored, re-ran green. Recorded as decisions.md D38 (covers both
+FIX 3 and FIX 4, since one surplus-label mechanism serves both).
+
+**Verified**: `poetry run pytest -q` — 547 passed (540 baseline + 7 new: 2 in
+`TestSurplusPreferredLabelInAnotherConfiguredLanguage`, four generic `SetAsideReason` sweep tests
+re-parametrizing over the new member, one `TestFixtureCorpus` parse-sweep instance for the new
+fixture). `poetry run ruff check .` — all checks passed. `poetry run ruff format .` — one file
+(`test_skos.py`, a line over length) reformatted, then `--check` clean. `poetry run mypy` — success, 9
+source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django
+makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry run
+pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T12:50:00Z · Forge · review fix 4 — a surplus default-language preferred label is dropped silently
+
+**Did**: closed a medium-severity finding from the merged feature's review, in the same family as
+FIX 3: `_import_labels`'s `if kind == PREFERRED and language == default_language: continue` line
+skips *every* `skos:prefLabel` literal in the default language, including the ones
+`_preferred_label_in` (`_import_concepts`) did not choose as `Concept.label` — dropped with no
+report at all, contradicting Article XI and the README's own "nothing a file contains is ever
+dropped in silence." Wrote the failing test first —
+`TestSurplusPreferredLabelInTheDefaultLanguage` in `test_skos.py`, using a new
+`surplus_preferred_label_default_language.ttl` fixture (two English `skos:prefLabel` values,
+"Widget" and "Doohickey", "en" being the default language) — confirmed the "kept as label" half
+already passed (no crash, matching FIX 3's finding that this half was never the bug) but the
+"reported" half failed (`0 == 1`, no set-aside entry at all) before any production change. Made the
+production change: the same `preferred_by_language`/`preferred_kept` machinery FIX 3 introduced now
+also drives the default-language branch — a literal matching `preferred_kept[default_language]` is
+still skipped silently (it already lives as `concept.label`; writing it as a `ConceptLabel` row too
+would duplicate the identity anchor, exactly what the model refuses), but every other literal in that
+language is now reported under the same `SetAsideReason.SURPLUS_PREFERRED_LABEL` FIX 3 added.
+Mutation probe: disabled the new report call in the default-language branch, re-ran the test class,
+confirmed the "reported" test failed again (`0 == 1`) while the "kept as label" test stayed green
+(proving the mutation is isolated to the reporting half, not the storage half); restored, re-ran
+green. Recorded together with FIX 3 in decisions.md D38 — one mechanism, one decision, covering both.
+
+**Verified**: `poetry run pytest -q` — 550 passed (547 baseline + 3 new: 2 in
+`TestSurplusPreferredLabelInTheDefaultLanguage`, one `TestFixtureCorpus` parse-sweep instance for the
+new fixture — no new `SetAsideReason` member this time, so no further sweep re-parametrization).
+`poetry run ruff check .` — all checks passed. `poetry run ruff format --check .` — 22 files already
+formatted. `poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files
+scanned. `poetry run python -m django makemigrations --check --dry-run --settings=tests.settings` —
+no changes detected. `poetry run pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T13:10:00Z · Forge · review fix 5 — a preferred label that slugifies to empty crashes the run
+
+**Did**: closed a medium-severity finding from the merged feature's review: `_assign_unique_slug`
+sets `slug_is_manual = True` with a `base` from `slugify(concept.label, allow_unicode=True)` that may
+be empty (a label of only characters `slugify()` strips, e.g. `"±"`), and `Concept.save()` then
+raises `ValidationError({'slug': 'An explicit slug must not be empty.'})` uncaught. Wrote the failing
+test first — `TestEmptySlugLabelIsSetAsideNotCrashed` in `test_skos.py`, using a new
+`empty_slug_label.ttl` fixture (one concept whose only default-language `skos:prefLabel` is `"±"`,
+one normal sibling concept to prove the rest of the vocabulary still imports) — confirmed both tests
+failed with exactly that raw `ValidationError` before any production change. Made the production
+change: `_import_concepts` now checks `slugify(label, allow_unicode=True)` right after resolving
+`label`, at the same point and in the same shape as the existing `NO_PREFERRED_LABEL` check —
+`mentioned_uris` still records the concept (so it is never additionally reported
+`absent_from_source`) but nothing is looked up or written for it — and sets it aside under a new
+`SetAsideReason.EMPTY_SLUG` member. The reported message deliberately names the *slug*, not the
+label, as the problem: the model's own message is field-scoped to `slug` and would misdirect a
+curator into scrutinising a label that is not actually at fault. Mutation probe: disabled the new
+check (`if False and not slugify(...)`), re-ran the new test class, confirmed both tests failed with
+the same raw `ValidationError`; restored, re-ran green. Recorded as decisions.md D39.
+
+**Verified**: `poetry run pytest -q` — 557 passed (550 baseline + 7 new: 2 in
+`TestEmptySlugLabelIsSetAsideNotCrashed`, four generic `SetAsideReason` sweep tests re-parametrizing
+over the new `EMPTY_SLUG` member, one `TestFixtureCorpus` parse-sweep instance for the new fixture).
+`poetry run ruff check .` — all checks passed. `poetry run ruff format --check .` — 22 files already
+formatted. `poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files
+scanned. `poetry run python -m django makemigrations --check --dry-run --settings=tests.settings` —
+no changes detected. `poetry run pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T13:25:00Z · Forge · review fix 6 — self-referential broader crashes while related is skipped
+
+**Did**: closed a low-severity finding from the merged feature's review: a self-referential
+`skos:related` triple is already a deliberate no-op via decisions.md D29's `if len(pair) < 2:
+continue` (a `frozenset({uri, uri})` collapses to one element), but the equivalent
+`skos:broader`/`skos:narrower` shape had no such guard — `desired_broader`'s directed `(narrower_uri,
+broader_uri)` tuple never collapses, so it reached `add_broader` and raised the model's own uncaught
+`ValidationError` ("A concept cannot be in a relation with itself."). Wrote the failing test first —
+`TestSelfReferentialBroaderIsSkippedLikeSelfReferentialRelated` in `test_skos.py`, using a new
+`self_referential_broader.ttl` fixture (one concept stating `skos:broader` about itself) — confirmed
+it failed with exactly that raw `ValidationError` before any production change. Made the production
+change: a `narrower_uri == broader_uri` check at the top of the broader/narrower resolution loop in
+`_import_relations`, skipping before `_resolve_concept_reference` is even called — the same
+"deliberate no-op, not reported" treatment D29 already chose for the `related` case, applied here
+consistently rather than re-argued. Mutation probe: disabled the new check, re-ran the test, confirmed
+it failed with the same raw `ValidationError`; restored, re-ran green. Recorded as decisions.md D40,
+naming this an inconsistency the predecessor task left rather than a considered design point being
+revisited — nothing in decisions.md ever argued broader should behave differently from related here.
+
+**Verified**: `poetry run pytest -q` — 559 passed (557 baseline + 2 new: 1 in
+`TestSelfReferentialBroaderIsSkippedLikeSelfReferentialRelated`, one `TestFixtureCorpus` parse-sweep
+instance for the new fixture — no new `SetAsideReason` member this time, so no sweep
+re-parametrization). `poetry run ruff check .` — all checks passed. `poetry run ruff format --check .`
+— 22 files already formatted. `poetry run mypy` — success, 9 source files. `poetry run deptry .` — no
+issues, 15 files scanned. `poetry run python -m django makemigrations --check --dry-run
+--settings=tests.settings` — no changes detected. `poetry run pre-commit run --all-files` — all hooks
+passed.
+
+## 2026-08-04T13:40:00Z · Forge · review fix 7 — report.absent_from_source contains None
+
+**Did**: closed a medium-severity finding from the merged feature's review, the last of the seven:
+`_import_concepts` and `_import_collections` share an identical bug in their "record the file no
+longer mentions" query — `.exclude(static_uri__in=mentioned_uris)` also selects a row whose
+`static_uri` is `NULL` (verified directly: Django compiles this to `NOT (field IN (...) AND field IS
+NOT NULL)`, true for any NULL row), so a locally authored concept or collection appended `None`
+straight into `report.absent_from_source: list[str]`, contradicting `CONTEXT.md`'s own "a record's
+uri is always present, never None." Wrote the failing tests first —
+`TestAbsentFromSourceNeverContainsNone` in `test_skos.py`, covering both sites: a locally authored
+`ConceptFactory` and a locally authored `CollectionFactory`, each in an already-imported scheme with
+no `static_uri` of their own — confirmed both failed with `None` actually present in
+`report.absent_from_source` before any production change. Made the production change at both sites:
+iterate the queryset as model instances and report each record's `.uri` property (`StaticUriModel`'s
+own "static if set, else the dynamic local URL" contract, never `None`) instead of the raw column,
+sorting in Python since `.uri` is not a database column. Mutation probe: reverted each site back to
+`.static_uri` in turn (using `CollectionFactory`, now imported into `test_skos.py` alongside the
+existing `ConceptFactory`) and confirmed each mutation was caught by, and only by, its own site's
+test — the concept-site revert failed only the concept test, the collection-site revert failed only
+the collection test, proving the two fixes are independently load-bearing, not a copy that happens to
+also pass by luck. Restored both, re-ran green. Recorded as decisions.md D41, including an explicit
+note that this changes only the reported *value*, not which records are reported absent — a locally
+authored record was already correctly caught by the query, since the file genuinely cannot mention a
+record with no external identifier to name it by.
+
+**This closes the last of the seven fixes in the review's list.**
+
+**Verified**: `poetry run pytest -q` — 561 passed (559 baseline + 2 new: 2 in
+`TestAbsentFromSourceNeverContainsNone` — no new fixture, since both tests build their locally
+authored record with a factory rather than a `.ttl` file, and no new `SetAsideReason` member, so no
+sweep re-parametrization). `poetry run ruff check .` — all checks passed. `poetry run ruff format
+--check .` — 22 files already formatted. `poetry run mypy` — success, 9 source files. `poetry run
+deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations --check
+--dry-run --settings=tests.settings` — no changes detected. `poetry run pre-commit run --all-files` —
+all hooks passed.
+
+## 2026-08-04T14:05:00Z · Forge · review fix 8 — an existing concept is silently moved between vocabularies
+
+**Did**: closed a high-severity finding from the review's second batch: `_import_concepts` assigned
+`concept.scheme = target_scheme` unconditionally on a `Concept.objects.get_by_uri` match, with no
+check that the matched record already belonged to a *different* vocabulary — FR-005 lets a file
+declaring no vocabulary of its own be imported into any caller-named target, so importing the same
+file into a second target silently emptied the first, and `report.updated` named the move with a
+bucket that means "content refreshed", indistinguishable from an ordinary corrected label. Wrote the
+failing tests first — `TestExistingConceptIsNotSilentlyMovedBetweenVocabularies` in `test_skos.py`,
+using a new `vocabulary_reassignment.ttl` fixture (no scheme declared, two concepts `a`/`b`, `b
+skos:broader a`) imported first into a scheme "First" then a scheme "Second" — confirmed all three
+failed before any production change: both concepts' `scheme_id` became "Second"'s,
+`first.concepts.count()` went to zero, and `report.updated` listed both URIs with nothing naming the
+move. Made the production change: `_import_concepts` now checks, right after the `get_by_uri`
+match/create branch resolves and before anything is mutated, whether a *matched* (not newly created)
+concept's `scheme_id` already differs from `target_scheme.pk`; if so it is set aside under a new
+`SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY` member, naming both vocabularies, and left completely
+untouched. Recorded as decisions.md D42, including a "Revisit if" flagging that `_import_collections`
+plausibly needs the identical rule (checked next).
+
+**Mutation probe**: disabled the new guard (`if False and not created and concept.scheme_id != ...`),
+re-ran the new test class, confirmed all three tests failed the same way as before the fix; restored,
+re-ran green.
+
+**Verified**: `poetry run pytest -q` — 576 passed (569 baseline-with-untracked-fixtures + 3 new in
+`TestExistingConceptIsNotSilentlyMovedBetweenVocabularies`, plus 4 generic `SetAsideReason` sweep
+tests re-parametrizing over the new `ALREADY_IN_ANOTHER_VOCABULARY` member). `poetry run ruff check .`
+— all checks passed. `poetry run ruff format .` — 1 file reformatted (`test_skos.py`) then clean.
+`poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned.
+`poetry run python -m django makemigrations --check --dry-run --settings=tests.settings` — no changes
+detected. `poetry run pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T14:20:00Z · Forge · review fix 9 — a collection is reassigned across vocabularies and left holding a foreign member
+
+**Did**: closed a high-severity finding, the collection-level counterpart of review fix 8:
+`_import_collections` wrote `row.scheme = target_scheme` unconditionally on a matched collection,
+with no equivalent of `_conflicting_scheme_ref` — no membership or ownership check at all. Two files
+declaring different vocabularies but the identical collection identifier, each naming its own member,
+would silently reassign the collection to whichever imported last, leaving it holding a foreign
+member from the vocabulary it was pulled out of — exactly the state
+`CollectionMember._reject_cross_scheme` exists to prevent, reachable through the package's own public
+API (`Collection.add`) because a re-import never re-validates membership rows it doesn't rewrite.
+Wrote the failing tests first — `TestExistingCollectionIsNotSilentlyReassignedBetweenVocabularies` in
+`test_skos.py`, using a new pair of fixtures (`shared_collection_vocab_a.ttl`/`shared_collection_vocab_b.ttl`,
+each declaring its own vocabulary and naming the identical `http://example.org/shared/coll` collection
+with its own single member) — confirmed both failed before any production change: the collection's
+`scheme` became vocabulary B's, and nothing was reported. Made the production change: the identical
+rule review fix 8 gave a concept, applied to a collection, in the same place in `_import_collections`
+(right after the `get_by_uri` match/create branch, before the row is mutated) — reusing the same
+`SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY` member rather than minting a second one, following
+D38's own precedent that one reason can serve two structurally identical defects at two call sites.
+Extended decisions.md D42 (not a new decision) with the collection half of the story.
+
+**Mutation probe**: disabled the new guard (`if False and not created and row.scheme_id != ...`),
+re-ran the new test class, confirmed both tests failed the same way as before the fix; restored,
+re-ran green.
+
+**Verified**: `poetry run pytest -q` — 578 passed (576 + 2 new in
+`TestExistingCollectionIsNotSilentlyReassignedBetweenVocabularies` — no new `SetAsideReason` member
+this time, so no sweep re-parametrization). `poetry run ruff check .` — all checks passed. `poetry run
+ruff format .` — 1 file reformatted (`test_skos.py`) then clean. `poetry run mypy` — success, 9 source
+files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django
+makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry run
+pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T14:35:00Z · Forge · review fix 10 — a URI held by a record of a different kind
+
+**Did**: closed a medium-severity finding named directly by the spec's own Edge Cases: "later a
+concept's identifier is found to be held by a record of a different kind — a collection in one file,
+a concept in another. This is a contradictory source and is reported while reading, rather than
+surfacing as a database constraint violation." `_import_concepts` consulted only
+`Concept.objects.get_by_uri`, `_import_collections` only `Collection.objects.get_by_uri` — the two
+per-model unique constraints on `static_uri` never collide with each other, so nothing caught a URI
+asserted as both kinds across two files. Wrote the failing tests first —
+`TestUriHeldByARecordOfADifferentKind` in `test_skos.py`, using a new fixture pair
+(`uri_kind_collection_first.ttl` types `ex:thing` as a `skos:Collection`,
+`uri_kind_concept_second.ttl` types the identical URI as a `skos:Concept`) imported in each order —
+confirmed both tests failed before any production change: both records existed simultaneously
+asserting the same static URI, and nothing was reported. Made the production change, symmetrically at
+both call sites: on a `Concept.DoesNotExist`/`Collection.DoesNotExist` from `get_by_uri`, each
+function now also tries the *other* model's `get_by_uri` for the same URI before creating a new
+record; a hit sets the URI aside under a new `SetAsideReason.URI_HELD_BY_DIFFERENT_KIND` member and
+the second record is never created. Recorded as decisions.md D43.
+
+**Mutation probe, both directions independently**: removed the concept-side check (the `try
+Collection.objects.get_by_uri(uri) ... except ... else: report + continue` block ahead of `concept =
+Concept(scheme=target_scheme)`), re-ran the test class — `test_a_concept_uri_already_held_by_a_collection_is_refused`
+failed while `test_a_collection_uri_already_held_by_a_concept_is_refused` stayed green; restored, then
+removed the collection-side check the same way — the opposite single test failed. Confirms the two
+checks are independently load-bearing, not one copy that happens to also cover the other case.
+Restored both, re-ran green.
+
+**Verified**: `poetry run pytest -q` — 584 passed (578 + 2 new in
+`TestUriHeldByARecordOfADifferentKind`, plus 4 generic `SetAsideReason` sweep tests re-parametrizing
+over the new `URI_HELD_BY_DIFFERENT_KIND` member). `poetry run ruff check .` — all checks passed.
+`poetry run ruff format --check .` — 22 files already formatted. `poetry run mypy` — success, 9 source
+files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django
+makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry run
+pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T14:50:00Z · Forge · review fix 11 — an ordered collection stated with skos:member and no skos:memberList imports empty
+
+**Did**: closed a medium-severity finding: the `if ordered:` branch of `_import_collections` read
+membership exclusively from `skos:memberList`, falling back to an empty list when the collection
+carried none at all — even though `skos:member` is a perfectly good, explicit membership assertion on
+an ordered collection too, and the SKOS reference itself documents `memberList` as *narrowing*
+`member`, not replacing it. Worse on a re-import: the reconciliation pass treats an empty
+`member_uris` as "the file states no members now" and removes membership an earlier, correctly-read
+import had written. Wrote the failing tests first — `TestOrderedCollectionFallsBackToMember` in
+`test_skos.py`, using two new fixtures (`ordered_collection_member_only.ttl`: an `OrderedCollection`
+asserted only with `skos:member`; `ordered_collection_member_and_memberlist.ttl`: both predicates,
+`memberList` naming two of three members) — confirmed all three tests failed before any production
+change: zero members on first import, zero again on re-import, and the third member dropped entirely
+in the mixed case. Made the production change: the `ordered` branch now reads `skos:memberList` when
+present (its own order first), appending any `skos:member` value it omits afterward in the same
+deterministic sorted order the unordered branch already uses; when `memberList` is absent entirely,
+it falls back to that same sorted read of `skos:member`. Recorded as decisions.md D44, including the
+explicit decision that an omitted `skos:member` is *kept*, not separately reported — it is a real
+membership assertion, not an unusable value.
+
+**Mutation probe**: reverted the `ordered` branch to its pre-fix shape (`memberList` only, empty list
+otherwise), re-ran the new test class, confirmed all three tests failed the same way as before the
+fix; restored, re-ran green.
+
+**Verified**: `poetry run pytest -q` — 587 passed (584 + 3 new in
+`TestOrderedCollectionFallsBackToMember` — no new `SetAsideReason` member this time, so no sweep
+re-parametrization). `poetry run ruff check .` — all checks passed. `poetry run ruff format --check .`
+— 22 files already formatted. `poetry run mypy` — success, 9 source files. `poetry run deptry .` — no
+issues, 15 files scanned. `poetry run python -m django makemigrations --check --dry-run
+--settings=tests.settings` — no changes detected. `poetry run pre-commit run --all-files` — all hooks
+passed.
+
+## 2026-08-04T15:05:00Z · Forge · review fix 12 — unmodelled predicates are reported for concept nodes only
+
+**Did**: closed a low-severity finding: `_import_unheld_values` was called exactly once, from
+`_import_concept_content`, so it only ever walked a *concept* node's own predicates — neither
+`_resolve_scheme` nor `_import_collections` ran an equivalent walk, so a non-SKOS predicate on the
+vocabulary's own scheme node, or on a collection node, was dropped with no report entry at all.
+FR-014's own wording is unqualified by node kind, and D27's "a story will claim it" justification for
+skipping a not-yet-built SKOS predicate has no equivalent argument for a predicate genuinely outside
+SKOS. Wrote the failing tests first — `TestUnmodelledPredicatesAreReportedForSchemeAndCollectionNodesToo`
+in `test_skos.py`, using a new fixture (`unmodelled_predicate_on_scheme_and_collection.ttl`: a scheme
+node carrying `ex:owner`, a collection node carrying `ex:curatedBy`) — confirmed both predicate-level
+tests failed before any production change: neither predicate appeared anywhere in `report.set_aside`.
+Made the production change: extracted the third clause of `_import_unheld_values`'s own walk (the
+generic "not handled, not SKOS" check) into a shared `_report_unmodelled_predicates(graph, node, uri,
+handled, report)`, parameterised by a per-node-kind `handled` set, and added two new call sites — one
+at the end of `_resolve_scheme` (gated by a new `_HANDLED_SCHEME_PREDICATES`), one inside
+`_import_collections`'s own per-collection loop (gated by a new `_HANDLED_COLLECTION_PREDICATES`).
+Deliberately left `skos:notation`/mapping-predicate reporting concept-only — those are concept-specific
+SKOS constructs by the vocabulary's own semantics, and the review finding names only the generic
+unmodelled-predicate gap. Recorded as decisions.md D45.
+
+**Mutation probe, both node kinds independently**: disabled the scheme-level call only, re-ran the
+test class — the scheme test failed, the collection test stayed green; restored, then disabled the
+collection-level call only — the opposite single test failed. Confirms the two calls are
+independently load-bearing. Restored both, re-ran green.
+
+**Verified**: `poetry run pytest -q` — 590 passed (587 + 3 new in
+`TestUnmodelledPredicatesAreReportedForSchemeAndCollectionNodesToo` — no new `SetAsideReason` member
+this time, so no sweep re-parametrization). `poetry run ruff check .` — all checks passed. `poetry run
+ruff format --check .` — 22 files already formatted. `poetry run mypy` — success, 9 source files.
+`poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations
+--check --dry-run --settings=tests.settings` — no changes detected. `poetry run pre-commit run
+--all-files` — all hooks passed.
+
+## 2026-08-04T15:25:00Z · Forge · review fix 13 — the predicate-coverage gate asserts against an implementation constant
+
+**Did**: closed a test-quality finding on `TestEverySkosPredicateIsReadOrReported` (T033, D34): its
+`recognised` set was built from `_HANDLED_CONCEPT_PREDICATES | _READ_BUT_NOT_AT_CONCEPT_LEVEL` —
+`_import_unheld_values`'s own exclusion set, imported directly from `skos.py`. Membership there means
+"not double-reported by `_import_unheld_values`", not the actual claim FR-014 and the test's own
+docstring make ("read by the importer, or named in the report") — adding a predicate to
+`_HANDLED_CONCEPT_PREDICATES` with no read path behind it would make the test pass and the behaviour
+regress in the same edit, because the test's "recognised" set and the constant a regression would
+touch were the same object. Rewrote the test behaviourally: for every fixture that can succeed
+standing alone (`scheme=None`, no pre-seeded database — the fatal-path fixtures and the two needing a
+caller-supplied target are excluded, named individually with the test class already covering each),
+imports it and, for every SKOS predicate the graph carries on a node this importer treats as a record
+(a concept, the resolved scheme node, or a collection), requires direct evidence — a matching model
+row, a matching `Concept.label`/`ConceptScheme.name`/`Collection.name`, or a matching
+`report.set_aside`/`report.normalized` entry. None of the evidence-gathering (`_COVERAGE_LABEL_KIND`/
+`_COVERAGE_NOTE_KIND`/`_COVERAGE_MAPPING_CURIE`) imports from `skos.py`; it restates the SKOS
+specification's own predicate vocabulary independently in the test file. A record wholly excluded
+this run (`NO_PREFERRED_LABEL`/`VOCABULARY_MISMATCH`/`EMPTY_SLUG`/`ALREADY_IN_ANOTHER_VOCABULARY`/
+`URI_HELD_BY_DIFFERENT_KIND`) blanket-covers its own predicates; a record that *was* created with only
+one value set aside does not — every other predicate on it still needs its own evidence, a
+distinction a first draft of this rewrite missed and then corrected (caught because
+`unmodelled_and_normalised_values.ttl`'s `widget` concept carries both a reported notation and a
+`prefLabel` that needed independent verification).
+
+**Proven stronger by mutation, not merely argued.** Disabled `skos:broader`/`skos:narrower` reading in
+`_import_relations` (commented out the two `graph.objects(node, SKOS.broader/narrower)` loops) while
+leaving `_HANDLED_CONCEPT_PREDICATES` completely unchanged — the exact regression shape this fix
+exists to catch. Reconstructed the *old* test's own logic inline against the unmodified constant:
+`unrecognised == set()`, i.e. the old test would still pass. Ran the *new*, rewritten test against the
+same mutation: 11 fixtures failed, naming `skos:broader`/`skos:narrower` on the concepts whose
+relation no longer lands or is reported. Reverted the mutation immediately; re-ran the full suite
+green. This demonstration was run twice — once mid-session to validate the design, once again in the
+final, fully-integrated state just before this commit — with identical results both times.
+
+**One honest limitation, named rather than hidden.** The rewrite is fixture-by-fixture, not a single
+global sweep, and deliberately excludes the fatal-path fixtures and the two needing a caller-supplied
+target (`_PREDICATE_COVERAGE_EXCLUDED_FIXTURES`, each named with which dedicated test class already
+covers it): a failed run has no resulting record and no non-fatal report entry for a predicate's
+coverage to appear in. A fully global, no-exclusions version was not attempted — it would need this
+test to invent target-scheme behaviour these fixtures were never built to exercise, duplicating what
+`TestChoosingBetweenDeclaredVocabularies`/`TestImportSkosVocabulary` already cover on purpose.
+Recorded as decisions.md D46.
+
+**Verified**: `poetry run pytest -q` — 629 passed (net: the single old
+`test_every_skos_predicate_in_the_fixture_corpus_is_read_or_reported` test is replaced by 40
+parametrized instances of `test_every_skos_predicate_in_this_fixture_is_read_or_reported`, one per
+fixture eligible for the sweep — no new fixture, no new `SetAsideReason` member). `poetry run ruff
+check .` — all checks passed. `poetry run ruff format --check .` — 22 files already formatted.
+`poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned.
+`poetry run python -m django makemigrations --check --dry-run --settings=tests.settings` — no changes
+detected. `poetry run pre-commit run --all-files` — all hooks passed.
+
+**This closes the last of the six fixes in this review batch (FIX 8–13).**

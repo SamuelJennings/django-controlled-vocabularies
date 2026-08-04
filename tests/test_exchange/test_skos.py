@@ -15,9 +15,8 @@ from django.utils.functional import Promise
 
 import controlled_vocabularies.exchange as exchange
 from controlled_vocabularies.exchange.report import FatalReason, NormalizedReason, SetAsideReason
-from controlled_vocabularies.exchange.safety import UnsafeRdfXmlError
+from controlled_vocabularies.exchange.safety import UnsafeJsonLdError, UnsafeRdfXmlError
 from controlled_vocabularies.exchange.skos import (
-    _HANDLED_CONCEPT_PREDICATES,
     SkosImportError,
     SkosImportFailed,
     _read_graph,
@@ -25,13 +24,14 @@ from controlled_vocabularies.exchange.skos import (
 )
 from controlled_vocabularies.models import (
     Collection,
+    CollectionMember,
     Concept,
     ConceptLabel,
     ConceptNote,
     ConceptRelation,
     ConceptScheme,
 )
-from tests.factories import ConceptFactory, ConceptSchemeFactory
+from tests.factories import CollectionFactory, ConceptFactory, ConceptSchemeFactory
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "skos"
 SECURITY_FIXTURES = Path(__file__).parent.parent / "fixtures" / "security"
@@ -112,6 +112,20 @@ class TestReadGraph:
 
     def test_ordinary_rdf_xml_is_unaffected_by_the_safety_scan(self):
         graph = _read_graph(SECURITY_FIXTURES / "ordinary.rdf", serialization="xml")
+        assert len(graph) > 0
+
+    def test_json_ld_is_routed_through_the_safety_scan_before_rdflib_sees_it(self):
+        # FIX 1 (review, decisions.md D36) — a string @context is a location
+        # rdflib's own JSON-LD parser would fetch via urlopen with no
+        # allowlist. Reinstates that exact document against the public
+        # reading path, the same proof-of-wiring shape used above for
+        # RDF/XML: if this were not actually wired in, the failure would be
+        # a connection error from the real fetch attempt, not this refusal.
+        with pytest.raises(UnsafeJsonLdError):
+            _read_graph(SECURITY_FIXTURES / "remote_context_string.jsonld", serialization="json-ld")
+
+    def test_json_ld_with_an_inline_context_is_unaffected_by_the_safety_scan(self):
+        graph = _read_graph(SECURITY_FIXTURES / "inline_context.jsonld", serialization="json-ld")
         assert len(graph) > 0
 
 
@@ -699,6 +713,64 @@ class TestConceptLabels:
         assert granite.pk == granite_pk
 
 
+class TestSurplusPreferredLabelInAnotherConfiguredLanguage:
+    """FIX 3 (review, decisions.md D38/D25) — ``ConceptLabel.clean()`` allows
+    at most one ``PREFERRED`` row per (concept, language); D25 filters an
+    unconfigured language ahead of the write for exactly this "don't rely on
+    the model's own refusal as control flow" reason, but never implemented
+    this — the cardinality — half of the same rule. Two ``skos:prefLabel``
+    values in one non-default *configured* language reached ``add_label``
+    twice, and the second raised the model's own uncaught ``ValidationError``.
+    One is kept deterministically — the lexicographically first, the same
+    rule ``_preferred_label_in`` already uses for the default language — and
+    the rest are set aside and reported."""
+
+    def test_one_value_is_kept_deterministically_and_the_run_does_not_crash(self, db):
+        report = import_skos(FIXTURES / "surplus_preferred_label.ttl")
+        assert report.fatal == []
+        gadget = Concept.objects.get(static_uri="http://example.org/surplus/gadget")
+        assert gadget.preferred_label("de") == "Apparat"
+        assert ConceptLabel.objects.filter(concept=gadget, language="de", kind=ConceptLabel.Kind.PREFERRED).count() == 1
+
+    def test_the_surplus_value_is_set_aside_and_reported(self, db):
+        report = import_skos(FIXTURES / "surplus_preferred_label.ttl")
+        gadget_uri = "http://example.org/surplus/gadget"
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.SURPLUS_PREFERRED_LABEL]
+        assert len(entries) == 1
+        assert entries[0].subject == gadget_uri
+        assert entries[0].params["language"] == "de"
+
+
+class TestSurplusPreferredLabelInTheDefaultLanguage:
+    """FIX 4 (review, decisions.md D38) — ``_preferred_label_in`` already
+    picks one default-language ``skos:prefLabel`` deterministically as
+    ``Concept.label`` (T009); ``_import_labels`` then skips *every* PREFERRED
+    literal in that language, including the ones that were not chosen —
+    dropped with no report at all, the silent-normalisation Article XI
+    forbids and the README's own "nothing a file contains is ever dropped in
+    silence" contradicts. The surplus is now reported under the same
+    ``SetAsideReason.SURPLUS_PREFERRED_LABEL`` FIX 3 uses — the same defect,
+    just in the language ``Concept.label`` itself anchors rather than any
+    other."""
+
+    def test_one_value_is_kept_as_the_concepts_label(self, db):
+        import_skos(FIXTURES / "surplus_preferred_label_default_language.ttl")
+        widget = Concept.objects.get(static_uri="http://example.org/surplus2/widget")
+        assert widget.label == "Doohickey"
+        assert not widget.labels.filter(language="en", kind=ConceptLabel.Kind.PREFERRED).exists()
+
+    def test_the_surplus_default_language_value_is_set_aside_and_reported(self, db):
+        report = import_skos(FIXTURES / "surplus_preferred_label_default_language.ttl")
+        widget_uri = "http://example.org/surplus2/widget"
+        entries = [
+            entry
+            for entry in report.set_aside
+            if entry.reason is SetAsideReason.SURPLUS_PREFERRED_LABEL and entry.subject == widget_uri
+        ]
+        assert len(entries) == 1
+        assert entries[0].params["language"] == "en"
+
+
 class TestConceptNotes:
     """T019 — FR-009/research.md R5: the definition and each of the six SKOS
     documentary note kinds are stored against their concept, each in its own
@@ -831,6 +903,44 @@ class TestUnheldValuesAndNormalisation:
         assert not any(entry.reason is SetAsideReason.UNMODELLED_PREDICATE for entry in report.set_aside)
 
 
+class TestUnmodelledPredicatesAreReportedForSchemeAndCollectionNodesToo:
+    """FIX 12 (review, decisions.md D45) — ``_import_unheld_values`` is
+    called once per concept, from ``_import_concept_content``; neither
+    ``_resolve_scheme`` nor ``_import_collections`` ran an equivalent walk,
+    so a non-SKOS predicate on the vocabulary's own scheme node, or on a
+    collection node, was dropped with no report entry at all. FR-014's own
+    wording is unqualified by node kind, and D27's justification for
+    silently skipping a SKOS predicate this module has not built a read
+    path for yet turns on "a story that will claim it" — no story claims a
+    predicate genuinely outside SKOS."""
+
+    def test_an_unmodelled_predicate_on_the_scheme_node_is_reported(self, db):
+        report = import_skos(FIXTURES / "unmodelled_predicate_on_scheme_and_collection.ttl")
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.UNMODELLED_PREDICATE]
+        matches = [entry for entry in entries if entry.subject == "http://example.org/scheme-collection-unmodelled/"]
+        assert len(matches) == 1
+        assert matches[0].params["predicate"] == "http://example.org/custom#owner"
+
+    def test_an_unmodelled_predicate_on_a_collection_node_is_reported(self, db):
+        report = import_skos(FIXTURES / "unmodelled_predicate_on_scheme_and_collection.ttl")
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.UNMODELLED_PREDICATE]
+        matches = [
+            entry
+            for entry in entries
+            if entry.subject == "http://example.org/scheme-collection-unmodelled/collection/group"
+        ]
+        assert len(matches) == 1
+        assert matches[0].params["predicate"] == "http://example.org/custom#curatedBy"
+
+    def test_the_scheme_and_collection_still_import_successfully(self, db):
+        report = import_skos(FIXTURES / "unmodelled_predicate_on_scheme_and_collection.ttl")
+        assert report.fatal == []
+        assert ConceptScheme.objects.filter(static_uri="http://example.org/scheme-collection-unmodelled/").exists()
+        assert Collection.objects.filter(
+            static_uri="http://example.org/scheme-collection-unmodelled/collection/group"
+        ).exists()
+
+
 class TestNoPreferredLabelFinishedByUS3:
     """T022 — FR-006: a concept with no preferred label in the vocabulary's
     default language is set aside under ``NO_PREFERRED_LABEL`` and named in
@@ -857,6 +967,34 @@ class TestNoPreferredLabelFinishedByUS3:
         b = Concept.objects.get(static_uri="http://example.org/quarry/b")
         assert b.label == "B"
         assert b.alt_labels("en") == ["B-alt"]
+
+
+class TestEmptySlugLabelIsSetAsideNotCrashed:
+    """FIX 5 (review, decisions.md D39) — ``_assign_unique_slug`` derives a
+    concept's slug from its preferred label with ``slugify()``, then sets
+    ``slug_is_manual = True`` and lets ``Concept.save()`` write it.
+    ``save()`` refuses an *explicit* (manual) slug that is empty — a label
+    made up only of characters ``slugify()`` strips (e.g. ``"±"``) produces
+    exactly that. The label itself is perfectly fine; it is the *derived
+    slug* that is unusable, so the concept must be set aside and reported —
+    under a reason that names the real problem, not the model's own
+    slug-shaped message — rather than crashing the run on an uncaught
+    ``ValidationError``."""
+
+    def test_a_label_that_slugifies_to_empty_is_set_aside_and_named(self, db):
+        report = import_skos(FIXTURES / "empty_slug_label.ttl")
+        assert report.fatal == []
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.EMPTY_SLUG]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/emptyslug/symbol"
+        assert not Concept.objects.filter(static_uri="http://example.org/emptyslug/symbol").exists()
+
+    def test_the_rest_of_the_vocabulary_imports_with_its_own_content_intact(self, db):
+        import_skos(FIXTURES / "empty_slug_label.ttl")
+        assert Concept.objects.filter(scheme__static_uri="http://example.org/emptyslug/").count() == 1
+        normal = Concept.objects.get(static_uri="http://example.org/emptyslug/normal")
+        assert normal.label == "Normal"
+        assert normal.alt_labels("en") == ["Normal-alt"]
 
 
 class TestBroaderAndNarrowerRelations:
@@ -906,6 +1044,25 @@ class TestBroaderAndNarrowerRelations:
             ConceptRelation.objects.filter(source=granite, target=igneous, kind=ConceptRelation.Kind.BROADER).count()
             == 1
         )
+
+
+class TestSelfReferentialBroaderIsSkippedLikeSelfReferentialRelated:
+    """FIX 6 (review, decisions.md D40) — a concept stating ``skos:related``
+    about itself is already a deliberate no-op (decisions.md D29's
+    ``if len(pair) < 2: continue``): not a real association, and the
+    model's own ``_reject_self`` would refuse it if attempted. The same
+    shape on ``skos:broader`` had no such guard: ``desired_broader`` never
+    collapses a ``(uri, uri)`` pair the way ``desired_related``'s
+    ``frozenset`` naturally does, so it reached ``add_broader`` and raised
+    the model's own uncaught ``ValidationError`` instead of being skipped
+    the same way."""
+
+    def test_a_self_referential_broader_triple_is_skipped_not_crashed(self, db):
+        report = import_skos(FIXTURES / "self_referential_broader.ttl")
+        assert report.fatal == []
+        loop = Concept.objects.get(static_uri="http://example.org/selfref/loop")
+        assert list(loop.broader()) == []
+        assert ConceptRelation.objects.filter(kind=ConceptRelation.Kind.BROADER).count() == 0
 
 
 class TestRelatedRelations:
@@ -1062,6 +1219,78 @@ class TestRelationRemovalOnReimport:
         assert companion in quarry.related()
 
 
+class TestRelationDisjointness:
+    """FIX 2 (review, decisions.md D37) — SKOS makes ``broader``/``narrower``
+    disjoint from ``related`` (models.py ``ConceptRelation._reject_disjointness_violation``):
+    a pair joined one way refuses a relation of the other kind. ``_import_relations``
+    built ``resolved_broader`` and ``resolved_related`` independently, so a pair the
+    file (or an earlier and a later run together) states both ways raised an
+    uncaught ``ValidationError`` from ``add_related``/``add_broader``, defeating
+    the "set aside and reported, never a crash" rule every other unusable value in
+    this feature already follows. The hierarchical relation wins (it is the
+    stronger statement, and SKOS itself declares the two disjoint); the related
+    statement is set aside and reported instead, in every route that can produce
+    the conflict — stated together in one file, and split across two runs, in
+    either direction.
+    """
+
+    def test_broader_and_related_stated_together_keeps_broader_and_sets_aside_related(self, db):
+        report = import_skos(FIXTURES / "relation_disjointness_conflict.ttl")
+        assert report.fatal == []
+        child = Concept.objects.get(static_uri="http://example.org/disjoint/child")
+        parent = Concept.objects.get(static_uri="http://example.org/disjoint/parent")
+        assert parent in child.broader()
+        assert parent not in child.related()
+        assert ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED).count() == 0
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.RELATION_DISJOINTNESS]
+        assert len(entries) == 1
+        assert {entries[0].subject, entries[0].params["other"]} == {
+            "http://example.org/disjoint/child",
+            "http://example.org/disjoint/parent",
+        }
+
+    def test_a_related_row_from_an_earlier_run_does_not_crash_a_later_run_stating_broader(self, db):
+        import_skos(FIXTURES / "relation_disjointness_prior_related.ttl")
+        a = Concept.objects.get(static_uri="http://example.org/disjoint2/a")
+        b = Concept.objects.get(static_uri="http://example.org/disjoint2/b")
+        assert b in a.related()
+
+        report = import_skos(FIXTURES / "relation_disjointness_prior_related_updated.ttl")
+
+        assert report.fatal == []
+        a.refresh_from_db()
+        assert b in a.broader()
+        assert b not in a.related()
+        assert ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED).count() == 0
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.RELATION_DISJOINTNESS]
+        assert len(entries) == 1
+        assert {entries[0].subject, entries[0].params["other"]} == {
+            "http://example.org/disjoint2/a",
+            "http://example.org/disjoint2/b",
+        }
+
+    def test_a_broader_row_from_an_earlier_run_does_not_crash_a_later_run_stating_related(self, db):
+        # The symmetric route: the earlier-run survivor is a BROADER row this
+        # time, and the later run states RELATED for the same pair instead.
+        import_skos(FIXTURES / "relation_disjointness_prior_broader.ttl")
+        a = Concept.objects.get(static_uri="http://example.org/disjoint3/a")
+        b = Concept.objects.get(static_uri="http://example.org/disjoint3/b")
+        assert b in a.broader()
+
+        report = import_skos(FIXTURES / "relation_disjointness_prior_broader_updated.ttl")
+
+        assert report.fatal == []
+        assert b in a.broader()
+        assert b not in a.related()
+        assert ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED).count() == 0
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.RELATION_DISJOINTNESS]
+        assert len(entries) == 1
+        assert {entries[0].subject, entries[0].params["other"]} == {
+            "http://example.org/disjoint3/a",
+            "http://example.org/disjoint3/b",
+        }
+
+
 class TestCollectionsAndMembership:
     """T027 — FR-012: a ``skos:Collection`` lands as a ``Collection`` holding
     the identifier the file gave it, inside the vocabulary being imported,
@@ -1134,6 +1363,48 @@ class TestOrderedCollectionMemberOrder:
         after = Collection.objects.get_by_uri("http://example.org/rocks/collection/example-sequence")
         assert after.pk == before.pk
         assert after.static_uri == before.static_uri
+
+
+class TestOrderedCollectionFallsBackToMember:
+    """FIX 11 (review, decisions.md D44) — the ``if ordered:`` branch of
+    ``_import_collections`` read membership exclusively from
+    ``skos:memberList``; a ``skos:OrderedCollection`` asserted only with
+    ``skos:member`` therefore imported with no members at all, and a
+    re-import additionally *removed* membership an earlier, correctly-read
+    import had written, because the reconciliation pass treats an empty
+    ``member_uris`` as "the file states no members now". The SKOS reference
+    treats ``memberList`` as narrowing ``member`` rather than replacing it,
+    so both are read: ``memberList``, when present, governs the order of
+    the members it names; any ``skos:member`` it omits is appended
+    afterward, in the same deterministic sorted order the unordered branch
+    already uses for a member that carries no order of its own."""
+
+    def test_an_ordered_collection_with_only_member_is_not_empty(self, db):
+        report = import_skos(FIXTURES / "ordered_collection_member_only.ttl")
+        collection = Collection.objects.get_by_uri("http://example.org/ordered-member-only/collection/group")
+        alpha = Concept.objects.get(static_uri="http://example.org/ordered-member-only/alpha")
+        beta = Concept.objects.get(static_uri="http://example.org/ordered-member-only/beta")
+        assert collection.ordered is True
+        assert collection.members() == [alpha, beta]
+        assert report.fatal == []
+
+    def test_a_reimport_with_only_member_does_not_empty_existing_membership(self, db):
+        # The reconciliation pass's own failure mode: an empty member_uris
+        # read from a genuinely empty file is correctly a full retraction,
+        # but the bug here was reading the collection as if it had none when
+        # it plainly does.
+        import_skos(FIXTURES / "ordered_collection_member_only.ttl")
+        import_skos(FIXTURES / "ordered_collection_member_only.ttl")
+        collection = Collection.objects.get_by_uri("http://example.org/ordered-member-only/collection/group")
+        assert collection.memberships.count() == 2
+
+    def test_memberlist_governs_order_and_member_only_entries_are_appended(self, db):
+        import_skos(FIXTURES / "ordered_collection_member_and_memberlist.ttl")
+        collection = Collection.objects.get_by_uri("http://example.org/ordered-mixed/collection/group")
+        alpha = Concept.objects.get(static_uri="http://example.org/ordered-mixed/alpha")
+        beta = Concept.objects.get(static_uri="http://example.org/ordered-mixed/beta")
+        gamma = Concept.objects.get(static_uri="http://example.org/ordered-mixed/gamma")
+        assert collection.members() == [gamma, alpha, beta]
 
 
 class TestCollectionMembershipMissingOrAbsentEnds:
@@ -1262,6 +1533,175 @@ class TestCollectionAbsentFromSource:
         import_skos(FIXTURES / "collection_absent_from_source_updated.ttl")
 
         assert alpha in dropped.members()
+
+
+class TestAbsentFromSourceNeverContainsNone:
+    """FIX 7 (review, decisions.md D41) — ``Concept.objects.filter(scheme=...)
+    .exclude(static_uri__in=mentioned_uris)`` (and ``_import_collections``'s
+    identical query for ``Collection``) also selects a row whose
+    ``static_uri`` is ``NULL``: Django's ``exclude(field__in=...)`` compiles
+    to ``NOT (field IN (...) AND field IS NOT NULL)``, which is true for a
+    NULL row regardless of what ``mentioned_uris`` holds. A locally authored
+    record — one the file could never "mention" at all, since it carries no
+    external identifier for the file to name in the first place — was
+    therefore always "absent from source", and its ``None`` static URI was
+    appended straight into ``report.absent_from_source: list[str]``.
+    CONTEXT.md is explicit that a record's ``uri`` is "always present,
+    never None"; the value to report is that property (the dynamic local
+    URL), not the raw column."""
+
+    def test_a_locally_authored_concept_reports_its_dynamic_uri_not_none(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/rocks/")
+        local = ConceptFactory(scheme=scheme, label="Local only")
+        assert local.static_uri is None
+
+        report = import_skos(FIXTURES / "rocks.ttl")
+
+        assert None not in report.absent_from_source
+        assert local.uri in report.absent_from_source
+
+    def test_a_locally_authored_collection_reports_its_dynamic_uri_not_none(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/rocks/")
+        local = CollectionFactory(scheme=scheme, name="Local collection only")
+        assert local.static_uri is None
+
+        report = import_skos(FIXTURES / "rocks.ttl")
+
+        assert None not in report.absent_from_source
+        assert local.uri in report.absent_from_source
+
+
+class TestExistingConceptIsNotSilentlyMovedBetweenVocabularies:
+    """FIX 8 (review, decisions.md D42) — ``_import_concepts`` assigned
+    ``concept.scheme = target_scheme`` unconditionally on a ``get_by_uri``
+    match, with no check that the matched record already belonged to a
+    *different* vocabulary. FR-005 lets a file that declares no vocabulary
+    of its own be imported into any caller-named target, so importing the
+    same file into a second target silently emptied the first — the report
+    called it ``updated``, indistinguishable from an ordinary content
+    refresh. Moving a record between vocabularies is a curatorial act, not
+    something reading a file should do as a side effect: a concept whose
+    URI already belongs to a different vocabulary is left exactly where it
+    is, set aside and reported naming both vocabularies."""
+
+    def test_a_concept_already_in_another_vocabulary_is_not_moved(self, db):
+        first = ConceptSchemeFactory(name="First")
+        second = ConceptSchemeFactory(name="Second")
+        import_skos(FIXTURES / "vocabulary_reassignment.ttl", scheme=first)
+
+        import_skos(FIXTURES / "vocabulary_reassignment.ttl", scheme=second)
+
+        a = Concept.objects.get(static_uri="http://example.org/reassignment/a")
+        b = Concept.objects.get(static_uri="http://example.org/reassignment/b")
+        assert a.scheme_id == first.pk
+        assert b.scheme_id == first.pk
+        assert first.concepts.count() == 2
+        assert second.concepts.count() == 0
+
+    def test_the_conflict_is_reported_naming_both_vocabularies(self, db):
+        first = ConceptSchemeFactory(name="First")
+        second = ConceptSchemeFactory(name="Second")
+        import_skos(FIXTURES / "vocabulary_reassignment.ttl", scheme=first)
+
+        report = import_skos(FIXTURES / "vocabulary_reassignment.ttl", scheme=second)
+
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY]
+        assert {entry.subject for entry in entries} == {
+            "http://example.org/reassignment/a",
+            "http://example.org/reassignment/b",
+        }
+        for entry in entries:
+            assert entry.params["current"] == first.uri
+            assert entry.params["target"] == second.uri
+
+    def test_report_updated_does_not_claim_the_move_happened(self, db):
+        first = ConceptSchemeFactory(name="First")
+        second = ConceptSchemeFactory(name="Second")
+        import_skos(FIXTURES / "vocabulary_reassignment.ttl", scheme=first)
+
+        report = import_skos(FIXTURES / "vocabulary_reassignment.ttl", scheme=second)
+
+        assert "http://example.org/reassignment/a" not in report.updated
+        assert "http://example.org/reassignment/b" not in report.updated
+        assert "http://example.org/reassignment/a" not in report.created
+        assert "http://example.org/reassignment/b" not in report.created
+
+
+class TestExistingCollectionIsNotSilentlyReassignedBetweenVocabularies:
+    """FIX 9 (review, decisions.md D42) — the identical defect FIX 8 closes
+    for a concept, one level up: ``_import_collections`` wrote
+    ``row.scheme = target_scheme`` unconditionally on a matched collection,
+    with no equivalent of ``_conflicting_scheme_ref``. Two files that both
+    declare the same collection identifier from different vocabularies
+    would silently reassign the collection to whichever imported last,
+    leaving it holding a foreign member from the vocabulary it was pulled
+    out of — exactly the state ``CollectionMember._reject_cross_scheme``
+    exists to prevent, produced through the package's own public API. Same
+    rule as FIX 8: the existing collection is left exactly where it is,
+    membership included, set aside and reported naming both vocabularies."""
+
+    def test_a_collection_already_in_another_vocabulary_is_not_reassigned(self, db):
+        import_skos(FIXTURES / "shared_collection_vocab_a.ttl")
+        import_skos(FIXTURES / "shared_collection_vocab_b.ttl")
+
+        vocab_a = ConceptScheme.objects.get(static_uri="http://example.org/shared-collection/vocab-a/")
+        collection = Collection.objects.get_by_uri("http://example.org/shared/coll")
+        concept_a = Concept.objects.get(static_uri="http://example.org/shared-collection/vocab-a/concept-a")
+        concept_b = Concept.objects.get(static_uri="http://example.org/shared-collection/vocab-b/concept-b")
+
+        assert collection.scheme_id == vocab_a.pk
+        assert collection.members() == [concept_a]
+        assert concept_b not in collection.members()
+
+    def test_the_conflict_is_reported_naming_both_vocabularies(self, db):
+        import_skos(FIXTURES / "shared_collection_vocab_a.ttl")
+        vocab_a = ConceptScheme.objects.get(static_uri="http://example.org/shared-collection/vocab-a/")
+        vocab_b_uri = "http://example.org/shared-collection/vocab-b/"
+
+        report = import_skos(FIXTURES / "shared_collection_vocab_b.ttl")
+
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/shared/coll"
+        assert entries[0].params["current"] == vocab_a.uri
+        assert entries[0].params["target"] == vocab_b_uri
+
+
+class TestUriHeldByARecordOfADifferentKind:
+    """FIX 10 (review, decisions.md D43) — spec Edge Cases: "later a
+    concept's identifier is found to be held by a record of a different
+    kind — a collection in one file, a concept in another. This is a
+    contradictory source and is reported while reading, rather than
+    surfacing as a database constraint violation." ``_import_concepts``
+    consults only ``Concept.objects.get_by_uri`` and ``_import_collections``
+    only ``Collection.objects.get_by_uri``, so the per-model unique
+    constraints never collide and nothing catches the clash: two records
+    silently end up asserting the same static URI, which Article IX makes
+    the sole identity."""
+
+    def test_a_concept_uri_already_held_by_a_collection_is_refused(self, db):
+        import_skos(FIXTURES / "uri_kind_collection_first.ttl")
+
+        report = import_skos(FIXTURES / "uri_kind_concept_second.ttl")
+
+        assert not Concept.objects.filter(static_uri="http://example.org/kind-clash/thing").exists()
+        assert Collection.objects.filter(static_uri="http://example.org/kind-clash/thing").exists()
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.URI_HELD_BY_DIFFERENT_KIND]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/kind-clash/thing"
+
+    def test_a_collection_uri_already_held_by_a_concept_is_refused(self, db):
+        import_skos(FIXTURES / "uri_kind_concept_second.ttl")
+
+        report = import_skos(FIXTURES / "uri_kind_collection_first.ttl")
+
+        assert not Collection.objects.filter(static_uri="http://example.org/kind-clash/thing").exists()
+        assert Concept.objects.filter(static_uri="http://example.org/kind-clash/thing").exists()
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.URI_HELD_BY_DIFFERENT_KIND]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/kind-clash/thing"
 
 
 class TestBlankNodeCollectionFails:
@@ -1433,46 +1873,356 @@ class TestFixtureCorpus:
         )
 
 
-class TestEverySkosPredicateIsReadOrReported:
-    """T033 — closes decisions.md D27's own gap. D27 silently skips a SKOS
-    predicate that has a model home but no read path yet, correct only
-    while a later story still owed that read path; every story has now
-    landed (US-4 relationships, US-5 collections), so a silent skip is the
-    disappearance D1 forbids. This turns D27's own "Revisit if" into a
-    check: every SKOS predicate appearing anywhere in the fixture corpus —
-    discovered by walking the files, not a hand-kept list, the same
-    discovery discipline ``ALL_FIXTURES`` above already applies — must be
-    either read by the importer or named in the report.
+# FIX 13 (review, decisions.md D46) — independent, domain-level predicate
+# knowledge for TestEverySkosPredicateIsReadOrReported's own behavioural
+# rewrite below. Deliberately *not* imported from
+# controlled_vocabularies.exchange.mapping: reusing production's own tables
+# would repeat exactly the defect this fix closes — a check built from the
+# same constant production uses to decide what it has handled can never
+# notice production quietly stopping to read what it still claims to. This
+# restates the SKOS specification's own vocabulary (which predicate is a
+# preferred/alternative/hidden label, which is which note kind, which is a
+# cross-vocabulary mapping and its CURIE) from the spec, not the module under
+# test.
+_COVERAGE_LABEL_KIND = {
+    SKOS.prefLabel: ConceptLabel.Kind.PREFERRED,
+    SKOS.altLabel: ConceptLabel.Kind.ALTERNATIVE,
+    SKOS.hiddenLabel: ConceptLabel.Kind.HIDDEN,
+}
+_COVERAGE_NOTE_KIND = {
+    SKOS.definition: ConceptNote.Kind.DEFINITION,
+    SKOS.scopeNote: ConceptNote.Kind.SCOPE,
+    SKOS.example: ConceptNote.Kind.EXAMPLE,
+    SKOS.editorialNote: ConceptNote.Kind.EDITORIAL,
+    SKOS.historyNote: ConceptNote.Kind.HISTORY,
+    SKOS.changeNote: ConceptNote.Kind.CHANGE,
+    SKOS.note: ConceptNote.Kind.NOTE,
+}
+_COVERAGE_MAPPING_CURIE = {
+    SKOS.exactMatch: "skos:exactMatch",
+    SKOS.closeMatch: "skos:closeMatch",
+    SKOS.broadMatch: "skos:broadMatch",
+    SKOS.narrowMatch: "skos:narrowMatch",
+    SKOS.relatedMatch: "skos:relatedMatch",
+    SKOS.mappingRelation: "skos:mappingRelation",
+}
 
-    ``_HANDLED_CONCEPT_PREDICATES`` is ``_import_unheld_values``'s own gate
-    in ``skos.py`` — imported directly rather than duplicated, so this test
-    tracks the production classification instead of a second copy of it
-    that could drift from it. It only classifies *concept*-level predicates,
-    though, because it only ever gates a walk over one concept node's own
-    predicates: three more SKOS predicates are read, but never reach that
-    gate at all because they are never a concept's own predicate to begin
-    with. ``skos:hasTopConcept`` is stated *by the scheme, about* a concept
-    (read by ``_scheme_refs``); ``skos:member``/``skos:memberList`` are
-    stated by a *collection* (read by ``_import_collections``). A first,
-    deliberately naive version of this test — checking only against
-    ``_HANDLED_CONCEPT_PREDICATES`` — failed by naming exactly these three,
-    which is what exposed that they needed naming here explicitly rather
-    than being silently missing from the "recognised" set.
+# A set-aside reason under which the *whole* record was never created or
+# updated this run — as opposed to one where the record exists but a
+# specific value on it was left out. Only these blanket-excuse every one of
+# that node's own predicates from needing further evidence: there is no
+# concept or collection row left to check anything against.
+_COVERAGE_WHOLE_RECORD_EXCLUDED_REASONS = frozenset(
+    {
+        SetAsideReason.NO_PREFERRED_LABEL,
+        SetAsideReason.VOCABULARY_MISMATCH,
+        SetAsideReason.EMPTY_SLUG,
+        SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY,
+        SetAsideReason.URI_HELD_BY_DIFFERENT_KIND,
+    }
+)
+
+# Fatal-path fixtures, and the two that need a caller-named scheme this sweep
+# does not attempt to supply, write nothing on their own — there is no
+# resulting record and no non-fatal report entry for a predicate's coverage
+# to appear in. Excluded explicitly, not silently skipped: each is already
+# exercised directly by its own dedicated test class.
+_PREDICATE_COVERAGE_EXCLUDED_FIXTURES = frozenset(
+    {
+        "blank_node_concept.ttl",  # TestFatalFindingsAndAtomicity
+        "blank_node_collection.ttl",  # TestBlankNodeCollectionFails
+        "refused_uri_scheme.ttl",  # TestFatalFindingsAndAtomicity
+        "multiple_fatal_problems.ttl",  # TestFatalFindingsAndAtomicity
+        "reimport_rolls_back_an_update.ttl",  # TestAtomicityOnAPopulatedDatabase
+        "two_vocabularies.ttl",  # TestChoosingBetweenDeclaredVocabularies
+        "no_scheme_declared.ttl",  # TestImportSkosVocabulary
+        "vocabulary_reassignment.ttl",  # TestExistingConceptIsNotSilentlyMovedBetweenVocabularies
+    }
+)
+
+_PREDICATE_COVERAGE_FIXTURES = sorted(
+    (filename, fmt) for filename, fmt in ALL_FIXTURES if filename not in _PREDICATE_COVERAGE_EXCLUDED_FIXTURES
+)
+
+
+def _coverage_membership_covered(collection_uri: str, concept_uri: str, report) -> bool:
+    """Direct evidence that ``concept_uri`` landed as a member of ``collection_uri``,
+    or was reported as a member that could not be found (FIX 13)."""
+    if CollectionMember.objects.filter(collection__static_uri=collection_uri, concept__static_uri=concept_uri).exists():
+        return True
+    return any(
+        entry.reason is SetAsideReason.MISSING_MEMBER
+        and entry.subject == concept_uri
+        and entry.params.get("collection") == collection_uri
+        for entry in report.set_aside
+    )
+
+
+def _coverage_relation_covered(kind: str, source_uri: str, target_uri: str, report) -> bool:
+    """Direct evidence that a ``kind`` relation between ``source_uri`` and ``target_uri``
+    (in that direction) landed, or was reported missing/disjoint (FIX 13)."""
+    if ConceptRelation.objects.filter(kind=kind, source__static_uri=source_uri, target__static_uri=target_uri).exists():
+        return True
+    return any(
+        entry.reason in (SetAsideReason.MISSING_RELATION_END, SetAsideReason.RELATION_DISJOINTNESS)
+        and {entry.subject, entry.params.get("other")} == {source_uri, target_uri}
+        for entry in report.set_aside
+    )
+
+
+def _coverage_scheme_membership_covered(concept_uri: str, scheme_uri: str, excluded_subjects: set[str]) -> bool:
+    """Direct evidence that ``concept_uri`` landed inside the vocabulary ``scheme_uri``
+    names, or that the concept was never created at all this run (FIX 13)."""
+    if concept_uri in excluded_subjects:
+        return True
+    return Concept.objects.filter(static_uri=concept_uri, scheme__static_uri=scheme_uri).exists()
+
+
+def _coverage_label_covered(
+    subject_uri: str, language: str, text: str, kind: str, excluded_subjects: set[str], report
+) -> bool:
+    """Direct evidence that this ``skos:prefLabel``/``altLabel``/``hiddenLabel`` value
+    landed — as the scheme's own name, a concept's identity anchor, or a
+    ``ConceptLabel`` row — or was reported set aside (FIX 13)."""
+    if subject_uri in excluded_subjects:
+        return True
+    if kind == ConceptLabel.Kind.PREFERRED:
+        if ConceptScheme.objects.filter(static_uri=subject_uri, name=text).exists():
+            return True
+        if Concept.objects.filter(static_uri=subject_uri, label=text).exists():
+            return True
+        if Collection.objects.filter(static_uri=subject_uri, name=text).exists():
+            return True
+    if ConceptLabel.objects.filter(concept__static_uri=subject_uri, language=language, kind=kind, text=text).exists():
+        return True
+    return any(
+        entry.subject == subject_uri
+        and entry.params.get("language") == language
+        and entry.reason in (SetAsideReason.UNCONFIGURED_LANGUAGE, SetAsideReason.SURPLUS_PREFERRED_LABEL)
+        for entry in report.set_aside
+    )
+
+
+def _coverage_note_covered(
+    subject_uri: str, language: str, text: str, kind: str, excluded_subjects: set[str], report
+) -> bool:
+    """Direct evidence that this note value landed as a ``ConceptNote`` row, or was
+    reported set aside (FIX 13)."""
+    if subject_uri in excluded_subjects:
+        return True
+    if ConceptNote.objects.filter(concept__static_uri=subject_uri, language=language, kind=kind, value=text).exists():
+        return True
+    return any(
+        entry.subject == subject_uri
+        and entry.params.get("language") == language
+        and entry.reason is SetAsideReason.UNCONFIGURED_LANGUAGE
+        for entry in report.set_aside
+    )
+
+
+def _coverage_predicate_covered(
+    predicate: rdflib.URIRef,
+    graph: rdflib.Graph,
+    in_scope: set[str],
+    excluded_subjects: set[str],
+    report,
+) -> tuple[bool, str | None]:
+    """Whether every in-scope triple of ``predicate`` in ``graph`` has direct evidence
+    of landing in a record or being named in the report (FIX 13). Returns
+    ``(True, None)`` when covered, or ``(False, subject)`` naming the first
+    triple's subject that has no such evidence."""
+    if predicate in _COVERAGE_LABEL_KIND:
+        kind = _COVERAGE_LABEL_KIND[predicate]
+        for subject_node, literal in graph.subject_objects(predicate):
+            subject_uri = str(subject_node)
+            if subject_uri not in in_scope or not isinstance(literal, rdflib.Literal) or not literal.language:
+                continue
+            if not _coverage_label_covered(
+                subject_uri, literal.language, str(literal), kind, excluded_subjects, report
+            ):
+                return False, subject_uri
+        return True, None
+
+    if predicate in _COVERAGE_NOTE_KIND:
+        kind = _COVERAGE_NOTE_KIND[predicate]
+        for subject_node, literal in graph.subject_objects(predicate):
+            subject_uri = str(subject_node)
+            if subject_uri not in in_scope or not isinstance(literal, rdflib.Literal) or not literal.language:
+                continue
+            if not _coverage_note_covered(subject_uri, literal.language, str(literal), kind, excluded_subjects, report):
+                return False, subject_uri
+        return True, None
+
+    if predicate in _COVERAGE_MAPPING_CURIE:
+        curie = _COVERAGE_MAPPING_CURIE[predicate]
+        for subject_node, _obj in graph.subject_objects(predicate):
+            subject_uri = str(subject_node)
+            if subject_uri not in in_scope or subject_uri in excluded_subjects:
+                continue
+            reported = any(
+                entry.reason is SetAsideReason.MAPPING
+                and entry.subject == subject_uri
+                and entry.params.get("predicate") == curie
+                for entry in report.set_aside
+            )
+            if not reported:
+                return False, subject_uri
+        return True, None
+
+    if predicate == SKOS.notation:
+        for subject_node, _obj in graph.subject_objects(predicate):
+            subject_uri = str(subject_node)
+            if subject_uri not in in_scope or subject_uri in excluded_subjects:
+                continue
+            reported = any(
+                entry.reason is SetAsideReason.NOTATION and entry.subject == subject_uri for entry in report.set_aside
+            )
+            if not reported:
+                return False, subject_uri
+        return True, None
+
+    if predicate in (SKOS.broader, SKOS.narrower):
+        for subject_node, object_node in graph.subject_objects(predicate):
+            subject_uri, object_uri = str(subject_node), str(object_node)
+            if subject_uri not in in_scope or subject_uri == object_uri:
+                continue
+            if subject_uri in excluded_subjects or object_uri in excluded_subjects:
+                continue
+            narrower_uri, broader_uri = (
+                (subject_uri, object_uri) if predicate == SKOS.broader else (object_uri, subject_uri)
+            )
+            if not _coverage_relation_covered(ConceptRelation.Kind.BROADER, narrower_uri, broader_uri, report):
+                return False, subject_uri
+        return True, None
+
+    if predicate == SKOS.related:
+        for subject_node, object_node in graph.subject_objects(predicate):
+            subject_uri, object_uri = str(subject_node), str(object_node)
+            if subject_uri not in in_scope or subject_uri == object_uri:
+                continue
+            if subject_uri in excluded_subjects or object_uri in excluded_subjects:
+                continue
+            covered = _coverage_relation_covered(
+                ConceptRelation.Kind.RELATED, subject_uri, object_uri, report
+            ) or _coverage_relation_covered(ConceptRelation.Kind.RELATED, object_uri, subject_uri, report)
+            if not covered:
+                return False, subject_uri
+        return True, None
+
+    if predicate in (SKOS.inScheme, SKOS.topConceptOf):
+        for subject_node, object_node in graph.subject_objects(predicate):
+            concept_uri, scheme_uri = str(subject_node), str(object_node)
+            if concept_uri not in in_scope:
+                continue
+            if not _coverage_scheme_membership_covered(concept_uri, scheme_uri, excluded_subjects):
+                return False, concept_uri
+        return True, None
+
+    if predicate == SKOS.hasTopConcept:
+        for subject_node, object_node in graph.subject_objects(predicate):
+            scheme_uri, concept_uri = str(subject_node), str(object_node)
+            if scheme_uri not in in_scope:
+                continue
+            if not _coverage_scheme_membership_covered(concept_uri, scheme_uri, excluded_subjects):
+                return False, scheme_uri
+        return True, None
+
+    if predicate == SKOS.member:
+        for subject_node, object_node in graph.subject_objects(predicate):
+            collection_uri, concept_uri = str(subject_node), str(object_node)
+            if collection_uri not in in_scope or collection_uri in excluded_subjects:
+                continue
+            if not _coverage_membership_covered(collection_uri, concept_uri, report):
+                return False, collection_uri
+        return True, None
+
+    if predicate == SKOS.memberList:
+        for subject_node, list_head in graph.subject_objects(predicate):
+            collection_uri = str(subject_node)
+            if collection_uri not in in_scope or collection_uri in excluded_subjects:
+                continue
+            for item in graph.items(list_head):
+                if not _coverage_membership_covered(collection_uri, str(item), report):
+                    return False, collection_uri
+        return True, None
+
+    # A SKOS predicate this dispatcher has no independent verification logic
+    # for yet. Treated as uncovered, not silently skipped — the whole point
+    # of this rewrite is that a predicate the fixture corpus grows to carry
+    # cannot pass this test merely by production classifying it as handled.
+    return False, str(predicate)
+
+
+class TestEverySkosPredicateIsReadOrReported:
+    """T033/FIX 13 (review, decisions.md D46) — a behavioural rewrite of the
+    original T033 gate. That version computed its own "recognised" set from
+    ``_HANDLED_CONCEPT_PREDICATES | _READ_BUT_NOT_AT_CONCEPT_LEVEL`` —
+    production's own exclusion set, imported directly. Membership there means
+    "not double-reported by ``_import_unheld_values``", which is *not* the
+    claim FR-014 actually makes: "read by the importer, or named in the
+    report." Adding a predicate to ``_HANDLED_CONCEPT_PREDICATES`` while
+    never building a read path for it made the old test pass and the
+    behaviour regress in the same edit, because the test's own "recognised"
+    set and the constant a review-introduced mutation would touch were one
+    and the same object — precisely the failure D34 wrote this gate to
+    prevent, and precisely what it could not actually prevent.
+
+    This version imports every fixture that can succeed standing alone
+    (``scheme=None``, no pre-seeded database — the excluded fixtures above
+    cannot, and are each exercised directly by their own dedicated test
+    class instead) and, for every SKOS predicate the fixture's own graph
+    carries on a node this importer treats as a record (a concept, the
+    vocabulary's own scheme node, or a collection — a *foreign* scheme node
+    merely referenced, as in ``mixed_scheme_membership.ttl``, is not itself
+    such a record), requires direct, independently-derived evidence —
+    a matching database row, or a matching report entry — that the
+    predicate's value was either read into a record or named in the report.
+    None of that evidence-gathering reuses ``skos.py``'s own handled-predicate
+    tables; :data:`_COVERAGE_LABEL_KIND`/`_COVERAGE_NOTE_KIND`/`_COVERAGE_MAPPING_CURIE`
+    above restate the SKOS specification's own vocabulary independently.
     """
 
-    _READ_BUT_NOT_AT_CONCEPT_LEVEL = frozenset({SKOS.hasTopConcept, SKOS.member, SKOS.memberList})
+    @pytest.mark.parametrize("filename,fmt", _PREDICATE_COVERAGE_FIXTURES)
+    def test_every_skos_predicate_in_this_fixture_is_read_or_reported(self, db, filename, fmt):
+        path = FIXTURES / filename
+        graph = rdflib.Graph()
+        graph.parse(path, format=fmt)
 
-    def test_every_skos_predicate_in_the_fixture_corpus_is_read_or_reported(self):
-        found: set[str] = set()
-        for filename, fmt in ALL_FIXTURES:
-            graph = rdflib.Graph()
-            graph.parse(FIXTURES / filename, format=fmt)
-            found |= {str(predicate) for predicate in graph.predicates() if str(predicate).startswith(str(SKOS))}
+        report = import_skos(path)
+        assert report.fatal == [], f"{filename} unexpectedly failed to import: {[f.render() for f in report.fatal]}"
 
-        recognised = {str(predicate) for predicate in _HANDLED_CONCEPT_PREDICATES | self._READ_BUT_NOT_AT_CONCEPT_LEVEL}
-        unrecognised = found - recognised
-        assert not unrecognised, (
-            f"SKOS predicate(s) in the fixture corpus are neither read nor reported: {sorted(unrecognised)}"
+        concept_nodes = set(graph.subjects(rdflib.RDF.type, SKOS.Concept))
+        collection_nodes = set(graph.subjects(rdflib.RDF.type, SKOS.Collection)) | set(
+            graph.subjects(rdflib.RDF.type, SKOS.OrderedCollection)
+        )
+        scheme_nodes = set(graph.subjects(rdflib.RDF.type, SKOS.ConceptScheme))
+        # Only the *resolved* scheme is in scope — a second, merely-referenced
+        # declared scheme (mixed_scheme_membership.ttl's "other") is never a
+        # record this importer creates, so its own predicates are not this
+        # importer's to account for.
+        resolved_scheme_uris = set(
+            ConceptScheme.objects.filter(static_uri__in=[str(node) for node in scheme_nodes]).values_list(
+                "static_uri", flat=True
+            )
+        )
+        in_scope = (
+            {str(node) for node in concept_nodes} | {str(node) for node in collection_nodes} | resolved_scheme_uris
+        )
+
+        excluded_subjects = {
+            entry.subject for entry in report.set_aside if entry.reason in _COVERAGE_WHOLE_RECORD_EXCLUDED_REASONS
+        }
+        predicates = {predicate for predicate in graph.predicates() if str(predicate).startswith(str(SKOS))}
+
+        failures = []
+        for predicate in predicates:
+            covered, failing_subject = _coverage_predicate_covered(
+                predicate, graph, in_scope, excluded_subjects, report
+            )
+            if not covered:
+                failures.append((str(predicate), failing_subject))
+        assert not failures, (
+            f"{filename}: SKOS predicate(s) neither reflected in a record nor named in the report: {failures}"
         )
 
 
