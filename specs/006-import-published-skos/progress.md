@@ -899,3 +899,47 @@ makemigrations --check --dry-run --settings=tests.settings` — no changes detec
 
 **Watch**: US-5's Implementer inherits the two open pre-existing-test conflicts above unless they
 are resolved before then; they are unrelated to collections and should not block US-5's own work.
+
+## Relation-deletion design fault corrected (D30)
+
+**Did**: fixed the "either end" defect D29 named and left open at the end of US-4:
+`_import_relations`'s deletion queries selected an existing `ConceptRelation` row when *either*
+its source or its target belonged to this run's own writes, and removed it if the run's resolved
+pairs no longer included it. That deletes an edge between a concept the file mentions and one it
+does not mention at all — only half spoken about — which contradicts FR-013/D5's authority rule
+and, worse, does it silently, which D1 forbids. Both the `BROADER` and `RELATED` deletion queries
+in `controlled_vocabularies/exchange/skos.py` now require **both** ends to be in
+`successful_ids`, not either. Recorded as decisions.md D30, including what it means for a curator:
+a re-import of a partial export no longer severs the imported slice from the rest of the
+vocabulary the export never retracted.
+
+`TestIdempotentReimport::test_a_reference_made_between_two_runs_still_resolves_after_the_second`
+(T013) is modified, minimally: its illustrative reference moved from granite-basalt (an edge
+`rocks.ttl` itself states and the importer is correctly authoritative over) to a concept created
+locally in granite's own scheme that the file never mentions. Its name, assertions, and place in
+the class are unchanged; only the prop and its docstring changed.
+`TestRecordsAbsentFromSource::test_a_concept_dropped_from_the_file_is_untouched_and_named_absent`
+(T015) needed no change — it already asserted exactly the behaviour D30 introduces.
+
+`TestRelationRemovalOnReimport` (T026) is rebuilt on a new dedicated fixture pair,
+`relation_lifecycle.ttl`/`relation_lifecycle_updated.ttl` (decisions.md D28 counsels against a
+third edit to the shared `rocks.ttl`/`rocks_updated.ttl` corpus): one test for the genuine
+retraction the class is named for, one new test for the D30 survival case its old scenario used to
+get backwards, and one carried-over selectivity check, all three now correctly targeted.
+
+Mutation-probed before closing: widened both deletion queries back to `Q(...) | Q(...)`, confirmed
+`TestRecordsAbsentFromSource`'s test fails (`ConceptRelation.DoesNotExist` on the manually-created
+reference), then restored the `&`-equivalent filter. The rule bites; it is not a test that would
+pass either way.
+
+**Verified**: `poetry run pytest -q` — 473 passed, 0 failed. `poetry run ruff check .` / `ruff
+format --check .` / `mypy` / `deptry .` — all clean. `makemigrations --check --dry-run` — no
+changes detected. `pre-commit run --all-files` — all hooks passed. `forge verify --base
+origin/main` — conformance, lint, typecheck, test, and build all passed.
+
+**Next**: US-5 (T027-T030) — collections arrive, ordered ones in order. No longer blocked by any
+open relation-deletion conflict.
+
+**Watch**: D30's "Revisit if" — a future story needing a relation reconciled against only one
+rewritten end (e.g. a bulk downstream-retirement operation) would be new, deliberately-asymmetric
+behaviour, not a further correction to this rule.

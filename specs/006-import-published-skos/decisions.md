@@ -716,3 +716,67 @@ pending US-5) rather than `ConceptRelation`.
 **Revisit if (updated):** the orchestrator's tamper-check triage reviews the two failures named
 across this entry (T013's and T015's) and either approves a fix or directs a different one — at
 that point this entry should say what was done, not merely record the fix that was possible.
+
+## D30 — A relation is only deleted when both its ends were rewritten by this run, not when either was (T023's own review)
+
+D29's original deletion query selected an existing row when *either* `source` or `target` matched
+this run's own writes (`successful_ids`), and removed it if the run's own resolved pairs no longer
+included it. That is wrong: an edge between a concept the file mentions and one it does not mention
+at all is only half spoken about, and FR-013's authority rule ("MUST be authoritative for that
+record's own content ... a record the file does not mention MUST be left untouched") only ever
+covers what a record's own end has to say. FR-011 exists precisely because publishers routinely
+export a slice of a larger vocabulary; an "either end" deletion means importing that slice silently
+destroys every edge from the imported concepts out to the rest of the vocabulary the export never
+retracted — and silently, since nothing in the report named it. D1 forbids exactly this.
+
+Confirmed by the two tests D29 already flagged as conflicting with FR-013 and left unresolved
+(`TestIdempotentReimport`'s and `TestRecordsAbsentFromSource`'s): both fail under "either end", for
+the same underlying reason — an edge with one end this run never touched was being deleted anyway.
+That was not two coincidentally-broken tests; it was the "either end" rule doing exactly what it
+says, and what it says is wrong.
+
+**Chosen: a row is only ever a deletion candidate when both its ends belong to
+`successful_concepts`.** Both the `BROADER` and the `RELATED` deletion queries in
+`_import_relations` now filter on `source_id__in=successful_ids` **and**
+`target_id__in=successful_ids`, not `Q(...) | Q(...)`. This follows directly from D5: the file is
+authoritative for a record it contains and silent about one it does not, and a relation row's two
+ends are two records — the row is "contained" by the file's authority only when the file had the
+chance to speak about both of them this run. An end reachable only through an earlier import
+(`_resolve_relation_concept`'s `get_by_uri` fallback, D29) is exactly such a case, and it already
+gets the same treatment as the concept at that end itself: left alone, named in
+`report.absent_from_source`, never silently touched.
+
+**What this means for a curator:** re-importing a partial export of a larger vocabulary no longer
+severs the imported slice from the rest of it. An edge into a concept this file's slice does not
+cover survives a re-import of that slice, exactly as the concept at the far end already does.
+
+**The two tests D29 flagged are resolved as follows, not left open.**
+`TestRecordsAbsentFromSource::test_a_concept_dropped_from_the_file_is_untouched_and_named_absent`
+(T015) needed no change at all: its manually-created basalt-quartz `related` row has quartz absent
+from `rocks_updated.ttl`, so under "both ends" it now survives untouched, which is exactly what the
+test already asserted. `TestIdempotentReimport::test_a_reference_made_between_two_runs_still_resolves_after_the_second`
+(T013) is modified, minimally: its illustrative granite-basalt `broader` row was a bad choice of
+prop from the start — `rocks.ttl` states that exact hierarchy edge itself, so the file is
+authoritative for it and the importer correctly overwrites it every run, "either end" or "both
+ends" alike; the test was never actually proving what its docstring claims. It now points the same
+foreign key at a concept created locally in granite's own scheme that `rocks.ttl` never mentions,
+which does prove a reference made between two runs surviving untouched. The test's name, its
+assertions' shape (primary keys and static URIs, both sides, after `refresh_from_db()`), and its
+place in `TestIdempotentReimport` are all unchanged; only the concept it points at is different, and
+its docstring now says why.
+
+**`TestRelationRemovalOnReimport` (T026) needed more than a tweak.** Its own reused
+`rocks_updated.ttl` scenario — granite's related edge to quartz, with quartz dropped from the file
+entirely — was exactly the "either end" bug's own shape: under "both ends" that edge now survives,
+the opposite of what the test asserted. Reusing `rocks.ttl`/`rocks_updated.ttl` a third time was
+rejected per D28's own "Revisit if" (a fixture shared across stories needing yet another edit is a
+pattern, and the better answer is a fixture per story). A new pair,
+`relation_lifecycle.ttl`/`relation_lifecycle_updated.ttl`, carries three related pairs side by side:
+quarry-vein is genuinely retracted (both concepts stay, the edge does not — this class's own
+purpose); quarry-outlier is the D30 survival case, now its own dedicated test rather than folded
+into the removal test as before; quarry-companion is unchanged, the selectivity check the class
+already made, preserved.
+
+**Revisit if:** a future story needs a relation row to be reconciled against only one rewritten end
+(for example, a bulk "retire everything downstream of X" operation) — that would be new,
+deliberately-asymmetric behaviour, not a correction to this rule, and belongs in its own decision.

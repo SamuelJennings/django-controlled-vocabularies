@@ -435,7 +435,14 @@ class TestIdempotentReimport:
     nothing new and recreates nothing. Every record's primary key is stable
     across both runs, and a foreign-key reference made *between* the two
     runs still resolves to the same row afterward — the acceptance scenario
-    specifically distinguishes this from merely re-reading the same URI."""
+    specifically distinguishes this from merely re-reading the same URI.
+
+    (decisions.md D30) The second test's illustrative reference was
+    originally made between granite and basalt, an edge rocks.ttl itself
+    states and is therefore authoritative over; it has since been repointed
+    at a locally created concept the file never mentions, so the test still
+    proves a foreign key surviving a re-import untouched rather than a
+    relationship the importer now correctly overwrites."""
 
     def test_every_primary_key_is_stable_across_two_identical_runs(self, db):
         import_skos(FIXTURES / "rocks.ttl")
@@ -453,18 +460,26 @@ class TestIdempotentReimport:
             assert Concept.objects.get(static_uri=uri).pk == pk
 
     def test_a_reference_made_between_two_runs_still_resolves_after_the_second(self, db):
+        # The illustrative reference is deliberately made to a concept
+        # created locally in granite's own scheme rather than to basalt:
+        # rocks.ttl states granite's own hierarchy down to basalt, so the
+        # importer has since taken ownership of that edge (decisions.md D30)
+        # and would correctly overwrite, not merely leave, it. "outsider"
+        # here is never mentioned by rocks.ttl at all, so it stands in for a
+        # foreign key genuinely made between two runs, outside anything the
+        # file speaks about.
         import_skos(FIXTURES / "rocks.ttl")
         granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
-        basalt = Concept.objects.get(static_uri="http://example.org/rocks/basalt")
-        relation = ConceptRelation.objects.create(source=granite, target=basalt, kind=ConceptRelation.Kind.BROADER)
+        outsider = ConceptFactory(scheme=granite.scheme, label="Local outsider")
+        relation = ConceptRelation.objects.create(source=granite, target=outsider, kind=ConceptRelation.Kind.BROADER)
 
         import_skos(FIXTURES / "rocks.ttl")
 
         relation.refresh_from_db()
         assert relation.source_id == granite.pk
-        assert relation.target_id == basalt.pk
+        assert relation.target_id == outsider.pk
         assert relation.source.static_uri == "http://example.org/rocks/granite"
-        assert relation.target.static_uri == "http://example.org/rocks/basalt"
+        assert relation.target.static_uri == outsider.static_uri
 
 
 class TestAuthoritativeUpdateForContainedRecords:
@@ -964,38 +979,65 @@ class TestRelationEndpointsMissingOrKnown:
 class TestRelationRemovalOnReimport:
     """T026 — FR-013: a re-import of a file from which a relationship has
     been removed removes it, leaving both concepts. This is the third case
-    decisions.md D20 deferred out of T014: `rocks_updated.ttl` already drops
-    granite's related edge to quartz (and, separately, quartz itself, which
-    T015 already covers under absent-from-source) — checked against the
-    fixture before writing this test, per the task's own instruction, and it
-    fits exactly, so no fixture edit was needed. Builds no new production
-    behaviour of its own: T023/T024's whole-graph reconciliation already
-    deletes a relation the file's own concepts no longer restate, which is
-    precisely what removing an edge on re-import requires."""
+    decisions.md D20 deferred out of T014.
+
+    (decisions.md D30) `rocks_updated.ttl`'s dropped granite-quartz edge no
+    longer proves this: quartz leaves the file entirely, and correcting
+    `_import_relations` to require *both* ends of a row to have been written
+    by this run before deleting it means that edge now survives instead —
+    exactly the "leaves both concepts" wording this class's own docstring
+    already promised, just not for the case this class used to test. This
+    class now uses its own dedicated `relation_lifecycle.ttl`/
+    `relation_lifecycle_updated.ttl` fixture pair rather than a third edit to
+    the shared rocks corpus (decisions.md D28), covering the genuine
+    retraction this class is named for, the D30 survival case, and the
+    selectivity check the original third test made, side by side."""
 
     def test_a_removed_related_edge_is_gone_and_both_concepts_remain(self, db):
-        import_skos(FIXTURES / "rocks.ttl")
-        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
-        quartz = Concept.objects.get(static_uri="http://example.org/rocks/quartz")
-        assert quartz in granite.related()
+        import_skos(FIXTURES / "relation_lifecycle.ttl")
+        quarry = Concept.objects.get(static_uri="http://example.org/lifecycle/quarry")
+        vein = Concept.objects.get(static_uri="http://example.org/lifecycle/vein")
+        assert vein in quarry.related()
 
-        import_skos(FIXTURES / "rocks_updated.ttl")
+        import_skos(FIXTURES / "relation_lifecycle_updated.ttl")
 
-        assert not ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED).exists()
-        assert Concept.objects.filter(pk=granite.pk).exists()
-        assert Concept.objects.filter(pk=quartz.pk).exists()
+        assert not ConceptRelation.objects.filter(
+            kind=ConceptRelation.Kind.RELATED,
+            source_id__in=(quarry.pk, vein.pk),
+            target_id__in=(quarry.pk, vein.pk),
+        ).exists()
+        assert Concept.objects.filter(pk=quarry.pk).exists()
+        assert Concept.objects.filter(pk=vein.pk).exists()
+
+    def test_an_edge_whose_other_end_left_the_file_entirely_survives(self, db):
+        # decisions.md D30: quarry-outlier is not restated by
+        # relation_lifecycle_updated.ttl, but outlier itself is not written
+        # by that run either — the file's silence about outlier is not the
+        # same as the file retracting quarry's edge to it, so the edge is
+        # left exactly as it was rather than deleted.
+        import_skos(FIXTURES / "relation_lifecycle.ttl")
+        quarry = Concept.objects.get(static_uri="http://example.org/lifecycle/quarry")
+        outlier = Concept.objects.get(static_uri="http://example.org/lifecycle/outlier")
+        assert outlier in quarry.related()
+
+        report = import_skos(FIXTURES / "relation_lifecycle_updated.ttl")
+
+        assert outlier in quarry.related()
+        assert Concept.objects.filter(pk=outlier.pk).exists()
+        assert "http://example.org/lifecycle/outlier" in report.absent_from_source
 
     def test_a_relationship_the_file_still_states_survives_the_same_reimport(self, db):
-        # granite's broader edge to igneous is unchanged between rocks.ttl and
-        # rocks_updated.ttl — the removal above must be selective, not a
-        # wholesale wipe of every relation touching granite.
-        import_skos(FIXTURES / "rocks.ttl")
-        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
-        igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
+        # quarry's related edge to companion is unchanged between
+        # relation_lifecycle.ttl and relation_lifecycle_updated.ttl — the
+        # removal above must be selective, not a wholesale wipe of every
+        # relation touching quarry.
+        import_skos(FIXTURES / "relation_lifecycle.ttl")
+        quarry = Concept.objects.get(static_uri="http://example.org/lifecycle/quarry")
+        companion = Concept.objects.get(static_uri="http://example.org/lifecycle/companion")
 
-        import_skos(FIXTURES / "rocks_updated.ttl")
+        import_skos(FIXTURES / "relation_lifecycle_updated.ttl")
 
-        assert igneous in granite.broader()
+        assert companion in quarry.related()
 
 
 class TestFixtureCorpus:

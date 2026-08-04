@@ -671,13 +671,19 @@ def _import_relations(
     written, rather than creating one and then the other, so which direction
     the file happened to state first never matters.
 
-    Every relation touching a concept this run wrote is then made to match
-    the file exactly (FR-013): an existing row the file no longer restates is
-    deleted, and a row the file newly states is created. This is computed as
-    one whole pass over every concept this run touched, rather than
-    incrementally per concept, because a relation is commonly asserted from
-    only one of its two ends (``narrower`` from the parent, ``broader`` from
-    the child; either end for ``related``) — an incremental per-concept
+    An existing row is only ever a *candidate* for deletion when **both** of
+    its ends were created or updated by this run (decisions.md D30): only
+    then has the file had the opportunity to speak about the row at all. An
+    edge with one end outside ``successful_concepts`` — the file simply does
+    not mention that end, the same "does not mention" FR-013 already treats
+    as untouched for the concept itself — is left exactly as it is, never
+    deleted, whether or not it is restated. A row where both ends were
+    written is then made to match the file exactly: deleted if the file no
+    longer restates it, kept (or created) if it does. This is computed as one
+    whole pass over every concept this run touched, rather than incrementally
+    per concept, because a relation is commonly asserted from only one of its
+    two ends (``narrower`` from the parent, ``broader`` from the child;
+    either end for ``related``) — an incremental per-concept
     delete-and-recreate would delete a row a sibling concept's own pass had
     only just written, depending on which concept happened to be reached
     first.
@@ -734,15 +740,23 @@ def _import_relations(
 
     successful_ids = {concept.pk for concept in successful_concepts.values()}
 
-    existing_broader = ConceptRelation.objects.filter(kind=ConceptRelation.Kind.BROADER).filter(
-        Q(source_id__in=successful_ids) | Q(target_id__in=successful_ids)
+    # Both ends in successful_ids, not either (decisions.md D30): a row with
+    # one end outside this run's own writes is only half spoken about by the
+    # file, and FR-013's deletion authority only ever covers what the file
+    # actually speaks about.
+    existing_broader = ConceptRelation.objects.filter(
+        kind=ConceptRelation.Kind.BROADER,
+        source_id__in=successful_ids,
+        target_id__in=successful_ids,
     )
     for row in existing_broader:
         if (row.source_id, row.target_id) not in resolved_broader:
             row.delete()
 
-    existing_related = ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED).filter(
-        Q(source_id__in=successful_ids) | Q(target_id__in=successful_ids)
+    existing_related = ConceptRelation.objects.filter(
+        kind=ConceptRelation.Kind.RELATED,
+        source_id__in=successful_ids,
+        target_id__in=successful_ids,
     )
     for row in existing_related:
         if frozenset({row.source_id, row.target_id}) not in resolved_related:
