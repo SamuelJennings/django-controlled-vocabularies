@@ -961,6 +961,43 @@ class TestRelationEndpointsMissingOrKnown:
         assert entries[0].params["other"] == "http://example.org/rocks/granite"
 
 
+class TestRelationRemovalOnReimport:
+    """T026 — FR-013: a re-import of a file from which a relationship has
+    been removed removes it, leaving both concepts. This is the third case
+    decisions.md D20 deferred out of T014: `rocks_updated.ttl` already drops
+    granite's related edge to quartz (and, separately, quartz itself, which
+    T015 already covers under absent-from-source) — checked against the
+    fixture before writing this test, per the task's own instruction, and it
+    fits exactly, so no fixture edit was needed. Builds no new production
+    behaviour of its own: T023/T024's whole-graph reconciliation already
+    deletes a relation the file's own concepts no longer restate, which is
+    precisely what removing an edge on re-import requires."""
+
+    def test_a_removed_related_edge_is_gone_and_both_concepts_remain(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        quartz = Concept.objects.get(static_uri="http://example.org/rocks/quartz")
+        assert quartz in granite.related()
+
+        import_skos(FIXTURES / "rocks_updated.ttl")
+
+        assert not ConceptRelation.objects.filter(kind=ConceptRelation.Kind.RELATED).exists()
+        assert Concept.objects.filter(pk=granite.pk).exists()
+        assert Concept.objects.filter(pk=quartz.pk).exists()
+
+    def test_a_relationship_the_file_still_states_survives_the_same_reimport(self, db):
+        # granite's broader edge to igneous is unchanged between rocks.ttl and
+        # rocks_updated.ttl — the removal above must be selective, not a
+        # wholesale wipe of every relation touching granite.
+        import_skos(FIXTURES / "rocks.ttl")
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
+
+        import_skos(FIXTURES / "rocks_updated.ttl")
+
+        assert igneous in granite.broader()
+
+
 class TestFixtureCorpus:
     """T005 — the published-vocabulary fixtures are discoverable and parse (FR-018, SC-016).
 

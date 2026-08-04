@@ -855,3 +855,47 @@ detected.
 
 **Watch**: the two pre-existing test conflicts remain open for orchestrator review; unaffected by
 this task.
+
+## 2026-08-04T12:45:00Z · Implementer US4 · T026
+
+**Did**: No production or fixture change. Checked `rocks_updated.ttl` against the task's own
+instruction before writing anything: it already drops granite's `related` edge to quartz (D20),
+and it fits this task exactly, so nothing further was needed. `TestRelationRemovalOnReimport`:
+re-importing `rocks.ttl` then `rocks_updated.ttl` removes the granite-quartz related row while
+both concepts remain in the database, and granite's still-stated broader edge to igneous survives
+the same re-import — proving the removal is selective (T023/T024's reconciliation), not a
+wholesale wipe of every relation touching a concept the file still contains.
+
+Both tests passed on first execution, the fourth task across this story's two most recent phases
+to do so (with T013/T014/T017/T022 in earlier phases), each proving a piece of behaviour a prior
+task already built generally rather than needing new code of its own.
+
+**Phase US-4 complete (T023-T026).** `skos:broader`, `skos:narrower`, and `skos:related` all land
+as the single canonical `ConceptRelation` row the models define, reconciled in one whole-graph
+pass per run so both directions of a hierarchy pair and both directions of a related pair each
+collapse to exactly one row (FR-010). A relationship end resolves against this run's own writes
+first, then an earlier import's, then is set aside and reported by both ends when neither resolves
+— including when the resolved match belongs to a different vocabulary (decisions.md D29). A
+re-import removes a relationship the file no longer restates while leaving every relationship it
+still states, and leaves both concepts in place either way (FR-013). `models.py` was not touched.
+
+**Concerns not resolved in this story, carried to the story report**: two pre-existing tests
+(`TestIdempotentReimport::test_a_reference_made_between_two_runs_still_resolves_after_the_second`,
+T013; `TestRecordsAbsentFromSource::test_a_concept_dropped_from_the_file_is_untouched_and_named_absent`,
+T015) each manually created a `ConceptRelation` not stated by any fixture, as a stand-in for
+"an arbitrary foreign key survives a re-import" written before this importer read relations at
+all. FR-013's authority over relationships, which this story is required to build, now correctly
+removes both manually-injected rows on re-import — decisions.md D29 records the full reasoning and
+a suggested fix. Neither test was modified, per this story's brief.
+
+**Verified**: `poetry run pytest -q` — 468 passed, 2 failed (the two pre-existing conflicts above,
+unchanged since T023/T024; 466 + 2 new tests in `test_skos.py`'s new
+`TestRelationRemovalOnReimport`, no new fixtures). `poetry run ruff check .` — all checks passed.
+`poetry run ruff format --check .` — 21 files already formatted. `poetry run mypy` — success, 9
+source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django
+makemigrations --check --dry-run --settings=tests.settings` — no changes detected.
+
+**Next**: US-5 (T027-T030) — collections arrive, ordered ones in order.
+
+**Watch**: US-5's Implementer inherits the two open pre-existing-test conflicts above unless they
+are resolved before then; they are unrelated to collections and should not block US-5's own work.
