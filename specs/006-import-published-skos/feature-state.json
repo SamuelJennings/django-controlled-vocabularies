@@ -298,8 +298,20 @@
         },
         {
           "id": "T032",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": ["poetry run pytest -q"],
+            "commands": [
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy",
+              "poetry run deptry .",
+              "poetry run python -m django makemigrations --check --dry-run --settings=tests.settings",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
         }
       ]
     }

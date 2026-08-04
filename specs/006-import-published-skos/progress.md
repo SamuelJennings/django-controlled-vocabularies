@@ -1219,3 +1219,45 @@ run deptry .` — no issues, 15 files scanned. `poetry run python -m django make
 **Next**: T032 — documentation (README, CHANGELOG, docstrings) in the same PR as the code.
 
 **Watch**: none beyond the feature-state.json ledger gap already flagged at T031.
+
+## 2026-08-04T13:20:00Z · Implementer US6 · T032
+
+**Did**: documentation in the same PR as the code (Article VI). README gains a new "## Importing a
+published vocabulary" section (inserted between "## Configuration" and "## Relationship to other
+packages"): what `import_skos()` reads and writes, the upsert/absent-from-source re-import rule
+(FR-013), a walkthrough of the `ImportReport`'s six buckets, and the "programmatic only, no
+CLI/web entry point yet" note FR-001 states. Written plainly and factually, per this story's own
+brief — the humanizer pass is the orchestrator's, not this Implementer's, to run. CHANGELOG's
+`[Unreleased]` → `### Added` gains one entry for the whole feature, in the same descriptive style as
+the existing FS-002/003/004/005 entries above it.
+
+Two stale docstrings fixed along the way, both public per Article VI and both directly contradicted
+by the finished feature: `skos.py`'s module docstring still said "this module currently covers
+reading a file into a graph (T006)" and named only Phase US-1's own scope; `exchange/__init__.py`'s
+said the reader and `import_skos()` "are a later story" and that the module "grows its re-exports
+one task at a time" — both written at T002/T006 and never updated as the other five stories landed.
+Rewrote both to describe the finished module. `import_skos()`'s own docstring (already present,
+T007) gains two paragraphs summarising what it imports beyond the vocabulary itself (concepts,
+labels, notes, relationships, collections) and the re-import/set-aside contract (FR-013/FR-014) —
+the rest of its detail (transaction/rollback semantics) was already accurate and is left as T007
+wrote it. `ImportReport`'s own docstring (T003, extended at T021) was already accurate and complete;
+not touched.
+
+**Verified**: `poetry run pytest -q` — 520 passed (unchanged from T034 — no test asserts on exact
+docstring text beyond non-emptiness, `TestExchangePackage::test_package_has_a_module_docstring`).
+`poetry run ruff check .` — all checks passed. `poetry run ruff format --check .` — 24 files already
+formatted. `poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files
+scanned. `poetry run python -m django makemigrations --check --dry-run --settings=tests.settings` —
+no changes detected. `poetry run pre-commit run --all-files` — all hooks passed.
+
+**Phase US-6 complete (T031/T033/T034/T032).** Every message this feature puts in front of a person
+— a report reason or a raised failure — is checked, in one closed-world sweep, to be translatable
+and named-placeholder-only; the developer-diagnostics exemption is named explicitly rather than left
+an unstated gap. Every SKOS predicate appearing anywhere in the fixture corpus is either read by the
+importer or named in the report, closing decisions.md D27. A collection the file no longer mentions
+is reported absent from source, the way a concept in that position already is, closing the gap D33
+named. README, CHANGELOG, and the public callable's docstrings document the finished feature. This
+is the last story before convergence; this Implementer stops here.
+
+**Watch**: the feature-state.json ledger gap flagged at T031 is still open — Forge's own
+reconciliation, not this Implementer's to restructure.

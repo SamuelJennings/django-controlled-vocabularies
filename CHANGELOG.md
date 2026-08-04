@@ -8,6 +8,23 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Added
 
+- Importing a published SKOS vocabulary: `import_skos(file, *, serialization=None, scheme=None)`
+  reads a Turtle, RDF/XML, or JSON-LD file and creates or updates the vocabulary it declares, its
+  concepts, their labels and documentary notes, their broader/narrower and related relationships,
+  and their collection membership, every record matched by its static URI. Re-running an import
+  upserts rather than deleting and recreating: a record the file still contains has its content
+  matched to the file exactly, including removing a value the file no longer carries, while a
+  record the file does not mention at all is left untouched and named in the report instead of
+  being deleted. Returns an `ImportReport` — a plain dataclass, not rendered text — with `created`,
+  `updated`, `set_aside` (a translatable, closed-vocabulary reason per value the app could not
+  store, e.g. an unconfigured language, a notation, a mapping to another vocabulary, or a predicate
+  the models have no place for), `absent_from_source`, `normalized` (a value stored under a
+  different predicate than the file asserted, e.g. a foreign `dcterms:description` read as a
+  concept's definition), and `fatal` buckets; a run either succeeds in full or writes nothing,
+  raising `SkosImportFailed` (carrying the same report) on a fatal problem such as a missing or
+  blank-node identity. RDF/XML input is scanned for unsafe constructs (entity expansion, external
+  references) before it is parsed. No command-line or web-facing entry point yet — programmatic
+  only. See the README.
 - Static, externally assigned identifiers: `ConceptScheme`, `Concept`, and `Collection` each gain a
   `static_uri` field holding an identifier assigned by an external publisher, held exactly as given
   and never recomputed by the app. Nothing in the package overwrites a stored value, and nothing
