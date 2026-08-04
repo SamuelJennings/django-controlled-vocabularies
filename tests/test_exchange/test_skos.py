@@ -1087,6 +1087,48 @@ class TestCollectionsAndMembership:
         assert "http://example.org/rocks/collection/silica-bearing" in report.created
 
 
+class TestOrderedCollectionMemberOrder:
+    """T028 — FR-012: an ordered collection's ``skos:memberList`` is walked in
+    order (research.md R2), ``ordered`` is set, and each member's position
+    matches the file. A re-import whose list states a different order updates
+    the positions to match (FR-013)."""
+
+    def test_an_ordered_collection_is_marked_ordered(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        collection = Collection.objects.get_by_uri("http://example.org/rocks/collection/example-sequence")
+        assert collection.ordered is True
+
+    def test_members_come_back_in_the_files_own_order(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        collection = Collection.objects.get_by_uri("http://example.org/rocks/collection/example-sequence")
+        basalt = Concept.objects.get(static_uri="http://example.org/rocks/basalt")
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        sedimentary = Concept.objects.get(static_uri="http://example.org/rocks/sedimentary")
+        assert collection.members() == [basalt, granite, sedimentary]
+
+    def test_a_reimport_that_changes_the_order_updates_the_positions_to_match(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        collection_pk = Collection.objects.get_by_uri("http://example.org/rocks/collection/example-sequence").pk
+
+        import_skos(FIXTURES / "rocks_updated.ttl")
+
+        collection = Collection.objects.get(pk=collection_pk)
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        sedimentary = Concept.objects.get(static_uri="http://example.org/rocks/sedimentary")
+        basalt = Concept.objects.get(static_uri="http://example.org/rocks/basalt")
+        assert collection.members() == [granite, sedimentary, basalt]
+
+    def test_the_ordered_collections_own_identifier_is_unchanged_by_reordering(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        before = Collection.objects.get_by_uri("http://example.org/rocks/collection/example-sequence")
+
+        import_skos(FIXTURES / "rocks_updated.ttl")
+
+        after = Collection.objects.get_by_uri("http://example.org/rocks/collection/example-sequence")
+        assert after.pk == before.pk
+        assert after.static_uri == before.static_uri
+
+
 class TestFixtureCorpus:
     """T005 — the published-vocabulary fixtures are discoverable and parse (FR-018, SC-016).
 

@@ -990,3 +990,35 @@ longer mentions) — T027-T030's own acceptance scenarios never name this case, 
 missing from a collection that is itself still present, so it is left unbuilt rather than invented
 speculatively. Flagged as a concern in the story report for the next pass to weigh against FR-013's
 general "left untouched and named" wording for any record.
+
+## 2026-08-04T13:05:00Z · Implementer US5 · T028
+
+**Did**: No new production code. T027's `_import_collections` already had to walk
+`skos:memberList` in order via `graph.items()` (research.md R2), set `ordered` from the node's own
+`rdf:type`, and call `Collection.set_member_order()` to make a re-import's changed order match the
+file — the general "resolved (file order) + survivors" reconciliation built for the D30-equivalent
+survivor case (T029's own concern, built ahead of its own acceptance coverage the same way T023 built
+`_resolve_relation_concept`'s cross-scheme guard ahead of T025) already gives an ordinary reorder for
+free. Four tests against `rocks.ttl`'s existing `example-sequence` collection (Phase 0, T005) and its
+already-staged `rocks_updated.ttl` reordering: marked ordered; members returned in the file's own
+order; a re-import with a changed `skos:memberList` updates positions to match; the collection's own
+identifier and primary key are unchanged by the reorder.
+
+**Mutation probe**: replaced the `row.set_member_order(...)` call with a no-op. The reorder test
+failed (`Basalt` where `Granite (revised)` was expected — the stale first-import order), the other
+three passed unaffected (order-marking, initial order, and identity are independent of the reorder
+call). Restored; full suite green again.
+
+**Verified**: `poetry run pytest -q` — 481 passed (477 + 4 new in `test_skos.py`'s new
+`TestOrderedCollectionMemberOrder`). `poetry run ruff check .` — all checks passed. `poetry run ruff
+format --check .` — 21 files already formatted. `poetry run mypy` — success, 9 source files.
+`poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations
+--check --dry-run --settings=tests.settings` — no changes detected. `poetry run pre-commit run
+--all-files` — all hooks passed.
+
+**Next**: T029 — a collection member neither in the file nor already in the database: collection
+still created, member set aside and reported; a re-import that adds and removes members leaves
+membership matching the file, and a member's concept the file no longer mentions at all survives
+(decisions.md D30's rule, applied here).
+
+**Watch**: none.
