@@ -1646,3 +1646,37 @@ re-parametrization). `poetry run ruff check .` — all checks passed. `poetry ru
 issues, 15 files scanned. `poetry run python -m django makemigrations --check --dry-run
 --settings=tests.settings` — no changes detected. `poetry run pre-commit run --all-files` — all hooks
 passed.
+
+## 2026-08-04T15:05:00Z · Forge · review fix 12 — unmodelled predicates are reported for concept nodes only
+
+**Did**: closed a low-severity finding: `_import_unheld_values` was called exactly once, from
+`_import_concept_content`, so it only ever walked a *concept* node's own predicates — neither
+`_resolve_scheme` nor `_import_collections` ran an equivalent walk, so a non-SKOS predicate on the
+vocabulary's own scheme node, or on a collection node, was dropped with no report entry at all.
+FR-014's own wording is unqualified by node kind, and D27's "a story will claim it" justification for
+skipping a not-yet-built SKOS predicate has no equivalent argument for a predicate genuinely outside
+SKOS. Wrote the failing tests first — `TestUnmodelledPredicatesAreReportedForSchemeAndCollectionNodesToo`
+in `test_skos.py`, using a new fixture (`unmodelled_predicate_on_scheme_and_collection.ttl`: a scheme
+node carrying `ex:owner`, a collection node carrying `ex:curatedBy`) — confirmed both predicate-level
+tests failed before any production change: neither predicate appeared anywhere in `report.set_aside`.
+Made the production change: extracted the third clause of `_import_unheld_values`'s own walk (the
+generic "not handled, not SKOS" check) into a shared `_report_unmodelled_predicates(graph, node, uri,
+handled, report)`, parameterised by a per-node-kind `handled` set, and added two new call sites — one
+at the end of `_resolve_scheme` (gated by a new `_HANDLED_SCHEME_PREDICATES`), one inside
+`_import_collections`'s own per-collection loop (gated by a new `_HANDLED_COLLECTION_PREDICATES`).
+Deliberately left `skos:notation`/mapping-predicate reporting concept-only — those are concept-specific
+SKOS constructs by the vocabulary's own semantics, and the review finding names only the generic
+unmodelled-predicate gap. Recorded as decisions.md D45.
+
+**Mutation probe, both node kinds independently**: disabled the scheme-level call only, re-ran the
+test class — the scheme test failed, the collection test stayed green; restored, then disabled the
+collection-level call only — the opposite single test failed. Confirms the two calls are
+independently load-bearing. Restored both, re-ran green.
+
+**Verified**: `poetry run pytest -q` — 590 passed (587 + 3 new in
+`TestUnmodelledPredicatesAreReportedForSchemeAndCollectionNodesToo` — no new `SetAsideReason` member
+this time, so no sweep re-parametrization). `poetry run ruff check .` — all checks passed. `poetry run
+ruff format --check .` — 22 files already formatted. `poetry run mypy` — success, 9 source files.
+`poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations
+--check --dry-run --settings=tests.settings` — no changes detected. `poetry run pre-commit run
+--all-files` — all hooks passed.

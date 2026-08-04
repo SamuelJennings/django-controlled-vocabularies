@@ -1366,3 +1366,56 @@ including it in the ordered list too" (for instance, a convention where `memberL
 partial and authoritative for exactly what it names) — that would be evidence for treating the
 omission as a set-aside-worthy discrepancy rather than a plain append, and belongs in its own
 decision built against that evidence.
+
+## D45 — Unmodelled-predicate reporting is generalised past the concept-only walk it was built for (review fix 12)
+
+`_import_unheld_values` — the function that reports a predicate genuinely outside SKOS under
+`SetAsideReason.UNMODELLED_PREDICATE` — was called exactly once, from `_import_concept_content`, so
+it only ever walked a *concept* node's own predicates. Neither `_resolve_scheme` nor
+`_import_collections` ran an equivalent walk over the vocabulary's own scheme node or a collection
+node, so a non-SKOS predicate asserted on either — a curator's own `ex:owner` on the scheme, an
+`ex:curatedBy` on a collection — was read by nothing and reported by nothing: dropped exactly as
+silently as an unmodelled concept predicate would have been before T021 built this mechanism at all.
+FR-014's own wording ("predicates the models have no place for") names no node kind restriction, and
+D27's justification for the one deliberate exclusion this mechanism already carries — a SKOS
+predicate with a model home but no read path yet, silently skipped rather than reported, because "a
+later story will claim it" — has no equivalent argument for a predicate genuinely outside SKOS
+entirely: no story was ever going to claim `ex:owner`, on any node kind.
+
+**Chosen: extract the third, node-kind-agnostic clause of `_import_unheld_values`'s own walk into a
+shared `_report_unmodelled_predicates(graph, node, uri, handled, report)`, parameterised by a
+per-node-kind `handled` set, and call it once for each of the three record kinds this module
+creates.** `_HANDLED_CONCEPT_PREDICATES` (unchanged) still gates the concept-level call;
+`_HANDLED_SCHEME_PREDICATES` (new — identity, `skos:prefLabel`, `skos:hasTopConcept`,
+`dcterms:description`) gates a new call at the end of `_resolve_scheme`; `_HANDLED_COLLECTION_PREDICATES`
+(new — identity, `skos:prefLabel`, `skos:member`, `skos:memberList`) gates a new call inside
+`_import_collections`'s own per-collection loop. Deliberately *not* extended to the `skos:notation`/
+mapping-predicate checks that also live in `_import_unheld_values`: those two are concept-specific
+SKOS constructs by the vocabulary's own semantics (a mapping links one *concept* to another across
+vocabularies; a notation identifies a *concept*), the review finding names only the generic
+"unmodelled predicate" gap, and extending notation/mapping reporting to scheme and collection nodes
+with no fixture material motivating it would be exactly the speculative reporting D27 already argues
+against for a predicate nothing asks to see reported.
+
+**Placement of the new calls matters.** The scheme call runs only once the scheme row itself has
+been resolved and saved — a scheme that cannot be resolved at all (`VOCABULARY_UNDETERMINED`/
+`VOCABULARY_TARGET_MISMATCH`/`VOCABULARY_AMBIGUOUS`) never reaches it, consistent with every other
+predicate-level check in this module only running for a record that is actually going to exist. The
+collection call runs only for a collection that passed both this fix's own D42/D43 identity checks
+and was actually saved — a collection set aside for belonging to another vocabulary, or for its URI
+clashing with a concept's, has no row for a non-SKOS predicate to be "on" in any sense a curator
+would recognise, so it is not walked either.
+
+**Reproduced before the fix:** a fixture carrying a scheme node with `ex:owner` and a collection node
+with `ex:curatedBy` imported cleanly, with neither predicate appearing anywhere in
+`report.set_aside` — confirmed by two failing tests before the production change, one per node kind.
+
+**Verified independently for each node kind, by mutation.** Disabling only the scheme-level call left
+the collection-level test green and only the scheme-level test failing; disabling only the
+collection-level call reproduced the opposite pattern — confirming the two calls are independently
+load-bearing.
+
+**Revisit if:** a future story finds a real published vocabulary using `skos:notation` or a mapping
+predicate on a scheme or collection node with a use worth modelling — that is new capability
+(a place to *store* it, or a considered reason to report it under NOTATION/MAPPING rather than the
+generic UNMODELLED_PREDICATE), not a correction to this decision's deliberate scope limit.

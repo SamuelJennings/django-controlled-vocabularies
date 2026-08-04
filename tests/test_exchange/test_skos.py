@@ -903,6 +903,44 @@ class TestUnheldValuesAndNormalisation:
         assert not any(entry.reason is SetAsideReason.UNMODELLED_PREDICATE for entry in report.set_aside)
 
 
+class TestUnmodelledPredicatesAreReportedForSchemeAndCollectionNodesToo:
+    """FIX 12 (review, decisions.md D45) — ``_import_unheld_values`` is
+    called once per concept, from ``_import_concept_content``; neither
+    ``_resolve_scheme`` nor ``_import_collections`` ran an equivalent walk,
+    so a non-SKOS predicate on the vocabulary's own scheme node, or on a
+    collection node, was dropped with no report entry at all. FR-014's own
+    wording is unqualified by node kind, and D27's justification for
+    silently skipping a SKOS predicate this module has not built a read
+    path for yet turns on "a story that will claim it" — no story claims a
+    predicate genuinely outside SKOS."""
+
+    def test_an_unmodelled_predicate_on_the_scheme_node_is_reported(self, db):
+        report = import_skos(FIXTURES / "unmodelled_predicate_on_scheme_and_collection.ttl")
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.UNMODELLED_PREDICATE]
+        matches = [entry for entry in entries if entry.subject == "http://example.org/scheme-collection-unmodelled/"]
+        assert len(matches) == 1
+        assert matches[0].params["predicate"] == "http://example.org/custom#owner"
+
+    def test_an_unmodelled_predicate_on_a_collection_node_is_reported(self, db):
+        report = import_skos(FIXTURES / "unmodelled_predicate_on_scheme_and_collection.ttl")
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.UNMODELLED_PREDICATE]
+        matches = [
+            entry
+            for entry in entries
+            if entry.subject == "http://example.org/scheme-collection-unmodelled/collection/group"
+        ]
+        assert len(matches) == 1
+        assert matches[0].params["predicate"] == "http://example.org/custom#curatedBy"
+
+    def test_the_scheme_and_collection_still_import_successfully(self, db):
+        report = import_skos(FIXTURES / "unmodelled_predicate_on_scheme_and_collection.ttl")
+        assert report.fatal == []
+        assert ConceptScheme.objects.filter(static_uri="http://example.org/scheme-collection-unmodelled/").exists()
+        assert Collection.objects.filter(
+            static_uri="http://example.org/scheme-collection-unmodelled/collection/group"
+        ).exists()
+
+
 class TestNoPreferredLabelFinishedByUS3:
     """T022 — FR-006: a concept with no preferred label in the vocabulary's
     default language is set aside under ``NO_PREFERRED_LABEL`` and named in

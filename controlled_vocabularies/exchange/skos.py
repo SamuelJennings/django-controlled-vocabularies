@@ -431,6 +431,10 @@ def _resolve_scheme(
         report.add_created(row.uri)
     else:
         report.add_updated(row.uri)
+    # FIX 12 (review, decisions.md D45): the scheme node itself can carry a
+    # non-SKOS predicate this module has no place for, exactly as a concept
+    # or a collection can; _import_unheld_values only ever walked a concept.
+    _report_unmodelled_predicates(graph, declared_node, declared_uri, _HANDLED_SCHEME_PREDICATES, report)
     return row, declared_uri
 
 
@@ -628,6 +632,65 @@ _HANDLED_CONCEPT_PREDICATES = frozenset(
     | set(MAPPING_PREDICATES)
 )
 
+#: Every predicate the vocabulary's own scheme node carries that
+#: :func:`_resolve_scheme` already reads and accounts for (FIX 12, review,
+#: decisions.md D45): its own identity, name (``skos:prefLabel``), top
+#: concepts, and description. ``skos:hasTopConcept`` is read *about* a
+#: concept, not held for the concept the way ``_HANDLED_CONCEPT_PREDICATES``
+#: is scoped, so it is named separately here rather than shared with it.
+_HANDLED_SCHEME_PREDICATES = frozenset(
+    {
+        rdflib.RDF.type,
+        SKOS.prefLabel,
+        SKOS.hasTopConcept,
+        DCTERMS.description,
+    }
+)
+
+#: Every predicate a collection node carries that :func:`_import_collections`
+#: already reads and accounts for (FIX 12, review, decisions.md D45): its own
+#: identity, name, and membership (both ``skos:member`` and
+#: ``skos:memberList``, per FIX 11).
+_HANDLED_COLLECTION_PREDICATES = frozenset(
+    {
+        rdflib.RDF.type,
+        SKOS.prefLabel,
+        SKOS.member,
+        SKOS.memberList,
+    }
+)
+
+
+def _report_unmodelled_predicates(
+    graph: rdflib.Graph,
+    node: rdflib.term.Node,
+    uri: str,
+    handled: frozenset[rdflib.URIRef],
+    report: ImportReport,
+) -> None:
+    """Set aside and report a predicate ``node`` carries that is neither in
+    ``handled`` — already accounted for elsewhere, for whatever kind of node
+    this is — nor itself a SKOS predicate this module has no read path for
+    *yet* (FIX 12, review, decisions.md D45; generalises D27's own concept-only
+    rule past the single node kind it was written for). A SKOS predicate with
+    no read path is deliberately not reported: the models do have a place for
+    it, so FR-014's "the models have no place for" does not apply, only "not
+    yet built" does. A predicate genuinely outside SKOS — with no model home
+    regardless of the node's own kind — is reported under
+    :data:`SetAsideReason.UNMODELLED_PREDICATE`, naming the predicate's own
+    URI (there is no curated CURIE table for a predicate this module has
+    never seen before). Called once per node this module treats as a record
+    with its own identity: a concept, the vocabulary's own scheme node, and a
+    collection, each with its own ``handled`` set naming what it already
+    reads.
+    """
+    for other_predicate, _obj in graph.predicate_objects(node):
+        if other_predicate in handled:
+            continue
+        if str(other_predicate).startswith(str(SKOS)):
+            continue
+        report.add_set_aside(SetAsideReason.UNMODELLED_PREDICATE, subject=uri, predicate=str(other_predicate))
+
 
 def _import_unheld_values(graph: rdflib.Graph, node: rdflib.term.Node, uri: str, report: ImportReport) -> None:
     """Set aside and report the values on ``concept`` the models have no place for (T021, FR-014).
@@ -638,9 +701,8 @@ def _import_unheld_values(graph: rdflib.Graph, node: rdflib.term.Node, uri: str,
     mapping (:data:`MAPPING_PREDICATES`, :data:`SetAsideReason.MAPPING`,
     naming the predicate's CURIE); and any predicate this concept carries
     that is neither handled elsewhere in this module nor itself a SKOS
-    predicate (:data:`SetAsideReason.UNMODELLED_PREDICATE`, naming the
-    predicate's own URI — there is no curated CURIE table for a predicate
-    this module has never seen before).
+    predicate (:func:`_report_unmodelled_predicates`,
+    :data:`SetAsideReason.UNMODELLED_PREDICATE`).
 
     A SKOS predicate this module simply does not read *yet* —
     ``skos:broader``/``narrower``/``related`` (US-4) and
@@ -657,12 +719,7 @@ def _import_unheld_values(graph: rdflib.Graph, node: rdflib.term.Node, uri: str,
         for _obj in graph.objects(node, mapping_predicate):
             report.add_set_aside(SetAsideReason.MAPPING, subject=uri, predicate=name)
 
-    for other_predicate, _obj in graph.predicate_objects(node):
-        if other_predicate in _HANDLED_CONCEPT_PREDICATES:
-            continue
-        if str(other_predicate).startswith(str(SKOS)):
-            continue
-        report.add_set_aside(SetAsideReason.UNMODELLED_PREDICATE, subject=uri, predicate=str(other_predicate))
+    _report_unmodelled_predicates(graph, node, uri, _HANDLED_CONCEPT_PREDICATES, report)
 
 
 def _resolve_concept_reference(
@@ -1030,6 +1087,7 @@ def _import_collections(
             report.add_created(uri)
         else:
             report.add_updated(uri)
+        _report_unmodelled_predicates(graph, node, uri, _HANDLED_COLLECTION_PREDICATES, report)
 
         if ordered:
             member_list_node = graph.value(node, SKOS.memberList)
