@@ -43,133 +43,147 @@ _EXAMPLE_FATAL_PARAMS = {
 }
 
 
-def test_import_report_starts_with_four_empty_buckets():
-    report = ImportReport()
-    assert report.created == []
-    assert report.updated == []
-    assert report.set_aside == []
-    assert report.absent_from_source == []
+class TestImportReportBuckets:
+    """``ImportReport`` starts with four empty buckets, and each ``add_*``
+    method appends only to its own — never fatal, which is tracked apart."""
+
+    def test_import_report_starts_with_four_empty_buckets(self):
+        report = ImportReport()
+        assert report.created == []
+        assert report.updated == []
+        assert report.set_aside == []
+        assert report.absent_from_source == []
+
+    def test_add_created_and_add_updated_append_to_their_own_bucket(self):
+        report = ImportReport()
+        report.add_created("https://example.org/vocab/rocks")
+        report.add_updated("https://example.org/vocab/rocks/granite")
+        assert report.created == ["https://example.org/vocab/rocks"]
+        assert report.updated == ["https://example.org/vocab/rocks/granite"]
+        # Adding to one bucket never touches another.
+        assert report.set_aside == []
+        assert report.absent_from_source == []
+
+    def test_add_absent_from_source_appends_the_subject(self):
+        report = ImportReport()
+        report.add_absent_from_source("https://example.org/vocab/rocks/basalt")
+        assert report.absent_from_source == ["https://example.org/vocab/rocks/basalt"]
+
+    def test_add_set_aside_records_reason_subject_and_params_as_data(self):
+        report = ImportReport()
+        report.add_set_aside(
+            SetAsideReason.UNCONFIGURED_LANGUAGE,
+            "https://example.org/vocab/rocks/granite",
+            language="es",
+        )
+        assert len(report.set_aside) == 1
+        entry = report.set_aside[0]
+        assert isinstance(entry, SetAsideEntry)
+        # Inspectable as data (spec US1-11): the reason and subject are read directly,
+        # never by parsing a rendered message.
+        assert entry.reason is SetAsideReason.UNCONFIGURED_LANGUAGE
+        assert entry.subject == "https://example.org/vocab/rocks/granite"
+        assert entry.params == {"language": "es"}
+
+    def test_set_aside_by_reason_groups_and_counts_without_parsing_prose(self):
+        report = ImportReport()
+        report.add_set_aside(SetAsideReason.NOTATION, "https://example.org/vocab/rocks/granite")
+        report.add_set_aside(SetAsideReason.NOTATION, "https://example.org/vocab/rocks/basalt")
+        report.add_set_aside(
+            SetAsideReason.UNCONFIGURED_LANGUAGE, "https://example.org/vocab/rocks/granite", language="es"
+        )
+        grouped = report.set_aside_by_reason()
+        assert len(grouped[SetAsideReason.NOTATION]) == 2
+        assert len(grouped[SetAsideReason.UNCONFIGURED_LANGUAGE]) == 1
+        assert SetAsideReason.MAPPING not in grouped
 
 
-def test_add_created_and_add_updated_append_to_their_own_bucket():
-    report = ImportReport()
-    report.add_created("https://example.org/vocab/rocks")
-    report.add_updated("https://example.org/vocab/rocks/granite")
-    assert report.created == ["https://example.org/vocab/rocks"]
-    assert report.updated == ["https://example.org/vocab/rocks/granite"]
-    # Adding to one bucket never touches another.
-    assert report.set_aside == []
-    assert report.absent_from_source == []
+class TestSetAsideEntry:
+    """A ``SetAsideEntry`` is a frozen record — nothing downstream can mutate
+    a reason, subject or params after it has been reported."""
+
+    def test_set_aside_entry_is_immutable(self):
+        entry = SetAsideEntry(reason=SetAsideReason.NOTATION, subject="https://example.org/vocab/x")
+        with pytest.raises((AttributeError, TypeError)):
+            entry.subject = "changed"
 
 
-def test_add_absent_from_source_appends_the_subject():
-    report = ImportReport()
-    report.add_absent_from_source("https://example.org/vocab/rocks/basalt")
-    assert report.absent_from_source == ["https://example.org/vocab/rocks/basalt"]
+class TestSetAsideReasonVocabulary:
+    """Every member of the closed ``SetAsideReason`` vocabulary is lazily
+    translatable, carries a named ``%(subject)s`` placeholder, and renders
+    with its own example params (Article XII)."""
+
+    @pytest.mark.parametrize("reason", list(SetAsideReason))
+    def test_every_reason_has_a_translatable_label(self, reason):
+        assert isinstance(reason.label, Promise), f"{reason} label is not lazily translatable"
+
+    @pytest.mark.parametrize("reason", list(SetAsideReason))
+    def test_every_reason_template_is_translatable_with_a_named_subject_placeholder(self, reason):
+        assert isinstance(reason.template, Promise), f"{reason} template is not lazily translatable"
+        assert "%(subject)s" in str(reason.template), f"{reason} template lacks a named %(subject)s placeholder"
+
+    @pytest.mark.parametrize("reason", list(SetAsideReason))
+    def test_every_reason_renders_with_its_example_params(self, reason):
+        entry = SetAsideEntry(reason=reason, subject="https://example.org/vocab/x", params=_EXAMPLE_PARAMS[reason])
+        rendered = entry.render()
+        assert isinstance(rendered, str)
+        assert "https://example.org/vocab/x" in rendered
+        for value in _EXAMPLE_PARAMS[reason].values():
+            assert value in rendered
 
 
-def test_add_set_aside_records_reason_subject_and_params_as_data():
-    report = ImportReport()
-    report.add_set_aside(
-        SetAsideReason.UNCONFIGURED_LANGUAGE,
-        "https://example.org/vocab/rocks/granite",
-        language="es",
-    )
-    assert len(report.set_aside) == 1
-    entry = report.set_aside[0]
-    assert isinstance(entry, SetAsideEntry)
-    # Inspectable as data (spec US1-11): the reason and subject are read directly,
-    # never by parsing a rendered message.
-    assert entry.reason is SetAsideReason.UNCONFIGURED_LANGUAGE
-    assert entry.subject == "https://example.org/vocab/rocks/granite"
-    assert entry.params == {"language": "es"}
+class TestFatalBucketAndFinding:
+    """T007 — the fatal bucket starts empty, ``add_fatal`` records reason,
+    subject and params as data, and a recorded ``FatalFinding`` is frozen."""
+
+    def test_import_report_starts_with_an_empty_fatal_bucket(self):
+        assert ImportReport().fatal == []
+
+    def test_add_fatal_records_reason_subject_and_params_as_data(self):
+        report = ImportReport()
+        report.add_fatal(FatalReason.MISSING_IDENTITY, "https://example.org/vocab/rocks/blank")
+        assert len(report.fatal) == 1
+        entry = report.fatal[0]
+        assert isinstance(entry, FatalFinding)
+        assert entry.reason is FatalReason.MISSING_IDENTITY
+        assert entry.subject == "https://example.org/vocab/rocks/blank"
+        assert entry.params == {}
+
+    def test_fatal_finding_is_immutable(self):
+        finding = FatalFinding(reason=FatalReason.MISSING_IDENTITY, subject="https://example.org/vocab/x")
+        with pytest.raises((AttributeError, TypeError)):
+            finding.subject = "changed"
 
 
-def test_set_aside_by_reason_groups_and_counts_without_parsing_prose():
-    report = ImportReport()
-    report.add_set_aside(SetAsideReason.NOTATION, "https://example.org/vocab/rocks/granite")
-    report.add_set_aside(SetAsideReason.NOTATION, "https://example.org/vocab/rocks/basalt")
-    report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, "https://example.org/vocab/rocks/granite", language="es")
-    grouped = report.set_aside_by_reason()
-    assert len(grouped[SetAsideReason.NOTATION]) == 2
-    assert len(grouped[SetAsideReason.UNCONFIGURED_LANGUAGE]) == 1
-    assert SetAsideReason.MAPPING not in grouped
+class TestFatalReasonVocabulary:
+    """Every member of the closed ``FatalReason`` vocabulary is lazily
+    translatable, carries a named ``%(subject)s`` placeholder, and renders
+    with its own example params (Article XII)."""
+
+    @pytest.mark.parametrize("reason", list(FatalReason))
+    def test_every_fatal_reason_has_a_translatable_label(self, reason):
+        assert isinstance(reason.label, Promise), f"{reason} label is not lazily translatable"
+
+    @pytest.mark.parametrize("reason", list(FatalReason))
+    def test_every_fatal_reason_template_is_translatable_with_a_named_subject_placeholder(self, reason):
+        assert isinstance(reason.template, Promise), f"{reason} template is not lazily translatable"
+        assert "%(subject)s" in str(reason.template), f"{reason} template lacks a named %(subject)s placeholder"
+
+    @pytest.mark.parametrize("reason", list(FatalReason))
+    def test_every_fatal_reason_renders_with_its_example_params(self, reason):
+        entry = FatalFinding(reason=reason, subject="https://example.org/vocab/x", params=_EXAMPLE_FATAL_PARAMS[reason])
+        rendered = entry.render()
+        assert isinstance(rendered, str)
+        assert "https://example.org/vocab/x" in rendered
+        for value in _EXAMPLE_FATAL_PARAMS[reason].values():
+            assert value in rendered
 
 
-@pytest.mark.parametrize("reason", list(SetAsideReason))
-def test_every_reason_has_a_translatable_label(reason):
-    assert isinstance(reason.label, Promise), f"{reason} label is not lazily translatable"
+class TestReasonVocabulariesAreDisjoint:
+    """decisions.md D3/D8: a fatal finding is never one of the set-aside
+    reasons — the two closed vocabularies never overlap."""
 
-
-@pytest.mark.parametrize("reason", list(SetAsideReason))
-def test_every_reason_template_is_translatable_with_a_named_subject_placeholder(reason):
-    assert isinstance(reason.template, Promise), f"{reason} template is not lazily translatable"
-    assert "%(subject)s" in str(reason.template), f"{reason} template lacks a named %(subject)s placeholder"
-
-
-@pytest.mark.parametrize("reason", list(SetAsideReason))
-def test_every_reason_renders_with_its_example_params(reason):
-    entry = SetAsideEntry(reason=reason, subject="https://example.org/vocab/x", params=_EXAMPLE_PARAMS[reason])
-    rendered = entry.render()
-    assert isinstance(rendered, str)
-    assert "https://example.org/vocab/x" in rendered
-    for value in _EXAMPLE_PARAMS[reason].values():
-        assert value in rendered
-
-
-def test_set_aside_entry_is_immutable():
-    entry = SetAsideEntry(reason=SetAsideReason.NOTATION, subject="https://example.org/vocab/x")
-    with pytest.raises((AttributeError, TypeError)):
-        entry.subject = "changed"
-
-
-# --- FatalReason / FatalFinding (T007) --------------------------------------
-
-
-def test_import_report_starts_with_an_empty_fatal_bucket():
-    assert ImportReport().fatal == []
-
-
-def test_add_fatal_records_reason_subject_and_params_as_data():
-    report = ImportReport()
-    report.add_fatal(FatalReason.MISSING_IDENTITY, "https://example.org/vocab/rocks/blank")
-    assert len(report.fatal) == 1
-    entry = report.fatal[0]
-    assert isinstance(entry, FatalFinding)
-    assert entry.reason is FatalReason.MISSING_IDENTITY
-    assert entry.subject == "https://example.org/vocab/rocks/blank"
-    assert entry.params == {}
-
-
-@pytest.mark.parametrize("reason", list(FatalReason))
-def test_every_fatal_reason_has_a_translatable_label(reason):
-    assert isinstance(reason.label, Promise), f"{reason} label is not lazily translatable"
-
-
-@pytest.mark.parametrize("reason", list(FatalReason))
-def test_every_fatal_reason_template_is_translatable_with_a_named_subject_placeholder(reason):
-    assert isinstance(reason.template, Promise), f"{reason} template is not lazily translatable"
-    assert "%(subject)s" in str(reason.template), f"{reason} template lacks a named %(subject)s placeholder"
-
-
-@pytest.mark.parametrize("reason", list(FatalReason))
-def test_every_fatal_reason_renders_with_its_example_params(reason):
-    entry = FatalFinding(reason=reason, subject="https://example.org/vocab/x", params=_EXAMPLE_FATAL_PARAMS[reason])
-    rendered = entry.render()
-    assert isinstance(rendered, str)
-    assert "https://example.org/vocab/x" in rendered
-    for value in _EXAMPLE_FATAL_PARAMS[reason].values():
-        assert value in rendered
-
-
-def test_fatal_finding_is_immutable():
-    finding = FatalFinding(reason=FatalReason.MISSING_IDENTITY, subject="https://example.org/vocab/x")
-    with pytest.raises((AttributeError, TypeError)):
-        finding.subject = "changed"
-
-
-def test_set_aside_reason_and_fatal_reason_are_disjoint_vocabularies():
-    # decisions.md D3/D8: a fatal finding is never one of the set-aside reasons.
-    set_aside_values = {reason.value for reason in SetAsideReason}
-    fatal_values = {reason.value for reason in FatalReason}
-    assert set_aside_values.isdisjoint(fatal_values)
+    def test_set_aside_reason_and_fatal_reason_are_disjoint_vocabularies(self):
+        set_aside_values = {reason.value for reason in SetAsideReason}
+        fatal_values = {reason.value for reason in FatalReason}
+        assert set_aside_values.isdisjoint(fatal_values)

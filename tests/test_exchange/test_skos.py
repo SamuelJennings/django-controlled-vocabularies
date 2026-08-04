@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 import rdflib
 
+import controlled_vocabularies.exchange as exchange
 from controlled_vocabularies.exchange.report import FatalReason, SetAsideReason
 from controlled_vocabularies.exchange.safety import UnsafeRdfXmlError
 from controlled_vocabularies.exchange.skos import SkosImportError, SkosImportFailed, _read_graph, import_skos
@@ -23,6 +24,23 @@ SECURITY_FIXTURES = Path(__file__).parent.parent / "fixtures" / "security"
 
 SKOS = rdflib.Namespace("http://www.w3.org/2004/02/skos/core#")
 ROCKS_URI = "http://example.org/rocks/"
+ROCKS_SCHEME_URI = rdflib.URIRef(ROCKS_URI)
+
+# (filename, rdflib format) for the base vocabulary in its three serializations.
+BASE_SERIALIZATIONS = [
+    ("rocks.ttl", "turtle"),
+    ("rocks.rdf", "xml"),
+    ("rocks.jsonld", "json-ld"),
+]
+
+# Every fixture in the directory, whatever its purpose, must at least parse as
+# RDF (fatal-path fixtures are semantically invalid for import, never
+# syntactically invalid RDF — that distinction is exactly what makes them
+# useful fatal-path material rather than parser-crash material). Discovered by
+# walking the directory rather than listed by hand, so a fixture added by a
+# later story is covered without anyone remembering to register it.
+SUFFIX_FORMATS = {".ttl": "turtle", ".rdf": "xml", ".jsonld": "json-ld"}
+ALL_FIXTURES = sorted((path.name, SUFFIX_FORMATS[path.suffix]) for path in FIXTURES.iterdir() if path.is_file())
 
 
 class TestReadGraph:
@@ -599,3 +617,160 @@ class TestAtomicityOnAPopulatedDatabase:
         assert not Concept.objects.filter(label="Ghost concept").exists()
         scheme.refresh_from_db()
         assert scheme.name == name_before
+
+
+class TestFixtureCorpus:
+    """T005 — the published-vocabulary fixtures are discoverable and parse (FR-018, SC-016).
+
+    The suite's own fixture set, not built inline: one small vocabulary ("Rock
+    types") in each of the three supported serializations, an edited copy for the
+    re-import scenarios, and the malformed documents the fatal paths (D3, FR-004)
+    need. `rdflib` is a test-only tool here (T005 is Phase 0 — the reader that
+    makes it a genuine runtime dependency lands at T006, decisions.md D12); every
+    fixture is exercised the same way a real import would read it.
+    """
+
+    def test_the_fixture_directory_is_not_empty(self):
+        # Guards the discovery above: an empty or moved directory would otherwise
+        # parametrize to nothing and report as a clean pass.
+        assert len(ALL_FIXTURES) >= len(BASE_SERIALIZATIONS)
+
+    @pytest.mark.parametrize("filename,fmt", ALL_FIXTURES)
+    def test_every_fixture_is_discoverable_and_parses(self, filename, fmt):
+        path = FIXTURES / filename
+        assert path.is_file(), f"{filename} is not discoverable under tests/fixtures/skos/"
+        graph = rdflib.Graph()
+        graph.parse(path, format=fmt)
+        assert len(graph) > 0, f"{filename} parsed to an empty graph"
+
+    @pytest.mark.parametrize("filename,fmt", BASE_SERIALIZATIONS)
+    def test_base_vocabulary_declares_the_scheme_and_its_top_concepts(self, filename, fmt):
+        graph = rdflib.Graph()
+        graph.parse(FIXTURES / filename, format=fmt)
+        assert (ROCKS_SCHEME_URI, rdflib.RDF.type, SKOS.ConceptScheme) in graph
+        top_concepts = set(graph.objects(ROCKS_SCHEME_URI, SKOS.hasTopConcept))
+        assert top_concepts == {
+            rdflib.URIRef("http://example.org/rocks/igneous"),
+            rdflib.URIRef("http://example.org/rocks/sedimentary"),
+        }
+
+    @pytest.mark.parametrize("filename,fmt", BASE_SERIALIZATIONS)
+    def test_base_vocabulary_carries_multilingual_labels_notes_hierarchy_related_and_collections(self, filename, fmt):
+        graph = rdflib.Graph()
+        graph.parse(FIXTURES / filename, format=fmt)
+        granite = rdflib.URIRef("http://example.org/rocks/granite")
+        quartz = rdflib.URIRef("http://example.org/rocks/quartz")
+        igneous = rdflib.URIRef("http://example.org/rocks/igneous")
+
+        # Multilingual preferred labels (en/de/fr — the test settings' configured languages).
+        granite_labels = {(o.language, str(o)) for o in graph.objects(granite, SKOS.prefLabel)}
+        assert granite_labels == {("en", "Granite"), ("de", "Granit"), ("fr", "Granite")}
+
+        # Notes of several kinds, spread across concepts.
+        assert (igneous, SKOS.definition, None) in graph
+        assert (granite, SKOS.scopeNote, None) in graph
+        assert (quartz, SKOS.historyNote, None) in graph
+        assert (quartz, SKOS.changeNote, None) in graph
+        assert (quartz, SKOS.note, None) in graph
+
+        # A broader/narrower hierarchy and a related pair.
+        assert (granite, SKOS.broader, igneous) in graph
+        assert (granite, SKOS.related, quartz) in graph
+
+        # An unordered and an ordered collection.
+        unordered = rdflib.URIRef("http://example.org/rocks/collection/silica-bearing")
+        ordered = rdflib.URIRef("http://example.org/rocks/collection/example-sequence")
+        assert (unordered, rdflib.RDF.type, SKOS.Collection) in graph
+        assert set(graph.objects(unordered, SKOS.member)) == {granite, quartz}
+        assert (ordered, rdflib.RDF.type, SKOS.OrderedCollection) in graph
+        member_list = graph.value(ordered, SKOS.memberList)
+        assert list(graph.items(member_list)) == [
+            rdflib.URIRef("http://example.org/rocks/basalt"),
+            granite,
+            rdflib.URIRef("http://example.org/rocks/sedimentary"),
+        ]
+
+    def test_the_three_base_serializations_are_isomorphic(self):
+        from rdflib.compare import isomorphic
+
+        graphs = []
+        for filename, fmt in BASE_SERIALIZATIONS:
+            graph = rdflib.Graph()
+            graph.parse(FIXTURES / filename, format=fmt)
+            graphs.append(graph)
+        assert isomorphic(graphs[0], graphs[1]), "rocks.ttl and rocks.rdf are not isomorphic"
+        assert isomorphic(graphs[0], graphs[2]), "rocks.ttl and rocks.jsonld are not isomorphic"
+
+    def test_updated_fixture_carries_the_four_re_import_edits(self):
+        graph = rdflib.Graph()
+        graph.parse(FIXTURES / "rocks_updated.ttl", format="turtle")
+        granite = rdflib.URIRef("http://example.org/rocks/granite")
+        quartz = rdflib.URIRef("http://example.org/rocks/quartz")
+
+        # 1. A corrected preferred label.
+        assert (granite, SKOS.prefLabel, rdflib.Literal("Granite (revised)", lang="en")) in graph
+        assert (granite, SKOS.prefLabel, rdflib.Literal("Granite", lang="en")) not in graph
+
+        # 2. A removed alternative label.
+        assert (granite, SKOS.altLabel, None) not in graph
+
+        # 3. A concept dropped from the file entirely (taking its related edge and
+        # its collection membership with it) — still present in an already-imported
+        # database, so the re-import scenario names it as absent from this source.
+        assert (quartz, rdflib.RDF.type, SKOS.Concept) not in graph
+        assert (granite, SKOS.related, quartz) not in graph
+        unordered = rdflib.URIRef("http://example.org/rocks/collection/silica-bearing")
+        assert quartz not in set(graph.objects(unordered, SKOS.member))
+
+        # 4. A changed collection order.
+        ordered = rdflib.URIRef("http://example.org/rocks/collection/example-sequence")
+        member_list = graph.value(ordered, SKOS.memberList)
+        assert list(graph.items(member_list)) == [
+            granite,
+            rdflib.URIRef("http://example.org/rocks/sedimentary"),
+            rdflib.URIRef("http://example.org/rocks/basalt"),
+        ]
+
+    def test_blank_node_concept_fixture_has_no_uri_identity(self):
+        graph = rdflib.Graph()
+        graph.parse(FIXTURES / "blank_node_concept.ttl", format="turtle")
+        concepts = list(graph.subjects(rdflib.RDF.type, SKOS.Concept))
+        assert len(concepts) == 1
+        assert isinstance(concepts[0], rdflib.BNode), "the fixture's concept must be a blank node, not a URI"
+
+    def test_blank_node_collection_fixture_has_no_uri_identity(self):
+        graph = rdflib.Graph()
+        graph.parse(FIXTURES / "blank_node_collection.ttl", format="turtle")
+        collections = list(graph.subjects(rdflib.RDF.type, SKOS.Collection))
+        assert len(collections) == 1
+        assert isinstance(collections[0], rdflib.BNode), "the fixture's collection must be a blank node, not a URI"
+
+    def test_refused_uri_scheme_fixture_uses_a_disallowed_scheme(self):
+        from controlled_vocabularies.conf import DEFAULT_ALLOWED_URI_SCHEMES
+
+        graph = rdflib.Graph()
+        graph.parse(FIXTURES / "refused_uri_scheme.ttl", format="turtle")
+        concepts = list(graph.subjects(rdflib.RDF.type, SKOS.Concept))
+        assert len(concepts) == 1
+        scheme = str(concepts[0]).split(":", 1)[0]
+        assert scheme not in DEFAULT_ALLOWED_URI_SCHEMES, (
+            f"fixture's concept scheme '{scheme}' must be outside the default allowlist"
+        )
+
+
+class TestExchangePackage:
+    """T002 — the ``controlled_vocabularies.exchange`` package exists and is
+    importable. The package is the module tree the import feature lands in
+    (plan.md Project Structure); this only asserts the scaffold itself is in
+    place. Homed here rather than in a file of its own because the package's
+    own surface — ``import_skos`` and its exceptions — is exercised by this
+    module more than any other in ``exchange``.
+    """
+
+    def test_package_is_importable(self):
+        assert exchange is not None
+
+    def test_package_has_a_module_docstring(self):
+        # A public package gets documented (Article VI); this catches an
+        # accidentally-empty __init__.py before anything is re-exported from it.
+        assert exchange.__doc__, "controlled_vocabularies.exchange has no module docstring"
