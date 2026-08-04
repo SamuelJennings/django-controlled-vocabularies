@@ -1612,3 +1612,79 @@ suite re-ran green.
 **Revisit if:** a future story gives the models a real place to store a value with no language (a
 language-neutral text field, or an explicit "unknown language" marker) — that is new modelling
 capability, not a correction to this decision's reading of FR-008/FR-009 as written today.
+
+## D49 — `_assign_unique_slug` reads the scheme's taken slugs once, in one query, and carries the running result across the whole import instead of one query per suffix attempt (review fix 16, performance)
+
+`_assign_unique_slug`'s `while Concept.objects.filter(scheme=scheme, slug=candidate).exclude(pk=concept.pk).exists()`
+loop issued one query per suffix attempt, and the suffix counter restarted at 1 for every concept, so
+N concepts deriving the same base slug cost N(N+1)/2 round-trips — all inside the one
+`transaction.atomic()` the whole run sits in. D6 already establishes that two source concepts sharing
+a preferred label is the *expected* case for a published file, not a rare edge condition, and plan.md's
+own reading strategy explicitly rules out anything quadratic in concept count. Measured directly
+against a 40-concept file where every concept shares one label: 1,069 queries before this fix.
+
+**Chosen: fetch every `(slug, static_uri)` pair already held in the target scheme once, in a single
+query, into a `dict[str, str | None]` (`taken_slugs`), and thread it through `_import_concepts`'s own
+per-concept loop into `_assign_unique_slug`, which reads and mutates it in place rather than querying
+the database at all.** A slug is free when `taken_slugs` has no entry for it, or when the entry names
+the concept currently being assigned; otherwise the numeric suffix increments and the check repeats
+against the same in-memory dict. Once a concept's slug is decided, `taken_slugs[candidate]` is set to
+its `static_uri`, so the next concept sharing that base label — processed later in the same,
+already-deterministic URI-sorted order (D6) — sees it as taken without a query. Net query cost for the
+whole shared-label group drops from quadratic to the one seeding query plus a small, genuinely constant
+per-concept cost from everything else the per-concept loop already does (`Concept.objects.get_by_uri`,
+the `Collection` cross-kind check, `Concept.save()`'s own guard, the insert itself, and the
+label/note/unheld-value writes) — none of which scale with the *size of the shared-label group*, only
+with N itself, which is the linear cost this fix accepts as unavoidable.
+
+**Keyed by `static_uri`, not `pk`, because a newly created concept has no primary key at the point its
+own slug is being decided.** `pk` cannot distinguish "this is my own, not-yet-saved row" from "nothing
+has claimed this slug yet" the way the concept's own `static_uri` — already assigned by
+`_import_concepts` before `_assign_unique_slug` is ever called, and immutable for the rest of the run
+— can. Seeding `taken_slugs` from `Concept.objects.filter(scheme=target_scheme).values_list("slug",
+"static_uri")` (the raw column, not the `.uri` property FIX 7/D41 uses for *reporting*) is deliberate
+too: some existing concepts carry a `NULL` `static_uri` (a locally authored record, per
+`StaticUriModel`'s own docstring — "leave blank while this record is authored here"), and `None` is a
+perfectly good "not this concept" sentinel for this internal comparison, unlike a display-facing
+report entry, where D41 already established that showing `None` to a curator would be actively
+misleading. No two real imported concepts ever share a `static_uri` (identity is unique by
+construction), so a `None` collision between two different local rows is harmless: neither is ever the
+`concept.static_uri` being compared against.
+
+**`taken_slugs` is seeded from the whole scheme, not only the concepts this run will touch**, so a
+concept the file never mentions at all this run — left completely untouched per FR-013, its slug never
+recomputed — still correctly blocks a *newly processed* concept from claiming the same slug. Nothing
+about "absent from source" concepts changes: they are never written to `taken_slugs` a second time,
+only read from it as an initial claim that persists for the run's whole duration.
+
+**`Concept.save()`'s own identical `EXISTS` check (models.py, `Concept.save()`) is deliberately left
+in place, not removed.** It is that model's own integrity backstop — the docstring's own words, "the
+UniqueConstraint is the integrity backstop", guarding both a derived slug and an explicit one, from
+*any* caller, not only this importer (a curator's own admin/GUI edit, a factory, a future script). This
+importer's own `taken_slugs` guarantees no collision for what *this run* writes, but the model has no
+way to know that its caller already did that work, and weakening the model's own guard to trust one
+particular caller would reopen the hole R4 built it to close for every other one. Left as one extra,
+genuinely constant-cost query per `Concept.save()` call — linear in N, not quadratic in a shared-label
+group's size — which is the acceptable, documented cost of keeping that guarantee for every caller.
+
+**Verified by a query-count bound, not merely argued — the task's own instruction, since a
+correctness-only test cannot distinguish O(N) from O(N²).** A new
+`TestSlugAssignmentQueryCountIsLinearInASharedLabelGroup` in `test_skos.py` writes a 40-concept Turtle
+file where every concept shares one `skos:prefLabel`, wraps the import in
+`django.test.utils.CaptureQueriesContext`, and asserts the captured query count stays under `12 * n`.
+Measured directly against this exact fixture and settings: 1,069 queries before this fix, 250 after,
+and confirmed linear (not merely "smaller") by measuring N=20/40/80/160 post-fix — 130/250/490/970,
+each doubling of N roughly doubling the count rather than roughly quadrupling it, the way N(N+1)/2
+would. A second new test, `test_the_same_file_imported_twice_produces_the_same_slugs`, re-imports the
+same 12-concept shared-label file twice and asserts every concept's slug is identical both times —
+D6's determinism requirement, now resting on `taken_slugs` being seeded fresh, deterministically, from
+the database on every run rather than on any accumulated in-process state.
+
+**Verified by mutation.** Restored the original per-suffix `Concept.objects.filter(...).exists()` loop
+(keeping `taken_slugs` threaded through elsewhere unchanged) — the new query-count test failed at
+1,070 queries for the same 40-concept fixture, correctly rejecting the reintroduced quadratic shape;
+restored the fix immediately, full suite re-ran green.
+
+**Revisit if:** a future story needs `_assign_unique_slug` reachable outside `_import_concepts`'s own
+per-concept loop (it currently has exactly one caller) — `taken_slugs` would need seeding at whatever
+new call site takes on that responsibility, the same discipline this fix already applies here.

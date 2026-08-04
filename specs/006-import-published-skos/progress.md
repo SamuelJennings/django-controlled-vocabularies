@@ -1857,3 +1857,49 @@ instances in `test_report.py`). `poetry run ruff check .` — all checks passed.
 success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m
 django makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry run
 pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T16:45:00Z · Forge · review fix 16 — `_assign_unique_slug` is quadratic in a shared-label group (performance)
+
+**Did**: `_assign_unique_slug`'s `while Concept.objects.filter(scheme=..., slug=candidate).exclude(pk=...).exists()`
+loop issued one query per suffix attempt, restarting the counter at 1 for every concept, so N concepts
+sharing a base label cost N(N+1)/2 round-trips — inside the one `transaction.atomic()` the whole run
+sits in. D6 already treats this as the expected case for a published file, not an edge condition, and
+plan.md's reading strategy explicitly rules out anything quadratic in concept count.
+
+Wrote the failing test first: a new `_write_shared_label_file` helper generates a Turtle file where N
+concepts all share one `skos:prefLabel`, and `TestSlugAssignmentQueryCountIsLinearInASharedLabelGroup`
+wraps the import in `django.test.utils.CaptureQueriesContext`, asserting the captured query count for
+N=40 stays under `12 * n`. Before the fix: 1,069 queries — the test failed exactly as expected,
+confirming the measured quadratic cost directly against this repository's own models and settings
+(not merely the brief's own numbers, which used a different fixture shape).
+
+Production change: `_import_concepts` now fetches every `(slug, static_uri)` pair already held in
+`target_scheme` once, in a single query, into a `taken_slugs: dict[str, str | None]`, and threads it
+into `_assign_unique_slug`, which reads and mutates it in place instead of querying per suffix
+attempt. Keyed by `static_uri` rather than `pk`, because a newly created concept has no primary key at
+the point its own slug is decided — `pk` cannot distinguish "my own not-yet-saved row" from "nothing
+claims this yet" the way the already-assigned, immutable `static_uri` can. Seeded from the whole
+scheme (not only concepts this run touches), so a "does not mention" concept (FR-013, left completely
+untouched) still correctly blocks a newly processed concept from claiming its slug. `Concept.save()`'s
+own identical `EXISTS` check in `models.py` is deliberately left in place — the model's own integrity
+backstop, guarding every caller, not only this importer — recorded with reasoning in decisions.md D49
+rather than silently left unaddressed.
+
+Re-measured after the fix: 250 queries at N=40 (down from 1,069), and confirmed genuinely linear, not
+merely smaller, by measuring N=20/40/80/160: 130/250/490/970 — each doubling of N roughly doubles the
+count rather than roughly quadrupling it. Added a second test,
+`test_the_same_file_imported_twice_produces_the_same_slugs`, re-importing a 12-concept shared-label
+file twice and asserting identical slugs both times — D6's determinism requirement, now resting on
+`taken_slugs` being freshly and deterministically seeded from the database on every run.
+
+Mutation probe: restored the original per-suffix `.exists()` loop (leaving `taken_slugs` threaded
+through unchanged elsewhere) — the query-count test failed at 1,070 queries for the same fixture,
+correctly rejecting the reintroduced quadratic shape. Restored the fix immediately; full suite re-ran
+green.
+
+**Verified**: `poetry run pytest -q` — 648 passed (646 baseline-after-FIX-15 + 2 new: both in
+`TestSlugAssignmentQueryCountIsLinearInASharedLabelGroup`). `poetry run ruff check .` — all checks
+passed. `poetry run ruff format --check .` — 22 files already formatted. `poetry run mypy` — success,
+9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django
+makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry run
+pre-commit run --all-files` — all hooks passed.

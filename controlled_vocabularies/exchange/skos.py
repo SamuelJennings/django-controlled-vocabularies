@@ -1235,9 +1235,27 @@ def _import_concepts(
     finished and every one of them has a primary key to relate through — see
     :func:`_import_relations` for why this cannot be folded into the
     per-concept loop instead.
+
+    ``taken_slugs`` (FIX 16, review, decisions.md D49) is fetched once, in a
+    single query, rather than once per concept: :func:`_assign_unique_slug`
+    reads and mutates it in place, so a scheme-wide slug collision check that
+    used to cost one query per suffix attempt — quadratic in the size of a
+    group of concepts sharing a label, D6's own "commonly share a preferred
+    label" case — now costs nothing per concept beyond the one shared lookup.
     """
     mentioned_uris: set[str] = set()
     concepts_by_uri: dict[str, Concept] = {}
+    # FIX 16 (review, decisions.md D49): slug -> the static_uri of the
+    # concept currently holding it, seeded from every concept already in
+    # target_scheme (including one this run will never touch — "absent from
+    # source" concepts keep their slug, and must go on blocking it) and kept
+    # current as each concept below is assigned its own final slug. Keyed by
+    # static_uri rather than pk: a newly created concept has no pk yet at the
+    # point its own slug is decided, so pk cannot distinguish "this is my own
+    # row" from "no owner yet" the way the immutable, already-known uri can.
+    taken_slugs: dict[str, str | None] = dict(
+        Concept.objects.filter(scheme=target_scheme).values_list("slug", "static_uri")
+    )
     for node in concept_nodes:
         hint = _first_literal(graph, node, SKOS.prefLabel)
         try:
@@ -1314,7 +1332,7 @@ def _import_concepts(
         concept.scheme = target_scheme
         concept.static_uri = uri
         concept.label = label
-        _assign_unique_slug(concept, target_scheme)
+        _assign_unique_slug(concept, taken_slugs)
         concept.save()
         concepts_by_uri[uri] = concept
         _import_concept_content(graph, node, concept, target_scheme, uri, report)
@@ -1334,7 +1352,7 @@ def _import_concepts(
         report.add_absent_from_source(concept.uri)
 
 
-def _assign_unique_slug(concept: Concept, scheme: ConceptScheme) -> None:
+def _assign_unique_slug(concept: Concept, taken_slugs: dict[str, str | None]) -> None:
     """Give ``concept`` a deterministic, scheme-unique slug derived from its label (T010, FR-007).
 
     Nothing is derived from ``concept.static_uri`` — identity and slug are
@@ -1351,6 +1369,23 @@ def _assign_unique_slug(concept: Concept, scheme: ConceptScheme) -> None:
     which of two colliding concepts gets the plain slug and which gets the
     suffix is the same on every run of the identical file).
 
+    ``taken_slugs`` (FIX 16, review, decisions.md D49) maps every slug
+    currently claimed in ``concept``'s scheme to the ``static_uri`` of
+    whichever concept claims it — fetched once by :func:`_import_concepts`,
+    outside this function, rather than re-queried per candidate here. A
+    candidate is free when nothing claims it yet, or when the claimant is
+    ``concept`` itself (already-resolved, so ``concept.static_uri`` is set
+    before this function is ever called): checking against ``static_uri``
+    rather than ``concept.pk`` is what makes a shared, mutated-in-place dict
+    work at all — a newly created concept has no primary key yet at the point
+    its own slug is decided, so ``pk`` cannot tell "this is my own,
+    not-yet-assigned row" apart from "nothing has claimed this slug yet" the
+    way the already-known, immutable URI can. Once a candidate is chosen,
+    ``taken_slugs`` is updated in place so the next concept in this same run
+    sees it as taken — the whole point: what was one query per suffix
+    attempt (quadratic across a shared-label group) is now zero additional
+    queries per concept, the shared dict standing in for all of them.
+
     Setting ``slug_is_manual`` stops ``Concept.save()`` from re-deriving (and
     silently overwriting) this value on a later plain save unrelated to this
     importer. It does not pin the slug in the sense a curator's own manual
@@ -1361,11 +1396,12 @@ def _assign_unique_slug(concept: Concept, scheme: ConceptScheme) -> None:
     base = slugify(concept.label, allow_unicode=True)
     candidate = base
     suffix = 1
-    while Concept.objects.filter(scheme=scheme, slug=candidate).exclude(pk=concept.pk).exists():
+    while taken_slugs.get(candidate, concept.static_uri) != concept.static_uri:
         suffix += 1
         candidate = f"{base}-{suffix}"
     concept.slug = candidate
     concept.slug_is_manual = True
+    taken_slugs[candidate] = concept.static_uri
 
 
 def import_skos(

@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 import rdflib
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils.functional import Promise
 
 import controlled_vocabularies.exchange as exchange
@@ -364,6 +366,80 @@ class TestConceptSlugs:
         # rock". If the slug tracked the identifier it would read "igneous",
         # not "igneous-rock".
         assert igneous.slug == "igneous-rock"
+
+
+def _write_shared_label_file(tmp_path: Path, n: int) -> Path:
+    """A Turtle file with ``n`` concepts sharing one ``skos:prefLabel`` — D6's
+    "two source concepts commonly sharing a preferred label" case, scaled up
+    to make a quadratic query cost in ``_assign_unique_slug`` measurable
+    (FIX 16, decisions.md D49). Written to a real file, not built as an
+    in-memory graph, because ``import_skos`` reads from a path."""
+    lines = [
+        "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .",
+        '<http://example.org/sharedslug/> a skos:ConceptScheme ; skos:prefLabel "Shared Slug Vocabulary"@en .',
+    ]
+    for i in range(n):
+        uri = f"http://example.org/sharedslug/c{i:04d}"
+        lines.append(
+            f'<{uri}> a skos:Concept ; skos:inScheme <http://example.org/sharedslug/> ; skos:prefLabel "Shared"@en .'
+        )
+    path = tmp_path / "shared_label.ttl"
+    path.write_text("\n".join(lines))
+    return path
+
+
+class TestSlugAssignmentQueryCountIsLinearInASharedLabelGroup:
+    """FIX 16 (review, decisions.md D49) — ``_assign_unique_slug``'s
+    ``while Concept.objects.filter(...).exclude(pk=...).exists()`` loop issued
+    one query per suffix attempt, and the suffix counter restarted at 1 for
+    every concept, so N concepts deriving the same base slug cost N(N+1)/2
+    round-trips inside the one ``transaction.atomic()`` the whole run sits in
+    — quadratic in the size of a shared-label group, which plan.md's own
+    reading strategy rules out. D6 already establishes that two source
+    concepts sharing a preferred label is the *expected* case, not a rare
+    edge condition, so this is not a hypothetical: a controlled-vocabulary
+    file (e.g. many concepts named "Unspecified" or "Other" across
+    sub-branches) can plausibly carry a group this size.
+    """
+
+    def test_query_count_stays_bounded_as_the_shared_label_group_grows(self, db, tmp_path):
+        # A small N, chosen to keep the test itself fast, but large enough to
+        # separate the two shapes clearly. Measured directly against this
+        # exact fixture and settings: the *pre-fix* quadratic version (one
+        # query per suffix attempt, restarting at 1 for every concept) cost
+        # 1,069 queries at N=40; the *post-fix* linear version cost 250 at
+        # the same N (and scaled linearly at larger N: 130/250/490/970 for
+        # N=20/40/80/160 — each doubling of N roughly doubles the count,
+        # never roughly quadruples it). The bound below sits well above the
+        # fix's own linear cost and well below the quadratic one, so it is
+        # generous headroom against an unrelated small query-count change
+        # elsewhere, not a tight ceiling — while still making it impossible
+        # for the quadratic shape to pass.
+        n = 40
+        path = _write_shared_label_file(tmp_path, n)
+        with CaptureQueriesContext(connection) as ctx:
+            report = import_skos(path)
+        assert report.fatal == []
+        assert Concept.objects.filter(scheme__static_uri="http://example.org/sharedslug/").count() == n
+        assert len(ctx.captured_queries) < 12 * n
+
+    def test_the_same_file_imported_twice_produces_the_same_slugs(self, db, tmp_path):
+        # D6: determinism survives whatever mechanism replaces the quadratic
+        # loop — the same file re-imported must derive the identical slug for
+        # each concept both times, not merely *a* unique one.
+        path = _write_shared_label_file(tmp_path, 12)
+        import_skos(path)
+        first_pass = {
+            concept.static_uri: concept.slug
+            for concept in Concept.objects.filter(scheme__static_uri="http://example.org/sharedslug/")
+        }
+        import_skos(path)
+        second_pass = {
+            concept.static_uri: concept.slug
+            for concept in Concept.objects.filter(scheme__static_uri="http://example.org/sharedslug/")
+        }
+        assert first_pass == second_pass
+        assert len(set(first_pass.values())) == 12, "each concept in the shared-label group must get a distinct slug"
 
 
 class TestFatalFindingsAndAtomicity:
