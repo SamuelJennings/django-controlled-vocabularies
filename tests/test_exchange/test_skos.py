@@ -1008,6 +1008,25 @@ class TestBroaderAndNarrowerRelations:
         )
 
 
+class TestSelfReferentialBroaderIsSkippedLikeSelfReferentialRelated:
+    """FIX 6 (review, decisions.md D40) — a concept stating ``skos:related``
+    about itself is already a deliberate no-op (decisions.md D29's
+    ``if len(pair) < 2: continue``): not a real association, and the
+    model's own ``_reject_self`` would refuse it if attempted. The same
+    shape on ``skos:broader`` had no such guard: ``desired_broader`` never
+    collapses a ``(uri, uri)`` pair the way ``desired_related``'s
+    ``frozenset`` naturally does, so it reached ``add_broader`` and raised
+    the model's own uncaught ``ValidationError`` instead of being skipped
+    the same way."""
+
+    def test_a_self_referential_broader_triple_is_skipped_not_crashed(self, db):
+        report = import_skos(FIXTURES / "self_referential_broader.ttl")
+        assert report.fatal == []
+        loop = Concept.objects.get(static_uri="http://example.org/selfref/loop")
+        assert list(loop.broader()) == []
+        assert ConceptRelation.objects.filter(kind=ConceptRelation.Kind.BROADER).count() == 0
+
+
 class TestRelatedRelations:
     """T024 — FR-010: ``skos:related`` is stored once as a symmetric
     association, including when the file states it from both concepts."""

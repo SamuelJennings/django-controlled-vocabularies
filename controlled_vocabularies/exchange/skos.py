@@ -779,6 +779,14 @@ def _import_relations(
     concepts_by_pk: dict[int, Concept] = {}
 
     for narrower_uri, broader_uri in desired_broader:
+        if narrower_uri == broader_uri:
+            # FIX 6 (review, decisions.md D40): a concept stating
+            # skos:broader/skos:narrower about itself — not a real
+            # hierarchy edge, the same no-op decisions.md D29 already
+            # applies to the equivalent skos:related shape (the model's
+            # own _reject_self would refuse it if attempted); nothing
+            # meaningful to reconcile.
+            continue
         narrower_concept = _resolve_concept_reference(narrower_uri, successful_concepts, target_scheme)
         broader_concept = _resolve_concept_reference(broader_uri, successful_concepts, target_scheme)
         if narrower_concept is None or broader_concept is None:

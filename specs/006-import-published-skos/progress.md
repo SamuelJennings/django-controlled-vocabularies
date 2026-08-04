@@ -1450,3 +1450,31 @@ over the new `EMPTY_SLUG` member, one `TestFixtureCorpus` parse-sweep instance f
 formatted. `poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files
 scanned. `poetry run python -m django makemigrations --check --dry-run --settings=tests.settings` —
 no changes detected. `poetry run pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T13:25:00Z · Forge · review fix 6 — self-referential broader crashes while related is skipped
+
+**Did**: closed a low-severity finding from the merged feature's review: a self-referential
+`skos:related` triple is already a deliberate no-op via decisions.md D29's `if len(pair) < 2:
+continue` (a `frozenset({uri, uri})` collapses to one element), but the equivalent
+`skos:broader`/`skos:narrower` shape had no such guard — `desired_broader`'s directed `(narrower_uri,
+broader_uri)` tuple never collapses, so it reached `add_broader` and raised the model's own uncaught
+`ValidationError` ("A concept cannot be in a relation with itself."). Wrote the failing test first —
+`TestSelfReferentialBroaderIsSkippedLikeSelfReferentialRelated` in `test_skos.py`, using a new
+`self_referential_broader.ttl` fixture (one concept stating `skos:broader` about itself) — confirmed
+it failed with exactly that raw `ValidationError` before any production change. Made the production
+change: a `narrower_uri == broader_uri` check at the top of the broader/narrower resolution loop in
+`_import_relations`, skipping before `_resolve_concept_reference` is even called — the same
+"deliberate no-op, not reported" treatment D29 already chose for the `related` case, applied here
+consistently rather than re-argued. Mutation probe: disabled the new check, re-ran the test, confirmed
+it failed with the same raw `ValidationError`; restored, re-ran green. Recorded as decisions.md D40,
+naming this an inconsistency the predecessor task left rather than a considered design point being
+revisited — nothing in decisions.md ever argued broader should behave differently from related here.
+
+**Verified**: `poetry run pytest -q` — 559 passed (557 baseline + 2 new: 1 in
+`TestSelfReferentialBroaderIsSkippedLikeSelfReferentialRelated`, one `TestFixtureCorpus` parse-sweep
+instance for the new fixture — no new `SetAsideReason` member this time, so no sweep
+re-parametrization). `poetry run ruff check .` — all checks passed. `poetry run ruff format --check .`
+— 22 files already formatted. `poetry run mypy` — success, 9 source files. `poetry run deptry .` — no
+issues, 15 files scanned. `poetry run python -m django makemigrations --check --dry-run
+--settings=tests.settings` — no changes detected. `poetry run pre-commit run --all-files` — all hooks
+passed.

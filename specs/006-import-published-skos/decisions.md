@@ -1133,3 +1133,33 @@ report entry says plainly what is actually true: the label is fine, the *derived
 **Revisit if:** a future story wants a curator to be able to supply an explicit fallback slug for
 this case (rather than the concept simply not importing) — that would be new functionality, not a
 correction to this rule.
+
+## D40 — Self-referential broader/narrower is skipped, the same no-op decisions.md D29 already applies to self-referential related (review fix 6)
+
+A review of the merged feature found an asymmetry between how `_import_relations` treats a
+self-referential `skos:related` triple and a self-referential `skos:broader`/`skos:narrower` one.
+`desired_related`'s keys are a `frozenset({uri, str(other)})`, so a concept naming itself as related
+to itself collapses to a single-element set, and D29's own `if len(pair) < 2: continue` already
+treats that as a deliberate no-op, consistent with the model's own `_reject_self` refusing it if
+attempted. `desired_broader`'s keys are a directed `(narrower_uri, broader_uri)` tuple, which never
+collapses the same way — a self-referential `skos:broader` reaches `_resolve_concept_reference`
+twice (resolving to the same `Concept` both times), lands in `resolved_broader` as `(pk, pk)`, and
+`add_broader` then raises the model's own uncaught `ValidationError` ("A concept cannot be in a
+relation with itself.").
+
+**Chosen: make the two consistent, treating self-referential broader/narrower as the same kind of
+no-op D29 already chose for self-referential related — not fatal, not set aside and reported, simply
+skipped.** A `narrower_uri == broader_uri` check is added at the top of the broader/narrower
+resolution loop, before `_resolve_concept_reference` is even called. Skipped rather than reported
+because that is exactly D29's own reasoning for the `related` case, restated here rather than
+re-argued: SKOS never intends a concept to be broader/narrower than itself, no fixture in this
+feature's corpus or its predecessors exercises the shape, and D8's "the fatal set is deliberately
+small" already leans against inventing a report reason nothing asks for. The asymmetry was a gap in
+FIX 6's own predecessor task (T023/T024), not a deliberate choice recorded anywhere — nothing in
+decisions.md ever argued broader should behave differently from related here, which is exactly why it
+counts as the review-found inconsistency it is, not a considered design point being revisited.
+
+**Revisit if:** a future story finds a real published vocabulary that states a self-referential
+`skos:broader` deliberately (unlikely, since SKOS's own semantics make it meaningless) — at that
+point silently skipping it may need to become reporting it instead, matching whatever `related`'s own
+equivalent revisit would look like.
