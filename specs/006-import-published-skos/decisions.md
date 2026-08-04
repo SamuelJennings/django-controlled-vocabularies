@@ -388,3 +388,28 @@ the defect rather than describing it.
 **Revisit if:** a real published file is found that declares two vocabularies with an equal claim
 and a convention for which is primary (a `dcterms:isPartOf`, say) — that convention would then
 decide ahead of the count, rather than the run being refused.
+
+## D20 — T014 tests only the field the importer already reads; alt-label/note/relationship removal is not this story's to build
+
+Tasks.md's T014 reads: "a corrected preferred label lands; an alternative label, a note, and a
+relationship the publisher removed are removed here too." `rocks_updated.ttl` (T005) was built to
+exercise all four at once, matching the spec's own Independent Test framing. But `import_skos()`
+does not read `skos:altLabel`, any note predicate, or `skos:related`/`skos:broader` at all — those
+predicates are US-3's (T018-T022) and US-4's (T023-T026) to first import, and this story's brief
+explicitly prohibits building that work here. "Removed on re-import" presupposes "imported in the
+first place"; there is nothing yet to remove.
+
+Chosen: T014's test asserts only what the importer already models — the concept's own preferred
+label (`Concept.label`, the identity anchor) correcting in place while the concept keeps its
+database identity — using the same `rocks.ttl`/`rocks_updated.ttl` fixture pair T005 built. It
+passed without any production change, the same shape T013 took: FR-013's authority rule was already
+general in how T009 wrote it (`concept.label = label` on every match, not only on create), so
+extending it to a new predicate is exactly re-running the existing mechanism, not new logic.
+
+The alt-label/note/relationship-removal assertions are not dropped, only deferred: US-3 and US-4
+inherit this exact fixture pair and will find `rocks_updated.ttl` already carrying the edits their
+own re-import tests need, with nothing further to build in it.
+
+**Revisit if:** US-3 or US-4's own Implementer finds `rocks_updated.ttl`'s edits do not match what
+their re-import test needs (e.g. a different label or note value would exercise their case better)
+— the fixture is not pinned, only reused where it already fits.

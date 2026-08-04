@@ -465,3 +465,30 @@ django makemigrations --check --dry-run --settings=tests.settings` — no change
 alongside the preferred-label correction; those predicates are not read by `import_skos()` at all yet
 (US-3/US-4 scope, explicitly prohibited here) — see the decision recorded at T014 for how that's
 scoped.
+
+## 2026-08-04T10:05:00Z · Implementer US2 · T014
+
+**Did**: One test — `rocks.ttl` imported, then `rocks_updated.ttl` (T005's re-import edit) imported —
+asserting granite's `Concept.label` corrects to "Granite (revised)", the concept keeps the same
+primary key, and the URI lands in `report.updated` not `report.created`. No production change: T009
+already writes `concept.label = label` on every match, not only on create, so FR-013's field-level
+authority for a corrected preferred label was already general.
+
+**Deviation** (decisions.md D20, new): scoped T014 to only the predicate `import_skos()` currently
+reads (`skos:prefLabel`). Tasks.md's T014 also names an alternative label, a note, and a relationship
+the publisher removed, all present in `rocks_updated.ttl`'s edits — but the importer reads none of
+`skos:altLabel`, any note predicate, or `skos:related`/`skos:broader` yet (US-3/US-4, explicitly
+prohibited in this brief). "Removed on re-import" presupposes "imported in the first place"; those
+assertions are deferred to the stories that build those read paths, which inherit the same fixture
+pair with nothing further to add to it.
+
+**Verified**: `poetry run pytest -q` — 412 passed (411 + 1 new). `poetry run ruff check .` — all
+checks passed. `poetry run ruff format --check .` — 23 files already formatted. `poetry run mypy` —
+success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m
+django makemigrations --check --dry-run --settings=tests.settings` — no changes detected.
+
+**Next**: T015 — records the file no longer mentions: untouched, named in the report's
+absent-from-source bucket.
+
+**Watch**: `report.absent_from_source` exists (T003) but nothing populates it yet — T015 is genuine
+new production code, unlike T013/T014.

@@ -447,3 +447,33 @@ class TestIdempotentReimport:
         assert relation.target_id == basalt.pk
         assert relation.source.static_uri == "http://example.org/rocks/granite"
         assert relation.target.static_uri == "http://example.org/rocks/basalt"
+
+
+class TestAuthoritativeUpdateForContainedRecords:
+    """T014 — FR-013/decisions.md D5: for a record the file still contains, the
+    file is authoritative for that record's own content. `rocks_updated.ttl`
+    corrects granite's preferred label; the corrected value must land, and the
+    concept must keep its identifier and database identity while it does.
+
+    `rocks_updated.ttl` (T005) also drops granite's alternative label and its
+    `related` edge to quartz, matching the spec's full Independent Test framing
+    — but `import_skos()` does not read `skos:altLabel` or `skos:related` at
+    all yet (that's US-3/US-4, T018-T026, explicitly out of this story's scope
+    per the brief's prohibitions). Asserting their removal here is therefore not
+    yet meaningful; decisions.md D20 records the scoping and why it is safe to
+    defer to the stories that actually build those read paths, reusing this
+    same fixture pair.
+    """
+
+    def test_a_corrected_preferred_label_lands_and_keeps_the_concept_s_identity(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        granite_before = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        pk_before = granite_before.pk
+
+        report = import_skos(FIXTURES / "rocks_updated.ttl")
+
+        granite_after = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        assert granite_after.pk == pk_before
+        assert granite_after.label == "Granite (revised)"
+        assert "http://example.org/rocks/granite" in report.updated
+        assert "http://example.org/rocks/granite" not in report.created
