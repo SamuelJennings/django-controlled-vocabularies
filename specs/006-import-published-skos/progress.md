@@ -442,3 +442,141 @@ files), deptry, `makemigrations --check --dry-run`, `pre-commit run --all-files`
 whose declared default language differs from the one frozen on the existing vocabulary must be
 reported as set aside, not silently ignored — silence is what D1 forbids. D17's `NO_PREFERRED_LABEL`
 set-aside is minimal and belongs to T022 to finish.
+
+## 2026-08-04T09:50:00Z · Implementer US2 · T013
+
+**Did**: `TestIdempotentReimport` in `test_skos.py` — two tests: every scheme and concept primary key
+is stable across two identical runs of `rocks.ttl` (5 concepts, no duplication); a `ConceptRelation`
+created directly between two runs (granite→basalt, `BROADER`) still resolves to the same rows after
+the second run. No new production code — `import_skos()`'s upsert-by-`static_uri` path (`get_by_uri`
+matching, T007/T009) already gives every record a stable PK across an identical re-run, so both tests
+passed on first execution. This is confirmatory acceptance coverage for FR-004/FR-013's already-built
+behaviour, the same shape T011 was for atomicity — not every task in this phase needs new code, and
+forcing a contrived failure first would mean writing a deliberately-broken test rather than a real one.
+
+**Verified**: `poetry run pytest -q` — 411 passed (409 + 2 new). `poetry run ruff check .` — all
+checks passed. `poetry run ruff format --check .` — 23 files already formatted. `poetry run mypy` —
+success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m
+django makemigrations --check --dry-run --settings=tests.settings` — no changes detected.
+
+**Next**: T014 — authoritative update for records the file contains.
+
+**Watch**: T014's acceptance text (tasks.md) names alternative-label/note/relationship removal
+alongside the preferred-label correction; those predicates are not read by `import_skos()` at all yet
+(US-3/US-4 scope, explicitly prohibited here) — see the decision recorded at T014 for how that's
+scoped.
+
+## 2026-08-04T10:05:00Z · Implementer US2 · T014
+
+**Did**: One test — `rocks.ttl` imported, then `rocks_updated.ttl` (T005's re-import edit) imported —
+asserting granite's `Concept.label` corrects to "Granite (revised)", the concept keeps the same
+primary key, and the URI lands in `report.updated` not `report.created`. No production change: T009
+already writes `concept.label = label` on every match, not only on create, so FR-013's field-level
+authority for a corrected preferred label was already general.
+
+**Deviation** (decisions.md D20, new): scoped T014 to only the predicate `import_skos()` currently
+reads (`skos:prefLabel`). Tasks.md's T014 also names an alternative label, a note, and a relationship
+the publisher removed, all present in `rocks_updated.ttl`'s edits — but the importer reads none of
+`skos:altLabel`, any note predicate, or `skos:related`/`skos:broader` yet (US-3/US-4, explicitly
+prohibited in this brief). "Removed on re-import" presupposes "imported in the first place"; those
+assertions are deferred to the stories that build those read paths, which inherit the same fixture
+pair with nothing further to add to it.
+
+**Verified**: `poetry run pytest -q` — 412 passed (411 + 1 new). `poetry run ruff check .` — all
+checks passed. `poetry run ruff format --check .` — 23 files already formatted. `poetry run mypy` —
+success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m
+django makemigrations --check --dry-run --settings=tests.settings` — no changes detected.
+
+**Next**: T015 — records the file no longer mentions: untouched, named in the report's
+absent-from-source bucket.
+
+**Watch**: `report.absent_from_source` exists (T003) but nothing populates it yet — T015 is genuine
+new production code, unlike T013/T014.
+
+## 2026-08-04T10:20:00Z · Implementer US2 · T015
+
+**Did**: `_import_concepts()` now tracks every successfully-identified concept URI it sees this run
+(`mentioned_uris`, added the moment `_identify()` succeeds — before the vocabulary-mismatch/
+no-preferred-label checks, so a concept set aside for either reason still counts as "mentioned", not
+absent) and, after the walk, reports every existing concept of `target_scheme` whose URI was never
+seen as `absent_from_source` — left completely untouched, only named (FR-013). Two tests:
+`rocks_updated.ttl` drops quartz entirely; quartz keeps its primary key and label, is named in
+`report.absent_from_source`, is in neither `created` nor `updated`, and a `ConceptRelation` created
+against it *between* the two runs (basalt→quartz, standing in for D5's "something downstream may
+already reference it") still resolves afterward. A second test confirms a still-mentioned concept
+(granite) is never reported absent merely because it happened to update.
+
+**Verified**: `poetry run pytest -q` — 414 passed (412 + 2 new). `poetry run ruff check .` — all
+checks passed. `poetry run ruff format --check .` — 23 files already formatted. `poetry run mypy` —
+success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m
+django makemigrations --check --dry-run --settings=tests.settings` — no changes detected.
+
+**Next**: T016 — the vocabulary's own name and description update from the file, identifier
+unchanged; also D22 (carried from US-1 review): a re-imported file whose declared default language
+conflicts with the one frozen on an existing scheme must be reported as set-aside.
+
+## 2026-08-04T10:40:00Z · Implementer US2 · T016
+
+**Did**: two pieces, both in `_resolve_scheme`. (1) `row.description` is now read from
+`DCTERMS.description` the same way `name` is read from `SKOS.prefLabel` (effective default language
+first, any language as fallback), written unconditionally including to `""` when the file no longer
+carries one (decisions.md D21 — SKOS has no scheme-level description predicate, so this reuses the
+`dcterms:description` alias CONTEXT.md already names for a concept's own `definition`).
+`mapping.py` gains `DCTERMS = rdflib.namespace.DCTERMS`, a built-in namespace object, no new
+dependency. New fixtures: `vocabulary_metadata.ttl`, `vocabulary_metadata_updated.ttl` (name and
+description both changed, identifier unchanged), `vocabulary_metadata_description_removed.ttl`
+(description predicate dropped entirely). (2) D22 (carried from the US-1 review): `_resolve_scheme`
+now always computes the file's declared default language, even for a matched existing scheme; when
+it disagrees with the scheme's `effective_default_language` a new `SetAsideReason.DEFAULT_LANGUAGE_FROZEN`
+set-aside entry is added, naming the declared and frozen values — `default_language` itself stays
+untouched (D18's guard is unchanged), only the silence is fixed. `test_report.py`'s
+`_EXAMPLE_PARAMS` table (T003's parametrized "every reason renders" test) gets the new reason's
+example params, the same extension T007 made for `FatalReason`.
+
+**Verified**: `poetry run pytest -q` — 425 passed (414 + 11 new: 5 in `test_skos.py`'s
+`TestVocabularyMetadataUpdate`/`TestFrozenDefaultLanguageConflictIsReported`, plus the parametrized
+`test_report.py` case for the new reason and its fixture-discovery entries). `poetry run ruff check .`
+— all checks passed. `poetry run ruff format --check .` — 23 files already formatted. `poetry run
+mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run
+python -m django makemigrations --check --dry-run --settings=tests.settings` — no changes detected.
+
+**Next**: T017 — a failed re-import against an already-populated database leaves it exactly as it
+was, including rolling back an *update* to an existing concept, not only a creation.
+
+**Watch**: none.
+
+## 2026-08-04T10:55:00Z · Implementer US2 · T017
+
+**Did**: new fixture `reimport_rolls_back_an_update.ttl` — the "rocks" scheme, granite with a label
+that must not land, and a blank-node concept (fatal, D3). One test: import `rocks.ttl`, then a
+failed re-import of that fixture, asserting granite's label, primary key, and total concept count
+are exactly as before, the scheme's `name` is unchanged, and the ghost concept was never created. No
+production change: `import_skos()` already wraps the whole run — vocabulary resolution and every
+concept write, create or update alike — inside one `transaction.atomic()` block (T007), and only
+raises `SkosImportFailed` once nothing further can be checked (T011), so an update mid-run rolls
+back exactly as a creation does. This is the third task this phase to pass on first execution
+without new code (with T013, T014), each proving a piece of FR-013's upsert contract that T006-T012
+already built generally rather than for the first-import case alone.
+
+**Verified**: `poetry run pytest -q` — 427 passed (425 + 2: 1 new test, 1 new fixture-discovery
+case). `poetry run ruff check .` — all checks passed. `poetry run ruff format --check .` — 23 files
+already formatted. `poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues,
+15 files scanned. `poetry run python -m django makemigrations --check --dry-run
+--settings=tests.settings` — no changes detected. `poetry run pre-commit run --all-files` — all
+hooks passed.
+
+**Phase US-2 complete (T013–T017).** Re-running `import_skos()` on an unchanged file duplicates
+nothing; a corrected preferred label, and a vocabulary's own name and description, land on re-import
+while identifiers stay fixed; a concept the file drops is left untouched and named in
+`report.absent_from_source`; a failed re-import rolls back an update exactly as it rolls back a
+creation. D18's silent skip of a frozen `default_language` conflict is now reported (D22). `models.py`
+was not touched. Deferred to US-3/US-4 by design (decisions.md D20): alternative-label, note, and
+relationship import — and therefore their removal on re-import — do not exist yet to defer *from*;
+`rocks_updated.ttl`'s edits to those predicates are already staged and waiting for those stories.
+
+**Watch**: US-3's Implementer should read decisions.md D20 and D21 before starting — D20 explains why
+`rocks_updated.ttl`'s alt-label/note edits are untested here and what's expected of the story that
+finally reads them; D21 sets the `dcterms:*` alias precedent (scheme description → concept
+definition) a note-kind mapping may want to follow for its own foreign-predicate aliases.
+
+**Watch**: none.

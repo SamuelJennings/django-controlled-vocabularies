@@ -15,7 +15,7 @@ import rdflib
 from controlled_vocabularies.exchange.report import FatalReason, SetAsideReason
 from controlled_vocabularies.exchange.safety import UnsafeRdfXmlError
 from controlled_vocabularies.exchange.skos import SkosImportError, SkosImportFailed, _read_graph, import_skos
-from controlled_vocabularies.models import Concept, ConceptScheme
+from controlled_vocabularies.models import Concept, ConceptRelation, ConceptScheme
 from tests.factories import ConceptFactory, ConceptSchemeFactory
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "skos"
@@ -410,3 +410,192 @@ class TestReportPopulatedByARealRun:
         assert {"http://example.org/minerals/feldspar", "http://example.org/minerals/mica"} <= set(report.created)
         assert any(entry.reason is SetAsideReason.VOCABULARY_MISMATCH for entry in report.set_aside)
         assert report.fatal == []
+
+
+class TestIdempotentReimport:
+    """T013 — FR-004/FR-013: importing an identical file twice creates
+    nothing new and recreates nothing. Every record's primary key is stable
+    across both runs, and a foreign-key reference made *between* the two
+    runs still resolves to the same row afterward — the acceptance scenario
+    specifically distinguishes this from merely re-reading the same URI."""
+
+    def test_every_primary_key_is_stable_across_two_identical_runs(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        scheme_pk = ConceptScheme.objects.get(static_uri=ROCKS_URI).pk
+        concept_pks = {c.static_uri: c.pk for c in Concept.objects.filter(scheme_id=scheme_pk)}
+        assert len(concept_pks) == 5
+
+        import_skos(FIXTURES / "rocks.ttl")
+
+        scheme = ConceptScheme.objects.get(static_uri=ROCKS_URI)
+        assert scheme.pk == scheme_pk
+        assert ConceptScheme.objects.filter(static_uri=ROCKS_URI).count() == 1
+        assert Concept.objects.filter(scheme=scheme).count() == len(concept_pks)
+        for uri, pk in concept_pks.items():
+            assert Concept.objects.get(static_uri=uri).pk == pk
+
+    def test_a_reference_made_between_two_runs_still_resolves_after_the_second(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        basalt = Concept.objects.get(static_uri="http://example.org/rocks/basalt")
+        relation = ConceptRelation.objects.create(source=granite, target=basalt, kind=ConceptRelation.Kind.BROADER)
+
+        import_skos(FIXTURES / "rocks.ttl")
+
+        relation.refresh_from_db()
+        assert relation.source_id == granite.pk
+        assert relation.target_id == basalt.pk
+        assert relation.source.static_uri == "http://example.org/rocks/granite"
+        assert relation.target.static_uri == "http://example.org/rocks/basalt"
+
+
+class TestAuthoritativeUpdateForContainedRecords:
+    """T014 — FR-013/decisions.md D5: for a record the file still contains, the
+    file is authoritative for that record's own content. `rocks_updated.ttl`
+    corrects granite's preferred label; the corrected value must land, and the
+    concept must keep its identifier and database identity while it does.
+
+    `rocks_updated.ttl` (T005) also drops granite's alternative label and its
+    `related` edge to quartz, matching the spec's full Independent Test framing
+    — but `import_skos()` does not read `skos:altLabel` or `skos:related` at
+    all yet (that's US-3/US-4, T018-T026, explicitly out of this story's scope
+    per the brief's prohibitions). Asserting their removal here is therefore not
+    yet meaningful; decisions.md D20 records the scoping and why it is safe to
+    defer to the stories that actually build those read paths, reusing this
+    same fixture pair.
+    """
+
+    def test_a_corrected_preferred_label_lands_and_keeps_the_concept_s_identity(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        granite_before = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        pk_before = granite_before.pk
+
+        report = import_skos(FIXTURES / "rocks_updated.ttl")
+
+        granite_after = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        assert granite_after.pk == pk_before
+        assert granite_after.label == "Granite (revised)"
+        assert "http://example.org/rocks/granite" in report.updated
+        assert "http://example.org/rocks/granite" not in report.created
+
+
+class TestRecordsAbsentFromSource:
+    """T015 — FR-013: a record the file no longer mentions is left exactly as
+    it is and named in the report's absent-from-source bucket. `rocks_updated.ttl`
+    drops quartz entirely; a concept elsewhere already referencing it (standing in
+    for "something downstream may already reference it", D5's own reasoning) must
+    still resolve to it afterward."""
+
+    def test_a_concept_dropped_from_the_file_is_untouched_and_named_absent(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        quartz = Concept.objects.get(static_uri="http://example.org/rocks/quartz")
+        quartz_pk, quartz_label = quartz.pk, quartz.label
+        basalt = Concept.objects.get(static_uri="http://example.org/rocks/basalt")
+        reference = ConceptRelation.objects.create(source=basalt, target=quartz, kind=ConceptRelation.Kind.RELATED)
+
+        report = import_skos(FIXTURES / "rocks_updated.ttl")
+
+        quartz_after = Concept.objects.get(static_uri="http://example.org/rocks/quartz")
+        assert quartz_after.pk == quartz_pk
+        assert quartz_after.label == quartz_label
+        assert "http://example.org/rocks/quartz" in report.absent_from_source
+        assert "http://example.org/rocks/quartz" not in report.updated
+        assert "http://example.org/rocks/quartz" not in report.created
+
+        reference.refresh_from_db()
+        assert reference.target_id == quartz_pk
+        assert reference.target.static_uri == "http://example.org/rocks/quartz"
+
+    def test_a_concept_still_mentioned_in_the_file_is_not_reported_absent(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        report = import_skos(FIXTURES / "rocks_updated.ttl")
+        assert "http://example.org/rocks/granite" not in report.absent_from_source
+        assert "http://example.org/rocks/basalt" not in report.absent_from_source
+
+
+class TestVocabularyMetadataUpdate:
+    """T016 — FR-013: the vocabulary's own name and description update from
+    the file on re-import, identifier unchanged. SKOS defines no description
+    predicate for a ``skos:ConceptScheme``; decisions.md D21 records
+    ``dcterms:description`` as the source, the same alias CONTEXT.md already
+    establishes for a concept's own ``definition``."""
+
+    def test_a_description_is_read_from_dcterms_description(self, db):
+        import_skos(FIXTURES / "vocabulary_metadata.ttl")
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/gems/")
+        assert scheme.name == "Gemstones"
+        assert scheme.description == "A vocabulary of gemstone types."
+
+    def test_a_changed_name_and_description_land_on_reimport_with_identifier_unchanged(self, db):
+        import_skos(FIXTURES / "vocabulary_metadata.ttl")
+        scheme_pk = ConceptScheme.objects.get(static_uri="http://example.org/gems/").pk
+
+        import_skos(FIXTURES / "vocabulary_metadata_updated.ttl")
+
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/gems/")
+        assert scheme.pk == scheme_pk
+        assert scheme.static_uri == "http://example.org/gems/"
+        assert scheme.name == "Precious stones"
+        assert scheme.description == "An updated vocabulary of gemstones and precious stones."
+
+    def test_a_description_removed_from_the_file_is_cleared_not_left_stale(self, db):
+        import_skos(FIXTURES / "vocabulary_metadata.ttl")
+
+        import_skos(FIXTURES / "vocabulary_metadata_description_removed.ttl")
+
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/gems/")
+        assert scheme.description == ""
+
+
+class TestFrozenDefaultLanguageConflictIsReported:
+    """Carried from the US-1 review (decisions.md D18/D22): D18 froze an
+    existing, concept-bearing scheme's ``default_language`` by silently
+    skipping recomputation on every non-creating run. That protects the
+    database but says nothing to the curator — a re-imported file that
+    genuinely declares a different default language now gets reported."""
+
+    def test_a_conflicting_declared_default_language_is_reported_not_silently_dropped(self, db):
+        scheme = ConceptSchemeFactory(name="Geology", static_uri="http://example.org/geology/", default_language="")
+        ConceptFactory(scheme=scheme, label="Existing concept")
+
+        report = import_skos(FIXTURES / "french_vocabulary.ttl")
+
+        scheme.refresh_from_db()
+        assert scheme.default_language == ""
+        conflicts = [entry for entry in report.set_aside if entry.reason is SetAsideReason.DEFAULT_LANGUAGE_FROZEN]
+        assert len(conflicts) == 1
+        assert conflicts[0].subject == "http://example.org/geology/"
+        assert conflicts[0].params == {"declared": "fr", "frozen": "en"}
+
+    def test_an_agreeing_declared_default_language_produces_no_conflict(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        report = import_skos(FIXTURES / "rocks.ttl")
+        assert not any(entry.reason is SetAsideReason.DEFAULT_LANGUAGE_FROZEN for entry in report.set_aside)
+
+
+class TestAtomicityOnAPopulatedDatabase:
+    """T017 — FR-003: a run that fails partway leaves the database exactly as
+    it was, asserted against an already-populated database rather than an
+    empty one, so the test fails if the transaction boundary only protected
+    creation. T011 already proved this for a scheme field write and for a
+    plain creation; this proves it for an *update to an already-existing
+    concept*, which a creation-only rollback would let through."""
+
+    def test_a_failed_reimport_leaves_a_populated_database_exactly_as_it_was(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        granite_before = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        pk_before, label_before = granite_before.pk, granite_before.label
+        concept_count_before = Concept.objects.count()
+        scheme = ConceptScheme.objects.get(static_uri=ROCKS_URI)
+        name_before = scheme.name
+
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(FIXTURES / "reimport_rolls_back_an_update.ttl")
+        assert exc_info.value.report.fatal[0].reason is FatalReason.MISSING_IDENTITY
+
+        granite_after = Concept.objects.get(pk=pk_before)
+        assert granite_after.label == label_before
+        assert Concept.objects.count() == concept_count_before
+        assert not Concept.objects.filter(label="Ghost concept").exists()
+        scheme.refresh_from_db()
+        assert scheme.name == name_before

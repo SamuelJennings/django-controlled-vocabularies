@@ -85,9 +85,12 @@ unless stated.
 - **T018** — Labels: preferred labels in other configured languages, alternative and hidden labels,
   each with kind and language, written through `Concept.add_label` (`research.md` R5). Test the
   default-language preferred label is `Concept.label` and is *not* duplicated as a `ConceptLabel`
-  row — the model refuses that, and the importer must not attempt it.
+  row — the model refuses that, and the importer must not attempt it. Also carries T014's deferred
+  case (decisions.md D20): a re-import of `rocks_updated.ttl` removes the alternative label the
+  publisher dropped, leaving the concept itself intact.
 - **T019** — Notes: definition and the six note kinds, each with its language, via
-  `Concept.add_note`.
+  `Concept.add_note`. Also carries T014's deferred case (decisions.md D20): a re-import of
+  `rocks_updated.ttl` removes the note the publisher dropped, leaving the concept itself intact.
 - **T020** — A label or note in a language the site is not configured for: stored nowhere, named in
   the report with its language and a count, concept still imported.
 - **T021** — Values the models have no place for — a notation, a mapping to another vocabulary, a
@@ -105,7 +108,9 @@ unless stated.
 - **T025** — A relationship end that is neither in the file nor in the database: set aside,
   reported with both ends, run successful. An end already in the database from an earlier import:
   stored.
-- **T026** — A re-import with a relationship removed removes it, leaving both concepts.
+- **T026** — A re-import with a relationship removed removes it, leaving both concepts. This is
+  T014's third deferred case (decisions.md D20); `rocks_updated.ttl` already drops granite's
+  `related` edge to quartz.
 
 ## Phase US-5 — Collections arrive, ordered ones in order (#65, P2)
 

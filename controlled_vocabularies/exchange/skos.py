@@ -24,7 +24,7 @@ from django.db import transaction
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 
-from controlled_vocabularies.exchange.mapping import SKOS
+from controlled_vocabularies.exchange.mapping import DCTERMS, SKOS
 from controlled_vocabularies.exchange.report import FatalReason, ImportReport, SetAsideReason
 from controlled_vocabularies.exchange.safety import scan_rdf_xml
 from controlled_vocabularies.models import Concept, ConceptScheme, validate_static_uri
@@ -355,6 +355,7 @@ def _resolve_scheme(
 
     row = target if target is not None else _get_or_create_scheme(declared_uri)
     created = row.pk is None
+    declared_default_language = _determine_default_language(graph, declared_node, concept_nodes)
     if created:
         # ConceptScheme.save() itself refuses to change default_language once
         # the scheme has concepts (R1 — it is the anchor every concept's
@@ -363,7 +364,20 @@ def _resolve_scheme(
         # differs from what a previous run already froze; only a freshly
         # created scheme has no concepts yet to protect, so only a freshly
         # created scheme's default_language is set from the file at all.
-        row.default_language = _determine_default_language(graph, declared_node, concept_nodes)
+        row.default_language = declared_default_language
+    elif declared_default_language and declared_default_language != row.effective_default_language:
+        # D18 froze this value once the scheme has concepts; D22 (carried
+        # from the US-1 review) requires the conflict to be reported rather
+        # than silently kept — silence is what D1 forbids. Compared against
+        # effective_default_language, not the raw stored field, so a scheme
+        # relying on the site default (default_language == "") that agrees
+        # with the file in the same effective language is not a conflict.
+        report.add_set_aside(
+            SetAsideReason.DEFAULT_LANGUAGE_FROZEN,
+            subject=declared_uri,
+            declared=declared_default_language,
+            frozen=row.effective_default_language,
+        )
     name = _first_literal(graph, declared_node, SKOS.prefLabel, language=row.effective_default_language)
     if not name:
         # The declared default language (or the site's, on fallback) carries
@@ -372,6 +386,17 @@ def _resolve_scheme(
         name = _first_literal(graph, declared_node, SKOS.prefLabel)
     if name:
         row.name = name
+    # SKOS defines no description predicate for a skos:ConceptScheme;
+    # dcterms:description is the source (decisions.md D21), the same alias
+    # CONTEXT.md establishes for a concept's own definition. Unlike name,
+    # description is optional on the model and is written unconditionally,
+    # including to empty when the file no longer carries one — a description
+    # the publisher removed is a value the publisher removed (D5), and
+    # nothing anchors identity to it the way default_language is anchored.
+    description = _first_literal(graph, declared_node, DCTERMS.description, language=row.effective_default_language)
+    if not description:
+        description = _first_literal(graph, declared_node, DCTERMS.description)
+    row.description = description or ""
     row.static_uri = declared_uri
     row.save()
     if created:
@@ -433,7 +458,15 @@ def _import_concepts(
     created :class:`Concept` is given a deterministic, scheme-unique slug
     (:func:`_assign_unique_slug`, FR-007) and written through the model's own
     ``save()``.
+
+    Finally (T013/FR-013), every existing concept of ``target_scheme`` whose
+    identity was never seen among ``concept_nodes`` — the file simply does not
+    mention it, as opposed to mentioning and setting it aside — is left
+    completely untouched and named in ``report.absent_from_source``. A concept
+    set aside for claiming a *different* vocabulary is not "absent from
+    source": the file does mention it, just not as a member of this one.
     """
+    mentioned_uris: set[str] = set()
     for node in concept_nodes:
         hint = _first_literal(graph, node, SKOS.prefLabel)
         try:
@@ -441,6 +474,7 @@ def _import_concepts(
         except _FatalIdentity as exc:
             report.add_fatal(exc.reason, exc.subject, **exc.params)
             continue
+        mentioned_uris.add(uri)
 
         other = _conflicting_scheme_ref(graph, node, target_scheme_uri)
         if other is not None:
@@ -471,6 +505,10 @@ def _import_concepts(
             report.add_created(uri)
         else:
             report.add_updated(uri)
+
+    absent = Concept.objects.filter(scheme=target_scheme).exclude(static_uri__in=mentioned_uris)
+    for uri in absent.order_by("static_uri").values_list("static_uri", flat=True):
+        report.add_absent_from_source(uri)
 
 
 def _assign_unique_slug(concept: Concept, scheme: ConceptScheme) -> None:

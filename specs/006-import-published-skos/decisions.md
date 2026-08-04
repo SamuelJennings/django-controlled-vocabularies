@@ -388,3 +388,86 @@ the defect rather than describing it.
 **Revisit if:** a real published file is found that declares two vocabularies with an equal claim
 and a convention for which is primary (a `dcterms:isPartOf`, say) — that convention would then
 decide ahead of the count, rather than the run being refused.
+
+## D20 — T014 tests only the field the importer already reads; alt-label/note/relationship removal is not this story's to build
+
+Tasks.md's T014 reads: "a corrected preferred label lands; an alternative label, a note, and a
+relationship the publisher removed are removed here too." `rocks_updated.ttl` (T005) was built to
+exercise all four at once, matching the spec's own Independent Test framing. But `import_skos()`
+does not read `skos:altLabel`, any note predicate, or `skos:related`/`skos:broader` at all — those
+predicates are US-3's (T018-T022) and US-4's (T023-T026) to first import, and this story's brief
+explicitly prohibits building that work here. "Removed on re-import" presupposes "imported in the
+first place"; there is nothing yet to remove.
+
+Chosen: T014's test asserts only what the importer already models — the concept's own preferred
+label (`Concept.label`, the identity anchor) correcting in place while the concept keeps its
+database identity — using the same `rocks.ttl`/`rocks_updated.ttl` fixture pair T005 built. It
+passed without any production change, the same shape T013 took: FR-013's authority rule was already
+general in how T009 wrote it (`concept.label = label` on every match, not only on create), so
+extending it to a new predicate is exactly re-running the existing mechanism, not new logic.
+
+The alt-label/note/relationship-removal assertions are not dropped, only deferred: US-3 and US-4
+inherit this exact fixture pair and will find `rocks_updated.ttl` already carrying the edits their
+own re-import tests need, with nothing further to build in it.
+
+**Revisit if:** US-3 or US-4's own Implementer finds `rocks_updated.ttl`'s edits do not match what
+their re-import test needs (e.g. a different label or note value would exercise their case better)
+— the fixture is not pinned, only reused where it already fits.
+
+## D21 — A vocabulary's description is read from `dcterms:description`, not a SKOS predicate
+
+T016 asks for the vocabulary's own name and description to update on re-import, identifier
+unchanged. SKOS itself defines no description predicate for a `skos:ConceptScheme` — `skos:prefLabel`
+is name, `skos:definition` exists only for a `skos:Concept`. A description has to come from
+somewhere, and the choice is between inventing a bespoke predicate no publisher will ever write and
+reusing an existing, widely-published one.
+
+Chosen: `dcterms:description` (`http://purl.org/dc/terms/description`), read the same way `name` is —
+the effective default language's own value when tagged, falling back to any language when the scheme
+carries none in it. This mirrors the alias CONTEXT.md already establishes for a concept's own
+`definition` ("treat foreign `dcterms:description` as an import alias for it"), so the same publisher
+convention now covers both the scheme and concept levels consistently, and no new dependency is
+needed — `rdflib.namespace.DCTERMS` is a built-in namespace object, added to `mapping.py` alongside
+`SKOS`.
+
+Unlike `name` (required, never blanked when the file has nothing to offer, since an empty name
+cannot produce a slug), `description` is optional on the model (`blank=True`) and is written
+unconditionally from the file, including to empty when a previously-described vocabulary's updated
+file drops the predicate — the file is authoritative for what it contains, and a description the
+publisher removed is a value the publisher removed, the same as any other field-level correction
+(D5). This is not frozen the way `default_language` is (D18): nothing anchors identity to it, so
+there is no guard to collide with.
+
+**Revisit if:** a predicate registry (`docs/brainstorm.md`) later formalises import aliases at the
+scheme level the way it will for concepts — this alias would move there rather than staying
+hand-coded in `_resolve_scheme`.
+
+## D22 — A frozen `default_language` conflict is reported as set-aside, not silently kept (carried from US-1 review)
+
+The US-1 review flagged this as required work for US-2, not a suggestion: D18 froze an existing
+scheme's `default_language` once it has concepts, by simply skipping recomputation on every
+non-creating run. That is correct for the database (R1's own guard must not trip), but it is silent
+— a re-imported file that now declares a genuinely different default language gets no signal that
+its declaration was ignored, which is exactly what D1 forbids ("nothing disappears silently").
+
+Chosen: `_resolve_scheme` now always computes the file's declared default language
+(`_determine_default_language`), even for a matched existing scheme. For a freshly created scheme
+this is used exactly as before (D18 unchanged). For an existing scheme, when the computed value is
+non-empty and differs from the scheme's own `effective_default_language` — not its raw
+`default_language`, which can legitimately be `""` while still being effectively the site's default
+in the same language the file computed — a new `SetAsideReason.DEFAULT_LANGUAGE_FROZEN` entry is
+added to the report, naming the declared value and the frozen one. `row.default_language` itself is
+left untouched either way; only the report changes, never the guarded value.
+
+Comparing against `effective_default_language` rather than the raw stored field matters: a scheme
+with `default_language=""` relying on the site's own "en" default and a file that also computes "en"
+must not report a spurious conflict merely because `"" != "en"` as strings — the two mean the same
+language. `TestImportedVocabularyDefaultLanguage`'s existing
+`test_default_language_is_not_recomputed_for_a_scheme_that_already_has_concepts` regression test
+(T012) is exactly the scenario this decision was written for — a scheme anchored in English by
+default, re-imported from a French-declaring file — and now surfaces the conflict as data instead of
+doing nothing with it.
+
+**Revisit if:** a curator-facing workflow wants to *act* on this conflict (e.g. offer to migrate the
+vocabulary's frozen language) rather than only see it in the report — that is new capability, not a
+fix to this one.

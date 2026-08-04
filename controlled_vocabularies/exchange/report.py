@@ -34,6 +34,11 @@ class SetAsideReason(TextChoices):
     other than the one being imported. Not "fatal" findings (a missing or blank-node
     identity) — those fail the whole run rather than being set aside (D3, D8) and
     are not part of this vocabulary.
+
+    ``DEFAULT_LANGUAGE_FROZEN`` (US-2, decisions.md D18/D22) is the one member
+    naming a conflict at the vocabulary level rather than a value that could
+    not be stored: a re-imported file's declared default language differing
+    from the one already frozen on an existing, concept-bearing scheme.
     """
 
     UNCONFIGURED_LANGUAGE = "unconfigured_language", _("language not configured")
@@ -44,6 +49,7 @@ class SetAsideReason(TextChoices):
     MISSING_MEMBER = "missing_member", _("collection member not found")
     NO_PREFERRED_LABEL = "no_preferred_label", _("no preferred label in default language")
     VOCABULARY_MISMATCH = "vocabulary_mismatch", _("belongs to a different vocabulary")
+    DEFAULT_LANGUAGE_FROZEN = "default_language_frozen", _("default language already fixed")
 
     @property
     def template(self) -> Promise:
@@ -84,6 +90,11 @@ _REASON_TEMPLATES: dict[SetAsideReason, Promise] = {
     ),
     SetAsideReason.VOCABULARY_MISMATCH: _(
         "'%(subject)s' claims the vocabulary '%(other)s', not the one being imported, and was set aside."
+    ),
+    SetAsideReason.DEFAULT_LANGUAGE_FROZEN: _(
+        "'%(subject)s' declares its default language as '%(declared)s', but this vocabulary's default "
+        "language is already fixed to '%(frozen)s' because it already has concepts; the declared value "
+        "was not applied."
     ),
 }
 
