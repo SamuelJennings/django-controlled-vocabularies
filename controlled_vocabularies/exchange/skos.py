@@ -920,7 +920,10 @@ def _import_collections(
     membership included — set aside and reported naming both vocabularies
     (review fix 9, decisions.md D42, :data:`SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY`),
     the same rule :func:`_import_concepts` applies to a concept in the same
-    position.
+    position. A URI matching no existing collection but already held by a
+    :class:`Concept` instead is set aside and reported rather than made to
+    identify two records at once (review fix 10, decisions.md D43,
+    :data:`SetAsideReason.URI_HELD_BY_DIFFERENT_KIND`).
 
     ``skos:member`` (unordered) or ``skos:memberList`` (ordered, walked in the
     file's own order) name the file's desired membership. Each member URI is
@@ -976,6 +979,17 @@ def _import_collections(
             row = Collection.objects.get_by_uri(uri)
             created = False
         except Collection.DoesNotExist:
+            # FIX 10 (review, decisions.md D43): the mirror image of the same
+            # check in _import_concepts — this URI may already be held by a
+            # Concept instead. See that function's own comment; the two
+            # identity spaces are checked independently of each other.
+            try:
+                Concept.objects.get_by_uri(uri)
+            except Concept.DoesNotExist:
+                pass
+            else:
+                report.add_set_aside(SetAsideReason.URI_HELD_BY_DIFFERENT_KIND, subject=uri)
+                continue
             row = Collection(scheme=target_scheme)
             created = True
 
@@ -1098,7 +1112,10 @@ def _import_concepts(
     ``save()``. A URI matching an *existing* record that already belongs to a
     different vocabulary is left there, set aside and reported naming both
     vocabularies, rather than silently moved (review fix 8, decisions.md D42,
-    :data:`SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY`).
+    :data:`SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY`). A URI matching no
+    existing concept but already held by a :class:`Collection` is set aside
+    and reported rather than made to identify two records at once (review
+    fix 10, decisions.md D43, :data:`SetAsideReason.URI_HELD_BY_DIFFERENT_KIND`).
 
     Finally (T013/FR-013), every existing concept of ``target_scheme`` whose
     identity was never seen among ``concept_nodes`` — the file simply does not
@@ -1156,6 +1173,19 @@ def _import_concepts(
             concept = Concept.objects.get_by_uri(uri)
             created = False
         except Concept.DoesNotExist:
+            # FIX 10 (review, decisions.md D43): before minting a new record
+            # for this URI, check the *other* identity space — a Collection
+            # may already hold it (spec Edge Cases' own example: "a
+            # collection in one file, a concept in another"). Concept's and
+            # Collection's per-model unique constraints on static_uri never
+            # collide with each other, so nothing else would ever catch this.
+            try:
+                Collection.objects.get_by_uri(uri)
+            except Collection.DoesNotExist:
+                pass
+            else:
+                report.add_set_aside(SetAsideReason.URI_HELD_BY_DIFFERENT_KIND, subject=uri)
+                continue
             concept = Concept(scheme=target_scheme)
             created = True
 

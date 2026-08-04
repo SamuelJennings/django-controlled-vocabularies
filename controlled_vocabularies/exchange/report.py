@@ -59,7 +59,11 @@ class SetAsideReason(TextChoices):
     vocabulary than the one being imported: moving a record between
     vocabularies is a curatorial act, never a side effect of reading a file,
     so the existing record is left exactly where it is rather than
-    reassigned.
+    reassigned. ``URI_HELD_BY_DIFFERENT_KIND`` (review fix 10, decisions.md
+    D43) names a URI already held by a record of a different kind — a
+    collection where this file asserts a concept, or the reverse — a
+    contradictory source reported while reading rather than surfacing as a
+    database constraint violation (spec Edge Cases).
     """
 
     UNCONFIGURED_LANGUAGE = "unconfigured_language", _("language not configured")
@@ -75,6 +79,7 @@ class SetAsideReason(TextChoices):
     SURPLUS_PREFERRED_LABEL = "surplus_preferred_label", _("surplus preferred label in a language")
     EMPTY_SLUG = "empty_slug", _("preferred label produces no usable slug")
     ALREADY_IN_ANOTHER_VOCABULARY = "already_in_another_vocabulary", _("already belongs to another vocabulary")
+    URI_HELD_BY_DIFFERENT_KIND = "uri_held_by_different_kind", _("identifier held by a different kind of record")
 
     @property
     def template(self) -> Promise:
@@ -136,6 +141,10 @@ _REASON_TEMPLATES: dict[SetAsideReason, Promise] = {
     SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY: _(
         "'%(subject)s' already belongs to the vocabulary '%(current)s'; importing it into '%(target)s' "
         "would move it between vocabularies, so it was left where it is."
+    ),
+    SetAsideReason.URI_HELD_BY_DIFFERENT_KIND: _(
+        "'%(subject)s' is already held by a record of a different kind in this application; a second "
+        "record was not created for it."
     ),
 }
 

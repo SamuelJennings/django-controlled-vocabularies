@@ -1579,3 +1579,38 @@ ruff format .` — 1 file reformatted (`test_skos.py`) then clean. `poetry run m
 files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django
 makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry run
 pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-04T14:35:00Z · Forge · review fix 10 — a URI held by a record of a different kind
+
+**Did**: closed a medium-severity finding named directly by the spec's own Edge Cases: "later a
+concept's identifier is found to be held by a record of a different kind — a collection in one file,
+a concept in another. This is a contradictory source and is reported while reading, rather than
+surfacing as a database constraint violation." `_import_concepts` consulted only
+`Concept.objects.get_by_uri`, `_import_collections` only `Collection.objects.get_by_uri` — the two
+per-model unique constraints on `static_uri` never collide with each other, so nothing caught a URI
+asserted as both kinds across two files. Wrote the failing tests first —
+`TestUriHeldByARecordOfADifferentKind` in `test_skos.py`, using a new fixture pair
+(`uri_kind_collection_first.ttl` types `ex:thing` as a `skos:Collection`,
+`uri_kind_concept_second.ttl` types the identical URI as a `skos:Concept`) imported in each order —
+confirmed both tests failed before any production change: both records existed simultaneously
+asserting the same static URI, and nothing was reported. Made the production change, symmetrically at
+both call sites: on a `Concept.DoesNotExist`/`Collection.DoesNotExist` from `get_by_uri`, each
+function now also tries the *other* model's `get_by_uri` for the same URI before creating a new
+record; a hit sets the URI aside under a new `SetAsideReason.URI_HELD_BY_DIFFERENT_KIND` member and
+the second record is never created. Recorded as decisions.md D43.
+
+**Mutation probe, both directions independently**: removed the concept-side check (the `try
+Collection.objects.get_by_uri(uri) ... except ... else: report + continue` block ahead of `concept =
+Concept(scheme=target_scheme)`), re-ran the test class — `test_a_concept_uri_already_held_by_a_collection_is_refused`
+failed while `test_a_collection_uri_already_held_by_a_concept_is_refused` stayed green; restored, then
+removed the collection-side check the same way — the opposite single test failed. Confirms the two
+checks are independently load-bearing, not one copy that happens to also cover the other case.
+Restored both, re-ran green.
+
+**Verified**: `poetry run pytest -q` — 584 passed (578 + 2 new in
+`TestUriHeldByARecordOfADifferentKind`, plus 4 generic `SetAsideReason` sweep tests re-parametrizing
+over the new `URI_HELD_BY_DIFFERENT_KIND` member). `poetry run ruff check .` — all checks passed.
+`poetry run ruff format --check .` — 22 files already formatted. `poetry run mypy` — success, 9 source
+files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django
+makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry run
+pre-commit run --all-files` — all hooks passed.

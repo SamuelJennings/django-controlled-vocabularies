@@ -1589,6 +1589,41 @@ class TestExistingCollectionIsNotSilentlyReassignedBetweenVocabularies:
         assert entries[0].params["target"] == vocab_b_uri
 
 
+class TestUriHeldByARecordOfADifferentKind:
+    """FIX 10 (review, decisions.md D43) — spec Edge Cases: "later a
+    concept's identifier is found to be held by a record of a different
+    kind — a collection in one file, a concept in another. This is a
+    contradictory source and is reported while reading, rather than
+    surfacing as a database constraint violation." ``_import_concepts``
+    consults only ``Concept.objects.get_by_uri`` and ``_import_collections``
+    only ``Collection.objects.get_by_uri``, so the per-model unique
+    constraints never collide and nothing catches the clash: two records
+    silently end up asserting the same static URI, which Article IX makes
+    the sole identity."""
+
+    def test_a_concept_uri_already_held_by_a_collection_is_refused(self, db):
+        import_skos(FIXTURES / "uri_kind_collection_first.ttl")
+
+        report = import_skos(FIXTURES / "uri_kind_concept_second.ttl")
+
+        assert not Concept.objects.filter(static_uri="http://example.org/kind-clash/thing").exists()
+        assert Collection.objects.filter(static_uri="http://example.org/kind-clash/thing").exists()
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.URI_HELD_BY_DIFFERENT_KIND]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/kind-clash/thing"
+
+    def test_a_collection_uri_already_held_by_a_concept_is_refused(self, db):
+        import_skos(FIXTURES / "uri_kind_concept_second.ttl")
+
+        report = import_skos(FIXTURES / "uri_kind_collection_first.ttl")
+
+        assert not Collection.objects.filter(static_uri="http://example.org/kind-clash/thing").exists()
+        assert Concept.objects.filter(static_uri="http://example.org/kind-clash/thing").exists()
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.URI_HELD_BY_DIFFERENT_KIND]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/kind-clash/thing"
+
+
 class TestBlankNodeCollectionFails:
     """T030 — decisions.md D3: a collection identified only by a blank node
     fails the run, on the same rule that governs a concept. An ordered

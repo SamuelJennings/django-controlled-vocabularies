@@ -1257,3 +1257,53 @@ itself refuses to create directly, produced anyway through the public import API
 vocabulary" operation — that is new functionality with its own review of what happens to relationships
 and collection membership on the far side of the move, not a correction to this rule, which only ever
 concerns what an *import* run does on its own.
+
+## D43 — A URI already held by a record of a different kind is detected while reading, not left to a constraint (review fix 10)
+
+The spec's own Edge Cases name this exactly: "later a concept's identifier is found to be held by a
+record of a different kind — a collection in one file, a concept in another. This is a contradictory
+source and is reported while reading, rather than surfacing as a database constraint violation."
+`_import_concepts` consulted only `Concept.objects.get_by_uri`, and `_import_collections` only
+`Collection.objects.get_by_uri` — each model's own `static_uri` uniqueness constraint is scoped to
+that model alone, so the two identity spaces never collide at the database level, and nothing
+compared them to each other. A file that types `ex:thing` as a `skos:Collection`, imported, followed
+by a second file that types the identical `ex:thing` as a `skos:Concept`, produced two real, live
+records asserting the same static URI — the sole identity Article IX establishes — with the run
+reporting nothing at all.
+
+**Chosen: before minting a new record for a URI, check the *other* model's identity space too.**
+`_import_concepts`, on a `Concept.DoesNotExist` from `get_by_uri`, now also tries
+`Collection.objects.get_by_uri` for the same URI before creating a `Concept`; `_import_collections`
+carries the exact mirror check the other way. A hit in the other model sets the URI aside and
+reported under a new `SetAsideReason.URI_HELD_BY_DIFFERENT_KIND` member, naming only the subject —
+there is nothing else useful to name, since the point is precisely that a curator did not expect two
+kinds of record to share this identifier — and the second record is never created. The check runs
+only on the "would create a new record" branch: a URI that already matches a record of the *same*
+kind is an ordinary update, not a clash, so this adds no cost to the common case.
+
+**Why not check both directions from one place, once, up front?** `_import_concepts` and
+`_import_collections` run at different points in `import_skos` (concepts first, collections last,
+within the same `_import_concepts` call), and a URI can only be *about to be created* from inside the
+function that owns that creation. A single shared pre-pass would either duplicate the two loops'
+own identity resolution or run before concepts exist for a same-file clash to be caught against, so
+the check stays local to each creation site, the same "checked at the point of the write, not
+gathered separately" discipline every other set-aside-ahead-of-write check in this module already
+follows (D25).
+
+**This also closes the same-file case, not only the cross-file one the spec's own wording leads
+with.** Because concepts are always fully written before `_import_collections` runs (within the same
+`_import_concepts` call), a single file that types one URI as both a `skos:Concept` and a
+`skos:Collection` is caught the same way: the concept is created first, and when the collection node
+for the identical URI is reached, `Concept.objects.get_by_uri` already finds it. No fixture in this
+corpus exercises this shape specifically — the review's own reproduction is cross-file — but the
+mechanism does not need a same-file/cross-file distinction to work correctly either way.
+
+**Verified independently for each direction, by mutation.** Disabling the concept-side check alone
+left `test_a_concept_uri_already_held_by_a_collection_is_refused` failing while
+`test_a_collection_uri_already_held_by_a_concept_is_refused` stayed green; disabling the
+collection-side check alone reproduced the opposite pattern — confirming the two checks are
+independently load-bearing, not a copy that happens to also pass by luck.
+
+**Revisit if:** a future feature wants to *resolve* the clash (e.g., let a curator choose which kind
+wins, or merge the two) rather than refuse the second record — that is new curatorial functionality,
+not a correction to this rule, which only ever refuses silently colliding on one identifier.

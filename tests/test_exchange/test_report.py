@@ -40,6 +40,7 @@ _EXAMPLE_PARAMS = {
         "current": "https://example.org/vocab/current",
         "target": "https://example.org/vocab/target",
     },
+    SetAsideReason.URI_HELD_BY_DIFFERENT_KIND: {},
 }
 
 # One example params dict per fatal reason (T007), the same shape as _EXAMPLE_PARAMS.
