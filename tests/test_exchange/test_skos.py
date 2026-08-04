@@ -17,7 +17,6 @@ import controlled_vocabularies.exchange as exchange
 from controlled_vocabularies.exchange.report import FatalReason, NormalizedReason, SetAsideReason
 from controlled_vocabularies.exchange.safety import UnsafeJsonLdError, UnsafeRdfXmlError
 from controlled_vocabularies.exchange.skos import (
-    _HANDLED_CONCEPT_PREDICATES,
     SkosImportError,
     SkosImportFailed,
     _read_graph,
@@ -25,6 +24,7 @@ from controlled_vocabularies.exchange.skos import (
 )
 from controlled_vocabularies.models import (
     Collection,
+    CollectionMember,
     Concept,
     ConceptLabel,
     ConceptNote,
@@ -1873,46 +1873,356 @@ class TestFixtureCorpus:
         )
 
 
-class TestEverySkosPredicateIsReadOrReported:
-    """T033 — closes decisions.md D27's own gap. D27 silently skips a SKOS
-    predicate that has a model home but no read path yet, correct only
-    while a later story still owed that read path; every story has now
-    landed (US-4 relationships, US-5 collections), so a silent skip is the
-    disappearance D1 forbids. This turns D27's own "Revisit if" into a
-    check: every SKOS predicate appearing anywhere in the fixture corpus —
-    discovered by walking the files, not a hand-kept list, the same
-    discovery discipline ``ALL_FIXTURES`` above already applies — must be
-    either read by the importer or named in the report.
+# FIX 13 (review, decisions.md D46) — independent, domain-level predicate
+# knowledge for TestEverySkosPredicateIsReadOrReported's own behavioural
+# rewrite below. Deliberately *not* imported from
+# controlled_vocabularies.exchange.mapping: reusing production's own tables
+# would repeat exactly the defect this fix closes — a check built from the
+# same constant production uses to decide what it has handled can never
+# notice production quietly stopping to read what it still claims to. This
+# restates the SKOS specification's own vocabulary (which predicate is a
+# preferred/alternative/hidden label, which is which note kind, which is a
+# cross-vocabulary mapping and its CURIE) from the spec, not the module under
+# test.
+_COVERAGE_LABEL_KIND = {
+    SKOS.prefLabel: ConceptLabel.Kind.PREFERRED,
+    SKOS.altLabel: ConceptLabel.Kind.ALTERNATIVE,
+    SKOS.hiddenLabel: ConceptLabel.Kind.HIDDEN,
+}
+_COVERAGE_NOTE_KIND = {
+    SKOS.definition: ConceptNote.Kind.DEFINITION,
+    SKOS.scopeNote: ConceptNote.Kind.SCOPE,
+    SKOS.example: ConceptNote.Kind.EXAMPLE,
+    SKOS.editorialNote: ConceptNote.Kind.EDITORIAL,
+    SKOS.historyNote: ConceptNote.Kind.HISTORY,
+    SKOS.changeNote: ConceptNote.Kind.CHANGE,
+    SKOS.note: ConceptNote.Kind.NOTE,
+}
+_COVERAGE_MAPPING_CURIE = {
+    SKOS.exactMatch: "skos:exactMatch",
+    SKOS.closeMatch: "skos:closeMatch",
+    SKOS.broadMatch: "skos:broadMatch",
+    SKOS.narrowMatch: "skos:narrowMatch",
+    SKOS.relatedMatch: "skos:relatedMatch",
+    SKOS.mappingRelation: "skos:mappingRelation",
+}
 
-    ``_HANDLED_CONCEPT_PREDICATES`` is ``_import_unheld_values``'s own gate
-    in ``skos.py`` — imported directly rather than duplicated, so this test
-    tracks the production classification instead of a second copy of it
-    that could drift from it. It only classifies *concept*-level predicates,
-    though, because it only ever gates a walk over one concept node's own
-    predicates: three more SKOS predicates are read, but never reach that
-    gate at all because they are never a concept's own predicate to begin
-    with. ``skos:hasTopConcept`` is stated *by the scheme, about* a concept
-    (read by ``_scheme_refs``); ``skos:member``/``skos:memberList`` are
-    stated by a *collection* (read by ``_import_collections``). A first,
-    deliberately naive version of this test — checking only against
-    ``_HANDLED_CONCEPT_PREDICATES`` — failed by naming exactly these three,
-    which is what exposed that they needed naming here explicitly rather
-    than being silently missing from the "recognised" set.
+# A set-aside reason under which the *whole* record was never created or
+# updated this run — as opposed to one where the record exists but a
+# specific value on it was left out. Only these blanket-excuse every one of
+# that node's own predicates from needing further evidence: there is no
+# concept or collection row left to check anything against.
+_COVERAGE_WHOLE_RECORD_EXCLUDED_REASONS = frozenset(
+    {
+        SetAsideReason.NO_PREFERRED_LABEL,
+        SetAsideReason.VOCABULARY_MISMATCH,
+        SetAsideReason.EMPTY_SLUG,
+        SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY,
+        SetAsideReason.URI_HELD_BY_DIFFERENT_KIND,
+    }
+)
+
+# Fatal-path fixtures, and the two that need a caller-named scheme this sweep
+# does not attempt to supply, write nothing on their own — there is no
+# resulting record and no non-fatal report entry for a predicate's coverage
+# to appear in. Excluded explicitly, not silently skipped: each is already
+# exercised directly by its own dedicated test class.
+_PREDICATE_COVERAGE_EXCLUDED_FIXTURES = frozenset(
+    {
+        "blank_node_concept.ttl",  # TestFatalFindingsAndAtomicity
+        "blank_node_collection.ttl",  # TestBlankNodeCollectionFails
+        "refused_uri_scheme.ttl",  # TestFatalFindingsAndAtomicity
+        "multiple_fatal_problems.ttl",  # TestFatalFindingsAndAtomicity
+        "reimport_rolls_back_an_update.ttl",  # TestAtomicityOnAPopulatedDatabase
+        "two_vocabularies.ttl",  # TestChoosingBetweenDeclaredVocabularies
+        "no_scheme_declared.ttl",  # TestImportSkosVocabulary
+        "vocabulary_reassignment.ttl",  # TestExistingConceptIsNotSilentlyMovedBetweenVocabularies
+    }
+)
+
+_PREDICATE_COVERAGE_FIXTURES = sorted(
+    (filename, fmt) for filename, fmt in ALL_FIXTURES if filename not in _PREDICATE_COVERAGE_EXCLUDED_FIXTURES
+)
+
+
+def _coverage_membership_covered(collection_uri: str, concept_uri: str, report) -> bool:
+    """Direct evidence that ``concept_uri`` landed as a member of ``collection_uri``,
+    or was reported as a member that could not be found (FIX 13)."""
+    if CollectionMember.objects.filter(collection__static_uri=collection_uri, concept__static_uri=concept_uri).exists():
+        return True
+    return any(
+        entry.reason is SetAsideReason.MISSING_MEMBER
+        and entry.subject == concept_uri
+        and entry.params.get("collection") == collection_uri
+        for entry in report.set_aside
+    )
+
+
+def _coverage_relation_covered(kind: str, source_uri: str, target_uri: str, report) -> bool:
+    """Direct evidence that a ``kind`` relation between ``source_uri`` and ``target_uri``
+    (in that direction) landed, or was reported missing/disjoint (FIX 13)."""
+    if ConceptRelation.objects.filter(kind=kind, source__static_uri=source_uri, target__static_uri=target_uri).exists():
+        return True
+    return any(
+        entry.reason in (SetAsideReason.MISSING_RELATION_END, SetAsideReason.RELATION_DISJOINTNESS)
+        and {entry.subject, entry.params.get("other")} == {source_uri, target_uri}
+        for entry in report.set_aside
+    )
+
+
+def _coverage_scheme_membership_covered(concept_uri: str, scheme_uri: str, excluded_subjects: set[str]) -> bool:
+    """Direct evidence that ``concept_uri`` landed inside the vocabulary ``scheme_uri``
+    names, or that the concept was never created at all this run (FIX 13)."""
+    if concept_uri in excluded_subjects:
+        return True
+    return Concept.objects.filter(static_uri=concept_uri, scheme__static_uri=scheme_uri).exists()
+
+
+def _coverage_label_covered(
+    subject_uri: str, language: str, text: str, kind: str, excluded_subjects: set[str], report
+) -> bool:
+    """Direct evidence that this ``skos:prefLabel``/``altLabel``/``hiddenLabel`` value
+    landed — as the scheme's own name, a concept's identity anchor, or a
+    ``ConceptLabel`` row — or was reported set aside (FIX 13)."""
+    if subject_uri in excluded_subjects:
+        return True
+    if kind == ConceptLabel.Kind.PREFERRED:
+        if ConceptScheme.objects.filter(static_uri=subject_uri, name=text).exists():
+            return True
+        if Concept.objects.filter(static_uri=subject_uri, label=text).exists():
+            return True
+        if Collection.objects.filter(static_uri=subject_uri, name=text).exists():
+            return True
+    if ConceptLabel.objects.filter(concept__static_uri=subject_uri, language=language, kind=kind, text=text).exists():
+        return True
+    return any(
+        entry.subject == subject_uri
+        and entry.params.get("language") == language
+        and entry.reason in (SetAsideReason.UNCONFIGURED_LANGUAGE, SetAsideReason.SURPLUS_PREFERRED_LABEL)
+        for entry in report.set_aside
+    )
+
+
+def _coverage_note_covered(
+    subject_uri: str, language: str, text: str, kind: str, excluded_subjects: set[str], report
+) -> bool:
+    """Direct evidence that this note value landed as a ``ConceptNote`` row, or was
+    reported set aside (FIX 13)."""
+    if subject_uri in excluded_subjects:
+        return True
+    if ConceptNote.objects.filter(concept__static_uri=subject_uri, language=language, kind=kind, value=text).exists():
+        return True
+    return any(
+        entry.subject == subject_uri
+        and entry.params.get("language") == language
+        and entry.reason is SetAsideReason.UNCONFIGURED_LANGUAGE
+        for entry in report.set_aside
+    )
+
+
+def _coverage_predicate_covered(
+    predicate: rdflib.URIRef,
+    graph: rdflib.Graph,
+    in_scope: set[str],
+    excluded_subjects: set[str],
+    report,
+) -> tuple[bool, str | None]:
+    """Whether every in-scope triple of ``predicate`` in ``graph`` has direct evidence
+    of landing in a record or being named in the report (FIX 13). Returns
+    ``(True, None)`` when covered, or ``(False, subject)`` naming the first
+    triple's subject that has no such evidence."""
+    if predicate in _COVERAGE_LABEL_KIND:
+        kind = _COVERAGE_LABEL_KIND[predicate]
+        for subject_node, literal in graph.subject_objects(predicate):
+            subject_uri = str(subject_node)
+            if subject_uri not in in_scope or not isinstance(literal, rdflib.Literal) or not literal.language:
+                continue
+            if not _coverage_label_covered(
+                subject_uri, literal.language, str(literal), kind, excluded_subjects, report
+            ):
+                return False, subject_uri
+        return True, None
+
+    if predicate in _COVERAGE_NOTE_KIND:
+        kind = _COVERAGE_NOTE_KIND[predicate]
+        for subject_node, literal in graph.subject_objects(predicate):
+            subject_uri = str(subject_node)
+            if subject_uri not in in_scope or not isinstance(literal, rdflib.Literal) or not literal.language:
+                continue
+            if not _coverage_note_covered(subject_uri, literal.language, str(literal), kind, excluded_subjects, report):
+                return False, subject_uri
+        return True, None
+
+    if predicate in _COVERAGE_MAPPING_CURIE:
+        curie = _COVERAGE_MAPPING_CURIE[predicate]
+        for subject_node, _obj in graph.subject_objects(predicate):
+            subject_uri = str(subject_node)
+            if subject_uri not in in_scope or subject_uri in excluded_subjects:
+                continue
+            reported = any(
+                entry.reason is SetAsideReason.MAPPING
+                and entry.subject == subject_uri
+                and entry.params.get("predicate") == curie
+                for entry in report.set_aside
+            )
+            if not reported:
+                return False, subject_uri
+        return True, None
+
+    if predicate == SKOS.notation:
+        for subject_node, _obj in graph.subject_objects(predicate):
+            subject_uri = str(subject_node)
+            if subject_uri not in in_scope or subject_uri in excluded_subjects:
+                continue
+            reported = any(
+                entry.reason is SetAsideReason.NOTATION and entry.subject == subject_uri for entry in report.set_aside
+            )
+            if not reported:
+                return False, subject_uri
+        return True, None
+
+    if predicate in (SKOS.broader, SKOS.narrower):
+        for subject_node, object_node in graph.subject_objects(predicate):
+            subject_uri, object_uri = str(subject_node), str(object_node)
+            if subject_uri not in in_scope or subject_uri == object_uri:
+                continue
+            if subject_uri in excluded_subjects or object_uri in excluded_subjects:
+                continue
+            narrower_uri, broader_uri = (
+                (subject_uri, object_uri) if predicate == SKOS.broader else (object_uri, subject_uri)
+            )
+            if not _coverage_relation_covered(ConceptRelation.Kind.BROADER, narrower_uri, broader_uri, report):
+                return False, subject_uri
+        return True, None
+
+    if predicate == SKOS.related:
+        for subject_node, object_node in graph.subject_objects(predicate):
+            subject_uri, object_uri = str(subject_node), str(object_node)
+            if subject_uri not in in_scope or subject_uri == object_uri:
+                continue
+            if subject_uri in excluded_subjects or object_uri in excluded_subjects:
+                continue
+            covered = _coverage_relation_covered(
+                ConceptRelation.Kind.RELATED, subject_uri, object_uri, report
+            ) or _coverage_relation_covered(ConceptRelation.Kind.RELATED, object_uri, subject_uri, report)
+            if not covered:
+                return False, subject_uri
+        return True, None
+
+    if predicate in (SKOS.inScheme, SKOS.topConceptOf):
+        for subject_node, object_node in graph.subject_objects(predicate):
+            concept_uri, scheme_uri = str(subject_node), str(object_node)
+            if concept_uri not in in_scope:
+                continue
+            if not _coverage_scheme_membership_covered(concept_uri, scheme_uri, excluded_subjects):
+                return False, concept_uri
+        return True, None
+
+    if predicate == SKOS.hasTopConcept:
+        for subject_node, object_node in graph.subject_objects(predicate):
+            scheme_uri, concept_uri = str(subject_node), str(object_node)
+            if scheme_uri not in in_scope:
+                continue
+            if not _coverage_scheme_membership_covered(concept_uri, scheme_uri, excluded_subjects):
+                return False, scheme_uri
+        return True, None
+
+    if predicate == SKOS.member:
+        for subject_node, object_node in graph.subject_objects(predicate):
+            collection_uri, concept_uri = str(subject_node), str(object_node)
+            if collection_uri not in in_scope or collection_uri in excluded_subjects:
+                continue
+            if not _coverage_membership_covered(collection_uri, concept_uri, report):
+                return False, collection_uri
+        return True, None
+
+    if predicate == SKOS.memberList:
+        for subject_node, list_head in graph.subject_objects(predicate):
+            collection_uri = str(subject_node)
+            if collection_uri not in in_scope or collection_uri in excluded_subjects:
+                continue
+            for item in graph.items(list_head):
+                if not _coverage_membership_covered(collection_uri, str(item), report):
+                    return False, collection_uri
+        return True, None
+
+    # A SKOS predicate this dispatcher has no independent verification logic
+    # for yet. Treated as uncovered, not silently skipped — the whole point
+    # of this rewrite is that a predicate the fixture corpus grows to carry
+    # cannot pass this test merely by production classifying it as handled.
+    return False, str(predicate)
+
+
+class TestEverySkosPredicateIsReadOrReported:
+    """T033/FIX 13 (review, decisions.md D46) — a behavioural rewrite of the
+    original T033 gate. That version computed its own "recognised" set from
+    ``_HANDLED_CONCEPT_PREDICATES | _READ_BUT_NOT_AT_CONCEPT_LEVEL`` —
+    production's own exclusion set, imported directly. Membership there means
+    "not double-reported by ``_import_unheld_values``", which is *not* the
+    claim FR-014 actually makes: "read by the importer, or named in the
+    report." Adding a predicate to ``_HANDLED_CONCEPT_PREDICATES`` while
+    never building a read path for it made the old test pass and the
+    behaviour regress in the same edit, because the test's own "recognised"
+    set and the constant a review-introduced mutation would touch were one
+    and the same object — precisely the failure D34 wrote this gate to
+    prevent, and precisely what it could not actually prevent.
+
+    This version imports every fixture that can succeed standing alone
+    (``scheme=None``, no pre-seeded database — the excluded fixtures above
+    cannot, and are each exercised directly by their own dedicated test
+    class instead) and, for every SKOS predicate the fixture's own graph
+    carries on a node this importer treats as a record (a concept, the
+    vocabulary's own scheme node, or a collection — a *foreign* scheme node
+    merely referenced, as in ``mixed_scheme_membership.ttl``, is not itself
+    such a record), requires direct, independently-derived evidence —
+    a matching database row, or a matching report entry — that the
+    predicate's value was either read into a record or named in the report.
+    None of that evidence-gathering reuses ``skos.py``'s own handled-predicate
+    tables; :data:`_COVERAGE_LABEL_KIND`/`_COVERAGE_NOTE_KIND`/`_COVERAGE_MAPPING_CURIE`
+    above restate the SKOS specification's own vocabulary independently.
     """
 
-    _READ_BUT_NOT_AT_CONCEPT_LEVEL = frozenset({SKOS.hasTopConcept, SKOS.member, SKOS.memberList})
+    @pytest.mark.parametrize("filename,fmt", _PREDICATE_COVERAGE_FIXTURES)
+    def test_every_skos_predicate_in_this_fixture_is_read_or_reported(self, db, filename, fmt):
+        path = FIXTURES / filename
+        graph = rdflib.Graph()
+        graph.parse(path, format=fmt)
 
-    def test_every_skos_predicate_in_the_fixture_corpus_is_read_or_reported(self):
-        found: set[str] = set()
-        for filename, fmt in ALL_FIXTURES:
-            graph = rdflib.Graph()
-            graph.parse(FIXTURES / filename, format=fmt)
-            found |= {str(predicate) for predicate in graph.predicates() if str(predicate).startswith(str(SKOS))}
+        report = import_skos(path)
+        assert report.fatal == [], f"{filename} unexpectedly failed to import: {[f.render() for f in report.fatal]}"
 
-        recognised = {str(predicate) for predicate in _HANDLED_CONCEPT_PREDICATES | self._READ_BUT_NOT_AT_CONCEPT_LEVEL}
-        unrecognised = found - recognised
-        assert not unrecognised, (
-            f"SKOS predicate(s) in the fixture corpus are neither read nor reported: {sorted(unrecognised)}"
+        concept_nodes = set(graph.subjects(rdflib.RDF.type, SKOS.Concept))
+        collection_nodes = set(graph.subjects(rdflib.RDF.type, SKOS.Collection)) | set(
+            graph.subjects(rdflib.RDF.type, SKOS.OrderedCollection)
+        )
+        scheme_nodes = set(graph.subjects(rdflib.RDF.type, SKOS.ConceptScheme))
+        # Only the *resolved* scheme is in scope — a second, merely-referenced
+        # declared scheme (mixed_scheme_membership.ttl's "other") is never a
+        # record this importer creates, so its own predicates are not this
+        # importer's to account for.
+        resolved_scheme_uris = set(
+            ConceptScheme.objects.filter(static_uri__in=[str(node) for node in scheme_nodes]).values_list(
+                "static_uri", flat=True
+            )
+        )
+        in_scope = (
+            {str(node) for node in concept_nodes} | {str(node) for node in collection_nodes} | resolved_scheme_uris
+        )
+
+        excluded_subjects = {
+            entry.subject for entry in report.set_aside if entry.reason in _COVERAGE_WHOLE_RECORD_EXCLUDED_REASONS
+        }
+        predicates = {predicate for predicate in graph.predicates() if str(predicate).startswith(str(SKOS))}
+
+        failures = []
+        for predicate in predicates:
+            covered, failing_subject = _coverage_predicate_covered(
+                predicate, graph, in_scope, excluded_subjects, report
+            )
+            if not covered:
+                failures.append((str(predicate), failing_subject))
+        assert not failures, (
+            f"{filename}: SKOS predicate(s) neither reflected in a record nor named in the report: {failures}"
         )
 
 

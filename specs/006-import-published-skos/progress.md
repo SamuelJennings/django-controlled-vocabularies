@@ -1680,3 +1680,58 @@ ruff format --check .` — 22 files already formatted. `poetry run mypy` — suc
 `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations
 --check --dry-run --settings=tests.settings` — no changes detected. `poetry run pre-commit run
 --all-files` — all hooks passed.
+
+## 2026-08-04T15:25:00Z · Forge · review fix 13 — the predicate-coverage gate asserts against an implementation constant
+
+**Did**: closed a test-quality finding on `TestEverySkosPredicateIsReadOrReported` (T033, D34): its
+`recognised` set was built from `_HANDLED_CONCEPT_PREDICATES | _READ_BUT_NOT_AT_CONCEPT_LEVEL` —
+`_import_unheld_values`'s own exclusion set, imported directly from `skos.py`. Membership there means
+"not double-reported by `_import_unheld_values`", not the actual claim FR-014 and the test's own
+docstring make ("read by the importer, or named in the report") — adding a predicate to
+`_HANDLED_CONCEPT_PREDICATES` with no read path behind it would make the test pass and the behaviour
+regress in the same edit, because the test's "recognised" set and the constant a regression would
+touch were the same object. Rewrote the test behaviourally: for every fixture that can succeed
+standing alone (`scheme=None`, no pre-seeded database — the fatal-path fixtures and the two needing a
+caller-supplied target are excluded, named individually with the test class already covering each),
+imports it and, for every SKOS predicate the graph carries on a node this importer treats as a record
+(a concept, the resolved scheme node, or a collection), requires direct evidence — a matching model
+row, a matching `Concept.label`/`ConceptScheme.name`/`Collection.name`, or a matching
+`report.set_aside`/`report.normalized` entry. None of the evidence-gathering (`_COVERAGE_LABEL_KIND`/
+`_COVERAGE_NOTE_KIND`/`_COVERAGE_MAPPING_CURIE`) imports from `skos.py`; it restates the SKOS
+specification's own predicate vocabulary independently in the test file. A record wholly excluded
+this run (`NO_PREFERRED_LABEL`/`VOCABULARY_MISMATCH`/`EMPTY_SLUG`/`ALREADY_IN_ANOTHER_VOCABULARY`/
+`URI_HELD_BY_DIFFERENT_KIND`) blanket-covers its own predicates; a record that *was* created with only
+one value set aside does not — every other predicate on it still needs its own evidence, a
+distinction a first draft of this rewrite missed and then corrected (caught because
+`unmodelled_and_normalised_values.ttl`'s `widget` concept carries both a reported notation and a
+`prefLabel` that needed independent verification).
+
+**Proven stronger by mutation, not merely argued.** Disabled `skos:broader`/`skos:narrower` reading in
+`_import_relations` (commented out the two `graph.objects(node, SKOS.broader/narrower)` loops) while
+leaving `_HANDLED_CONCEPT_PREDICATES` completely unchanged — the exact regression shape this fix
+exists to catch. Reconstructed the *old* test's own logic inline against the unmodified constant:
+`unrecognised == set()`, i.e. the old test would still pass. Ran the *new*, rewritten test against the
+same mutation: 11 fixtures failed, naming `skos:broader`/`skos:narrower` on the concepts whose
+relation no longer lands or is reported. Reverted the mutation immediately; re-ran the full suite
+green. This demonstration was run twice — once mid-session to validate the design, once again in the
+final, fully-integrated state just before this commit — with identical results both times.
+
+**One honest limitation, named rather than hidden.** The rewrite is fixture-by-fixture, not a single
+global sweep, and deliberately excludes the fatal-path fixtures and the two needing a caller-supplied
+target (`_PREDICATE_COVERAGE_EXCLUDED_FIXTURES`, each named with which dedicated test class already
+covers it): a failed run has no resulting record and no non-fatal report entry for a predicate's
+coverage to appear in. A fully global, no-exclusions version was not attempted — it would need this
+test to invent target-scheme behaviour these fixtures were never built to exercise, duplicating what
+`TestChoosingBetweenDeclaredVocabularies`/`TestImportSkosVocabulary` already cover on purpose.
+Recorded as decisions.md D46.
+
+**Verified**: `poetry run pytest -q` — 629 passed (net: the single old
+`test_every_skos_predicate_in_the_fixture_corpus_is_read_or_reported` test is replaced by 40
+parametrized instances of `test_every_skos_predicate_in_this_fixture_is_read_or_reported`, one per
+fixture eligible for the sweep — no new fixture, no new `SetAsideReason` member). `poetry run ruff
+check .` — all checks passed. `poetry run ruff format --check .` — 22 files already formatted.
+`poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned.
+`poetry run python -m django makemigrations --check --dry-run --settings=tests.settings` — no changes
+detected. `poetry run pre-commit run --all-files` — all hooks passed.
+
+**This closes the last of the six fixes in this review batch (FIX 8–13).**

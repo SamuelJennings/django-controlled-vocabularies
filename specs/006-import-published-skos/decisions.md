@@ -1419,3 +1419,72 @@ load-bearing.
 predicate on a scheme or collection node with a use worth modelling — that is new capability
 (a place to *store* it, or a considered reason to report it under NOTATION/MAPPING rather than the
 generic UNMODELLED_PREDICATE), not a correction to this decision's deliberate scope limit.
+
+## D46 — The predicate-coverage gate is rewritten to check actual evidence, not membership in production's own exclusion set (review fix 13)
+
+`tests/test_exchange/test_skos.py::TestEverySkosPredicateIsReadOrReported` (T033, D34) computed a
+`recognised` set from `_HANDLED_CONCEPT_PREDICATES | _READ_BUT_NOT_AT_CONCEPT_LEVEL` — the first
+imported directly from `skos.py`, the second a small hand-kept set naming the three predicates read
+at a node kind other than a concept's own — and asserted every SKOS predicate found anywhere in the
+fixture corpus was a member. D34's own account of this test says plainly what membership means:
+"not double-reported by `_import_unheld_values`." That is a different claim than the one FR-014 and
+this test's own docstring actually make — "read by the importer, or named in the report" — and the
+gap between the two is exactly the shape of defect this fix's brief names: adding a predicate to
+`_HANDLED_CONCEPT_PREDICATES` with no read path behind it makes the predicate "recognised" and the
+test pass, in the same edit that makes the importer silently stop accounting for it. The test's own
+"recognised" set and the constant a regression would touch were the same object; the test could not,
+structurally, ever catch that shape of regression.
+
+**Chosen: rebuild the test on independent evidence.** For every fixture that can succeed standing
+alone (`scheme=None`, no pre-seeded database — the same discovery walk `ALL_FIXTURES` already uses,
+now filtered to exclude the fatal-path fixtures and the two that need a caller-supplied target this
+sweep does not attempt to construct, each already exercised directly by its own dedicated test
+class), the test imports it and, for every SKOS predicate the graph carries on a node this importer
+actually treats as a record (a concept, the vocabulary's own resolved scheme node — never a second,
+merely-referenced declared scheme, as in `mixed_scheme_membership.ttl`'s "other" — or a collection),
+requires direct evidence: a matching `ConceptLabel`/`ConceptNote`/`ConceptRelation`/`CollectionMember`
+row, a matching `Concept.label` or `ConceptScheme.name`/`Collection.name` value, or a matching
+`report.set_aside`/`report.normalized` entry naming the same subject and, where the reason carries
+one, the same language or predicate. None of this evidence-gathering imports anything from `skos.py`:
+`_COVERAGE_LABEL_KIND`/`_COVERAGE_NOTE_KIND`/`_COVERAGE_MAPPING_CURIE` restate the SKOS
+specification's own predicate-to-kind vocabulary independently, in the test file, so a future
+regression in production's own classification has no matching classification in the test to hide
+behind.
+
+**A record entirely excluded this run — set aside under `NO_PREFERRED_LABEL`, `VOCABULARY_MISMATCH`,
+`EMPTY_SLUG`, or this fix's own `ALREADY_IN_ANOTHER_VOCABULARY`/`URI_HELD_BY_DIFFERENT_KIND` — blanket-
+covers every one of its own predicates.** There is no record for any of them to have landed against,
+and the set-aside entry already explains why the whole node was skipped; requiring separate evidence
+per predicate on a node that was never created would be checking for something that cannot exist.
+This is narrower than it might look: a record that *was* created, with only one specific value set
+aside (`UNCONFIGURED_LANGUAGE`, `SURPLUS_PREFERRED_LABEL`, `NOTATION`, `MAPPING`, `MISSING_MEMBER`,
+`MISSING_RELATION_END`, `RELATION_DISJOINTNESS`) does **not** get this blanket treatment — every one
+of *that* node's other predicates still needs its own evidence, exactly the distinction a first draft
+of this rewrite missed (treating any subject appearing in *any* set-aside entry as wholly excused,
+which would have let `unmodelled_and_normalised_values.ttl`'s own `widget` concept's `prefLabel` pass
+unverified merely because `widget` also carries a separately-reported notation).
+
+**Proven stronger by mutation, not merely argued.** Disabling `skos:broader`/`skos:narrower` reading
+in `_import_relations` (commenting out the two `graph.objects(node, SKOS.broader/narrower)` loops)
+while leaving `_HANDLED_CONCEPT_PREDICATES` completely unchanged — the exact shape of regression this
+fix exists to catch — reproduces the old test's own logic (rebuilt inline against the unmodified
+constant) still passing, `unrecognised == set()`, while the new, rewritten test fails on eleven
+fixtures, naming `skos:broader`/`skos:narrower` on the concepts whose relation no longer lands or is
+reported. Reverted immediately after recording the result; no production code was left changed by
+this probe.
+
+**One honest limitation, not hidden in new clothes.** The rewrite is fixture-by-fixture, not a single
+global sweep, and it excludes the fatal-path fixtures and two target-requiring ones
+(`_PREDICATE_COVERAGE_EXCLUDED_FIXTURES`) because a failed run has no resulting record and no
+non-fatal report entry for a predicate's coverage to appear in — there is nothing behavioural left to
+check on a run that wrote nothing. Their own predicates are still exercised, just by the test classes
+built to exercise those specific fixtures directly (named in the exclusion set's own comments), not
+by this generic sweep. A fully global, no-exclusions version was not attempted: it would need this
+test to also supply a synthetic target scheme for the ambiguous/undeclared cases, which risks
+asserting behaviour these fixtures were never built to have and duplicating what
+`TestChoosingBetweenDeclaredVocabularies`/`TestImportSkosVocabulary` already cover on purpose.
+
+**Revisit if:** a SKOS predicate this dispatcher has no case for yet reaches the fixture corpus — it
+is treated as uncovered (a hard failure naming the predicate) rather than silently skipped, which is
+deliberate: a new predicate must earn its own evidence rule in `_coverage_predicate_covered`, the
+same discipline this whole fix exists to enforce on production's own classification.
