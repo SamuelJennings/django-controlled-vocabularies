@@ -580,3 +580,38 @@ finally reads them; D21 sets the `dcterms:*` alias precedent (scheme description
 definition) a note-kind mapping may want to follow for its own foreign-predicate aliases.
 
 **Watch**: none.
+
+## 2026-08-04T11:10:00Z · Implementer US3 · T018
+
+**Did**: `mapping.py` gains `LABEL_PREDICATES` (`skos:prefLabel`/`altLabel`/`hiddenLabel` ->
+`ConceptLabel.Kind`). `skos.py`'s new `_import_labels()` writes every one of a concept's labels
+through `Concept.add_label` (research.md R5), replacing whatever the concept already held — a
+label carries no identifier of its own to upsert by, unlike the concept itself, so the file's
+current content is written fresh on every run rather than diffed against what was there before.
+The preferred label in the vocabulary's effective default language is skipped: it is already
+`Concept.label` (T009), and `ConceptLabel.clean()` refuses a second preferred row in that language,
+so the importer must not attempt one either. Wired in through a new `_import_concept_content()`,
+called once per created-or-updated concept right after `concept.save()` — a thin wrapper today,
+built to grow one call per US-3 task (T019, T021 add to it next) rather than threading each new
+piece of concept content through `_import_concepts()` directly.
+
+Language filtering is deliberately not built yet — every fixture this task reads from already
+uses a configured language, and tasks.md scopes that filtering to T020 as its own increment (the
+brief for T020 asks for a considered choice between filtering ahead of the write and catching the
+model's own refusal, which is exactly the kind of decision worth its own task rather than folded
+in here as a side effect).
+
+**Verified**: `poetry run pytest -q` — 431 passed (427 + 4 new in `test_skos.py`'s new
+`TestConceptLabels`). `poetry run ruff check .` — all checks passed. `poetry run ruff format
+--check .` — 21 files already formatted. `poetry run mypy` — success, 9 source files. `poetry run
+deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations --check
+--dry-run --settings=tests.settings` — no changes detected. `poetry run pre-commit run
+--all-files` — all hooks passed.
+
+**Next**: T019 — notes: the definition and the six SKOS documentary note kinds, each with its
+language, via `Concept.add_note`.
+
+**Watch**: `rocks_updated.ttl` does not yet drop a note from a concept that stays present — only
+granite's alternative label and quartz's whole removal are covered, so T018's own carried case
+(decisions.md D20) had fixture material to test against, but T019's equivalent carried case does
+not yet. Recorded as a new decision (D24) rather than left implicit.
