@@ -94,6 +94,55 @@ CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES = [
 A stored identifier is later rendered as a link, so schemes that can carry executable content
 (`javascript`, `data`, `vbscript`) are refused even if you add them to this setting.
 
+## Importing a published vocabulary
+
+`import_skos()` reads a SKOS file — Turtle, RDF/XML, or JSON-LD — and creates or updates the
+vocabulary it declares, along with every concept it contains: identity, labels, documentary notes,
+broader/narrower and related relationships, and collection membership. Every record is matched by
+its static URI, never by name, so importing the same file twice updates the same rows rather than
+duplicating them.
+
+```python
+from controlled_vocabularies.exchange import import_skos
+
+report = import_skos("rocks.ttl")
+```
+
+The caller may name a target `ConceptScheme` for a file that declares no vocabulary of its own, or
+have it checked against one the file does declare:
+
+```python
+report = import_skos("rocks.ttl", scheme=my_scheme)
+```
+
+Re-running an import upserts rather than deleting and recreating. For a record the file still
+contains, the file is authoritative for that record's own content — labels, notes, relationships,
+and collection membership end up matching the file exactly, including the removal of a value the
+file no longer carries. A record the file does not mention at all is left completely untouched and
+named in the report instead, never deleted.
+
+The call returns an `ImportReport`, a plain dataclass rather than rendered text, so a caller can
+inspect what happened without parsing anything:
+
+- `created` / `updated` — the URIs of every vocabulary, concept, and collection the run wrote.
+- `set_aside` — a `SetAsideEntry` per value the run could not store, each carrying a closed,
+  translatable reason (an unconfigured language, a notation, a mapping to another vocabulary, a
+  predicate the models have no place for, a missing relationship or collection member, and so on)
+  and the data needed to render a message about it. Nothing a file contains is ever dropped in
+  silence — a value the app cannot store is always named here.
+- `absent_from_source` — the URIs of records that exist here but that the file no longer mentions.
+- `normalized` — a `NormalizedEntry` per value the run stored, but under a different predicate than
+  the one the file asserted (a foreign `dcterms:description` read as a concept's definition, for
+  example).
+- `fatal` — populated only on a failed run: a `FatalFinding` per reason the whole import was
+  refused (a missing or blank-node identity, or a vocabulary that could not be resolved). A failed
+  run raises `SkosImportFailed`, carrying this same report, and leaves the database exactly as it
+  was before the run started.
+
+A run either succeeds in full or changes nothing: every problem in a file is collected before any
+of it is written, and a fatal one rolls the whole run back. There is no command-line or web-facing
+entry point yet — `import_skos()` is a programmatic call only.
+
 ## Relationship to other packages
 
 Supersedes and retires `skos-builder` and `django-research-vocabs`, consolidating vocabulary

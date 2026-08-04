@@ -11,11 +11,18 @@ from pathlib import Path
 
 import pytest
 import rdflib
+from django.utils.functional import Promise
 
 import controlled_vocabularies.exchange as exchange
 from controlled_vocabularies.exchange.report import FatalReason, NormalizedReason, SetAsideReason
 from controlled_vocabularies.exchange.safety import UnsafeRdfXmlError
-from controlled_vocabularies.exchange.skos import SkosImportError, SkosImportFailed, _read_graph, import_skos
+from controlled_vocabularies.exchange.skos import (
+    _HANDLED_CONCEPT_PREDICATES,
+    SkosImportError,
+    SkosImportFailed,
+    _read_graph,
+    import_skos,
+)
 from controlled_vocabularies.models import (
     Collection,
     Concept,
@@ -1216,6 +1223,47 @@ class TestCollectionMembershipMissingOrAbsentEnds:
         assert set(collection.members()) == {alpha, gamma, delta}
 
 
+class TestCollectionAbsentFromSource:
+    """T034 — closes the gap decisions.md D33 named rather than invented: a
+    collection an earlier import created that the current file no longer
+    mentions at all is left untouched and named in
+    ``report.absent_from_source``, the same way a concept in that position
+    already is (T015). A collection is a record with its own identity for
+    the same reasons a concept and a vocabulary are (decisions.md D32)."""
+
+    def test_a_collection_dropped_from_the_file_is_untouched_and_named_absent(self, db):
+        import_skos(FIXTURES / "collection_absent_from_source.ttl")
+        dropped = Collection.objects.get_by_uri("http://example.org/vanishing-collections/collection/dropped")
+        dropped_pk, dropped_name = dropped.pk, dropped.name
+
+        report = import_skos(FIXTURES / "collection_absent_from_source_updated.ttl")
+
+        dropped_after = Collection.objects.get_by_uri("http://example.org/vanishing-collections/collection/dropped")
+        assert dropped_after.pk == dropped_pk
+        assert dropped_after.name == dropped_name
+        assert "http://example.org/vanishing-collections/collection/dropped" in report.absent_from_source
+        assert "http://example.org/vanishing-collections/collection/dropped" not in report.updated
+        assert "http://example.org/vanishing-collections/collection/dropped" not in report.created
+
+    def test_a_collection_still_mentioned_in_the_file_is_not_reported_absent(self, db):
+        import_skos(FIXTURES / "collection_absent_from_source.ttl")
+        report = import_skos(FIXTURES / "collection_absent_from_source_updated.ttl")
+        assert "http://example.org/vanishing-collections/collection/kept" not in report.absent_from_source
+
+    def test_a_dropped_collections_membership_survives_untouched(self, db):
+        # FR-013's "left untouched", not only "not deleted": the concept
+        # stays a member of the absent collection across the re-import,
+        # exactly as an absent concept's own foreign-key references survive
+        # (TestRecordsAbsentFromSource, T015).
+        import_skos(FIXTURES / "collection_absent_from_source.ttl")
+        dropped = Collection.objects.get_by_uri("http://example.org/vanishing-collections/collection/dropped")
+        alpha = Concept.objects.get(static_uri="http://example.org/vanishing-collections/alpha")
+
+        import_skos(FIXTURES / "collection_absent_from_source_updated.ttl")
+
+        assert alpha in dropped.members()
+
+
 class TestBlankNodeCollectionFails:
     """T030 — decisions.md D3: a collection identified only by a blank node
     fails the run, on the same rule that governs a concept. An ordered
@@ -1385,6 +1433,49 @@ class TestFixtureCorpus:
         )
 
 
+class TestEverySkosPredicateIsReadOrReported:
+    """T033 — closes decisions.md D27's own gap. D27 silently skips a SKOS
+    predicate that has a model home but no read path yet, correct only
+    while a later story still owed that read path; every story has now
+    landed (US-4 relationships, US-5 collections), so a silent skip is the
+    disappearance D1 forbids. This turns D27's own "Revisit if" into a
+    check: every SKOS predicate appearing anywhere in the fixture corpus —
+    discovered by walking the files, not a hand-kept list, the same
+    discovery discipline ``ALL_FIXTURES`` above already applies — must be
+    either read by the importer or named in the report.
+
+    ``_HANDLED_CONCEPT_PREDICATES`` is ``_import_unheld_values``'s own gate
+    in ``skos.py`` — imported directly rather than duplicated, so this test
+    tracks the production classification instead of a second copy of it
+    that could drift from it. It only classifies *concept*-level predicates,
+    though, because it only ever gates a walk over one concept node's own
+    predicates: three more SKOS predicates are read, but never reach that
+    gate at all because they are never a concept's own predicate to begin
+    with. ``skos:hasTopConcept`` is stated *by the scheme, about* a concept
+    (read by ``_scheme_refs``); ``skos:member``/``skos:memberList`` are
+    stated by a *collection* (read by ``_import_collections``). A first,
+    deliberately naive version of this test — checking only against
+    ``_HANDLED_CONCEPT_PREDICATES`` — failed by naming exactly these three,
+    which is what exposed that they needed naming here explicitly rather
+    than being silently missing from the "recognised" set.
+    """
+
+    _READ_BUT_NOT_AT_CONCEPT_LEVEL = frozenset({SKOS.hasTopConcept, SKOS.member, SKOS.memberList})
+
+    def test_every_skos_predicate_in_the_fixture_corpus_is_read_or_reported(self):
+        found: set[str] = set()
+        for filename, fmt in ALL_FIXTURES:
+            graph = rdflib.Graph()
+            graph.parse(FIXTURES / filename, format=fmt)
+            found |= {str(predicate) for predicate in graph.predicates() if str(predicate).startswith(str(SKOS))}
+
+        recognised = {str(predicate) for predicate in _HANDLED_CONCEPT_PREDICATES | self._READ_BUT_NOT_AT_CONCEPT_LEVEL}
+        unrecognised = found - recognised
+        assert not unrecognised, (
+            f"SKOS predicate(s) in the fixture corpus are neither read nor reported: {sorted(unrecognised)}"
+        )
+
+
 class TestExchangePackage:
     """T002 — the ``controlled_vocabularies.exchange`` package exists and is
     importable. The package is the module tree the import feature lands in
@@ -1401,3 +1492,56 @@ class TestExchangePackage:
         # A public package gets documented (Article VI); this catches an
         # accidentally-empty __init__.py before anything is re-exported from it.
         assert exchange.__doc__, "controlled_vocabularies.exchange has no module docstring"
+
+
+class TestFailureMessagesUseOnlyNamedPlaceholders:
+    """T031 (FR-016, spec User Story 6 Acceptance Scenarios 1 and 4) — the
+    "named, not positional" check applied to the messages this module raises
+    directly rather than adding to ``ImportReport``. Every ``raise …Error(_("…"))``
+    call site in ``skos.py`` is exercised once here.
+
+    Acceptance Scenario 4's developer-diagnostics exemption is the raw rdflib
+    parse error the unparseable-file refusal chains onto ``__cause__``: named and
+    asserted present, rather than left as an unstated gap in the sweep.
+    """
+
+    def test_missing_file_message(self, tmp_path, uses_only_named_placeholders):
+        with pytest.raises(SkosImportError) as excinfo:
+            _read_graph(tmp_path / "does-not-exist.ttl")
+        err = excinfo.value
+        assert isinstance(err.message, Promise)
+        assert uses_only_named_placeholders(str(err.message))
+        assert err.code == "skos_file_not_found"
+
+    def test_unsupported_serialization_message(self, uses_only_named_placeholders):
+        with pytest.raises(SkosImportError) as excinfo:
+            _read_graph(FIXTURES / "rocks.ttl", serialization="n3")
+        err = excinfo.value
+        assert isinstance(err.message, Promise)
+        assert uses_only_named_placeholders(str(err.message))
+        assert err.code == "skos_format_unsupported"
+
+    def test_unparseable_file_message_and_its_developer_diagnostic_exemption(
+        self, tmp_path, uses_only_named_placeholders
+    ):
+        bad = tmp_path / "bad.ttl"
+        bad.write_text("this is not turtle @@@ not even close {{{ ]][[ ")
+        with pytest.raises(SkosImportError) as excinfo:
+            _read_graph(bad)
+        err = excinfo.value
+        assert isinstance(err.message, Promise)
+        assert uses_only_named_placeholders(str(err.message))
+        assert err.code == "skos_parse_failed"
+        # Developer-diagnostic exemption: the raw rdflib parser exception is
+        # chained onto __cause__, not translated — only the curator-facing
+        # wrapper message just checked above is held to Article XII.
+        assert err.__cause__ is not None, "the underlying rdflib exception must be chained for developer diagnostics"
+
+    @pytest.mark.django_db
+    def test_import_failed_message(self, uses_only_named_placeholders):
+        with pytest.raises(SkosImportFailed) as excinfo:
+            import_skos(FIXTURES / "blank_node_concept.ttl")
+        err = excinfo.value
+        assert isinstance(err.message, Promise)
+        assert uses_only_named_placeholders(str(err.message))
+        assert err.code == "skos_import_failed"

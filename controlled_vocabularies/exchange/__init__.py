@@ -5,9 +5,9 @@ the models R1 built, and the run returns a structured :class:`ImportReport` of
 what it did. Models stay the source of truth; RDF is read only at this
 boundary and never stored as a graph (Article X).
 
-The reader itself (``skos.py``) and its public ``import_skos()`` entry point
-are a later story (tasks.md Phase US-1); this module grows its re-exports one
-task at a time, each landing with the test that covers it.
+:func:`import_skos` (``skos.py``) is the package's public entry point; the
+rest of this module's re-exports are the :class:`ImportReport` it returns and
+the vocabularies and exceptions that describe what went into it.
 """
 
 from controlled_vocabularies.exchange.report import (

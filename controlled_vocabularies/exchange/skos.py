@@ -1,14 +1,20 @@
-"""Reading a published SKOS file into records (FS-006, tasks.md Phase US-1).
+"""Reading a published SKOS file into records (FS-006).
 
-The RDF boundary: a file becomes an ``rdflib`` graph (:func:`_read_graph`,
-T006), the graph is walked into the models R1 built, and the run returns a
+The RDF boundary: a file becomes an ``rdflib`` graph (:func:`_read_graph`),
+the graph is walked into the models R1 built, and the run returns a
 structured :class:`~controlled_vocabularies.exchange.report.ImportReport` of
 what it did. Models stay the source of truth; RDF is read only at this
 boundary and never stored as a graph (Article X).
 
-Grows one task at a time: this module currently covers reading a file into a
-graph (T006). Later tasks in the same phase add vocabulary matching, concept
-creation, slugging, and fatal-finding collection on top of it.
+:func:`import_skos` is the module's one public entry point. It resolves or
+creates the vocabulary a file declares, then imports each of its concepts —
+identity, preferred/alternative/hidden labels, documentary notes,
+broader/narrower and related relationships, and collection membership — and
+every value the models have no place for is set aside and named in the
+report rather than dropped (Article XI). The whole run is one transaction:
+a fatal finding (a missing or refused identity, or a vocabulary that cannot
+be resolved) rolls the run back entirely, after every problem in the file
+has been collected, not only the first.
 """
 
 from __future__ import annotations
@@ -831,6 +837,12 @@ def _import_collections(
     exactly as the concept at that end already is
     (``report.absent_from_source``); only the latter is removed. This is not
     re-derived — it is D30's own rule, applied to a second model.
+
+    Finally (T034, FR-013), every existing collection of ``target_scheme``
+    whose identity was never seen among ``collection_nodes`` — the file
+    simply does not mention it — is left completely untouched, membership
+    included, and named in ``report.absent_from_source``, the same tail
+    :func:`_import_concepts` already runs for a concept in that position.
     """
     collection_nodes = sorted(
         set(graph.subjects(rdflib.RDF.type, SKOS.Collection))
@@ -838,6 +850,7 @@ def _import_collections(
         key=str,
     )
     successful_ids = {concept.pk for concept in successful_concepts.values()}
+    mentioned_uris: set[str] = set()
 
     for node in collection_nodes:
         hint = _first_literal(graph, node, SKOS.prefLabel)
@@ -846,6 +859,7 @@ def _import_collections(
         except _FatalIdentity as exc:
             report.add_fatal(exc.reason, exc.subject, **exc.params)
             continue
+        mentioned_uris.add(uri)
 
         ordered = (node, rdflib.RDF.type, SKOS.OrderedCollection) in graph
 
@@ -902,6 +916,10 @@ def _import_collections(
             ]
             survivors = [concept for concept in current if concept.pk not in resolved_pks]
             row.set_member_order(resolved + survivors)
+
+    absent = Collection.objects.filter(scheme=target_scheme).exclude(static_uri__in=mentioned_uris)
+    for uri in absent.order_by("static_uri").values_list("static_uri", flat=True):
+        report.add_absent_from_source(uri)
 
 
 def _import_concept_content(
@@ -1051,11 +1069,24 @@ def import_skos(
 ) -> ImportReport:
     """Import a published SKOS file and return a structured report (FR-001).
 
-    Reads ``file`` (see :func:`_read_graph` for the serialization rules) and
-    creates or updates the vocabulary it declares, matched by its static URI
-    (research.md R6). ``scheme`` names a target vocabulary for a file that
-    declares none of its own, or is checked against one the file does
-    declare — a mismatch fails the run and writes nothing (FR-005).
+    Reads ``file`` (Turtle, RDF/XML, or JSON-LD — see :func:`_read_graph` for
+    the serialization rules) and creates or updates the vocabulary it
+    declares, matched by its static URI (research.md R6), along with every
+    concept it contains: identity, labels, documentary notes,
+    broader/narrower and related relationships, and collection membership.
+    ``scheme`` names a target vocabulary for a file that declares none of
+    its own, or is checked against one the file does declare — a mismatch
+    fails the run and writes nothing (FR-005).
+
+    Re-running an import upserts rather than deleting and recreating: a
+    record the file still contains has its content matched to the file
+    exactly, including removing a value the file no longer carries, while a
+    record the file simply does not mention is left completely untouched
+    and named in ``report.absent_from_source`` (FR-013). Anything the file
+    carries that the models have no place for — an unconfigured language,
+    a notation, a cross-vocabulary mapping, a predicate outside SKOS
+    entirely — is set aside and named in the report rather than dropped in
+    silence (FR-014, Article XI).
 
     The whole run sits inside one transaction (FR-003, research.md R7): a
     fatal finding — a missing or refused identity, or a vocabulary that

@@ -1113,3 +1113,170 @@ widened two pre-existing `TestReportPopulatedByARealRun` assertions (T012, US-1)
 collections in the created/updated bucket; flagged for the next tamper-check triage pass to review
 alongside D23/D28/D31's own precedent, even though this session applied and verified the fix itself
 rather than leaving it open, since no separate orchestrator pass is described for this story.
+
+## 2026-08-04T12:50:00Z · Implementer US6 · T031
+
+**Did**: `tests/test_exchange/test_standards.py` — a closed-world standards sweep (FR-016, spec
+User Story 6 Acceptance Scenarios 1 and 4) that complements the many per-message assertions already
+scattered across `test_report.py`/`test_skos.py`/`test_safety.py`. `TestReportReasonTemplatesUseOnlyNamedPlaceholders`
+parametrizes over `list(SetAsideReason) + list(FatalReason) + list(NormalizedReason)` — every member
+of all three closed report-reason vocabularies, so a reason added later without its own dedicated
+test is still caught — and asserts each template carries *only* named `%(name)s` placeholders, never
+a bare positional one (the existing tests check `%(subject)s` is present; this additionally checks
+nothing else in the string is un-named). `TestFailureMessagesUseOnlyNamedPlaceholders` exercises
+every `raise …Error(_("…"), …)` call site in the `exchange` package once (the four `SkosImportError`/
+`SkosImportFailed` messages in `skos.py`, the two `UnsafeRdfXmlError` messages in `safety.py`) with
+the same check. Acceptance Scenario 4's developer-diagnostics exemption — the raw upstream `rdflib`/
+`defusedxml` exception each of the two chained refusals carries on `__cause__` — is asserted present
+explicitly rather than left an unstated gap, naming it as the one thing this feature shows a person
+that Article XII does not hold to a translatable, named-placeholder standard.
+
+No new production code: every message the earlier US0-US5 Implementers wrote already meets the
+standard this sweep checks (matching T013/T014/T017/T022/T028/T029's own precedent of an
+acceptance-coverage-only task). Proven a real check with a mutation probe: temporarily reverted
+`SkosImportError`'s "could not be found" message from `%(file)s` to a bare `%s`; the new sweep's
+`test_missing_file_message` failed naming the positional placeholder, the other 20 new tests were
+unaffected; reverted, full suite green again.
+
+**Verified**: `poetry run pytest -q` — 514 passed (493 + 21 new in the new `test_standards.py`).
+`poetry run ruff check .` — all checks passed. `poetry run ruff format .` — 1 file reformatted
+(`test_standards.py`) then clean. `poetry run mypy` — success, 9 source files. `poetry run deptry .`
+— no issues, 15 files scanned. `poetry run python -m django makemigrations --check --dry-run
+--settings=tests.settings` — no changes detected. `poetry run pre-commit run --all-files` — all
+hooks passed.
+
+**Next**: T033 (was T031a in tasks.md prose) — every SKOS predicate in the fixture corpus is either
+read or reported, closing decisions.md D27's own gap.
+
+**Watch**: `specs/006-import-published-skos/feature-state.json`'s US6 story only lists tasks T031
+and T032 — T033 and T034 (added mid-run by the US4/US5 Implementers as T031a/T031b, per this
+story's own brief) are not yet entries in the ledger. Restructuring `stories[].tasks` is Forge's own
+job, not an Implementer's (feature-state.schema.json's own description), so this Implementer flips
+status/attempts/evidence only on the two task ids the ledger already has and records T033/T034's own
+progress here in prose instead — flagged for Forge to reconcile the ledger's task list with
+tasks.md's own T031/T033/T034/T032 numbering.
+
+## 2026-08-04T13:00:00Z · Implementer US6 · T033
+
+**Did**: `TestEverySkosPredicateIsReadOrReported` in `test_skos.py` — closes decisions.md D27's own
+gap. Discovers every SKOS predicate appearing anywhere in the fixture corpus by walking the files
+(the same discipline `ALL_FIXTURES` already applies, not a hand-kept list) and asserts each one is
+either read by the importer or named in the report, now that US-4/US-5 have landed every read path
+D27 deferred to.
+
+**Deviation** (decisions.md D34, new): a first, deliberately naive version checked the discovered
+predicates against `_HANDLED_CONCEPT_PREDICATES` alone (`_import_unheld_values`'s own gate, imported
+directly rather than duplicated) and failed, correctly, naming `skos:hasTopConcept`,
+`skos:member`, and `skos:memberList` — all three genuinely read (`_scheme_refs`,
+`_import_collections`), but never at concept-node level, so they never reach that gate. Fixed in the
+test with a small `_READ_BUT_NOT_AT_CONCEPT_LEVEL` set naming the three explicitly, not in
+production — no predicate in the corpus was actually unhandled.
+
+**Verified**: `poetry run pytest -q` — 515 passed (514 + 1 new). `poetry run ruff check .` — all
+checks passed. `poetry run ruff format --check .` — 22 files already formatted. `poetry run mypy` —
+success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python -m
+django makemigrations --check --dry-run --settings=tests.settings` — no changes detected. `poetry
+run pre-commit run --all-files` — all hooks passed.
+
+**Next**: T034 (was T031b in tasks.md prose) — a collection an earlier import created that the
+current file no longer mentions is reported in `report.absent_from_source`, the way a concept in
+that position already is. The only task in this story expected to need new production code.
+
+**Watch**: none beyond the feature-state.json ledger gap already flagged at T031.
+
+## 2026-08-04T13:10:00Z · Implementer US6 · T034
+
+**Did**: closes the gap decisions.md D33 named rather than invented at the end of US-5. New fixture
+pair `collection_absent_from_source.ttl`/`_updated.ttl` (D28's own "prefer a new fixture" counsel):
+"kept" is restated by both files, "dropped" exists only in the first. `TestCollectionAbsentFromSource`
+in `test_skos.py` — three tests, the first genuinely failing against the pre-existing code (`_import_collections`
+never tracked which collections a run's own file mentioned, per the Watch note carried since T027):
+the dropped collection's primary key and name are unchanged after the re-import, it is named in
+`report.absent_from_source` and in neither `created` nor `updated`, and its membership (the concept
+`alpha`) survives untouched — the same three assertions `TestRecordsAbsentFromSource` (T015) makes
+for a concept in the same position.
+
+Production change (`_import_collections`, `skos.py`): a `mentioned_uris` set, populated the moment
+each collection node's identity is successfully checked (mirroring `_import_concepts`'s own
+`mentioned_uris`, T015) — a collection that fails identity (D3, T030) is never added, since it never
+gets a usable URI to report absence by. After the per-collection loop, every existing `Collection` of
+`target_scheme` whose URI was never seen is reported via `report.add_absent_from_source()`, the same
+tail `_import_concepts` already runs. Nothing about an absent collection's own row or its membership
+is touched — only named, per FR-013's "left untouched."
+
+**Mutation probe**: replaced the new absent-reporting block with a no-op. The first
+`TestCollectionAbsentFromSource` test failed exactly as it had before this task's fix (`'…/dropped'
+in []`), the other two were unaffected (they don't depend on the absent bucket). Restored; full
+suite green again.
+
+**Verified**: `poetry run pytest -q` — 520 passed (515 + 3 new in `TestCollectionAbsentFromSource` +
+2 new fixture-discovery cases). `poetry run ruff check .` — all checks passed. `poetry run ruff
+format --check .` — 24 files already formatted. `poetry run mypy` — success, 9 source files. `poetry
+run deptry .` — no issues, 15 files scanned. `poetry run python -m django makemigrations --check
+--dry-run --settings=tests.settings` — no changes detected. `poetry run pre-commit run --all-files`
+— all hooks passed.
+
+**Next**: T032 — documentation (README, CHANGELOG, docstrings) in the same PR as the code.
+
+**Watch**: none beyond the feature-state.json ledger gap already flagged at T031.
+
+## 2026-08-04T13:20:00Z · Implementer US6 · T032
+
+**Did**: documentation in the same PR as the code (Article VI). README gains a new "## Importing a
+published vocabulary" section (inserted between "## Configuration" and "## Relationship to other
+packages"): what `import_skos()` reads and writes, the upsert/absent-from-source re-import rule
+(FR-013), a walkthrough of the `ImportReport`'s six buckets, and the "programmatic only, no
+CLI/web entry point yet" note FR-001 states. Written plainly and factually, per this story's own
+brief — the humanizer pass is the orchestrator's, not this Implementer's, to run. CHANGELOG's
+`[Unreleased]` → `### Added` gains one entry for the whole feature, in the same descriptive style as
+the existing FS-002/003/004/005 entries above it.
+
+Two stale docstrings fixed along the way, both public per Article VI and both directly contradicted
+by the finished feature: `skos.py`'s module docstring still said "this module currently covers
+reading a file into a graph (T006)" and named only Phase US-1's own scope; `exchange/__init__.py`'s
+said the reader and `import_skos()` "are a later story" and that the module "grows its re-exports
+one task at a time" — both written at T002/T006 and never updated as the other five stories landed.
+Rewrote both to describe the finished module. `import_skos()`'s own docstring (already present,
+T007) gains two paragraphs summarising what it imports beyond the vocabulary itself (concepts,
+labels, notes, relationships, collections) and the re-import/set-aside contract (FR-013/FR-014) —
+the rest of its detail (transaction/rollback semantics) was already accurate and is left as T007
+wrote it. `ImportReport`'s own docstring (T003, extended at T021) was already accurate and complete;
+not touched.
+
+**Verified**: `poetry run pytest -q` — 520 passed (unchanged from T034 — no test asserts on exact
+docstring text beyond non-emptiness, `TestExchangePackage::test_package_has_a_module_docstring`).
+`poetry run ruff check .` — all checks passed. `poetry run ruff format --check .` — 24 files already
+formatted. `poetry run mypy` — success, 9 source files. `poetry run deptry .` — no issues, 15 files
+scanned. `poetry run python -m django makemigrations --check --dry-run --settings=tests.settings` —
+no changes detected. `poetry run pre-commit run --all-files` — all hooks passed.
+
+**Phase US-6 complete (T031/T033/T034/T032).** Every message this feature puts in front of a person
+— a report reason or a raised failure — is checked, in one closed-world sweep, to be translatable
+and named-placeholder-only; the developer-diagnostics exemption is named explicitly rather than left
+an unstated gap. Every SKOS predicate appearing anywhere in the fixture corpus is either read by the
+importer or named in the report, closing decisions.md D27. A collection the file no longer mentions
+is reported absent from source, the way a concept in that position already is, closing the gap D33
+named. README, CHANGELOG, and the public callable's docstrings document the finished feature. This
+is the last story before convergence; this Implementer stops here.
+
+**Watch**: the feature-state.json ledger gap flagged at T031 is still open — Forge's own
+reconciliation, not this Implementer's to restructure.
+
+## 2026-08-04T14:10:00Z · Forge · US-6 convergence check
+
+**Did**: reviewed the US-6 Implementer's completion report and re-ran the gates independently.
+`forge verify --base origin/main` was **red on conformance** — `tests/test_exchange/test_standards.py`
+mirrors no source module. Split the sweep into the three modules of its subjects, moved the shared
+placeholder predicate into a new `tests/test_exchange/conftest.py` fixture, and deleted the
+standalone file. Recorded as D35.
+
+Also reconciled the ledger gap the Implementer flagged: `feature-state.json`'s US6 story carried
+only T031 and T032. T033 and T034 (tasks.md's T031a/T031b, renamed by the US-6 Implementer to match
+its commit trail) are now ledger entries with their evidence, tasks.md and decisions.md use the
+T033/T034 names throughout, and US6 is marked done.
+
+**Verified**: `poetry run pytest -q` — 520 passed, unchanged by the move. `forge verify --base
+origin/main` — conformance, lint, typecheck, test, build all green. `ruff format --check`, `deptry`,
+`makemigrations --check`, `pre-commit run --all-files` all clean.
+
+**Next**: convergence — merge US-6 to the feature branch and open the PR.
