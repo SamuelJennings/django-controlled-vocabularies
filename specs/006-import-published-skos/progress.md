@@ -712,3 +712,40 @@ finishes it with acceptance coverage that confirms it still holds now that US-3 
 and notes alongside it).
 
 **Watch**: none.
+
+## 2026-08-04T12:05:00Z · Implementer US3 · T022
+
+**Did**: `TestNoPreferredLabelFinishedByUS3` in `test_skos.py` — two tests: the concept with no
+preferred label in the vocabulary's default language is set aside under `NO_PREFERRED_LABEL`,
+named with its subject and language, and never created; the rest of the vocabulary imports with
+*its own* US-3 content intact, not only its identity — `no_default_language_label.ttl`'s concept
+"b" now carries an alternative label, proving labels built in this same phase (T018) land normally
+for a concept in the same run as one that gets set aside. No production change: T009's own
+`NO_PREFERRED_LABEL` handling (decisions.md D17) already `continue`s before any concept is created
+or its content imported, so nothing about US-3's own additions (T018-T021) could have disturbed it,
+and both tests passed on first execution — the third task across this feature's two most recent
+phases to do so (with T013/T014/T017 in US-2), each proving a piece of behaviour a prior task
+already built generally rather than needing new code of its own.
+
+**Verified**: `poetry run pytest -q` — 453 passed (451 + 2 new). `poetry run ruff check .` — all
+checks passed. `poetry run ruff format --check .` — 21 files already formatted. `poetry run mypy`
+— success, 9 source files. `poetry run deptry .` — no issues, 15 files scanned. `poetry run python
+-m django makemigrations --check --dry-run --settings=tests.settings` — no changes detected.
+
+**Phase US-3 complete (T018-T022).** A concept's labels — preferred labels in every configured
+language beyond the default, alternative and hidden labels — and its documentary notes — the
+definition and the six SKOS note kinds, plus a foreign `dcterms:description` read as a definition
+and reported as a normalisation — all land through the models' own `add_label`/`add_note` write
+path. A value in a language the site is not configured for is set aside and named, filtered ahead
+of the write. A notation, a mapping to another vocabulary, and a predicate from outside SKOS
+entirely are each set aside under the reason that fits, and a concept with no preferred label in
+the default language remains set aside and the rest of the vocabulary imports around it. `models.py`
+was not touched. Deferred to US-4/US-5 by design: relationships and collection membership are
+recognised SKOS predicates with a model home, so they are silently skipped rather than reported as
+unmodelled (decisions.md D27) — those stories build the read paths that will finally consume them.
+
+**Watch**: US-4's Implementer should read decisions.md D27 before starting — once relationships are
+read, `skos:broader`/`narrower`/`related` stop being "not yet built" and become genuinely handled;
+`_import_unheld_values()`'s own SKOS-namespace check will keep silently skipping them either way
+(nothing breaks if `_HANDLED_CONCEPT_PREDICATES` is left as-is), but adding them there too would
+make the set of predicates this module actually reads match what the constant claims to name.

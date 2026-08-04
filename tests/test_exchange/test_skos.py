@@ -794,6 +794,34 @@ class TestUnheldValuesAndNormalisation:
         assert not any(entry.reason is SetAsideReason.UNMODELLED_PREDICATE for entry in report.set_aside)
 
 
+class TestNoPreferredLabelFinishedByUS3:
+    """T022 — FR-006: a concept with no preferred label in the vocabulary's
+    default language is set aside under ``NO_PREFERRED_LABEL`` and named in
+    the report, and the rest of the vocabulary imports. Built at T009
+    (decisions.md D17) because FR-006 states it in the same sentence as
+    concept creation itself; D17 left it deliberately minimal and named this
+    task as where it is finished. Nothing about the shape D17 chose disagrees
+    with what US-3 built on top of it, so "finished" here means acceptance
+    coverage proving the rest of the vocabulary imports *with* its own US-3
+    content (labels, in this fixture) alongside the set-aside concept, not a
+    production change."""
+
+    def test_the_concept_with_no_default_language_label_is_set_aside_and_named(self, db):
+        report = import_skos(FIXTURES / "no_default_language_label.ttl")
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.NO_PREFERRED_LABEL]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/quarry/c"
+        assert entries[0].params["language"] == "en"
+        assert not Concept.objects.filter(static_uri="http://example.org/quarry/c").exists()
+
+    def test_the_rest_of_the_vocabulary_imports_with_its_own_content_intact(self, db):
+        import_skos(FIXTURES / "no_default_language_label.ttl")
+        assert Concept.objects.filter(scheme__static_uri="http://example.org/quarry/").count() == 2
+        b = Concept.objects.get(static_uri="http://example.org/quarry/b")
+        assert b.label == "B"
+        assert b.alt_labels("en") == ["B-alt"]
+
+
 class TestFixtureCorpus:
     """T005 — the published-vocabulary fixtures are discoverable and parse (FR-018, SC-016).
 
