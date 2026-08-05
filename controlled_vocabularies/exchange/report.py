@@ -430,10 +430,21 @@ class ImportReport:
         ``en-us``, never under the configured language it lost to. Present and
         empty — never absent — after a run that left nothing behind, so a
         caller never has to distinguish "clean run" from "feature absent".
+
+        Folded case-insensitively (CORR-003/SEC-003, decisions.md D34): FR-001
+        makes matching case-insensitive throughout, so ``PT-br`` and ``pt-BR``
+        are one recoverable language, not two — a curator ranking by what
+        configuring a language would recover must not have its vote split by
+        a spelling difference RFC 5646 itself calls meaningless. The first
+        published spelling seen (a run's :attr:`set_aside` order is
+        deterministic) is kept as the display key.
         """
         account: dict[str, int] = {}
+        display: dict[str, str] = {}
         for entry in self.set_aside:
             if entry.reason in self._LANGUAGE_ACCOUNT_REASONS:
                 language = entry.params["language"]
-                account[language] = account.get(language, 0) + 1
-        return account
+                key = language.lower()
+                display.setdefault(key, language)
+                account[key] = account.get(key, 0) + 1
+        return {display[key]: count for key, count in account.items()}

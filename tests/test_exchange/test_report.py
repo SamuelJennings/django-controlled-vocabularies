@@ -171,6 +171,17 @@ class TestLanguageAccount:
         ranked = sorted(report.language_account().items(), key=lambda item: -item[1])
         assert ranked[0] == ("fr", 2)
 
+    def test_mixed_case_spellings_of_one_language_fold_into_one_entry(self):
+        # CORR-003/SEC-003: a file tagging some values @PT-br and some @pt-BR
+        # must rank as one recoverable language, not two — FR-001's
+        # case-insensitivity applies to the account as much as to matching.
+        report = ImportReport()
+        report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, "https://example.org/a", language="PT-br")
+        report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, "https://example.org/b", language="pt-BR")
+        account = report.language_account()
+        assert len(account) == 1
+        assert sum(account.values()) == 2
+
 
 class TestSetAsideEntry:
     """A ``SetAsideEntry`` is a frozen record — nothing downstream can mutate

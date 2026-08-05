@@ -124,7 +124,7 @@ class LanguageMatcher:
         def sort_key(pair: tuple[str, str]) -> tuple[bool, int, str, str]:
             tag, value = pair
             tag_lower = tag.lower()
-            return (tag_lower != config_lower, -self._tag_counts.get(tag, 0), tag_lower, value)
+            return (tag_lower != config_lower, -self._tag_counts.get(tag_lower, 0), tag_lower, value)
 
         ranked = sorted(range(len(candidates)), key=lambda index: sort_key(candidates[index]))
         winner_index = ranked[0]

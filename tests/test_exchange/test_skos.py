@@ -186,6 +186,34 @@ class TestPreferredLabelTagCounts:
         counts = skos_graph.preferred_label_tag_counts(concept_nodes)
         assert counts == {"en-gb": 2, "en-us": 1}
 
+    def test_case_varying_tags_for_one_language_fold_into_one_count(self, tmp_path):
+        # CORR-003/SEC-003: rdflib preserves published case per literal, but a
+        # re-cased tag is not a different language (RFC 5646/RDF 1.1) — two
+        # concepts publishing "en-GB" and "en-gb" respectively must be one
+        # population, not two.
+        path = tmp_path / "case_counts.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/v/> a skos:ConceptScheme ;
+                skos:prefLabel "V"@en .
+
+            <http://example.org/v/a> a skos:Concept ;
+                skos:inScheme <http://example.org/v/> ;
+                skos:prefLabel "A"@en-GB .
+
+            <http://example.org/v/b> a skos:Concept ;
+                skos:inScheme <http://example.org/v/> ;
+                skos:prefLabel "B"@en-gb .
+            """
+        )
+        skos_graph = SkosGraph.from_file(path)
+        concept_nodes = sorted(skos_graph.graph.subjects(rdflib.RDF.type, SKOS.Concept), key=str)
+        counts = skos_graph.preferred_label_tag_counts(concept_nodes)
+        assert counts == {"en-gb": 2}
+
     def test_counts_exclude_the_scheme_and_collection_nodes_own_labels(self, tmp_path):
         # Counted graph-wide, this would additionally sweep the scheme's and the
         # collection's own de-tagged skos:prefLabel — silently changing the
@@ -656,6 +684,82 @@ class TestLabelsNotesAndNamesResolveThroughTheMatcher:
         import_skos(path)
         collection = Collection.objects.get(static_uri="http://example.org/namedcoll/coll")
         assert collection.name == "Named collection"
+
+
+class TestVocabularyAndCollectionNameSubstitutionIsReported:
+    """T027 — CORR-002, FR-006/Article XI, decisions.md D34: a vocabulary's name,
+    a vocabulary's description, and a collection's name are all filled by variant
+    matching through ``_localized_literal`` exactly as ``Concept.label`` is — but
+    unlike ``Concept.label``, none of the three reported a ``LANGUAGE_SUBSTITUTION``.
+    The same one-line guard ``Concept.label``'s own write already applies."""
+
+    def test_the_vocabularys_name_and_description_are_each_reported_as_a_substitution(self, db, tmp_path):
+        path = tmp_path / "named.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+            @prefix dcterms: <http://purl.org/dc/terms/> .
+
+            <http://example.org/named/> a skos:ConceptScheme ;
+                skos:prefLabel "Aardvark scheme"@fr, "Named scheme"@de-at ;
+                dcterms:description "Aardvark description"@fr, "Named description"@de-at .
+
+            <http://example.org/named/item> a skos:Concept ;
+                skos:inScheme <http://example.org/named/> ;
+                skos:prefLabel "Item"@de-at .
+            """
+        )
+        report = import_skos(path)
+        scheme_uri = "http://example.org/named/"
+        matching = [
+            entry
+            for entry in report.normalized
+            if entry.reason is NormalizedReason.LANGUAGE_SUBSTITUTION and entry.subject == scheme_uri
+        ]
+        # One entry each for the name and the description, both de-at -> de.
+        assert len(matching) == 2
+        assert all(entry.params == {"language": "de-at", "kept_as": "de"} for entry in matching)
+
+    def test_a_collections_name_is_reported_as_a_substitution(self, db, tmp_path):
+        path = tmp_path / "named_collection.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/namedcoll/> a skos:ConceptScheme ;
+                skos:prefLabel "Named collection scheme"@de .
+
+            <http://example.org/namedcoll/item> a skos:Concept ;
+                skos:inScheme <http://example.org/namedcoll/> ;
+                skos:prefLabel "Item"@de .
+
+            <http://example.org/namedcoll/coll> a skos:Collection ;
+                skos:prefLabel "Aardvark collection"@fr, "Named collection"@de-at ;
+                skos:member <http://example.org/namedcoll/item> .
+            """
+        )
+        report = import_skos(path)
+        collection = Collection.objects.get(static_uri="http://example.org/namedcoll/coll")
+        matching = [
+            entry
+            for entry in report.normalized
+            if entry.reason is NormalizedReason.LANGUAGE_SUBSTITUTION and entry.subject == collection.static_uri
+        ]
+        assert len(matching) == 1
+        assert matching[0].params == {"language": "de-at", "kept_as": "de"}
+
+    def test_an_exact_match_scheme_name_is_not_reported_as_a_substitution(self, db):
+        # SC-004: no substitution when the scheme's own name is published in
+        # exactly the resolved default language — declares-de-at.ttl's own
+        # de-at is a variant of de, so it must not appear here.
+        report = import_skos(FIXTURES / "rocks.ttl")
+        scheme_uri = "http://example.org/rocks/"
+        assert not any(
+            entry.reason is NormalizedReason.LANGUAGE_SUBSTITUTION and entry.subject == scheme_uri
+            for entry in report.normalized
+        )
 
 
 class TestLanguageSubstitutionIsReported:

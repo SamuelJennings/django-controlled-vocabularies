@@ -212,11 +212,19 @@ class SkosGraph:
         this population (``skos.py:327``) and a contest can only ever turn on it
         (D4). A caller passing a wider node set would silently change that
         already-shipped rule.
+
+        Keyed case-folded (CORR-003/SEC-003, decisions.md D34): ``rdflib``
+        preserves a literal's published case, but FR-001 makes matching
+        case-insensitive throughout — ``pt-BR`` and ``pt-br`` are one
+        published tag, not two, so :meth:`~controlled_vocabularies.exchange.languages.LanguageMatcher.resolve_winner`
+        (which looks this tally up case-folded too) never splits one
+        population's vote across cases.
         """
         counts: dict[str, int] = {}
         for node in concept_nodes:
             for language in self.label_languages(node, SKOS.prefLabel):
-                counts[language] = counts.get(language, 0) + 1
+                key = language.lower()
+                counts[key] = counts.get(key, 0) + 1
         return counts
 
     def scheme_refs(self, concept_node: rdflib.term.Node) -> set[str]:
@@ -261,9 +269,10 @@ def _localized_literal(
     node: rdflib.term.Node,
     predicate: rdflib.URIRef,
     target_language: str,
-) -> str | None:
+) -> tuple[str, str] | None:
     """The value of ``predicate`` on ``node`` whose published tag resolves to ``target_language``
-    through ``matcher`` (T008, call sites 6/7/8), or ``None``.
+    through ``matcher`` (T008, call sites 6/7/8), paired with the winning published tag, or
+    ``None``.
 
     ``SkosGraph.first_literal``'s own ``language=`` filter is an exact match; resolving a variant
     tag to ``target_language`` is configured-language policy, which stays off ``SkosGraph``
@@ -271,6 +280,13 @@ def _localized_literal(
     this, a site importing a vocabulary declared in a variant of its default language names every
     concept correctly and then falls through to :meth:`SkosGraph.first_literal`'s own any-language
     fallback — ``sorted(...)[0]`` across every language in the file — for the record's own name.
+
+    The winning tag is returned rather than discarded (CORR-002, decisions.md D34) so each of this
+    function's three callers can report a :attr:`~controlled_vocabularies.exchange.report.NormalizedReason.LANGUAGE_SUBSTITUTION`
+    when it differs from ``target_language`` — the same guard :meth:`ConceptImporter.import_concepts`
+    already applies to ``Concept.label`` over an identical candidate computation, so a vocabulary's
+    name and description and a collection's name are held to the one rule everywhere it applies,
+    not silently exempted at three of its four sites.
     """
     candidates = [
         (tag, value)
@@ -280,8 +296,8 @@ def _localized_literal(
     ]
     if not candidates:
         return None
-    (_winning_tag, value), _losers = matcher.resolve_winner(target_language, candidates)
-    return value
+    (winning_tag, value), _losers = matcher.resolve_winner(target_language, candidates)
+    return value, winning_tag
 
 
 def report_unmodelled_predicates(
@@ -476,24 +492,45 @@ class SchemeResolver:
                 declared=declared_default_language,
                 frozen=row.effective_default_language,
             )
-        name = _localized_literal(
+        name_match = _localized_literal(
             self.skos_graph, self.matcher, declared_node, SKOS.prefLabel, row.effective_default_language
         )
-        if not name:
+        if name_match is None:
             # The declared default language (or the site's, on fallback) carries no prefLabel on
             # the scheme itself — fall back to any language rather than leaving name unset.
             name = self.skos_graph.first_literal(declared_node, SKOS.prefLabel)
+        else:
+            name, winning_tag = name_match
+            if winning_tag.lower() != row.effective_default_language.lower():
+                # CORR-002, decisions.md D34: the same guard Concept.label's own write already
+                # applies — a name that made it in under a different language than published is a
+                # normalisation, not a silent substitution (FR-006, Article XI).
+                self.report.add_normalized(
+                    NormalizedReason.LANGUAGE_SUBSTITUTION,
+                    subject=declared_uri,
+                    language=winning_tag,
+                    kept_as=row.effective_default_language,
+                )
         if name:
             row.name = name
         # SKOS defines no description predicate for a skos:ConceptScheme; dcterms:description is
         # the source (D21), the same alias CONTEXT.md establishes for a concept's own definition.
         # Unlike name, description is written unconditionally, including to empty when the file no
         # longer carries one — nothing anchors identity to it the way default_language is anchored.
-        description = _localized_literal(
+        description_match = _localized_literal(
             self.skos_graph, self.matcher, declared_node, DCTERMS.description, row.effective_default_language
         )
-        if not description:
+        if description_match is None:
             description = self.skos_graph.first_literal(declared_node, DCTERMS.description)
+        else:
+            description, winning_tag = description_match
+            if winning_tag.lower() != row.effective_default_language.lower():
+                self.report.add_normalized(
+                    NormalizedReason.LANGUAGE_SUBSTITUTION,
+                    subject=declared_uri,
+                    language=winning_tag,
+                    kept_as=row.effective_default_language,
+                )
         row.description = description or ""
         row.static_uri = declared_uri
         row.save()
@@ -1277,11 +1314,21 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
 
             row.scheme = self.target_scheme
             row.static_uri = uri
-            name = _localized_literal(
-                self.skos_graph, self.matcher, node, SKOS.prefLabel, self.target_scheme.effective_default_language
-            )
-            if not name:
+            default_language = self.target_scheme.effective_default_language
+            name_match = _localized_literal(self.skos_graph, self.matcher, node, SKOS.prefLabel, default_language)
+            if name_match is None:
                 name = self.skos_graph.first_literal(node, SKOS.prefLabel)
+            else:
+                name, winning_tag = name_match
+                if winning_tag.lower() != default_language.lower():
+                    # CORR-002, decisions.md D34: the same guard resolve_scheme's own name/
+                    # description writes already apply.
+                    self.report.add_normalized(
+                        NormalizedReason.LANGUAGE_SUBSTITUTION,
+                        subject=uri,
+                        language=winning_tag,
+                        kept_as=default_language,
+                    )
             if name:
                 row.name = name
             row.ordered = ordered
