@@ -748,6 +748,64 @@ class TestLanguageSubstitutionIsReported:
         assert report.normalized == []
 
 
+class TestTheLanguageAccountReflectsARealImport:
+    """T011/T012 — FR-008/SC-011/SC-012/SC-013: :meth:`ImportReport.language_account`
+    driven from a real import through ``import_skos``, the way a curator
+    actually reaches it — not a hand-built report, which ``TestLanguageAccount``
+    in ``test_report.py`` already covers at the unit level (T004). The account
+    must cover every value not stored for a language reason and no value that
+    was stored, and must be present and empty rather than absent after a run
+    that left nothing behind, so #52 can render from it without asking which
+    kind of run produced it."""
+
+    def test_the_account_covers_every_unconfigured_value_and_no_stored_value(self, db, tmp_path):
+        path = tmp_path / "multilingual.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/multiling/> a skos:ConceptScheme ;
+                skos:prefLabel "Multiling"@en .
+
+            <http://example.org/multiling/a> a skos:Concept ;
+                skos:inScheme <http://example.org/multiling/> ;
+                skos:prefLabel "A"@en ;
+                skos:altLabel "A1"@es, "A2"@es .
+
+            <http://example.org/multiling/b> a skos:Concept ;
+                skos:inScheme <http://example.org/multiling/> ;
+                skos:prefLabel "B"@en ;
+                skos:note "B1"@ja .
+
+            <http://example.org/multiling/c> a skos:Concept ;
+                skos:inScheme <http://example.org/multiling/> ;
+                skos:prefLabel "C"@en ;
+                skos:altLabel "C1"@it ;
+                skos:note "C2"@it, "C3"@it .
+            """
+        )
+        report = import_skos(path)
+        assert report.language_account() == {"es": 2, "ja": 1, "it": 3}
+
+        # Covers every value not stored for a language reason...
+        unconfigured = [entry for entry in report.set_aside if entry.reason is SetAsideReason.UNCONFIGURED_LANGUAGE]
+        assert sum(report.language_account().values()) == len(unconfigured)
+
+        # ...and no value that was stored: the en preferred labels landed,
+        # and the account carries nothing under a configured language.
+        assert Concept.objects.get(static_uri="http://example.org/multiling/a").label == "A"
+        assert "en" not in report.language_account()
+
+    def test_present_and_empty_after_an_import_that_leaves_nothing_behind(self, db):
+        # SC-013: rocks.ttl is #50's own established clean-run fixture
+        # (TestReportPopulatedByARealRun pins report.set_aside == [] against
+        # it) — reused rather than duplicated, per decisions.md D21.
+        report = import_skos(FIXTURES / "rocks.ttl")
+        assert report.set_aside == []
+        assert report.language_account() == {}
+
+
 class TestConceptsImpliedByMembershipButNeverGivenAnRdfType:
     """FIX 17 (review, decisions.md D50) — ``concept_nodes`` used to come only
     from ``graph.subjects(rdf.RDF.type, SKOS.Concept)``. A node the file

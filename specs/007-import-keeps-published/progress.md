@@ -179,3 +179,26 @@ Append-only log of stage transitions and gate outcomes.
   --check .`, `mypy controlled_vocabularies`, `deptry .`, `pre-commit run --all-files`. Worktree
   clean. One non-obvious choice recorded as D22. Next: US-2 (#70, T011–T012) — the account
   populated from a real import.
+
+- **S4 IMPLEMENT — US-2 (#70, T011–T012), Implementer.** `craft-tdd` and `craft-increments`
+  loaded by name, receipts verified against the brief before any task started. Baseline confirmed
+  green (745 tests, HEAD `aa0d122`) before touching anything. Two commits, one per task, tree green
+  and clean after each:
+  - **T011** — `TestTheLanguageAccountReflectsARealImport`, driving `ImportReport.language_account()`
+    from a real import through `import_skos` rather than a hand-built report: a fixture (built via
+    `tmp_path`, not a checked-in fixture — this scenario is not reused elsewhere) carrying three
+    languages the test site is not configured for (`es`, `ja`, `it`), with distinct multiplicities
+    (2, 1, 3) so the breakdown is a real assertion rather than a total that could pass by accident,
+    proves the account covers every value not stored for a language reason and no value that was
+    stored.
+  - **T012** — a second test in the same class: `rocks.ttl` — #50's own established clean-run
+    fixture, already pinned elsewhere as importing with `report.set_aside == []` — reused rather
+    than duplicated (D21), proving the account is present and empty rather than absent after a run
+    that left nothing behind (SC-013).
+  Both tests passed on their first run, since `language_account()` (T004) and the set-aside
+  population it folds over were already implemented in earlier phases; T011/T012 are test-only
+  tasks by tasks.md's own text, and no production code changed. Recorded as D26 so this reads as a
+  characterization choice rather than a skipped RED step.
+  Full verify green throughout: `poetry run pytest -q` (747 passed), `ruff check .`, `ruff format
+  --check .`, `mypy controlled_vocabularies`, `deptry .`. Worktree clean. Next: US-3 (#71,
+  T013–T015) — competing variants resolve the same way every time.
