@@ -2237,6 +2237,41 @@ class TestFixtureCorpus:
             rdflib.URIRef("http://example.org/rocks/basalt"),
         ]
 
+    def test_variants_fixture_carries_several_variants_of_one_base_language_across_labels_and_notes(self):
+        # T005/FR-015/SC-020: several variants of one base language (en), spread
+        # across preferred labels, alternative labels, and notes — the contest
+        # population US-3 needs, reused rather than rebuilt by #52 (spec US-5).
+        graph = rdflib.Graph()
+        graph.parse(FIXTURES / "variants.ttl", format="turtle")
+        colour = rdflib.URIRef("http://example.org/colours/colour")
+
+        pref_labels = {(o.language, str(o)) for o in graph.objects(colour, SKOS.prefLabel)}
+        assert pref_labels == {("en-gb", "Colour"), ("en-us", "Color")}
+
+        alt_labels = {(o.language, str(o)) for o in graph.objects(colour, SKOS.altLabel)}
+        assert alt_labels == {("en-gb", "Colour"), ("en-us", "Color")}
+
+        note_languages = {o.language for o in graph.objects(colour, SKOS.note)}
+        assert note_languages == {"en-gb", "en-us"}
+
+    def test_en_gb_only_fixture_publishes_only_the_specific_to_general_direction(self):
+        # T005/SC-002: a vocabulary published only as en-gb, for a site configured
+        # only for en (no bare "en" tag anywhere in this file).
+        graph = rdflib.Graph()
+        graph.parse(FIXTURES / "en-gb-only.ttl", format="turtle")
+        languages = {literal.language for literal in graph.objects(None, SKOS.prefLabel)}
+        assert languages == {"en-gb"}
+
+    def test_declares_de_at_fixture_declares_itself_in_a_variant_of_a_configured_language(self):
+        # T005/SC-010: the vocabulary's own skos:prefLabel is a single de-at tag,
+        # for the default-language resolution path.
+        graph = rdflib.Graph()
+        graph.parse(FIXTURES / "declares-de-at.ttl", format="turtle")
+        scheme = rdflib.URIRef("http://example.org/farben/")
+        assert (scheme, rdflib.RDF.type, SKOS.ConceptScheme) in graph
+        scheme_labels = {(o.language, str(o)) for o in graph.objects(scheme, SKOS.prefLabel)}
+        assert scheme_labels == {("de-at", "Farben")}
+
     def test_blank_node_concept_fixture_has_no_uri_identity(self):
         graph = rdflib.Graph()
         graph.parse(FIXTURES / "blank_node_concept.ttl", format="turtle")
