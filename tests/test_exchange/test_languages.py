@@ -128,3 +128,55 @@ class TestLanguageMatcherFromSettings:
         # T002: constructible from a plain dict, nothing rdflib-shaped required.
         matcher = LanguageMatcher.from_settings({"en": 3, "de": 1})
         assert isinstance(matcher, LanguageMatcher)
+
+
+class TestLanguageMatcherResolveWinner:
+    """T021 — the winner rule, once: exact-match-first, then predominance,
+    then the lexicographic tie-break within one tag (FR-002, FR-003, S3R
+    SPEC-001). Both ``preferred_label_in`` and ``import_labels`` read this
+    method rather than each computing their own winner."""
+
+    def test_exact_match_wins_over_a_more_predominant_variant(self):
+        matcher = LanguageMatcher(["en"], {"en-gb": 100, "en": 1})
+        winner, losers = matcher.resolve_winner("en", [("en-gb", "Colour"), ("en", "Color")])
+        assert winner == ("en", "Color")
+        assert losers == [("en-gb", "Colour")]
+
+    def test_predominance_decides_when_no_candidate_is_exact(self):
+        matcher = LanguageMatcher(["en"], {"en-gb": 5, "en-us": 2})
+        winner, losers = matcher.resolve_winner("en", [("en-us", "Color"), ("en-gb", "Colour")])
+        assert winner == ("en-gb", "Colour")
+        assert losers == [("en-us", "Color")]
+
+    def test_predominant_variant_the_site_does_not_hold_decides_nothing(self):
+        # fr is overwhelmingly predominant in the file but is not one of the
+        # candidates competing for this configured slot — it must not leak in.
+        matcher = LanguageMatcher(["en"], {"fr": 1000, "en-gb": 5, "en-us": 2})
+        winner, _losers = matcher.resolve_winner("en", [("en-us", "Color"), ("en-gb", "Colour")])
+        assert winner == ("en-gb", "Colour")
+
+    def test_tie_break_is_lexicographic_by_tag_when_predominance_ties(self):
+        matcher = LanguageMatcher(["en"], {"en-gb": 3, "en-us": 3})
+        winner, _losers = matcher.resolve_winner("en", [("en-us", "Color"), ("en-gb", "Colour")])
+        assert winner == ("en-gb", "Colour")
+
+    def test_tie_break_also_applies_with_no_predominance_data_at_all(self):
+        matcher = LanguageMatcher(["en"], {})
+        winner, _losers = matcher.resolve_winner("en", [("en-us", "Color"), ("en-gb", "Colour")])
+        assert winner == ("en-gb", "Colour")
+
+    def test_one_candidate_set_yields_one_winner_deterministically(self):
+        # The property both preferred_label_in and import_labels depend on
+        # (T021): calling this twice on the same candidates never disagrees
+        # with itself.
+        matcher = LanguageMatcher(["en"], {"en-gb": 5, "en-us": 2})
+        candidates = [("en-us", "Color"), ("en-gb", "Colour")]
+        first_winner, _ = matcher.resolve_winner("en", candidates)
+        second_winner, _ = matcher.resolve_winner("en", candidates)
+        assert first_winner == second_winner
+
+    def test_single_candidate_wins_by_default(self):
+        matcher = LanguageMatcher(["en"], {})
+        winner, losers = matcher.resolve_winner("en", [("en-gb", "Colour")])
+        assert winner == ("en-gb", "Colour")
+        assert losers == []

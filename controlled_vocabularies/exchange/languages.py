@@ -100,3 +100,34 @@ class LanguageMatcher:
             return LanguageResolution(published_tag, None)
         candidates.sort(key=lambda code: (code.lower().count("-"), code.lower()))
         return LanguageResolution(published_tag, candidates[0])
+
+    def resolve_winner(
+        self, configured_language: str, candidates: Sequence[tuple[str, str]]
+    ) -> tuple[tuple[str, str], list[tuple[str, str]]]:
+        """The one winner among several published variants filling one configured
+        language's slot, and everyone else (T021, FR-002, FR-003; S3R SPEC-001).
+
+        ``candidates`` are the ``(published_tag, value)`` pairs a caller has
+        already resolved to ``configured_language`` via :meth:`resolve`. Exact
+        match wins first and always (FR-002); otherwise the tag this matcher's
+        ``tag_counts`` shows publishing most often wins (FR-003); ties — equal
+        predominance, or no predominance data at all — break lexicographically by
+        tag (FR-003, D5). Lives here rather than in the importer because two call
+        sites need the identical answer for the identical candidate set —
+        ``preferred_label_in`` (``Concept.label``) and ``import_labels`` (the
+        surplus report) — and today they agree only by the coincidence that both
+        happen to sort the same way.
+        """
+        candidates = list(candidates)
+        config_lower = configured_language.lower()
+
+        def sort_key(pair: tuple[str, str]) -> tuple[bool, int, str, str]:
+            tag, value = pair
+            tag_lower = tag.lower()
+            return (tag_lower != config_lower, -self._tag_counts.get(tag, 0), tag_lower, value)
+
+        ranked = sorted(range(len(candidates)), key=lambda index: sort_key(candidates[index]))
+        winner_index = ranked[0]
+        winner = candidates[winner_index]
+        losers = [pair for index, pair in enumerate(candidates) if index != winner_index]
+        return winner, losers
