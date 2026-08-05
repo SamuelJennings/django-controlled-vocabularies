@@ -484,3 +484,23 @@ place entirely.
 **Revisit if:** a later story again inserts classes adjacent to an existing one — the same shape can
 recur, and the only thing that caught it was reading the diff's deletions rather than trusting a
 green suite.
+
+## D26 — T011 and T012 are test-only tasks, and their tests passed on the first run
+
+`ImportReport.language_account()` (T004) and the set-aside population it folds over
+(`UNCONFIGURED_LANGUAGE` since #50, `VARIANT_NOT_KEPT` since US-1's T008) were both already
+implemented and merged before this phase started. US-2's own tasks.md text asks only that the
+account be exercised "from a real import rather than a hand-built report" (T011) and "end to end"
+for a clean run (T012) — neither names a production change, and none was needed or made.
+
+`craft-tdd`'s warning that a test passing on first run is usually testing nothing just written does
+not apply the same way here: both tests assert a specific, falsifiable claim — an exact per-language
+breakdown with distinct multiplicities for T011, and `report.set_aside == []` alongside
+`language_account() == {}` for T012 — rather than a tautology, an unexercised fixture, or a wrong
+import. Each was written before being run, and each was run and read before being trusted; both
+happened to confirm behaviour already correct rather than drive new behaviour into existence. This
+is recorded so a later reader does not look for a code change in either commit and conclude one is
+missing, the same shape D23 recorded for T006.
+
+**Revisit if:** never — this is simply what a coverage task looks like when the feature it covers
+was implemented in an earlier phase.
