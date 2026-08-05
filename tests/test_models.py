@@ -1959,16 +1959,29 @@ class TestCollectionOverridableSlug:
         """T048 — CORR-304/ARCH-303: ``Collection.save()``'s manual-slug branch carries the same
         two refusals ``Concept.save()``'s identical branch already has tests for (empty, and one
         ``validate_unicode_slug`` rejects) — models.py:1443-1457 — but nothing had ever called
-        ``Collection.set_slug()`` with a value that reaches either raise. Would pass with no
-        ``ValidationError`` if either raise, or the ``validate_unicode_slug`` call, were removed.
+        ``Collection.set_slug()`` with a value that reaches either raise.
+
+        CORR-405, decisions.md D61 (fix cycle 5): the original version of this test asserted only
+        ``pytest.raises(ValidationError)``, which the empty-slug case satisfies whether it is
+        ``StaticUriModel._validate_manual_slug``'s own empty-specific raise or Django's
+        ``validate_unicode_slug`` (whose ``^[-\\w]+\\Z`` pattern also rejects ``""``) that raises
+        it — deleting the former left this test green. Asserting the specific message under
+        ``message_dict["slug"]`` makes each raise load-bearing on its own.
         """
         collection = Collection.objects.create(scheme=scheme, name="Igneous Rocks")
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValidationError) as empty_exc:
             collection.set_slug("")
-        with pytest.raises(ValidationError):
+        assert empty_exc.value.message_dict["slug"] == ["An explicit slug must not be empty."]
+        malformed_message = [
+            "An explicit slug must be a valid slug — letters, numbers, hyphens or underscores, "
+            "with no spaces or slashes."
+        ]
+        with pytest.raises(ValidationError) as slash_exc:
             collection.set_slug("foo/bar")
-        with pytest.raises(ValidationError):
+        assert slash_exc.value.message_dict["slug"] == malformed_message
+        with pytest.raises(ValidationError) as spaces_exc:
             collection.set_slug("has spaces")
+        assert spaces_exc.value.message_dict["slug"] == malformed_message
         # A valid explicit slug still works (regression guard).
         collection.set_slug("ig-1")
         assert collection.slug == "ig-1"

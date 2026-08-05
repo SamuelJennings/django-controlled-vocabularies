@@ -1604,3 +1604,28 @@ sibling state to confuse it with.
 one" rule the report's other reasons already follow (e.g. `ALREADY_IN_ANOTHER_VOCABULARY` naming a
 record decision, not a value), applied to the one place a collection's own creation is silently
 implied by a value-level reason's absence of a record.
+
+## D61 — T054 (fix cycle 5): assert the manual-slug refusal message, not only its type
+
+CORR-405 (round 4, low): T048's `test_explicit_slug_that_is_empty_or_malformed_is_refused`
+asserted only `pytest.raises(ValidationError)` for `set_slug("")`. `_validate_manual_slug`
+(models.py) raises an empty-specific message for that case, but Django's own
+`validate_unicode_slug` (`^[-\w]+\Z`) also rejects the empty string, so deleting the
+empty-specific raise and falling through to the generic validator's own `ValidationError` left
+the test green — confirmed by temporarily replacing the raise with `pass` and re-running
+`TestCollectionOverridableSlug`: unchanged, 5 passed.
+
+**Fixed by asserting `message_dict["slug"]` against the exact string each raise produces** rather
+than only the exception's type — the empty-specific message for `set_slug("")`, and the
+malformed-specific one (shared by `validate_unicode_slug`'s rejection) for `"foo/bar"` and `"has
+spaces"`. Re-running the same mutation against the strengthened test now fails it for the right
+reason (`AssertionError` on the message, not a swallowed `ValidationError`), confirmed and
+reverted in the worktree before committing — the production code is unchanged.
+
+Scoped to the one test CORR-405 named. `Concept`'s own manual-slug test
+(`TestReviewHardening.test_explicit_slug_with_invalid_characters_is_refused`) has no empty-slug
+case at all — a gap that predates this feature entirely and is out of this cycle's scope, since
+CORR-405 named only the test T048 itself introduced.
+
+**Revisit if:** never — the shared `_validate_manual_slug` means this one strengthened test
+already proves both raises for all three models; there is nothing left to weaken again.
