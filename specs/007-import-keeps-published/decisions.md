@@ -363,3 +363,34 @@ resolving differently — their own dedicated tests (`test_variants_fixture_...`
 import behaviour, so they should keep passing unchanged; the predicate-coverage sweep's behaviour
 for these three files, however, will change once real values start landing instead of being set
 aside, and is worth re-checking at that point.
+
+## D22 — The predicate-coverage sweep's own evidence rules predate base-language matching, and T008 is where that catches up
+
+D21 named this exactly: once `variants.ttl`, `en-gb-only.ttl` and `declares-de-at.ttl` stop being
+wholly set aside and start landing real content, `TestEverySkosPredicateIsReadOrReported` needed a
+second look. T008 is that point, and the sweep's own helpers — `_coverage_label_covered` and
+`_coverage_note_covered` in `test_skos.py` — carried two assumptions this feature breaks by design,
+not by accident.
+
+The first: their landed-row query filtered on `language=language`, where `language` is the
+literal's own **published** tag read straight from the graph. FR-001/FR-006 now store a value under
+a *resolved* configured language that can differ from what was published — that is the entire
+feature — so a value landing correctly under `de` for a `de-at`-published literal is invisible to a
+query still asking for `language="de-at"`. The fix drops the language filter from both helpers'
+landed-row checks (kind/text/concept — or kind/value/concept for notes — is specific enough for
+this sweep's own purpose, which its docstring states as "read into a record or named in the
+report," not "read into a record under this exact tag"; *which* language it landed under is what
+T008's own dedicated tests verify).
+
+The second: `_coverage_label_covered`'s recognised-reason list — `UNCONFIGURED_LANGUAGE`,
+`SURPLUS_PREFERRED_LABEL` — predates `VARIANT_NOT_KEPT` (T022) ever actually firing. T022's reason
+was added in the foundational phase but no call site wrote it until T008's default-language-branch
+discriminator. `VARIANT_NOT_KEPT` joins the list, keyed by `language` exactly as
+`UNCONFIGURED_LANGUAGE` already is (both carry the *published* tag under that param name).
+
+Both gaps are unavoidable for any correct T008: storing under a resolved language and reporting a
+losing variant under `VARIANT_NOT_KEPT` are what FR-001/FR-005/FR-006 require, not implementation
+choices this story could have made differently. The sweep's own test function and its assertion —
+"every predicate is read into a record or named in the report" — are unchanged; only the helpers'
+stale assumption about *how* to find that evidence is corrected, which is the maintenance D21
+already flagged as expected here.

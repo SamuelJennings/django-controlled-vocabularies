@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 import rdflib
 from django.db import connection
+from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils.functional import Promise
 
@@ -519,6 +520,140 @@ class TestConceptLabelIsSelectedByTheWinnerRule:
         target = Concept.objects.get(static_uri="http://example.org/exactwins/target")
         assert target.label == "Alpha"
         assert target.slug == "alpha"
+
+
+class TestLabelsNotesAndNamesResolveThroughTheMatcher:
+    """T008 — FR-001, call sites 3/4/5/6/7/8: ``import_labels`` and ``_import_notes`` store a
+    matched value under its resolved configured language rather than comparing raw published tags,
+    and ``SkosGraph.first_literal``'s ``language=`` filter — read for a vocabulary's own name and
+    description and for a collection's name — resolves through the matcher too."""
+
+    def test_an_en_only_vocabulary_imports_into_an_en_gb_configured_site(self, db):
+        # SC-001: general-to-specific. rocks.ttl's own content is unmodified;
+        # only the site's configured languages narrow to en-gb alone.
+        with override_settings(LANGUAGES=[("en-gb", "British English")]):
+            report = import_skos(FIXTURES / "rocks.ttl")
+            assert report.fatal == []
+            igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
+            assert igneous.label == "Igneous rock"
+            assert igneous.definition("en-gb") == "Rock formed by the cooling and solidification of magma or lava."
+            granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+            assert granite.alt_labels("en-gb") == ["Magma rock"]
+            assert granite.hidden_labels("en-gb") == ["Granit rock"]
+
+    def test_an_en_gb_only_vocabulary_imports_into_an_en_configured_site(self, db):
+        # SC-002: specific-to-general, the direction that stored nothing before this feature.
+        report = import_skos(FIXTURES / "en-gb-only.ttl")
+        assert report.fatal == []
+        colour = Concept.objects.get(static_uri="http://example.org/colours-gb/colour")
+        assert colour.label == "Colour"
+        assert colour.alt_labels("en") == ["Hue"]
+        assert colour.notes("en") == ["The visible spectral quality of light."]
+
+    def test_a_de_at_published_vocabulary_on_a_de_site_imports_its_preferred_labels_without_raising(self, db):
+        # SC-010's write half: T006 and T007 alone still stop short of this — the concept's own
+        # alt label and note are also tagged de-at and must resolve through the matcher too.
+        report = import_skos(FIXTURES / "declares-de-at.ttl")
+        assert report.fatal == []
+        rot = Concept.objects.get(static_uri="http://example.org/farben/rot")
+        assert rot.label == "Rot"
+        assert rot.alt_labels("de") == ["Karmesinrot"]
+        assert rot.notes("de") == ["Eine der Grundfarben."]
+
+    def test_a_tag_differing_only_in_case_is_treated_as_an_exact_match(self, db, tmp_path):
+        # SC-004.
+        path = tmp_path / "case.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/case/> a skos:ConceptScheme ;
+                skos:prefLabel "Case"@en .
+
+            <http://example.org/case/item> a skos:Concept ;
+                skos:inScheme <http://example.org/case/> ;
+                skos:prefLabel "Item"@en, "Artikel"@DE .
+            """
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        item = Concept.objects.get(static_uri="http://example.org/case/item")
+        assert item.preferred_label("de") == "Artikel"
+
+    def test_a_tag_sharing_no_base_language_with_any_configured_language_is_still_set_aside(self, db, tmp_path):
+        # SC-003.
+        path = tmp_path / "nobase.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/nobase/> a skos:ConceptScheme ;
+                skos:prefLabel "No base"@en .
+
+            <http://example.org/nobase/item> a skos:Concept ;
+                skos:inScheme <http://example.org/nobase/> ;
+                skos:prefLabel "Item"@en ;
+                skos:altLabel "アイテム"@ja .
+            """
+        )
+        report = import_skos(path)
+        item = Concept.objects.get(static_uri="http://example.org/nobase/item")
+        assert item.alt_labels("ja") == []
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.UNCONFIGURED_LANGUAGE]
+        assert len(entries) == 1
+        assert entries[0].subject == item.static_uri
+        assert entries[0].params["language"] == "ja"
+
+    def test_the_vocabularys_own_name_and_description_resolve_through_the_matcher_too(self, db, tmp_path):
+        # Call sites 6/7: without this, first_literal's exact filter finds no "de" literal and
+        # falls back to sorted(...)[0] across every language in the file.
+        path = tmp_path / "named.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+            @prefix dcterms: <http://purl.org/dc/terms/> .
+
+            <http://example.org/named/> a skos:ConceptScheme ;
+                skos:prefLabel "Aardvark scheme"@fr, "Named scheme"@de-at ;
+                dcterms:description "Aardvark description"@fr, "Named description"@de-at .
+
+            <http://example.org/named/item> a skos:Concept ;
+                skos:inScheme <http://example.org/named/> ;
+                skos:prefLabel "Item"@de-at .
+            """
+        )
+        import_skos(path)
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/named/")
+        assert scheme.effective_default_language == "de"
+        assert scheme.name == "Named scheme"
+        assert scheme.description == "Named description"
+
+    def test_a_collections_own_name_resolves_through_the_matcher_too(self, db, tmp_path):
+        # Call site 8.
+        path = tmp_path / "named_collection.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/namedcoll/> a skos:ConceptScheme ;
+                skos:prefLabel "Named collection scheme"@de .
+
+            <http://example.org/namedcoll/item> a skos:Concept ;
+                skos:inScheme <http://example.org/namedcoll/> ;
+                skos:prefLabel "Item"@de .
+
+            <http://example.org/namedcoll/coll> a skos:Collection ;
+                skos:prefLabel "Aardvark collection"@fr, "Named collection"@de-at ;
+                skos:member <http://example.org/namedcoll/item> .
+            """
+        )
+        import_skos(path)
+        collection = Collection.objects.get(static_uri="http://example.org/namedcoll/coll")
+        assert collection.name == "Named collection"
 
 
 class TestConceptsImpliedByMembershipButNeverGivenAnRdfType:
@@ -2522,7 +2657,16 @@ def _coverage_label_covered(
 ) -> bool:
     """Direct evidence that this ``skos:prefLabel``/``altLabel``/``hiddenLabel`` value
     landed — as the scheme's own name, a concept's identity anchor, or a
-    ``ConceptLabel`` row — or was reported set aside (FIX 13)."""
+    ``ConceptLabel`` row — or was reported set aside (FIX 13).
+
+    T008 (FS-007 US-1): a value may now land under a *resolved* configured language
+    other than its own published tag (FR-001/FR-006), so the landed-row check is no
+    longer scoped to ``language`` — decisions.md D21 named this sweep as something to
+    re-check once these fixtures' values start landing instead of being set aside.
+    ``VARIANT_NOT_KEPT`` (T022) joins the recognised set-aside reasons for the same
+    reason: a losing variant is reported under it, keyed by its own published tag,
+    exactly as ``UNCONFIGURED_LANGUAGE`` already is.
+    """
     if subject_uri in excluded_subjects:
         return True
     if kind == ConceptLabel.Kind.PREFERRED:
@@ -2532,12 +2676,17 @@ def _coverage_label_covered(
             return True
         if Collection.objects.filter(static_uri=subject_uri, name=text).exists():
             return True
-    if ConceptLabel.objects.filter(concept__static_uri=subject_uri, language=language, kind=kind, text=text).exists():
+    if ConceptLabel.objects.filter(concept__static_uri=subject_uri, kind=kind, text=text).exists():
         return True
     return any(
         entry.subject == subject_uri
         and entry.params.get("language") == language
-        and entry.reason in (SetAsideReason.UNCONFIGURED_LANGUAGE, SetAsideReason.SURPLUS_PREFERRED_LABEL)
+        and entry.reason
+        in (
+            SetAsideReason.UNCONFIGURED_LANGUAGE,
+            SetAsideReason.SURPLUS_PREFERRED_LABEL,
+            SetAsideReason.VARIANT_NOT_KEPT,
+        )
         for entry in report.set_aside
     )
 
@@ -2546,10 +2695,15 @@ def _coverage_note_covered(
     subject_uri: str, language: str, text: str, kind: str, excluded_subjects: set[str], report
 ) -> bool:
     """Direct evidence that this note value landed as a ``ConceptNote`` row, or was
-    reported set aside (FIX 13)."""
+    reported set aside (FIX 13).
+
+    T008: not scoped to ``language`` on the landed-row check, for the same reason as
+    :func:`_coverage_label_covered` — a note may land under a resolved configured
+    language other than its own published tag.
+    """
     if subject_uri in excluded_subjects:
         return True
-    if ConceptNote.objects.filter(concept__static_uri=subject_uri, language=language, kind=kind, value=text).exists():
+    if ConceptNote.objects.filter(concept__static_uri=subject_uri, kind=kind, value=text).exists():
         return True
     return any(
         entry.subject == subject_uri
