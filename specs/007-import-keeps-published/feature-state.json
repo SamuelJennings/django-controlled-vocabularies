@@ -919,33 +919,98 @@
       "priority": "P1",
       "issue": null,
       "worktree": "/home/sam/projects/samueljennings/dcv-fs007-fix3",
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T038",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py",
+              "tests/test_models.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 826 passed",
+              "forge verify  # lint/typecheck/test/build pass; conformance red on pre-existing pyproject line-length",
+              "forge tamper-check  # 2 files flagged, 0 deleted lines, no pre-existing definition missing or altered"
+            ]
+          }
         },
         {
           "id": "T039",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 826 passed",
+              "forge verify  # lint/typecheck/test/build pass; conformance red on pre-existing pyproject line-length",
+              "forge tamper-check  # 2 files flagged, 0 deleted lines, no pre-existing definition missing or altered"
+            ]
+          }
         },
         {
           "id": "T040",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 826 passed",
+              "forge verify  # lint/typecheck/test/build pass; conformance red on pre-existing pyproject line-length",
+              "forge tamper-check  # 2 files flagged, 0 deleted lines, no pre-existing definition missing or altered"
+            ]
+          }
         },
         {
           "id": "T041",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 826 passed",
+              "forge verify  # lint/typecheck/test/build pass; conformance red on pre-existing pyproject line-length",
+              "forge tamper-check  # 2 files flagged, 0 deleted lines, no pre-existing definition missing or altered"
+            ]
+          }
         },
         {
           "id": "T042",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 826 passed",
+              "forge verify  # lint/typecheck/test/build pass; conformance red on pre-existing pyproject line-length",
+              "forge tamper-check  # 2 files flagged, 0 deleted lines, no pre-existing definition missing or altered"
+            ]
+          }
+        },
+        {
+          "id": "T043",
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 828 passed",
+              "pytest -k BaseSharingLanguage against cd4f1c6  # 1 failed (colour -> color), proving the test can fail"
+            ]
+          }
         }
       ]
     }
