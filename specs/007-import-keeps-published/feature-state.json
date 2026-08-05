@@ -64,6 +64,11 @@
       "state": "IMPLEMENT",
       "at": "2026-08-05T12:05:00Z",
       "note": "US-1 merged as a2b5a3a; 745 green, receipts verified, tamper flag triaged (D25 reinstates an absorbed test class)"
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-05T13:05:00Z",
+      "note": "US-2 verified independently (747 tests, lint/format/typecheck/deptry green, receipts green, tamper flag additive-only with zero deleted lines) and merged to the feature branch as d1342e2"
     }
   ],
   "gates": {
@@ -379,19 +384,45 @@
       "id": "US2",
       "priority": "P1",
       "issue": 70,
-      "worktree": null,
-      "status": "todo",
+      "worktree": "/home/sam/projects/samueljennings/dcv-fs007-us2",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T011",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py::TestTheLanguageAccountReflectsARealImport::test_the_account_covers_every_unconfigured_value_and_no_stored_value"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_exchange/test_skos.py::TestTheLanguageAccountReflectsARealImport -v",
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "poetry run deptry ."
+            ]
+          }
         },
         {
           "id": "T012",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py::TestTheLanguageAccountReflectsARealImport::test_present_and_empty_after_an_import_that_leaves_nothing_behind"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_exchange/test_skos.py::TestTheLanguageAccountReflectsARealImport -v",
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "poetry run deptry ."
+            ]
+          }
         }
       ]
     },
