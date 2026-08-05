@@ -1825,3 +1825,50 @@ unconditional `add_fatal(VOCABULARY_RECORD_INVALID)` below it, so `import_skos` 
 **Revisit if:** never — the same defensive-read shape the round-5 recommendation names directly,
 and the only change needed to keep every shape of `ValidationError` inside this handler's own
 exception contract.
+
+## D68 — T058 (fix cycle 6): a vocabulary refused for publishing no name gets its own reason, and
+two round-5 refusals gain success criteria
+
+CORR-504 (round 5, medium): D59/T054's `elif created:` guard for a scheme with no
+`skos:prefLabel` published at all reused `FatalReason.VOCABULARY_NAME_UNUSABLE`, whose template
+is written for one trigger only — "its published name in '%(language)s' is longer than this
+application can store." On the no-prefLabel path nothing is published in any language, so both
+halves of that sentence are false: there is no over-long value, and `winning_tag` names the site's
+effective default language, not a language anything was actually published in. D59's own text
+already flagged this as a live risk ("a dedicated `RECORD_NAME_UNPUBLISHED`-shaped reason is worth
+minting... if the reused-message imprecision becomes a real curator complaint") — the round-5
+review is exactly that complaint, materialising the case D59 predicted rather than a new one.
+
+**Fixed by minting `FatalReason.VOCABULARY_NAME_UNPUBLISHED`**, scoped to the scheme side only —
+the collection side already has its own distinct `COLLECTION_NOT_CREATED` reason for this trigger
+(D60), whose message the round-5 review's own `checked_and_clear` section confirmed already holds
+on both the over-long and the no-prefLabel path. A scheme has no such second reason to reuse
+correctly, because an unusable created-scheme name is always fatal, never a set-aside, so there
+was nothing but the wrong-shaped `VOCABULARY_NAME_UNUSABLE` to fall back to. The new reason takes
+no `language` param — there is no language to name — and its own template says plainly that no
+`skos:prefLabel` was published.
+
+**A pre-existing test's assertion is overturned, not merely extended**, and is named here per this
+cycle's own rule for doing so. `TestNoPublishedNameAtAllIsUnusableTheSameAsOverLong
+.test_a_created_scheme_with_no_preflabel_at_all_is_fatal_not_persisted_blank` (T054, fix cycle 5,
+D59) asserted `report.fatal[0].reason is FatalReason.VOCABULARY_NAME_UNUSABLE` — true of the old
+code and false of the corrected code, since this task's whole point is that the no-prefLabel
+trigger is not the same reason as the over-long one. The assertion is changed to the new reason,
+and a `render()` check is added (`assert "longer than" not in message`) that the previous
+type-only assertion could not have made, per CORR-504's own observation. T055's own
+`test_a_node_publishing_only_an_empty_literal_is_treated_as_no_usable_name_at_all` (committed
+earlier in this same fix cycle) reaches the identical branch — an empty-only literal is, by T055's
+own fix, indistinguishable from nothing having been published — and is updated to the same new
+reason for the same cause, not a second, independent overturn.
+
+**CORR-506** (round 5, low): two refusal behaviours this feature added had no success criterion —
+a matched vocabulary whose own write fails (T052/D57) and a created vocabulary or collection
+publishing no preferred label at all (T054/D59) — while SC-024's amendment and SC-031 cover only
+the sibling over-long-value trigger. Both already have tests; this is the spec catching up to
+behaviour, not new behaviour. Added as SC-032 (D57) and SC-033 (D59) at the end of the existing
+list, per this file's own append-only numbering — nothing renumbered, nothing struck.
+
+**Revisit if:** never — the same "a message must hold on every path that reaches it" rule D60
+already applied to the collection side, extended to the one place it had not yet reached; the two
+new success criteria describe behaviour already proven by an existing test, so there is nothing
+further to reconcile.

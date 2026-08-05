@@ -1922,6 +1922,14 @@ class TestNoPublishedNameAtAllIsUnusableTheSameAsOverLong:
     """
 
     def test_a_created_scheme_with_no_preflabel_at_all_is_fatal_not_persisted_blank(self, db, tmp_path):
+        """T058, CORR-504, decisions.md D68 (fix cycle 6): overturns the reason this test
+        asserted since fix cycle 5 (D59) — ``VOCABULARY_NAME_UNUSABLE``, whose template says the
+        published name is "longer than this application can store." Nothing is published here at
+        all, so that message is false on this trigger; a dedicated
+        ``VOCABULARY_NAME_UNPUBLISHED`` names what actually happened. The type-only assertion
+        this test previously made could not have caught the message being wrong, so ``render()``
+        is now asserted too.
+        """
         path = tmp_path / "sec404_scheme.ttl"
         path.write_text(
             "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
@@ -1934,7 +1942,10 @@ class TestNoPublishedNameAtAllIsUnusableTheSameAsOverLong:
             import_skos(path)
         report = exc_info.value.report
         assert len(report.fatal) == 1
-        assert report.fatal[0].reason is FatalReason.VOCABULARY_NAME_UNUSABLE
+        assert report.fatal[0].reason is FatalReason.VOCABULARY_NAME_UNPUBLISHED
+        message = report.fatal[0].render()
+        assert "longer than" not in message
+        assert "no skos:prefLabel was published" in message
         assert not ConceptScheme.objects.filter(static_uri="http://pub.example/sec404scheme").exists()
 
     def test_a_created_collection_with_no_preflabel_at_all_is_set_aside_not_persisted_blank(self, db, tmp_path):
@@ -2092,7 +2103,9 @@ class TestAnEmptyPublishedLiteralIsNeverTreatedAsAUsableName:
     def test_a_node_publishing_only_an_empty_literal_is_treated_as_no_usable_name_at_all(self, db, tmp_path):
         """The record-level outcome when *every* published literal is unusable must be unchanged:
         this is not a new way to have a name, it is the same "nothing storable" case D59 already
-        makes fatal for a created scheme.
+        makes fatal for a created scheme — reported as ``VOCABULARY_NAME_UNPUBLISHED`` (T058,
+        decisions.md D68), since an empty literal is, per this same task's own fix, the same as
+        nothing having been published at all.
         """
         path = tmp_path / "sec501_scheme_none_usable.ttl"
         path.write_text(
@@ -2105,7 +2118,7 @@ class TestAnEmptyPublishedLiteralIsNeverTreatedAsAUsableName:
             import_skos(path)
         report = exc_info.value.report
         assert len(report.fatal) == 1
-        assert report.fatal[0].reason is FatalReason.VOCABULARY_NAME_UNUSABLE
+        assert report.fatal[0].reason is FatalReason.VOCABULARY_NAME_UNPUBLISHED
         assert not ConceptScheme.objects.filter(static_uri="http://pub.example/sec501schemenone").exists()
 
 

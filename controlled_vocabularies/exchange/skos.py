@@ -720,7 +720,13 @@ class SchemeResolver:
             # name still None, which would otherwise leave row.name at the field default '' — the
             # exact state D49 already declares impossible for a created record, reached by a
             # different route.
-            self.report.add_fatal(FatalReason.VOCABULARY_NAME_UNUSABLE, subject=declared_uri, language=winning_tag)
+            #
+            # T058, CORR-504, decisions.md D68 (fix cycle 6): VOCABULARY_NAME_UNUSABLE's own
+            # message names a published value that is "longer than this application can store" —
+            # false on this path, since nothing was published at all. VOCABULARY_NAME_UNPUBLISHED
+            # names what actually happened; no language param, since there is no language the
+            # value was published in.
+            self.report.add_fatal(FatalReason.VOCABULARY_NAME_UNPUBLISHED, subject=declared_uri)
             return None, None
         # SKOS defines no description predicate for a skos:ConceptScheme; dcterms:description is
         # the source (D21), the same alias CONTEXT.md establishes for a concept's own definition.

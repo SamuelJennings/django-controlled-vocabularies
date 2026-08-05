@@ -194,6 +194,8 @@ Every message this feature puts in front of a person is translatable, any field 
 - **SC-029**: Two records in one vocabulary whose identifiers end in the same segment both import, with distinct slugs, and both keep those slugs when the same file is imported again in any order — verified by test.
 - **SC-030**: A record created on this site rather than imported still derives its slug from its label, and still follows a relabel — verified by test, so FR-019 is not quietly broken by the change FR-017 makes.
 - **SC-031**: A vocabulary's own name, published only as a value longer than the field allows, refuses the whole run when this run is creating that vocabulary — nothing else in the file has a resolved vocabulary to import into — but leaves a matched vocabulary's existing name in place, set aside rather than fatal — verified by test (decisions.md D49).
+- **SC-032**: A matched vocabulary whose own record fails to write — its stored slug is invalid, or a value the model refuses for any other reason — refuses the whole run rather than reporting a clean success while nothing was imported — verified by test (decisions.md D57).
+- **SC-033**: A vocabulary or collection this run is creating that publishes no preferred label in any language is refused (a vocabulary) or dropped in full (a collection) rather than persisted with a blank name — verified by test (decisions.md D59).
 
 ## Assumptions
 
