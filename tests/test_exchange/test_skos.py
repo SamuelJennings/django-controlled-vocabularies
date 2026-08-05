@@ -1039,6 +1039,67 @@ class TestConceptSlugs:
         assert Concept.objects.filter(scheme__static_uri="http://example.org/quarry2/").count() == 2
 
 
+class TestConceptSchemeSlugFollowsThePublishedIdentifier:
+    """T030 — FR-018/decisions.md D35: a vocabulary's own slug is the fragment of its published
+    identifier where it has one, otherwise the last segment of its path — assigned once and never
+    recomputed, exactly like a concept's (T029). Before this task ``ConceptScheme.save()`` re-derived
+    the slug from ``name`` on every save with no manual mechanism at all, so a vocabulary's name
+    arriving in a different language moved the address of every record it holds (SC-028) — the exact
+    case D35 measured: ``scheme.slug`` going from ``colours`` to ``colors`` with ``static_uri``
+    unchanged throughout.
+    """
+
+    def test_a_scheme_name_arriving_in_a_different_language_does_not_move_the_scheme_or_its_concepts(
+        self, db, tmp_path
+    ):
+        first = tmp_path / "renamed_scheme_first.ttl"
+        first.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/renamedscheme/> a skos:ConceptScheme ; skos:prefLabel "Colours"@en-gb .
+
+            <http://example.org/renamedscheme/clay> a skos:Concept ;
+                skos:inScheme <http://example.org/renamedscheme/> ;
+                skos:prefLabel "Clay"@en-gb .
+            """
+        )
+        second = tmp_path / "renamed_scheme_second.ttl"
+        second.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/renamedscheme/> a skos:ConceptScheme ; skos:prefLabel "Color"@en-us .
+
+            <http://example.org/renamedscheme/clay> a skos:Concept ;
+                skos:inScheme <http://example.org/renamedscheme/> ;
+                skos:prefLabel "Clay"@en-gb .
+            """
+        )
+        with override_settings(LANGUAGES=[("en", "English")]):
+            import_skos(first)
+        scheme_before = ConceptScheme.objects.get(static_uri="http://example.org/renamedscheme/")
+        slug_before = scheme_before.slug
+        clay_before = Concept.objects.get(static_uri="http://example.org/renamedscheme/clay")
+        local_url_before = clay_before.local_url
+
+        with override_settings(LANGUAGES=[("en", "English")]):
+            import_skos(second)
+
+        scheme_after = ConceptScheme.objects.get(static_uri="http://example.org/renamedscheme/")
+        clay_after = Concept.objects.get(static_uri="http://example.org/renamedscheme/clay")
+        assert scheme_after.name == "Color"
+        assert scheme_after.slug == slug_before
+        assert clay_after.local_url == local_url_before
+
+    def test_a_scheme_s_slug_is_the_last_segment_of_its_identifier_not_its_name(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/rocks/")
+        # The URI's own last path segment is "rocks"; the name is "Rock types",
+        # which would slugify to "rock-types" under the superseded rule (D6).
+        assert scheme.slug == "rocks"
+
+
 def _write_shared_label_file(tmp_path: Path, n: int) -> Path:
     """A Turtle file with ``n`` concepts sharing one ``skos:prefLabel`` — D6's
     "two source concepts commonly sharing a preferred label" case, scaled up

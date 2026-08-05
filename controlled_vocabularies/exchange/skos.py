@@ -551,6 +551,15 @@ class SchemeResolver:
                 )
         row.description = description or ""
         row.static_uri = declared_uri
+        # T030, FR-018, decisions.md D35: the vocabulary's own slug is identifier-derived,
+        # exactly like a concept's (T029, assign_unique_slug) — recomputed from declared_uri
+        # on every touch rather than gated on `created`, which is safe rather than merely
+        # convenient: `declared_uri` is what `_get_or_create_scheme` matched this row on, so
+        # it is invariant across a re-import and the recomputed value always agrees with what
+        # is already stored. Unlike a concept's slug, no collision-suffix logic is needed:
+        # ConceptScheme.save() already refuses (never auto-suffixes) a colliding slug.
+        row.slug = slugify(identifier_slug_segment(declared_uri), allow_unicode=True)
+        row.slug_is_manual = True
         row.save()
         if created:
             self.report.add_created(row.uri)

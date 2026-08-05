@@ -894,3 +894,25 @@ The full suite was green (335/335 in `test_skos.py`, 792/790 overall) before thi
 D6 specifically — they are not, on the view that a superseded rule's test is not evidence worth
 preserving once the rule it tested is gone, the same position D25 takes about a test's home
 mattering more than its literal survival.
+
+## D39 — `SchemeResolver.resolve_scheme` recomputes the scheme's slug on every touch, not only on creation
+
+T030's own task text reads naturally as "assign once, at creation" — the same shape T029 gives a
+concept. Concept's own mechanism does not actually work that way, though: `assign_unique_slug` runs
+unconditionally for every concept `import_concepts` touches, created or matched-existing alike, and
+that is safe only because `concept.static_uri` is invariant once a concept is matched — recomputing
+the base from it always reproduces the value already stored.
+
+The same invariant holds for a scheme: `_get_or_create_scheme(declared_uri)` matches an existing row
+by `get_by_uri(declared_uri)`, so on every re-import of the same vocabulary, `declared_uri` is by
+construction the identifier that row was already matched on. Recomputing
+`identifier_slug_segment(declared_uri)` on every call therefore always reproduces the slug already
+stored, exactly as for a concept, so gating on `created` would add a branch that changes nothing
+observable. Doing it unconditionally is also what keeps a scheme created outside the importer (a
+curator's own row, given a `static_uri` directly, matched by a later import) reachable by the same
+rule the moment it is: a scheme's `slug_is_manual` defaulting `False` on creation is exactly the
+guard T031 relies on for locally-authored records with no `static_uri` at all, and it stays correct
+for a scheme that is never matched by an import.
+
+**Revisit if:** never — this is the same reasoning `assign_unique_slug` already relies on,
+transplanted to the one call site that creates or matches a scheme rather than a concept.

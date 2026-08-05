@@ -345,7 +345,11 @@ class ConceptScheme(StaticUriModel):
     """A controlled vocabulary — a named container for concepts (a SKOS concept scheme).
 
     The ``slug`` is derived from ``name`` on every save (dynamic while unpublished,
-    research R5) and is unique app-wide. The ``uri`` is composed on read.
+    research R5) unless :attr:`slug_is_manual` is set, in which case it is held
+    exactly as assigned (FR-018, decisions.md D35) — the same mechanism
+    :attr:`Concept.slug_is_manual` already gives a concept, so a vocabulary's own
+    published identifier can anchor its address the same way. It is unique app-wide.
+    The ``uri`` is composed on read.
     """
 
     name = models.CharField(
@@ -365,6 +369,16 @@ class ConceptScheme(StaticUriModel):
         verbose_name=_("slug"),
         help_text=_(
             "A URL-safe identifier derived automatically from the name. A slug must be unique across all vocabularies."
+        ),
+    )
+    slug_is_manual = models.BooleanField(
+        default=False,
+        # No db_index: mirrors Concept.slug_is_manual (FS-006) — a low-cardinality flag
+        # read only inside save()'s own row, never filtered or ordered on.
+        verbose_name=_("slug set manually"),
+        help_text=_(
+            "Whether the slug was set explicitly rather than derived from the name. "
+            "A manual slug is left untouched when the name later changes."
         ),
     )
     default_language = models.CharField(
@@ -423,9 +437,22 @@ class ConceptScheme(StaticUriModel):
         """
         return self.default_language or settings.LANGUAGE_CODE
 
+    def set_slug(self, slug: str) -> None:
+        """Set an explicit slug that survives a later rename (FR-018, decisions.md D35).
+
+        Marks the slug manual and saves, so from now on :meth:`save` leaves it untouched
+        when :attr:`name` changes — the same mechanism :meth:`Concept.set_slug` gives a
+        concept, used here so an imported vocabulary's own published identifier can anchor
+        its address the same way. The value is stored exactly as given rather than
+        re-slugified. The usual non-empty and app-wide uniqueness checks still apply.
+        """
+        self.slug = slug
+        self.slug_is_manual = True
+        self.save()
+
     def save(self, *args, **kwargs):
-        """Derive the slug from ``name``, freeze the default language once concepts
-        exist, and refuse an empty or colliding slug."""
+        """Derive the slug from ``name`` unless :attr:`slug_is_manual`, freeze the default
+        language once concepts exist, and refuse an empty or colliding slug."""
         # Freeze the default language once the vocabulary has concepts. Each concept's
         # identity anchor (``Concept.label``) is its preferred label in the effective
         # default language; changing that language afterwards would silently reinterpret
@@ -454,9 +481,31 @@ class ConceptScheme(StaticUriModel):
                     )
                 }
             )
-        self.slug = slugify(self.name, allow_unicode=True)
-        if not self.slug:
-            raise ValidationError({"name": _("Name must produce a non-empty slug.")})
+        if not self.slug_is_manual:
+            # An auto slug tracks the name; a manual one is left exactly as set
+            # (FR-018, decisions.md D35).
+            self.slug = slugify(self.name, allow_unicode=True)
+            if not self.slug:
+                raise ValidationError({"name": _("Name must produce a non-empty slug.")})
+        else:
+            # A manual slug is stored verbatim (not re-slugified) but must still be a
+            # well-formed single-segment slug (Concept.save()'s identical guard, Article IX
+            # — identity IS the URI, and save() never runs full_clean()).
+            if not self.slug:
+                raise ValidationError({"slug": _("An explicit slug must not be empty.")})
+            try:
+                validate_unicode_slug(self.slug)
+            except ValidationError as exc:
+                raise ValidationError(
+                    {
+                        "slug": ValidationError(
+                            _(
+                                "An explicit slug must be a valid slug — letters, numbers, "
+                                "hyphens or underscores, with no spaces or slashes."
+                            ),
+                        )
+                    }
+                ) from exc
         # Refuse a slug that collides with another scheme rather than minting a
         # duplicate identifier or silently auto-suffixing it (research R4).
         if ConceptScheme.objects.filter(slug=self.slug).exclude(pk=self.pk).exists():
