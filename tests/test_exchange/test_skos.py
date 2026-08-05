@@ -1165,6 +1165,58 @@ class TestConceptSchemeSlugFollowsThePublishedIdentifier:
         assert scheme.slug == "rocks"
 
 
+class TestConceptSchemeSlugCollisionIsIdentifierDerived:
+    """T035 — FR-018/FR-020/SC-028/SC-029, decisions.md D35: two vocabularies whose published
+    identifiers end in the same segment (``.../a/colours``, ``.../b/colours``) are ordinary in
+    SKOS, and T030's identifier-derived scheme slug (:meth:`SchemeResolver.resolve_scheme`) made
+    that an uncaught ``ValidationError`` out of ``ConceptScheme.save()`` — a regression against
+    cd4f1c6, where the slug came from each scheme's own distinct name. Resolved exactly the way
+    ``ConceptImporter.assign_unique_slug`` already resolves a concept collision: the same
+    identifier-derived base, a numeric suffix minted only when the candidate already belongs to a
+    *different* scheme (matched on ``static_uri``, so a scheme reads its own prior slug back to
+    itself and a re-import is stable). ``ConceptScheme.save()`` itself keeps refusing rather than
+    auto-suffixing (research R4) — the importer resolves its own collisions, as it already does
+    for concepts.
+    """
+
+    def _write(self, tmp_path: Path, name: str, uri: str, label: str) -> Path:
+        path = tmp_path / name
+        path.write_text(
+            f"""
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <{uri}> a skos:ConceptScheme ; skos:prefLabel "{label}"@en .
+            """
+        )
+        return path
+
+    def test_two_vocabularies_sharing_a_last_segment_both_import_with_distinct_slugs(self, db, tmp_path):
+        first = self._write(tmp_path, "scheme_collision_a.ttl", "http://a.org/colours", "Colours A")
+        second = self._write(tmp_path, "scheme_collision_b.ttl", "http://b.org/colours", "Colours B")
+
+        import_skos(first)
+        import_skos(second)
+
+        a = ConceptScheme.objects.get(static_uri="http://a.org/colours")
+        b = ConceptScheme.objects.get(static_uri="http://b.org/colours")
+        assert {a.slug, b.slug} == {"colours", "colours-2"}
+        assert a.slug != b.slug
+
+    def test_each_vocabulary_keeps_its_slug_when_its_own_file_is_reimported(self, db, tmp_path):
+        first = self._write(tmp_path, "scheme_collision_a.ttl", "http://a.org/colours", "Colours A")
+        second = self._write(tmp_path, "scheme_collision_b.ttl", "http://b.org/colours", "Colours B")
+        import_skos(first)
+        import_skos(second)
+        a_slug_before = ConceptScheme.objects.get(static_uri="http://a.org/colours").slug
+        b_slug_before = ConceptScheme.objects.get(static_uri="http://b.org/colours").slug
+
+        import_skos(first)
+        import_skos(second)
+
+        assert ConceptScheme.objects.get(static_uri="http://a.org/colours").slug == a_slug_before
+        assert ConceptScheme.objects.get(static_uri="http://b.org/colours").slug == b_slug_before
+
+
 def _write_shared_label_file(tmp_path: Path, n: int) -> Path:
     """A Turtle file with ``n`` concepts sharing one ``skos:prefLabel`` — D6's
     "two source concepts commonly sharing a preferred label" case, scaled up
