@@ -89,6 +89,11 @@
       "state": "IMPLEMENT",
       "at": "2026-08-05T14:40:00Z",
       "note": "S6 fix cycle 1 of 2. US6 is the review-fix phase, not a user story, and carries no issue. ARCH-001 reproduced independently; resolved by spec amendment FR-016/SC-022 (D33) on Sam's explicit delegation. T023-T028 cover ARCH-001, SEC-001, SEC-002, CORR-001 and the small non-blocking findings; four performance findings deferred to a post-merge issue."
+    },
+    {
+      "state": "REVIEW",
+      "at": "2026-08-05T15:10:00Z",
+      "note": "Delta brief: FR-016/D33 withdrawn before any code implemented it, superseded by FR-017-FR-020 (D35) on Sam's design correction \u2014 local addresses derive from published identifiers, never from translated labels. Overturns #50's D6, annotated in place. T023 dropped from US6; US7 (T029-T034) added, gated on re-approval. Scheme slug pinning needs the feature's only migration."
     }
   ],
   "gates": {
@@ -638,11 +643,6 @@
       "replans": 0,
       "tasks": [
         {
-          "id": "T023",
-          "status": "todo",
-          "attempts": 0
-        },
-        {
           "id": "T024",
           "status": "todo",
           "attempts": 0
@@ -664,6 +664,46 @@
         },
         {
           "id": "T028",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
+    },
+    {
+      "id": "US7",
+      "priority": "P1",
+      "issue": null,
+      "worktree": null,
+      "status": "todo",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T029",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T030",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T031",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T032",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T033",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T034",
           "status": "todo",
           "attempts": 0
         }

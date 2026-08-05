@@ -742,3 +742,66 @@ preferred label never reaches the code that records its other values, so none of
 the account. The failure lands precisely on the concept that was wholly lost, which is the one a
 curator most needs to be told about. FR-008's sufficiency clause and SC-012 both fail. Fixed by
 accounting the skipped concept's own published tags before continuing.
+
+## D35 — A local address is derived from the published identifier, never from a translated label
+
+Supersedes D33, which is withdrawn before any code implemented it, and overturns
+[#50](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/50)'s D6.
+
+**The maintainer's correction, which is the right one.** A published vocabulary gives every record
+an identifier with a stable path. That path does not move when a label is translated, corrected, or
+read in a different language, because it was never made of a label. This application's own addresses
+must behave the same way: `/{vocabulary}/{record}` is composed from published identifiers and never
+from a translated value.
+
+**D33 was the wrong layer, and worth naming as such.** It held the default-language label still so
+that a slug derived from that label would stay still. That is a symptom treated one step away from
+its cause: the slug should not have been derived from a translated value in the first place, and
+every rule built to stabilise the label was scaffolding around a mistake. It also cost a carve-out
+in FR-002, which now stands as the Spec gate approved it.
+
+**R1 already built the mechanism, and #50 declined to use it.** `Concept.set_slug` marks a slug
+manual so `save()` stops re-deriving it, and its docstring says why it exists: *"this same mechanism
+later carries an imported vocabulary's own slugs unchanged (spec R2)."* #50's `assign_unique_slug`
+went the other way and said so plainly — *"Nothing is derived from `concept.static_uri` — identity
+and slug are deliberately independent"* — and pinned the reasoning in D6: an identifier made of
+opaque codes produces an unreadable local address. That is a real cost and it is the smaller one.
+Readability of a URL is a preference. A URL that moves under data already pointing at it is a
+correctness failure, and Article IX names downstream-data safety as the thing that must not break.
+
+**The scope is wider than the case the review found.** `ConceptScheme.save()` re-derives its slug
+from its name on every save with no manual mechanism at all, so a vocabulary's name arriving in a
+different language moves the address of *every record it holds*. Measured:
+
+```
+before: scheme.slug=colours | concept.local_url=.../vocabularies/colours/clay
+after : scheme.slug=colors  | concept.local_url=.../vocabularies/colors/clay
+```
+
+`static_uri` was unchanged throughout. Both segments of the address were label-derived, so both are
+in scope, and the vocabulary needs the pinning mechanism the concept already has.
+
+**Two rules decided here rather than escalated, because both follow from the identifier itself.**
+
+*Which part of the identifier.* The fragment where the identifier has one, otherwise the last
+segment of its path. SKOS vocabularies use fragment identifiers constantly
+(`http://example.org/scheme#clay`), and for those the fragment is the record's name in every sense
+that matters.
+
+*Collisions.* Two records in one vocabulary can end in the same segment when their paths differ.
+The suffix that separates them is derived from the identifiers, not from read order, so the same
+file yields the same slugs however it is traversed. #50's existing suffix rule is order-dependent
+and is replaced rather than reused.
+
+**Why this lands in this feature rather than its own.** It changes behaviour #50 shipped, which
+normally argues for separate work. FR-009 is the reason it cannot wait: this feature's approved spec
+already promises that a re-import does not alter a record's local address, and with label-derived
+slugs that promise is unkeepable. The fix is not scope added on top of FS-007, it is what makes
+FS-007's own approved requirement true. Shipping D33's workaround instead would mean landing code
+written to be deleted.
+
+**Cost, named rather than hidden.** Local addresses for vocabularies published under opaque codes
+become opaque — `/vocabularies/v-113/00123` where today they read `/soil-types/clay`. D6 called that
+out and it remains true. It is accepted because the addresses are correct and permanent, which is
+what a vocabulary's consumers need from them, and because a readable-but-unstable address is worse
+than an opaque stable one for every use a URL is put to.

@@ -105,6 +105,15 @@ work (#19). Deletion is never a consequence of reading a file.
 
 ## D6 — Slugs are derived by R1's rule, disambiguated by suffix, and allowed to move
 
+> **SUPERSEDED 2026-08-05 by FS-007 `decisions.md` D35** (spec FR-017 to FR-020). An imported
+> record's slug is now derived from its published identifier and never recomputed, and the
+> vocabulary's own slug follows the same rule. The reasoning below is kept as the decision record it
+> was. Its rejected alternative — deriving from the identifier — is what the project now does, and
+> its accepted consequence, a slug that moves, is what the project now forbids. What changed is the
+> weight given to each side: readability of a local address is a preference, an address that moves
+> under data already pointing at it is a correctness failure, and Article IX names downstream-data
+> safety as the one that governs. The maintainer's ruling.
+
 An imported concept has no slug in its source — SKOS has no such notion. R1 already derives one
 from the label on save unless `slug_is_manual` is set, so the import needs no rule of its own
 beyond collision handling: two concepts in one vocabulary can carry the same preferred label,

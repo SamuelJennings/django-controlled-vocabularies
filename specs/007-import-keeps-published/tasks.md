@@ -254,16 +254,9 @@ Every task here is test-first in the strong sense the review demands: the test m
 against the current branch before the fix, because three of these four are regressions that a test
 written after the fix would pass vacuously.
 
-- **T023** — FR-016 and SC-022: the default-language contest resolves over every published tag
-  sharing the default language's base, whether or not those tags are separately configured
-  (S6 ARCH-001, `decisions.md` D33). An exact match still wins that contest. Only this one slot
-  changes; every other slot keeps FR-002's placement. **RED first**, using the reproduction already
-  written to `/tmp/arch001_repro.py`: import `tests/fixtures/skos/variants.ttl` under
-  `LANGUAGES=[("en",...)]`, then re-import unchanged under `LANGUAGES=[("en",...),("en-gb",...)]`,
-  and assert name, slug and `local_url` are all unchanged. The existing SC-015 test stays and is
-  **not** the guard — it adds a language sharing no base, which is why it could not fail. A value
-  filling both its own exact slot and the default slot is expected under D33, so assert that too
-  rather than treating the duplicate as a defect.
+- ~~**T023**~~ — **DROPPED 2026-08-05, no code written.** It implemented the withdrawn FR-016. The
+  defect it targeted is real and is now fixed at its source by Phase FIX-2 below (`decisions.md`
+  D35).
 - **T024** — SC-023 (S6 SEC-001): a vocabulary whose `effective_default_language` resolves to
   nothing configured is reported as **that one problem**, naming the unconfigured default, instead of
   emitting one `NO_PREFERRED_LABEL` per concept and storing nothing. **RED first** under
@@ -304,3 +297,37 @@ written after the fix would pass vacuously.
   what `decisions.md` and the retro's proposal list exist for.
 - **ARCH-007** — CHANGELOG coverage of the two public-surface additions. Folded into T027's docs
   touch rather than carried as its own task.
+
+## Phase FIX-2 — Local addresses come from published identifiers (FR-017 to FR-020)
+
+Gated on the maintainer's re-approval of the amended spec. Every task is test-first, and the
+re-import stability tests must be shown RED against the current branch first — this is behaviour
+#50 shipped, so a test written after the change proves nothing about what it changed.
+
+- **T029** — `Concept`: an imported record's slug is the last segment of its published identifier —
+  the fragment where there is one, otherwise the last path segment — stored via the manual-slug
+  mechanism R1 already built for this (`Concept.set_slug`'s own docstring names this use). It is
+  never recomputed on a later import. Tests: SC-026 for both identifier shapes, and SC-027 — a
+  publisher rename leaves the slug and local address alone, which is the case D6 deliberately let
+  move.
+- **T030** — `ConceptScheme`: the same rule for the vocabulary's own slug, which today re-derives
+  from `name` on every save with no manual mechanism at all. This needs a **migration** adding the
+  pinning field, and it is the only migration in this feature. Tests: SC-028 — a vocabulary name
+  arriving in a different language moves neither the vocabulary's slug nor the address of any record
+  inside it. The measured before/after is in `decisions.md` D35.
+- **T031** — FR-019 and SC-030: a record authored on this site, with no publisher identifier, still
+  derives its slug from its label and still follows a relabel. This is the guard that stops T029 and
+  T030 from silently changing curator-authored behaviour, and it is the test most likely to be
+  forgotten because nothing in the imported path exercises it.
+- **T032** — FR-020 and SC-029: replace #50's order-dependent numeric suffix with a collision rule
+  derived from the identifiers, so two records whose identifiers end in the same segment get stable,
+  distinct slugs regardless of the order the file is read. Test: import the same file twice with the
+  record order reversed and assert identical slugs both times.
+- **T033** — Documentation and the superseded records. README's import section and `CONTEXT.md`
+  describe addresses as identifier-derived and permanent; CHANGELOG records the behaviour change and
+  names the cost D35 accepts (opaque identifiers give opaque addresses). Update
+  `assign_unique_slug`'s docstring, which currently asserts the opposite rule in prose
+  (`"Nothing is derived from concept.static_uri"`), and `Concept.set_slug`'s, which anticipated this
+  use. Public markdown, so humanized before it lands.
+- **T034** — Full re-verification: `forge verify`, migrate-from-zero, `makemigrations --check`, and
+  a RED-then-GREEN transcript for SC-027 and SC-028 specifically.
