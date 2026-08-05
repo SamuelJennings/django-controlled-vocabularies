@@ -394,3 +394,64 @@ choices this story could have made differently. The sweep's own test function an
 "every predicate is read into a record or named in the report" — are unchanged; only the helpers'
 stale assumption about *how* to find that evidence is corrected, which is the maintenance D21
 already flagged as expected here.
+
+## D23 — T006's own test is scoped to `determine_default_language`, not to a concept actually importing
+
+`tasks.md`'s T006 entry names two things to test: the default-language resolution itself, and "every
+concept is named rather than set aside." Both are true of US-1 once it is complete, but not both are
+true after T006's own commit alone. `declares-de-at.ttl`'s one concept carries no exact-tag
+preferred label anywhere — its only `skos:prefLabel` is `"Rot"@de-at` — so naming it needs T007's
+winner rule (`preferred_label_in` returning candidates, `import_concepts` reading
+`resolve_winner`), not just a corrected default language. Tested as written, T006's commit would be
+red until T007 landed, which `craft-increments` treats as a stall condition, not a valid slice
+boundary.
+
+T006's own tests therefore assert directly against `SchemeResolver.determine_default_language`'s
+observable effect — the scheme's own `default_language`/`effective_default_language` fields via
+`resolve_scheme`, which runs and settles regardless of whether any concept later imports — covering
+both the declared-language branch and the commonest-fallback branch resolving through the matcher,
+plus the unconfigured-language regression. "Every concept is named" for exactly this fixture is
+T007's own stated acceptance test ("a concept whose only preferred label is a variant of the default
+language still names the concept and derives its slug the way an exact match would") — the same
+claim, proven where it is actually achievable.
+
+**Revisit if:** never — this is how the two tasks' test coverage was always going to divide once
+`declares-de-at.ttl`'s exact content (no exact-tag label anywhere) is accounted for; it is recorded
+so a later reader does not look for "every concept is named" inside T006's own commit and conclude
+it is missing.
+
+## D24 — A default-language-branch loser's reason is decided against the tag T007 actually chose, not against `default_language` itself
+
+T008's task text says a loser's published tag is compared "against the winner's" to choose between
+`SURPLUS_PREFERRED_LABEL` and `VARIANT_NOT_KEPT` — the same discriminator T014 (US-3) states for
+every other configured language. Two readings were available for what "the winner" means inside
+`import_labels`, and they disagree on one reachable case.
+
+*Reading A* — compare the loser's tag against `default_language` itself (the configured code). A
+raw-tag-group duplicate under a *variant* (two `de-at`-tagged preferred labels, no exact `de` tag
+anywhere) would then read as `VARIANT_NOT_KEPT`, because `"de-at" != "de"`. But its message —
+"another variant was kept for the site's `de` instead" — is false: the value that *was* kept is
+tagged `de-at` too, the exact same variant, not another one. Article XI's "surfaced to the user,
+never silent" is not met by surfacing something wrongly (the same argument D14 already made against
+reusing `SURPLUS_PREFERRED_LABEL` for a true contest loser, run in reverse here).
+
+*Reading B (chosen)* — compare the loser's tag against the tag `import_concepts`' own
+`resolve_winner` call actually chose for the default-language slot (`default_language_winner_tag`,
+recomputed in `import_labels` from the identical `preferred_label_in`/`resolve_winner` call —
+T021's "one winner, one computation" guarantees it agrees with `import_concepts`' own answer without
+threading the value through `_import_concept_content`'s parameters). A same-tag duplicate — the
+loser's tag equals whichever tag actually won — keeps `SURPLUS_PREFERRED_LABEL`, true regardless of
+whether that shared tag happens to equal `default_language` exactly or is itself a variant. A
+different-tag loser takes `VARIANT_NOT_KEPT`. This is the literal reading of T014's own words ("a
+loser whose published tag equals the winner's *tag*") and the only one that keeps
+`SURPLUS_PREFERRED_LABEL`'s message true in every case T008 can reach.
+
+Reported under `SURPLUS_PREFERRED_LABEL`, the `language` param is always the *resolved* configured
+code (`default_language`), never the raw tag that happens to be shared — consistent with T004's own
+invariant that this reason's `language` names a configured code the site already holds, not a
+published tag configuring something would recover.
+
+**Revisit if:** T013/T014 (US-3) re-key `preferred_by_language` onto the resolved language for every
+configured slot, not only the default one — at that point this same discriminator should read
+identically for both, and worth checking that `import_labels`'s two now-separate computations (this
+one, and T013's) still agree by construction rather than by coincidence.
