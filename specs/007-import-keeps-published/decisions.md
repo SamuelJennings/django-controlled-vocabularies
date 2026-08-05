@@ -1797,3 +1797,31 @@ once the loop has actually failed to progress, never before.
 detecting it directly is simpler than deriving, and keeping in sync with, a closed-form condition
 on `max_length` and `suffix_text` that would have to be re-derived if the clamp in D63 ever
 changed shape again.
+
+## D67 — T057 (fix cycle 6): `exc.message_dict` raises `AttributeError` for a non-dict
+`ValidationError`; read `error_dict` with a default instead
+
+CORR-505/SEC-503 (round 5, low and medium): `django.core.exceptions.ValidationError.message_dict`
+is a property that does `getattr(self, "error_dict")` before anything else, so it raises
+`AttributeError` whenever the exception was constructed from a bare message
+(`ValidationError("...")`) or a list rather than a field dict. T052's handler
+(`resolve_scheme`'s `except ValidationError`) reads `"slug" in exc.message_dict` unconditionally —
+correct for every raise this package's own `ConceptScheme.save()` chain produces, all of which are
+dict-form, but not obliged to hold for a consuming project's own `pre_save` receiver on
+`ConceptScheme` or a subclass `save()` override, both of which conventionally raise the ordinary
+non-dict form. Reproduced by monkeypatching `ConceptScheme.save` to `raise
+ValidationError("a plain refusal, no field dict")`: `import_skos` raised `AttributeError` instead
+of `SkosImportFailed`, escaping outside its own documented exception hierarchy — precisely the
+guarantee this `except` clause exists to give (D50), broken by the line refining what it reports.
+
+**Fixed by reading the attribute `message_dict` itself guards on, with a default.**
+`"slug" in getattr(exc, "error_dict", {})` — `error_dict` is present only for the dict form, its
+keys are the same field names `message_dict` would expose, and a missing attribute now falls
+through to `{}` rather than raising. The non-dict form then correctly skips
+`STORED_SLUG_INVALID` (there is no field name to report one for) and still reaches the
+unconditional `add_fatal(VOCABULARY_RECORD_INVALID)` below it, so `import_skos` raises
+`SkosImportFailed` exactly as D57 intends for any write failure, dict-shaped or not.
+
+**Revisit if:** never — the same defensive-read shape the round-5 recommendation names directly,
+and the only change needed to keep every shape of `ValidationError` inside this handler's own
+exception contract.

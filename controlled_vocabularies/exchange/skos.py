@@ -795,7 +795,15 @@ class SchemeResolver:
             # settings.LANGUAGES reaches this exact path with the slug untouched. Only report
             # STORED_SLUG_INVALID when the exception actually names the slug; anything else keeps
             # its own field name out of a message that would otherwise misdiagnose it.
-            if "slug" in exc.message_dict:
+            #
+            # T057, CORR-505/SEC-503, decisions.md D67 (fix cycle 6): exc.message_dict is a
+            # property that raises AttributeError for a ValidationError built from a bare message
+            # or a list rather than a field dict — every raise this package's own save() chain
+            # produces is dict-form, but a consumer's pre_save receiver or a subclass override is
+            # not obliged to be. error_dict is the attribute message_dict itself guards on, and
+            # its keys are the same field names; reading it with a default keeps this refusal
+            # inside SkosImportFailed for every shape of ValidationError, not only the dict one.
+            if "slug" in getattr(exc, "error_dict", {}):
                 self.report.add_set_aside(SetAsideReason.STORED_SLUG_INVALID, subject=declared_uri)
             # T052, CORR-401/SEC-402, decisions.md D57 (fix cycle 5): whichever field failed, the
             # scheme was not written, so nothing else in the file has a resolved vocabulary to

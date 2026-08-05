@@ -14,6 +14,7 @@ import pytest
 import rdflib
 from django.conf import global_settings
 from django.conf import settings as django_settings
+from django.core.exceptions import ValidationError
 from django.db import connection
 from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
@@ -2184,6 +2185,41 @@ class TestAStoredSlugThatFailsValidationIsSetAsideNotEscaped:
         assert not Concept.objects.filter(static_uri="http://pub.example/corr401scheme#c1").exists()
         scheme.refresh_from_db()
         assert scheme.default_language == "de"
+
+    def test_a_non_dict_validation_error_from_scheme_save_is_a_fatal_not_an_attributeerror(
+        self, db, tmp_path, monkeypatch
+    ):
+        """T057, CORR-505/SEC-503, decisions.md D67 (fix cycle 6): ``ValidationError.message_dict``
+        is a property that raises ``AttributeError`` (``getattr(self, "error_dict")``) whenever the
+        exception was built from a bare message or a list rather than a field dict —
+        ``ValidationError("message")`` is the ordinary form a consumer's own ``pre_save`` receiver
+        or a ``ConceptScheme`` subclass override would raise, not the dict form every raise inside
+        this package's own ``ConceptScheme.save()`` chain uses. The handler's own ``"slug" in
+        exc.message_dict`` line therefore converted a non-dict ``ValidationError`` into an
+        ``AttributeError`` escaping ``import_skos`` — precisely the guarantee this except clause
+        exists to give. Reproduced by monkeypatching ``ConceptScheme.save`` directly, the same
+        shape a downstream receiver produces.
+        """
+        ConceptSchemeFactory(name="Corr Five O Five Scheme", static_uri="http://pub.example/corr505scheme")
+        path = tmp_path / "corr505_scheme.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/corr505scheme> a skos:ConceptScheme ; skos:prefLabel "Corr Five O Five Scheme"@en .\n'
+        )
+
+        def failing_save(self, *args, **kwargs):
+            raise ValidationError("a plain refusal, no field dict")
+
+        monkeypatch.setattr(ConceptScheme, "save", failing_save)
+
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(path)
+
+        report = exc_info.value.report
+        assert len(report.fatal) == 1
+        assert report.fatal[0].reason is FatalReason.VOCABULARY_RECORD_INVALID
+        slug_entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.STORED_SLUG_INVALID]
+        assert slug_entries == []
 
     def test_a_concept_s_out_of_band_slug_failing_validation_does_not_escape_import_skos(self, db, tmp_path):
         path = tmp_path / "sec301_concept.ttl"
