@@ -2923,6 +2923,79 @@ class TestRelationDisjointness:
         }
 
 
+class TestCollectionSlugFollowsThePublishedIdentifier:
+    """T038 — FR-017/FR-019/decisions.md D35: a collection is a third imported record
+    with a published identifier and a real local address (``Collection.local_url``),
+    and it was missed when ``Concept`` (T029) and ``ConceptScheme`` (T030) moved to
+    identifier-derived slugs — three review lenses independently found the gap. A
+    publisher renaming a collection's ``skos:prefLabel`` must not move its slug or
+    ``local_url``, the same guarantee SC-026/SC-027 already give a concept and a
+    vocabulary. A collection authored on this site (never imported) keeps deriving its
+    slug from its name (FR-019).
+    """
+
+    def test_a_publisher_rename_leaves_the_collection_s_slug_and_local_url_unchanged(self, db, tmp_path):
+        first = tmp_path / "renamed_collection_first.ttl"
+        first.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://pub.example/x> a skos:ConceptScheme ; skos:prefLabel "Scheme"@en .
+
+            <http://pub.example/x#c1> a skos:Concept ;
+                skos:inScheme <http://pub.example/x> ;
+                skos:prefLabel "Concept One"@en .
+
+            <http://pub.example/x#grp> a skos:Collection ;
+                skos:prefLabel "Colours"@en ;
+                skos:member <http://pub.example/x#c1> .
+            """
+        )
+        import_skos(first)
+        collection_before = Collection.objects.get(static_uri="http://pub.example/x#grp")
+        slug_before = collection_before.slug
+        local_url_before = collection_before.local_url
+        assert collection_before.name == "Colours"
+
+        second = tmp_path / "renamed_collection_second.ttl"
+        second.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://pub.example/x> a skos:ConceptScheme ; skos:prefLabel "Scheme"@en .
+
+            <http://pub.example/x#c1> a skos:Concept ;
+                skos:inScheme <http://pub.example/x> ;
+                skos:prefLabel "Concept One"@en .
+
+            <http://pub.example/x#grp> a skos:Collection ;
+                skos:prefLabel "Colors"@en ;
+                skos:member <http://pub.example/x#c1> .
+            """
+        )
+        report = import_skos(second)
+
+        collection_after = Collection.objects.get(static_uri="http://pub.example/x#grp")
+        assert "http://pub.example/x#grp" in report.updated
+        assert collection_after.name == "Colors"
+        assert collection_after.slug == slug_before
+        assert collection_after.local_url == local_url_before
+
+    def test_a_collection_s_slug_is_the_last_segment_of_its_identifier_not_its_name(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        collection = Collection.objects.get(static_uri="http://example.org/rocks/collection/silica-bearing")
+        # The URI's own last path segment is "silica-bearing"; the name is
+        # "Silica-bearing rocks", which would slugify to "silica-bearing-rocks"
+        # under the superseded name-derived rule (D6).
+        assert collection.slug == "silica-bearing"
+
+    def test_a_collection_created_on_this_site_still_derives_its_slug_from_its_name(self, db, scheme):
+        collection = Collection.objects.create(scheme=scheme, name="Silica bearing rocks")
+        assert collection.static_uri is None
+        assert collection.slug_is_manual is False
+        assert collection.slug == "silica-bearing-rocks"
+
+
 class TestCollectionsAndMembership:
     """T027 — FR-012: a ``skos:Collection`` lands as a ``Collection`` holding
     the identifier the file gave it, inside the vocabulary being imported,

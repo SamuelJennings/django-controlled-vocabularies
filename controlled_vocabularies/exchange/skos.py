@@ -1345,6 +1345,12 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
         )
         successful_ids = {concept.pk for concept in successful_concepts.values()}
         mentioned_uris: set[str] = set()
+        # slug -> the static_uri of the collection currently holding it, seeded from every
+        # collection already in target_scheme (T038, FR-017/FR-020, decisions.md D35) — the
+        # same shape ConceptImporter.import_concepts already seeds for concepts.
+        taken_slugs: dict[str, str | None] = dict(
+            Collection.objects.filter(scheme=self.target_scheme).values_list("slug", "static_uri")
+        )
 
         for node in collection_nodes:
             hint = self.skos_graph.first_literal(node, SKOS.prefLabel)
@@ -1406,6 +1412,11 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
             if name:
                 row.name = name
             row.ordered = ordered
+            # T038, FR-017, decisions.md D35: a collection's own slug is identifier-derived,
+            # exactly like a concept's (assign_unique_slug) and a scheme's (resolve_scheme) —
+            # nothing is derived from row.name, so a publisher rename never moves it.
+            row.slug = unique_slug_for_identifier(uri, taken_slugs)
+            row.slug_is_manual = True
             row.save()
             if created:
                 self.report.add_created(uri)
