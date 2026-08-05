@@ -178,11 +178,29 @@ The panel is also the reason `skos.py::configured_language_codes()` is deleted r
 place. The plan cited that function as its own Article XV justification and then would have shipped
 it alongside the class that replaced it.
 
+**Round two** ran the same three lenses against the revised artefacts and returned `approve` on all
+three, risk `low`, with no critical or high findings — so the gate is green and one design-review
+cycle was spent. Round two's mediums were applied in the same pass rather than carried as watch
+items, because each was a one-sentence artefact edit and several corrected factual errors introduced
+by the round-one fixes.
+
+Two of those are worth naming, because they are the same mistake twice and a third occurrence is
+plausible. The plan's call-site enumeration asserted "these are the whole surface" at four sites, was
+falsified at five, reasserted it, and was falsified again at eight — `SkosGraph.first_literal`'s
+`language=` filter decides what the vocabulary and its collections are *named*, and its any-language
+fallback would have named a `de-at` vocabulary in whatever language sorted first on a `de` site. The
+count now carries a warning to check it rather than grep it. Separately, the FR-010 test written to
+run "under Django's default `LANGUAGES`" would have run under `tests/settings.py`'s own three-language
+list and pinned nothing at all, while reading in the record as an obligation met — the shape of an
+unconsumed declaration, and the reason D17's mitigation now names
+`@override_settings(LANGUAGES=global_settings.LANGUAGES)` explicitly.
+
 ## D13 — The winner rule is one computation, not two that happen to agree
 
-`Concept.label` is chosen in `preferred_label_in`; the surplus report is computed from
-`preferred_kept` in `import_labels`. They are independent, and today they agree only because both are
-`sorted(...)[0]` over the same raw-tag group. The plan changed the rule in one of them.
+`Concept.label` is chosen in `preferred_label_in` (`skos.py:190`, called once, at `:677`); the
+surplus report is computed from `preferred_kept` in `import_labels` (`:530`). They are independent,
+and today they agree only because both are `sorted(...)[0]` over the same raw-tag group. The plan
+changed the rule in one of them.
 
 Left that way, the failure is not a mismatch a test would call cosmetic. `Concept.label` would hold
 one value while the report named that same value as a surplus set-aside, and stored the true winner
@@ -261,4 +279,27 @@ There is no safer setting to read, and inventing one would contradict the spec's
 not to introduce a setting. So this is a documentation and test obligation rather than a guard:
 README says plainly that the package stores content for every code in `settings.LANGUAGES` and that
 narrowing that list is how a site narrows an import, and the FR-010 invariant test runs one case
-under Django's default rather than only under `@override_settings`.
+under Django's own 99-language default — named explicitly as
+`@override_settings(LANGUAGES=django.conf.global_settings.LANGUAGES)`, because `tests/settings.py`
+declares its own three-language list and "no override" would mean that list rather than Django's.
+
+## D18 — A concept's local address follows the file, not the concept
+
+Predominance is a property of the whole vocabulary being imported (`research.md` R2), and
+`assign_unique_slug` recomputes a concept's slug from its label on every run (`skos.py:769`). Put
+together, those two facts have a consequence neither records on its own: where a concept's
+default-language preferred label arrives only by variant match, which variant wins depends on the
+rest of the file. A publisher's unrelated edits elsewhere in a later release can therefore move an
+existing concept to a new local URL, with nothing about that concept having changed.
+
+This is new with this feature. Under exact matching such a concept stored no label at all, so the
+coupling could not arise. FR-009 and SC-015 do not cover it either: they hold identity still across a
+re-import of *the same file*, and this is a different file.
+
+It is recorded rather than guarded, for the same reason as D6. Pinning the previously-stored variant
+would add state and contradict the rule #50 established that the file is authoritative for the
+records it contains, and scoping predominance per concept is precisely what R2 rejected — it would
+let two concepts in one file resolve the same base language differently. So the remedies are the two
+cheap ones: README says a local URL derived from a variant-matched label can move when the published
+vocabulary's predominant variant changes, and this entry carries the constraint into #52's and R6's
+specification rather than leaving it to be discovered by a broken bookmark.

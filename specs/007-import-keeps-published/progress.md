@@ -76,3 +76,27 @@ Append-only log of stage transitions and gate outcomes.
     rather than resolved silently. None changes an approved behaviour, and all three are named in
     the plan notification for veto.
   - `design_review_cycles` 1 of 1 used.
+- **S3R ROUND TWO** — the same three lenses re-run against the revised artefacts, `check-skills`
+  green before dispatch and `check-receipts` green on all three returned reports, all schema-valid.
+  **Verdict `approve` on all three lenses, risk `low`, zero critical and zero high.** The gate is
+  green and the run proceeds to the plan notification.
+  - Each lens confirmed its own round-one blocker was closed by the edit made rather than merely
+    named, and checked the two added tasks (T021, T022) on its own terms. The architecture lens
+    independently re-derived the `research.md` R4 overturn and agreed with it; the security lens
+    re-measured the Django `zh-hans`/`zh-hant` reachability rather than trusting its own prior note.
+  - Twelve non-blocking findings (8 medium, 4 low), applied in the same pass rather than carried as
+    watch items, since each was a one-sentence edit. Three lenses converged independently on the same
+    three: `SkosGraph.first_literal`'s `language=` filter is a sixth, seventh and eighth comparison
+    that decides what the vocabulary and its collections are *named*; T002's predominance count fixed
+    its predicate but not its node set, which would have silently changed #50's merged
+    default-language rule; and T013's re-keying makes one candidate group hold both same-language
+    duplicates and variant losers, with no stated discriminator between them.
+  - Two findings caught factual errors introduced by the round-one fixes. The plan's "whole surface"
+    claim was falsified for the second time, and the FR-010 test written to run "under Django's
+    default `LANGUAGES`" would have run under `tests/settings.py`'s own three-language list and
+    pinned nothing while reading as an obligation met. Both are recorded in D12.
+  - One low finding became a decision rather than an edit: D18, that a concept's local URL follows the
+    file rather than the concept, because predominance is file-wide and the slug is recomputed every
+    run. Carried into #52's and R6's specification.
+- **Plan notification (veto window, not a gate)** — sent to Sam carrying the panel's verdict.
+  Silence is consent; the run proceeds to S4 IMPLEMENT.

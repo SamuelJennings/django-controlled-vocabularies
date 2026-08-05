@@ -39,10 +39,12 @@ unconfigured language on the write path, and this feature keeps writing through
 
 **Testing**: pytest + pytest-django. New fixture vocabularies under `tests/fixtures/skos/` carrying
 variant tags, alongside the 51 `@en` files #50 shipped there. `@override_settings(LANGUAGES=...)` is
-the lever for most scenarios, since the site's configuration is the input under test — but **not for
-every one**. The ordinary consuming project declares no `LANGUAGES` at all and inherits Django's
-99-language default, so the FR-010 invariant test also runs one case under that default, pinning the
-behaviour a real consumer gets rather than only the behaviour a test author configured.
+the lever for every scenario, since the site's configuration is the input under test. The FR-010
+invariant additionally runs one case under **Django's own 99-language default**, which the suite must
+name explicitly — `@override_settings(LANGUAGES=django.conf.global_settings.LANGUAGES)` — because
+`tests/settings.py:13` declares its own three-language list, so "no override" means that list rather
+than Django's. That case pins the behaviour a real consumer gets: the ordinary consuming project
+declares no `LANGUAGES` at all.
 
 **Target Platform**: any Django project installing this app
 
@@ -75,7 +77,7 @@ schema change.
 | IX — URI identity | Pass | Untouched. FR-009 forbids this feature from altering any identifier, local address, or database identity, and US-4 tests exactly that across a re-import — scoped to `Concept`, `ConceptScheme` and `Collection` records, since #50 deletes and recreates label and note rows on every run by design (see "Rules the implementer must not have to invent"). |
 | X — Stack & architecture norms | **Pass, with a documented departure** | Django's own resolver answers "which language should this request be served in", where refusing an uncatalogued language is correct. Filing a stored record under a language is a different question, and the measurement in `research.md` R1 is why the framework mechanism is not used here. |
 | XI — RDF fidelity | Pass | A substitution is reported as one, never applied silently — the article's own requirement, one axis over from the normalisation #50 already reports. Re-import stays additive and upserts by URI. |
-| XII — Internationalization | Pass | The new normalisation reason carries a translatable template with named placeholders, in the closed vocabulary the existing reasons live in. |
+| XII — Internationalization | Pass | This feature adds **two** messages — the normalisation reason for a substitution (T003) and the set-aside reason for a contest loser (T022) — each a translatable template with named placeholders, in the closed vocabularies the existing reasons live in. |
 | XIII — Data-model conventions | Not applicable | No field added, so no indexing decision to record. FR-013 stands as a conditional this feature does not trigger. |
 | XIV — Test structure & fixtures | Pass | The new module gets its mirroring `tests/test_exchange/test_languages.py`, grouped into `Test<Subject>` classes. Fixtures are files on disk loaded from the suite, not vocabularies built inline. |
 | XV — Cohesion | **Central to the design** | `configured_language_codes()` is today a module-level function in `skos.py`, and this feature would otherwise add three or four siblings around the same subject. They go on one class instead, which is also the extension point a consuming project would subclass. |
@@ -122,10 +124,11 @@ tests/
 The general-to-specific direction (SC-001) needs no new file: 51 existing fixtures are tagged `@en`,
 and the spec's Assumptions already say #50's fixtures are reused where they serve.
 
-### The five comparisons, across four methods
+### The eight comparisons, across five methods
 
-These are the whole surface of the change in `skos.py`, and naming them here is what keeps the
-stories from overlapping in ways their titles hide.
+Naming them here is what keeps the stories from overlapping in ways their titles hide. The list was
+wrong twice — it said four, then five — so treat the count as a claim to check rather than a fact to
+grep, and confirm it against `skos.py` before starting.
 
 1. `SchemeResolver.determine_default_language` — resolves the vocabulary's default language.
    Currently `if declared_language in configured` (set membership). This is the one place the change
@@ -148,6 +151,15 @@ stories from overlapping in ways their titles hide.
    membership). Notes carry no per-language cardinality limit, so there is no contest here: every
    variant value is stored (FR-004). This asymmetry with `import_labels` is the single most likely
    place for an implementer to over-apply the contest rule.
+6, 7, 8. `SkosGraph.first_literal`'s `language=` filter (`skos.py:176`, exact tag equality), reached
+   with a **resolved configured language** at three sites that decide what records are *named*:
+   `ConceptScheme.name` (`:430`), `ConceptScheme.description` (`:441`), and `Collection.name`
+   (`:1094`). These resolve through the matcher too — one operand each, no new code. Leaving them is
+   not harmless just because each has an any-language fallback on the next line (`:434`, `:445`,
+   `:1098`): that fallback takes `sorted(...)[0]` across **every** language in the file, so on the
+   feature's own headline scenario a `de` site importing a `de-at` vocabulary gets every concept
+   named correctly and the vocabulary itself named in whatever language happens to sort first. That
+   is the defect this feature exists to remove, one level up.
 
 `skos.py::configured_language_codes()` is **deleted** by this feature, not left in place. Its one
 remaining job — reading `settings.LANGUAGES` — becomes the matcher's default construction, so the
@@ -159,7 +171,7 @@ invert the dependency.
 ### One winner, one computation
 
 `preferred_kept` in `import_labels` (`skos.py:530`) and `preferred_label_in` (`skos.py:190`, called
-at `:677` and `:724`) each choose a preferred label independently. Today they agree only because both
+once, at `:677`) each choose a preferred label independently. Today they agree only because both
 are `sorted(...)[0]` over the same raw-tag group. Once the winner rule becomes exact-match-first,
 then predominance, two independent implementations can disagree — and when they do, `Concept.label`
 holds one value while the report names that same value as a surplus set-aside and stores the other

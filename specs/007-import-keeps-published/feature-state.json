@@ -44,6 +44,11 @@
       "state": "GATE_PLAN",
       "at": "2026-08-05T09:20:00Z",
       "note": "plan veto notification carrying the S3R verdict"
+    },
+    {
+      "state": "GATE_PLAN",
+      "at": "2026-08-05T09:45:00Z",
+      "note": "S3R round two: approve on all three lenses, risk low, no critical/high; 12 non-blocking findings applied; plan notification sent"
     }
   ],
   "gates": {
@@ -59,8 +64,8 @@
       ]
     },
     "plan": {
-      "approved_by": null,
-      "at": null
+      "approved_by": "notified",
+      "at": "2026-08-05T09:45:00Z"
     },
     "merge": {
       "approved_by": null,
