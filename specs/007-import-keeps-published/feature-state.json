@@ -69,6 +69,11 @@
       "state": "IMPLEMENT",
       "at": "2026-08-05T13:05:00Z",
       "note": "US-2 verified independently (747 tests, lint/format/typecheck/deptry green, receipts green, tamper flag additive-only with zero deleted lines) and merged to the feature branch as d1342e2"
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-05T14:05:00Z",
+      "note": "US-3 merged as ec5e80f; 758 tests green, receipts verified, tamper flag triaged clean (0 deletions, AST diff shows every pre-existing class intact)"
     }
   ],
   "gates": {
@@ -430,24 +435,73 @@
       "id": "US3",
       "priority": "P2",
       "issue": 71,
-      "worktree": null,
-      "status": "todo",
+      "worktree": "/home/sam/projects/samueljennings/dcv-fs007-us3",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T013",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py::TestPreferredLabelWinnerIsReKeyedOnTheResolvedLanguage::test_two_different_tags_resolving_to_one_non_default_language_no_longer_crash_the_run",
+              "tests/test_exchange/test_skos.py::TestPreferredLabelWinnerIsReKeyedOnTheResolvedLanguage::test_the_predominant_variant_is_stored_not_the_alphabetically_first_tag_or_value",
+              "tests/test_exchange/test_skos.py::TestPreferredLabelWinnerIsReKeyedOnTheResolvedLanguage::test_importing_the_same_file_twice_stores_the_same_value_both_times",
+              "tests/test_exchange/test_skos.py::TestPreferredLabelWinnerIsReKeyedOnTheResolvedLanguage::test_an_exact_match_in_a_non_default_language_wins_over_a_more_predominant_variant",
+              "tests/test_exchange/test_skos.py::TestPreferredLabelWinnerIsReKeyedOnTheResolvedLanguage::test_the_winner_reported_by_import_labels_agrees_with_concept_label_for_the_default_language",
+              "tests/test_exchange/test_skos.py::TestExactMatchPreferredLabelFailingOnItsOwnMeritsIsNotBackfilledByAVariant::test_the_concept_is_set_aside_under_empty_slug_and_the_variants_value_is_not_promoted"
+            ],
+            "commands": [
+              "poetry run pytest -q tests/test_exchange/test_skos.py -k \"TestPreferredLabelWinnerIsReKeyedOnTheResolvedLanguage or TestExactMatchPreferredLabelFailingOnItsOwnMeritsIsNotBackfilledByAVariant\" (RED: 4 failed on the crash the fix removes, 2 passed pre-existing correct behaviour)",
+              "poetry run pytest -q tests/test_exchange/test_skos.py",
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "poetry run deptry ."
+            ]
+          }
         },
         {
           "id": "T014",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py::TestVariantContestLosersAreDiscriminatedInEveryConfiguredLanguage::test_the_run_succeeds_and_stores_exactly_one_de_label",
+              "tests/test_exchange/test_skos.py::TestVariantContestLosersAreDiscriminatedInEveryConfiguredLanguage::test_one_entry_of_each_reason_and_only_the_variant_reaches_the_language_account"
+            ],
+            "commands": [
+              "poetry run pytest -q tests/test_exchange/test_skos.py -k TestVariantContestLosersAreDiscriminatedInEveryConfiguredLanguage (RED: 1 failed \u2014 both losers reported as SURPLUS_PREFERRED_LABEL before the discriminator)",
+              "poetry run pytest -q tests/test_exchange/test_skos.py",
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "poetry run deptry ."
+            ]
+          }
         },
         {
           "id": "T015",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py::TestAlternativeLabelsHiddenLabelsAndNotesHaveNoPerLanguageContest::test_alternative_labels_in_two_variants_of_one_configured_language_are_both_kept",
+              "tests/test_exchange/test_skos.py::TestAlternativeLabelsHiddenLabelsAndNotesHaveNoPerLanguageContest::test_neither_alternative_label_is_set_aside_as_a_duplicate_or_a_contest_loser",
+              "tests/test_exchange/test_skos.py::TestAlternativeLabelsHiddenLabelsAndNotesHaveNoPerLanguageContest::test_notes_in_two_variants_of_one_configured_language_are_both_kept"
+            ],
+            "commands": [
+              "poetry run pytest -q tests/test_exchange/test_skos.py -k TestAlternativeLabelsHiddenLabelsAndNotesHaveNoPerLanguageContest -v (passed on first run \u2014 no production change needed, D29)",
+              "poetry run pytest -q",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "poetry run deptry ."
+            ]
+          }
         }
       ]
     },
