@@ -641,8 +641,11 @@ class Concept(StaticUriModel):
 
         Marks the slug manual and saves, so from now on :meth:`save` leaves it
         untouched when :attr:`label` changes. The value is stored exactly as given
-        rather than re-slugified — this same mechanism later carries an imported
-        vocabulary's own slugs unchanged (spec R2). The usual non-empty and
+        rather than re-slugified — the same ``slug_is_manual`` mechanism also carries
+        an imported concept's own identifier-derived slug unchanged (T029, FR-017,
+        decisions.md D35), though :func:`~controlled_vocabularies.exchange.skos.assign_unique_slug`
+        sets the two attributes directly rather than calling this method, to avoid a
+        second write on every imported concept. The usual non-empty and
         within-scheme uniqueness checks still apply (FR-012).
         """
         self.slug = slug

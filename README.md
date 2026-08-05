@@ -145,11 +145,19 @@ The package stores content for every language code in `settings.LANGUAGES`. A pr
 none inherits Django's own default list of 99 languages, so a vocabulary published in sixty
 languages imports into all sixty. Narrowing `LANGUAGES` is how a site limits what an import stores.
 
-One consequence is worth knowing before you rely on a concept's address. A concept's preferred
-label in the vocabulary's default language can arrive by variant match, and which variant wins is
-decided by the file as a whole rather than by that one concept. A later release of the same
-vocabulary can therefore change a concept's stored label and its local URL even though nothing
-about that concept itself changed.
+A vocabulary's slug and a concept's slug are both derived from their own published identifier —
+its fragment where it has one, otherwise the last segment of its path — assigned once, on first
+import, and never recomputed by a later one. Renaming a record, or a vocabulary's name arriving in
+a different language on a later import, never moves that record's local address; only the
+publisher reassigning the identifier itself does. A record authored on this site rather than
+imported has no published identifier to derive from, and keeps deriving its slug from its label,
+as it always has.
+
+That permanence has a cost worth naming: a vocabulary published under opaque codes gets an opaque
+local address — `/v-113/00123` rather than `/soil-types/clay`. It is accepted because the address
+is correct and stays correct, which is what every consumer of a URL needs from it, and because a
+readable address that can move under data already pointing at it is worse than a stable one that
+cannot.
 
 The call returns an `ImportReport`, a plain dataclass rather than rendered text, so a caller can
 inspect what happened without parsing anything:
@@ -164,9 +172,9 @@ inspect what happened without parsing anything:
   Published files are often not well-behaved, and the reasons cover that too. Where a pair of
   concepts is stated as both broader and related, the hierarchical statement wins, because SKOS
   declares the two disjoint, and the related one is set aside. A second preferred label in one
-  language is set aside rather than refused at the database. A label that yields no usable slug is
-  set aside naming the slug as the problem, not the label. None of these stops the rest of the
-  vocabulary from importing.
+  language is set aside rather than refused at the database. An identifier whose own segment
+  yields no usable slug is set aside naming the slug as the problem, not the identifier. None of
+  these stops the rest of the vocabulary from importing.
 - `absent_from_source` — the URIs of records that exist here but that the file no longer mentions.
 - `normalized` — a `NormalizedEntry` per value the run stored, but under a different predicate than
   the one the file asserted (a foreign `dcterms:description` read as a concept's definition, for
