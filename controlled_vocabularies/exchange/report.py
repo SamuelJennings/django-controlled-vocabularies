@@ -225,6 +225,14 @@ class FatalReason(TextChoices):
     would otherwise be silently set aside for want of a preferred label. Failing
     the whole run early, naming the one misconfiguration, replaces what would
     otherwise be one ``NO_PREFERRED_LABEL`` per concept for no gain to a curator.
+    ``VOCABULARY_SLUG_UNUSABLE`` (fix cycle 2, FR-018, decisions.md D35) names a
+    vocabulary whose published identifier's own segment (T030's
+    ``identifier_slug_segment``) is made up only of characters ``slugify()``
+    strips, so no local address can be derived from it. Fatal rather than set
+    aside like a concept's own ``EMPTY_SLUG``: a concept missing its slug is one
+    record the rest of the file can still import around, but without a
+    resolvable vocabulary there is nothing for the rest of the file to import
+    into.
     """
 
     MISSING_IDENTITY = "missing_identity", _("identifier missing or blank")
@@ -233,6 +241,7 @@ class FatalReason(TextChoices):
     VOCABULARY_TARGET_MISMATCH = "vocabulary_target_mismatch", _("declared vocabulary does not match the named target")
     VOCABULARY_AMBIGUOUS = "vocabulary_ambiguous", _("the file declares more than one vocabulary and none was named")
     DEFAULT_LANGUAGE_UNCONFIGURED = "default_language_unconfigured", _("default language not configured")
+    VOCABULARY_SLUG_UNUSABLE = "vocabulary_slug_unusable", _("vocabulary's identifier produces no usable slug")
 
     @property
     def template(self) -> Promise:
@@ -262,6 +271,9 @@ _FATAL_TEMPLATES: dict[FatalReason, Promise] = {
     FatalReason.DEFAULT_LANGUAGE_UNCONFIGURED: _(
         "'%(subject)s' has an effective default language of '%(language)s', which this site is not "
         "configured for; the run was refused."
+    ),
+    FatalReason.VOCABULARY_SLUG_UNUSABLE: _(
+        "'%(subject)s' produces no usable slug from its own identifier; the run was refused."
     ),
 }
 

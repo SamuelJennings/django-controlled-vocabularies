@@ -594,7 +594,17 @@ class SchemeResolver:
         # (never auto-suffixing) a colliding slug (research R4), which is a different case: a
         # curator setting two vocabularies' slugs equal by hand.
         taken_slugs: dict[str, str | None] = dict(ConceptScheme.objects.values_list("slug", "static_uri"))
-        row.slug = unique_slug_for_identifier(declared_uri, taken_slugs)
+        slug = unique_slug_for_identifier(declared_uri, taken_slugs)
+        if not slug:
+            # T036, decisions.md D35 (fix cycle 2): an identifier segment made up only of
+            # characters slugify() strips is fatal, not set aside like a concept's EMPTY_SLUG —
+            # without a resolvable vocabulary there is nothing for the rest of the file to import
+            # into. Checked ahead of row.save() (the same discipline EMPTY_SLUG already applies)
+            # rather than letting ConceptScheme.save()'s own refusal raise. Falling back to
+            # row.name here would reinstate the exact defect FR-018 exists to remove.
+            self.report.add_fatal(FatalReason.VOCABULARY_SLUG_UNUSABLE, subject=declared_uri)
+            return None, None
+        row.slug = slug
         row.slug_is_manual = True
         row.save()
         if created:

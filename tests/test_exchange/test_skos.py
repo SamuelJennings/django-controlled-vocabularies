@@ -1473,6 +1473,51 @@ class TestVocabularyDefaultLanguageMustItselfBeConfigured:
         assert report.fatal == []
 
 
+class TestVocabularySlugUnusableIsFatalNotAValidationError:
+    """T036 — FR-018, decisions.md D35: T030 made a vocabulary's own slug derive from its
+    published identifier's own segment, exactly like a concept's (T029), but only the concept path
+    (``import_concepts``' ``EMPTY_SLUG`` check) got a guard for a segment that ``slugify()``
+    strips down to nothing — the scheme path did not, so ``SchemeResolver.resolve_scheme`` let
+    ``ConceptScheme.save()`` raise an uncaught ``ValidationError`` instead. A regression against
+    cd4f1c6, where the slug came from the vocabulary's own name and 'Symbols' slugified fine.
+
+    Fatal rather than set-aside, deliberately: without a resolvable vocabulary there is nothing for
+    the rest of the file to import into.
+    """
+
+    def test_an_identifier_segment_that_slugifies_to_empty_fails_the_run_with_one_fatal_finding(self, db, tmp_path):
+        path = tmp_path / "unusable_scheme_slug.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://c.org/vocab/#±> a skos:ConceptScheme ; skos:prefLabel "Symbols"@en .
+            """
+        )
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(path)
+        report = exc_info.value.report
+        assert len(report.fatal) == 1
+        assert report.fatal[0].reason is FatalReason.VOCABULARY_SLUG_UNUSABLE
+        assert report.fatal[0].subject == "http://c.org/vocab/#±"
+        assert ConceptScheme.objects.count() == 0
+
+    def test_the_name_is_never_used_as_a_fallback_for_the_unusable_slug(self, db, tmp_path):
+        # FR-018's whole point: a local address never derives from a translated label. Falling
+        # back to the name here would reinstate the exact defect FR-018 exists to remove.
+        path = tmp_path / "unusable_scheme_slug_fallback.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://c.org/vocab2/#±> a skos:ConceptScheme ; skos:prefLabel "Symbols"@en .
+            """
+        )
+        with pytest.raises(SkosImportFailed):
+            import_skos(path)
+        assert not ConceptScheme.objects.filter(name="Symbols").exists()
+
+
 class TestReportPopulatedByARealRun:
     """T012 — FR-015: a real run's report distinguishes what was created,
     what was updated, and what was set aside with its reason, all as data a
