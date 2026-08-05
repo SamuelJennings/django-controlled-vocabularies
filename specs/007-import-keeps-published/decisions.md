@@ -1334,3 +1334,48 @@ in `skos.py` or `models.py` changes for this task. Three additions, all test-onl
 **Revisit if:** never — these close the "two of three kinds" and "matched vs. created" shapes
 this feature has now hit twice (round two's dominant finding, per CORR-301's own framing), and no
 behaviour changed underneath them.
+
+## D54 — T049 (fix cycle 4): the slug-pinning machinery is extracted, the same way `static_uri`
+already was
+
+ARCH-302: `slug_is_manual` (the field declaration), `set_slug()`, and the manual-slug branch of
+`save()` (the empty/malformed-slug raise) were declared three times — on `ConceptScheme`,
+`Concept` and `Collection` — byte-identical apart from `help_text` wording. The repo had already
+diagnosed and fixed this exact shape once, for `static_uri`: `_static_uri_field(help_text)`
+exists so the field's shared attributes are declared once, and `tests/test_standards.py`'s
+`TestStaticUriFieldAttributesAgree` guards the copies from drifting apart. There was no equivalent
+for `slug_is_manual`, so the same drift was unguarded — and CORR-304/ARCH-303 had already found
+one instance of it (Collection's copy untested while Concept's was).
+
+**Extracted onto `StaticUriModel`, the abstract base all three already subclass, following the
+`static_uri` precedent exactly**, not a new mechanism:
+
+- `_slug_is_manual_field(help_text)` beside `_static_uri_field`, called once per concrete model
+  with that model's own `help_text` (a concept's slug tracks its *label*; a scheme's or a
+  collection's tracks its *name*) — the one legitimate difference, same as before.
+- `StaticUriModel.set_slug(slug)` — the three-statement body was identical; the one prose
+  difference between the three per-model docstrings is now one shared docstring naming both
+  exceptions (`assign_unique_slug`/`import_collections` writing the two attributes directly
+  rather than calling it, per D46).
+- `StaticUriModel._validate_manual_slug()` — the empty/malformed-slug raise, called from each
+  concrete `save()`'s manual branch. The auto-derivation branch beside it (tracking a label or a
+  name, and the collision check against a different scope per model) stays on each subclass,
+  since what it derives *from*, and what it collides against, legitimately differs.
+
+**A bare `slug: str` annotation on `StaticUriModel`** (no field, no column — Django only turns a
+*field instance* into a column, never a plain type annotation) lets `set_slug`/
+`_validate_manual_slug` reference `self.slug` with a type mypy/django-stubs can resolve from the
+base, even though the concrete `SlugField` is still declared per-subclass (its uniqueness scope
+— app-wide for `ConceptScheme`, per-scheme for `Concept` and `Collection` — is the one thing that
+does not belong on a shared base).
+
+**Verified migration-neutral**, the task's own hard requirement: `slug_is_manual`'s field
+attributes (`default`, `verbose_name`, `help_text` text) are unchanged by moving them into a
+factory function called from the same three places — Django's migration state depends on a
+field's attributes, not the Python expression that constructed it. `poetry run python -m django
+makemigrations --check --dry-run --settings=tests.settings` reports "No changes detected" after
+the extraction; the full suite (638 tests across `test_models.py`, `test_skos.py`,
+`test_standards.py`) and `mypy` are both clean.
+
+**Revisit if:** never — the same remedy the repo already chose for `static_uri`'s identical
+drift, applied to the one other field this feature added to all three models.
