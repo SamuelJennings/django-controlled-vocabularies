@@ -574,13 +574,13 @@ class ConceptImporter:
         model's own refusal, because each tag was its own singleton group and neither ever saw the
         other. This is the identical computation ``import_concepts`` already runs for
         ``Concept.label`` over the identical ``preferred_label_in`` candidates, so the two agree by
-        construction rather than by coincidence (decisions.md D13). Inside the default-language
-        slot, a loser is discriminated by its own published tag against the tag the winner
-        computation chose: the same tag is a same-language duplicate and keeps
+        construction rather than by coincidence (decisions.md D13). In every configured language's
+        slot, default or not, a loser is discriminated by its own published tag against the tag the
+        winner computation chose (T014): the same tag is a same-language duplicate and keeps
         ``SURPLUS_PREFERRED_LABEL`` (FIX 4, D38); a different tag is a losing variant and takes
-        ``VARIANT_NOT_KEPT`` (T022, decisions.md D14) — the discriminator T014 applies to every
-        other configured language too, stated here so US-1 does not land an assertion US-3 has to
-        undo.
+        ``VARIANT_NOT_KEPT`` (T022, decisions.md D14) — the two populations have different remedies,
+        which is what :meth:`~controlled_vocabularies.exchange.report.ImportReport.language_account`
+        exists to tell apart.
         """
         concept.labels.all().delete()
 
@@ -637,11 +637,20 @@ class ConceptImporter:
                 if kind == ConceptLabel.Kind.PREFERRED:
                     winner_tag, winner_value = preferred_winner_by_language[resolved_language]
                     if published_tag.lower() != winner_tag.lower() or str(literal) != winner_value:
-                        # T014 extends the default branch's own discriminator (VARIANT_NOT_KEPT vs
-                        # SURPLUS_PREFERRED_LABEL) to this branch; T013 keeps one reason here.
-                        self.report.add_set_aside(
-                            SetAsideReason.SURPLUS_PREFERRED_LABEL, subject=uri, language=resolved_language
-                        )
+                        # T014: the same discriminator the default-language branch already applies
+                        # (D24) — a same-tag loser is a same-language duplicate, a different-tag
+                        # loser is a contest loser recoverable by configuring its published tag.
+                        if published_tag.lower() == winner_tag.lower():
+                            self.report.add_set_aside(
+                                SetAsideReason.SURPLUS_PREFERRED_LABEL, subject=uri, language=resolved_language
+                            )
+                        else:
+                            self.report.add_set_aside(
+                                SetAsideReason.VARIANT_NOT_KEPT,
+                                subject=uri,
+                                language=published_tag,
+                                kept_as=resolved_language,
+                            )
                         continue
                 concept.add_label(language=resolved_language, kind=kind, text=str(literal))
                 if resolved_language.lower() != published_tag.lower():

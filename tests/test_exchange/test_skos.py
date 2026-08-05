@@ -1632,6 +1632,74 @@ class TestExactMatchPreferredLabelFailingOnItsOwnMeritsIsNotBackfilledByAVariant
         assert not Concept.objects.filter(static_uri="http://example.org/emptyexact/target").exists()
 
 
+class TestVariantContestLosersAreDiscriminatedInEveryConfiguredLanguage:
+    """T014 — FR-005, T022, decisions.md D14: once T013 re-keyed ``preferred_by_language`` on the
+    resolved language, one group can hold both a same-language duplicate and a genuine contest
+    loser. A loser whose published tag equals the winner's (case-insensitively) is a same-language
+    duplicate and keeps ``SURPLUS_PREFERRED_LABEL``; one published under a different tag is a
+    contest loser and takes ``VARIANT_NOT_KEPT`` — the same discriminator US-1's T008 already
+    applies to the default-language branch (decisions.md D24), extended here to every other
+    configured language (skos.py's own general branch)."""
+
+    def _three_preferred_labels_two_under_one_tag_one_under_a_variant(self, tmp_path):
+        # de-at wins on predominance (4 occurrences: 2 fillers + 2 on target) over de-ch (1); the
+        # two de-at values on target are a same-language duplicate, the de-ch value a contest loser.
+        path = tmp_path / "mixed_losers_de.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/mixedlosers/> a skos:ConceptScheme ;
+                skos:prefLabel "Mixed losers"@en .
+
+            <http://example.org/mixedlosers/filler1> a skos:Concept ;
+                skos:inScheme <http://example.org/mixedlosers/> ;
+                skos:prefLabel "Filler one"@en, "Eins"@de-at .
+
+            <http://example.org/mixedlosers/filler2> a skos:Concept ;
+                skos:inScheme <http://example.org/mixedlosers/> ;
+                skos:prefLabel "Filler two"@en, "Zwei"@de-at .
+
+            <http://example.org/mixedlosers/target> a skos:Concept ;
+                skos:inScheme <http://example.org/mixedlosers/> ;
+                skos:prefLabel "Target"@en, "Ziel-AT-1"@de-at, "Ziel-AT-2"@de-at, "Ziel-CH"@de-ch .
+            """
+        )
+        return path
+
+    def test_the_run_succeeds_and_stores_exactly_one_de_label(self, db, tmp_path):
+        path = self._three_preferred_labels_two_under_one_tag_one_under_a_variant(tmp_path)
+        with override_settings(LANGUAGES=[("en", "English"), ("de", "German")]):
+            report = import_skos(path)
+        assert report.fatal == []
+        target = Concept.objects.get(static_uri="http://example.org/mixedlosers/target")
+        assert target.preferred_label("de") == "Ziel-AT-1"
+        assert ConceptLabel.objects.filter(concept=target, language="de", kind=ConceptLabel.Kind.PREFERRED).count() == 1
+
+    def test_one_entry_of_each_reason_and_only_the_variant_reaches_the_language_account(self, db, tmp_path):
+        path = self._three_preferred_labels_two_under_one_tag_one_under_a_variant(tmp_path)
+        with override_settings(LANGUAGES=[("en", "English"), ("de", "German")]):
+            report = import_skos(path)
+        target_uri = "http://example.org/mixedlosers/target"
+        surplus = [
+            entry
+            for entry in report.set_aside
+            if entry.reason is SetAsideReason.SURPLUS_PREFERRED_LABEL and entry.subject == target_uri
+        ]
+        variant = [
+            entry
+            for entry in report.set_aside
+            if entry.reason is SetAsideReason.VARIANT_NOT_KEPT and entry.subject == target_uri
+        ]
+        assert len(surplus) == 1
+        assert surplus[0].params["language"] == "de"
+        assert len(variant) == 1
+        assert variant[0].params["language"] == "de-ch"
+        assert variant[0].params["kept_as"] == "de"
+        assert report.language_account().get("de-ch") == 1
+        assert "de" not in report.language_account()
+
+
 class TestConceptNotes:
     """T019 — FR-009/research.md R5: the definition and each of the six SKOS
     documentary note kinds are stored against their concept, each in its own
