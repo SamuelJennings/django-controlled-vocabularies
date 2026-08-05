@@ -48,6 +48,14 @@ This is a seed — it grows as the code does.
 | **ConceptField / ConceptsField** | The consumption API: a model field wrapping a `ForeignKey` / `ManyToMany` to `Concept`, constrained to a scheme, with an autocomplete widget. | Replaces choice-iterable style entirely (`docs/brainstorm.md`). |
 | **Lifecycle** | A concept's `status`: `draft` → `published` → `deprecated` (`owl:deprecated` on export). Referenced concepts are `PROTECT`ed, not deleted. | `docs/brainstorm.md`. |
 
+## Importing published vocabularies
+
+| Term | Definition | Notes / synonyms to avoid |
+|---|---|---|
+| **Base language** | The first subtag of a language tag — `en` in `en-GB`, `zh` in `zh-Hans`. Matching a published tag against the site's configured languages runs on this, never on the whole tag. | Not the tag itself; two tags can share a base language and still differ. |
+| **Variant** | A published language tag that shares a base language with a configured one without matching it exactly — a file's `en-gb` against a site configured for `en`, say. Where a value's kind holds only one per language (a preferred label), one variant is kept and the rest are set aside and reported by their own published tag; where it holds many (alternative labels, hidden labels, notes), every variant offered is stored. | Distinct from an exact match, which always wins over a variant and is never displaced by one. |
+| **Substitution** | A value stored under a configured language other than the tag it was published under, because only a variant match reached it. Reported alongside what was created and updated, distinguishable from a value that was not stored at all. | The value *was* kept — not the same as a value set aside. |
+
 ## Architectural decisions
 
 Design reasoning lives in [`docs/brainstorm.md`](docs/brainstorm.md). Start there for the "why" behind
