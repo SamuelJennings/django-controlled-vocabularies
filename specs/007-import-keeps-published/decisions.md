@@ -1716,3 +1716,159 @@ treatment automatically rather than needing its own guard.
 
 **Revisit if:** never — one substitution point for every entry type, matching the "one computation,
 one shape" rule the report module's other shared logic already follows.
+
+## D65 — T055 (fix cycle 6): an empty or whitespace-only literal is never a usable name, fixed at
+every place one is selected
+
+SEC-501/SEC-502/CORR-501/CORR-502/SEC-504 (round 5, three high, one medium, one low), all one root
+cause reproduced from both directions. `SkosGraph.first_literal` applied no content filter at all;
+`first_literal_with_language`'s `max_length` filter (T051, D56) tested only `len(str(literal)) <=
+max_length`, which an empty literal always satisfies. Both sort on the raw string, so `""` sorts
+ahead of every real value. Two opposite, independently reproduced symptoms:
+
+**A file publishing a usable name was refused outright.** `skos:prefLabel ""@en, "Geology
+Vocabulary"@en` on a site defaulting to `en` — `_localized_literal`'s own per-tag exact match
+picked the empty literal for the `en` slot, `name` arrived at the length check as `''`, and
+T054's `elif created:` guard (D59) fired `VOCABULARY_NAME_UNUSABLE`, refusing a file that plainly
+carries a storable name one triple away.
+
+**A created record was persisted with a blank name.** `skos:prefLabel "<300 chars>"@en, ""@de,
+"Geologie Vokabular"@fr` — T054's own second-chance fallback (D58) called
+`first_literal_with_language(..., max_length=...)` to find *something* storable when the
+default-language name was over-long, and the empty `de` literal satisfied that filter and sorted
+first, so the fallback returned `('', 'de')` and `row.name = ''` was written unconditionally. This
+is exactly the state D49 declares impossible for a created record, reopened through the fallback
+D58 itself added to close a different gap.
+
+**Fixed at the two accessors that select a literal, not at either consequence.** `first_literal`
+and `first_literal_with_language` both now require `str(literal).strip()` to be truthy, in
+addition to whatever language or length filter already applied — an empty or whitespace-only
+(SEC-504) literal is excluded from the candidate pool before sorting, at every call site, rather
+than reaching `name` and being caught (or not) after the fact. `_localized_literal` needed no
+change of its own: its per-tag candidates are built by calling `first_literal(node, predicate,
+language=tag)` (skos.py:412), so a tag whose only literal is empty now yields no candidate for
+that tag automatically, the same way a missing predicate already does.
+
+**Determinism was checked, not assumed**, per the round-5 brief's own instruction — two literals
+equally usable (same value, or a genuine tie after the emptiness filter) still resolve through
+`sorted()` over `(str, str)` tuples, a total order with no set or dict iteration reaching the
+comparison at any point in either accessor. Unaffected by this fix, since it is a filter on the
+candidate pool, not a change to how the pool is ordered.
+
+**Revisit if:** never — the same "unusable is unusable at the point of selection, not the point
+of consequence" rule the round-5 review's own recommendation states, applied once at both
+accessors rather than patched at each of the four call sites (`resolve_scheme`'s exact match, its
+any-language fallback, `import_collections`'s identical pair) that would otherwise each need their
+own guard.
+
+## D66 — T056 (fix cycle 6): `unique_slug_for_identifier`'s collision loop gives up rather than
+looping forever
+
+CORR-503 (round 5, medium) claimed SEC-405's own clamp (D63) turns the collision loop
+non-terminating. Established real before touching anything, per the brief's own instruction: the
+review's exact repro, `unique_slug_for_identifier('http://e.org/#ab', {'ab': 'other', 'a-':
+'other2'}, 2)`, was run under a 20-second `timeout` ahead of any fix and killed (exit 143, no
+return) — confirmed hanging, not merely slow.
+
+**Why it hangs.** Once `len(suffix_text) >= max_length`, `max(max_length - len(suffix_text), 1)`
+is pinned at `1`, so the base contributes exactly one character every subsequent iteration, and
+the final `[:max_length]` clamp (D63) keeps only that one base character plus the first
+`max_length - 1` characters of `suffix_text`. At `max_length=2` those two facts together mean the
+assembled candidate is always `base[0] + suffix_text[0]` — the base's first character, plus
+literally the leading `-` every `suffix_text` starts with — regardless of which suffix number is
+being tried. If that one resulting string is already taken by a different record, no value of
+`suffix` can ever produce a different candidate, and the `while` condition never becomes false.
+
+**Fixed by detecting the repeat, not by pre-judging `max_length` against `len(suffix_text)`.** A
+`tried` set records every candidate this call has already produced; a candidate reappearing proves
+the search has cycled back to a string it already rejected, so the loop cannot make progress and
+returns `""` — the same "unusable" signal an empty base already returns, which every caller
+already knows how to handle (fatal for a vocabulary, a set-aside for a concept or collection). A
+simpler `return "" if len(suffix_text) >= max_length` at the top of each iteration was considered
+and rejected: it fires the moment the *first* retry needs a suffix as long as `max_length`, which
+is exactly the shape the two pre-existing SEC-303/SEC-405 tests exercise
+(`{'ab': 'other', 'b-2': 'other2'}`, `max_length=2`) — and in both of those, the very first retry's
+candidate (`'a-'`) is *not* taken, so the call correctly succeeds today. A length-only pre-check
+would have turned those two passing, correct results into a give-up, weakening behaviour the
+existing tests (not touched by this cycle) already prove correct. Repeat-detection only gives up
+once the loop has actually failed to progress, never before.
+
+**Revisit if:** never — a repeat is the only condition under which this loop cannot terminate;
+detecting it directly is simpler than deriving, and keeping in sync with, a closed-form condition
+on `max_length` and `suffix_text` that would have to be re-derived if the clamp in D63 ever
+changed shape again.
+
+## D67 — T057 (fix cycle 6): `exc.message_dict` raises `AttributeError` for a non-dict
+`ValidationError`; read `error_dict` with a default instead
+
+CORR-505/SEC-503 (round 5, low and medium): `django.core.exceptions.ValidationError.message_dict`
+is a property that does `getattr(self, "error_dict")` before anything else, so it raises
+`AttributeError` whenever the exception was constructed from a bare message
+(`ValidationError("...")`) or a list rather than a field dict. T052's handler
+(`resolve_scheme`'s `except ValidationError`) reads `"slug" in exc.message_dict` unconditionally —
+correct for every raise this package's own `ConceptScheme.save()` chain produces, all of which are
+dict-form, but not obliged to hold for a consuming project's own `pre_save` receiver on
+`ConceptScheme` or a subclass `save()` override, both of which conventionally raise the ordinary
+non-dict form. Reproduced by monkeypatching `ConceptScheme.save` to `raise
+ValidationError("a plain refusal, no field dict")`: `import_skos` raised `AttributeError` instead
+of `SkosImportFailed`, escaping outside its own documented exception hierarchy — precisely the
+guarantee this `except` clause exists to give (D50), broken by the line refining what it reports.
+
+**Fixed by reading the attribute `message_dict` itself guards on, with a default.**
+`"slug" in getattr(exc, "error_dict", {})` — `error_dict` is present only for the dict form, its
+keys are the same field names `message_dict` would expose, and a missing attribute now falls
+through to `{}` rather than raising. The non-dict form then correctly skips
+`STORED_SLUG_INVALID` (there is no field name to report one for) and still reaches the
+unconditional `add_fatal(VOCABULARY_RECORD_INVALID)` below it, so `import_skos` raises
+`SkosImportFailed` exactly as D57 intends for any write failure, dict-shaped or not.
+
+**Revisit if:** never — the same defensive-read shape the round-5 recommendation names directly,
+and the only change needed to keep every shape of `ValidationError` inside this handler's own
+exception contract.
+
+## D68 — T058 (fix cycle 6): a vocabulary refused for publishing no name gets its own reason, and
+two round-5 refusals gain success criteria
+
+CORR-504 (round 5, medium): D59/T054's `elif created:` guard for a scheme with no
+`skos:prefLabel` published at all reused `FatalReason.VOCABULARY_NAME_UNUSABLE`, whose template
+is written for one trigger only — "its published name in '%(language)s' is longer than this
+application can store." On the no-prefLabel path nothing is published in any language, so both
+halves of that sentence are false: there is no over-long value, and `winning_tag` names the site's
+effective default language, not a language anything was actually published in. D59's own text
+already flagged this as a live risk ("a dedicated `RECORD_NAME_UNPUBLISHED`-shaped reason is worth
+minting... if the reused-message imprecision becomes a real curator complaint") — the round-5
+review is exactly that complaint, materialising the case D59 predicted rather than a new one.
+
+**Fixed by minting `FatalReason.VOCABULARY_NAME_UNPUBLISHED`**, scoped to the scheme side only —
+the collection side already has its own distinct `COLLECTION_NOT_CREATED` reason for this trigger
+(D60), whose message the round-5 review's own `checked_and_clear` section confirmed already holds
+on both the over-long and the no-prefLabel path. A scheme has no such second reason to reuse
+correctly, because an unusable created-scheme name is always fatal, never a set-aside, so there
+was nothing but the wrong-shaped `VOCABULARY_NAME_UNUSABLE` to fall back to. The new reason takes
+no `language` param — there is no language to name — and its own template says plainly that no
+`skos:prefLabel` was published.
+
+**A pre-existing test's assertion is overturned, not merely extended**, and is named here per this
+cycle's own rule for doing so. `TestNoPublishedNameAtAllIsUnusableTheSameAsOverLong
+.test_a_created_scheme_with_no_preflabel_at_all_is_fatal_not_persisted_blank` (T054, fix cycle 5,
+D59) asserted `report.fatal[0].reason is FatalReason.VOCABULARY_NAME_UNUSABLE` — true of the old
+code and false of the corrected code, since this task's whole point is that the no-prefLabel
+trigger is not the same reason as the over-long one. The assertion is changed to the new reason,
+and a `render()` check is added (`assert "longer than" not in message`) that the previous
+type-only assertion could not have made, per CORR-504's own observation. T055's own
+`test_a_node_publishing_only_an_empty_literal_is_treated_as_no_usable_name_at_all` (committed
+earlier in this same fix cycle) reaches the identical branch — an empty-only literal is, by T055's
+own fix, indistinguishable from nothing having been published — and is updated to the same new
+reason for the same cause, not a second, independent overturn.
+
+**CORR-506** (round 5, low): two refusal behaviours this feature added had no success criterion —
+a matched vocabulary whose own write fails (T052/D57) and a created vocabulary or collection
+publishing no preferred label at all (T054/D59) — while SC-024's amendment and SC-031 cover only
+the sibling over-long-value trigger. Both already have tests; this is the spec catching up to
+behaviour, not new behaviour. Added as SC-032 (D57) and SC-033 (D59) at the end of the existing
+list, per this file's own append-only numbering — nothing renumbered, nothing struck.
+
+**Revisit if:** never — the same "a message must hold on every path that reaches it" rule D60
+already applied to the collection side, extended to the one place it had not yet reached; the two
+new success criteria describe behaviour already proven by an existing test, so there is nothing
+further to reconcile.

@@ -122,12 +122,20 @@ def unique_slug_for_identifier(static_uri: str, taken_slugs: dict[str, str | Non
     cycle 5), so the returned candidate never exceeds ``max_length`` however many collisions it
     resolves — true even at ``max_length < len(suffix_text) + 1``, where keeping one base
     character and the whole suffix would otherwise still overrun the field.
+
+    Returns ``""`` — the same "unusable" signal an empty base already gives — rather than looping
+    forever when no further collision retry can produce a candidate distinct from one already
+    tried (T056, CORR-503, decisions.md D66, fix cycle 6): once ``max_length`` is small enough
+    relative to the suffix text, the clamp above can make two *different* suffixes render as the
+    identical truncated string, and a candidate that keeps re-colliding with the same taken slug
+    would otherwise never terminate.
     """
     base = identifier_slug_base(static_uri)[:max_length]
     if not base:
         return ""
     candidate = base
     suffix = 1
+    tried = {candidate}
     while taken_slugs.get(candidate, static_uri) != static_uri:
         suffix += 1
         suffix_text = f"-{suffix}"
@@ -143,6 +151,16 @@ def unique_slug_for_identifier(static_uri: str, taken_slugs: dict[str, str | Non
         # own "never exceeds max_length" claim was false in that case. The final `[:max_length]`
         # clamps the assembled candidate, not only the base.
         candidate = (base[: max(max_length - len(suffix_text), 1)] + suffix_text)[:max_length]
+        if candidate in tried:
+            # CORR-503 (fix cycle 6): the clamp above can render two different suffixes as the
+            # same truncated string once max_length is small relative to suffix_text — a repeat
+            # proves this call cannot resolve the collision within the field's own width, not
+            # merely that this one candidate is taken. Every one of the three current call sites
+            # passes max_length=255, so this is unreached in practice (D51/D63 already put the
+            # collision count needed at roughly 10^250); a direct caller of this module-level
+            # helper with a small max_length is the only way to reach it.
+            return ""
+        tried.add(candidate)
     taken_slugs[candidate] = static_uri
     return candidate
 
@@ -253,16 +271,22 @@ class SkosGraph:
         *,
         language: str | None = None,
     ) -> str | None:
-        """The lexicographically-first literal value of ``predicate`` on ``node``, or ``None``.
+        """The lexicographically-first *usable* literal value of ``predicate`` on ``node``, or
+        ``None``.
 
         Deterministic rather than "whichever rdflib happens to yield first" — the graph's own
         iteration order is not something to depend on for a value that ends up in a stored record
         (T010). ``language``, when given, restricts to literals tagged with that language.
+
+        An empty or whitespace-only literal is excluded from selection entirely (T055, SEC-501/
+        SEC-504, decisions.md D65) — it is not a name or description any caller can actually
+        store, and sorting on the raw string alone let it win over a real value published
+        alongside it in the same file.
         """
         values = sorted(
             str(literal)
             for literal in self.graph.objects(node, predicate)
-            if language is None or getattr(literal, "language", None) == language
+            if (language is None or getattr(literal, "language", None) == language) and str(literal).strip()
         )
         return values[0] if values else None
 
@@ -290,11 +314,18 @@ class SkosGraph:
         the same file. Returns ``None`` when no literal exists at all, or (with ``max_length``
         given) when none of them fit — a caller distinguishes the two only when it needs to,
         by calling again with no ``max_length`` to get a representative value for a message.
+
+        An empty or whitespace-only literal is excluded unconditionally, with or without
+        ``max_length`` (T055, SEC-501/SEC-502/SEC-504, decisions.md D65) — it always satisfies a
+        length filter and always sorts first, so without this it wins the fallback over any real
+        value published alongside it, in both branches this fallback is called from (nothing
+        published in the target language at all, and the target-language value itself being
+        unusable).
         """
         pairs = sorted(
             (str(literal), getattr(literal, "language", None) or "")
             for literal in self.graph.objects(node, predicate)
-            if max_length is None or len(str(literal)) <= max_length
+            if str(literal).strip() and (max_length is None or len(str(literal)) <= max_length)
         )
         return pairs[0] if pairs else None
 
@@ -689,7 +720,13 @@ class SchemeResolver:
             # name still None, which would otherwise leave row.name at the field default '' — the
             # exact state D49 already declares impossible for a created record, reached by a
             # different route.
-            self.report.add_fatal(FatalReason.VOCABULARY_NAME_UNUSABLE, subject=declared_uri, language=winning_tag)
+            #
+            # T058, CORR-504, decisions.md D68 (fix cycle 6): VOCABULARY_NAME_UNUSABLE's own
+            # message names a published value that is "longer than this application can store" —
+            # false on this path, since nothing was published at all. VOCABULARY_NAME_UNPUBLISHED
+            # names what actually happened; no language param, since there is no language the
+            # value was published in.
+            self.report.add_fatal(FatalReason.VOCABULARY_NAME_UNPUBLISHED, subject=declared_uri)
             return None, None
         # SKOS defines no description predicate for a skos:ConceptScheme; dcterms:description is
         # the source (D21), the same alias CONTEXT.md establishes for a concept's own definition.
@@ -764,7 +801,15 @@ class SchemeResolver:
             # settings.LANGUAGES reaches this exact path with the slug untouched. Only report
             # STORED_SLUG_INVALID when the exception actually names the slug; anything else keeps
             # its own field name out of a message that would otherwise misdiagnose it.
-            if "slug" in exc.message_dict:
+            #
+            # T057, CORR-505/SEC-503, decisions.md D67 (fix cycle 6): exc.message_dict is a
+            # property that raises AttributeError for a ValidationError built from a bare message
+            # or a list rather than a field dict — every raise this package's own save() chain
+            # produces is dict-form, but a consumer's pre_save receiver or a subclass override is
+            # not obliged to be. error_dict is the attribute message_dict itself guards on, and
+            # its keys are the same field names; reading it with a default keeps this refusal
+            # inside SkosImportFailed for every shape of ValidationError, not only the dict one.
+            if "slug" in getattr(exc, "error_dict", {}):
                 self.report.add_set_aside(SetAsideReason.STORED_SLUG_INVALID, subject=declared_uri)
             # T052, CORR-401/SEC-402, decisions.md D57 (fix cycle 5): whichever field failed, the
             # scheme was not written, so nothing else in the file has a resolved vocabulary to

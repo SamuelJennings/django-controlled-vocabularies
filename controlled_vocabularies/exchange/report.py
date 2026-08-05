@@ -289,6 +289,11 @@ class FatalReason(TextChoices):
     unlike that reason, the specific field named — a slug or something else —
     is reported separately, as a :class:`SetAsideReason` where one exists
     (``STORED_SLUG_INVALID``) rather than folded into this fatal's own message.
+    ``VOCABULARY_NAME_UNPUBLISHED`` (fix cycle 6, CORR-504, decisions.md D68)
+    names a *created* scheme that publishes no ``skos:prefLabel`` at all —
+    distinct from ``VOCABULARY_NAME_UNUSABLE``, whose own message names a
+    published value that is too long, which is false when nothing was
+    published in any language to begin with.
     """
 
     MISSING_IDENTITY = "missing_identity", _("identifier missing or blank")
@@ -305,6 +310,10 @@ class FatalReason(TextChoices):
     VOCABULARY_RECORD_INVALID = (
         "vocabulary_record_invalid",
         _("vocabulary's stored record fails its own validation and could not be written"),
+    )
+    VOCABULARY_NAME_UNPUBLISHED = (
+        "vocabulary_name_unpublished",
+        _("vocabulary publishes no preferred label in any language"),
     )
 
     @property
@@ -347,6 +356,10 @@ _FATAL_TEMPLATES: dict[FatalReason, Promise] = {
     FatalReason.VOCABULARY_RECORD_INVALID: _(
         "'%(subject)s' has a stored record that fails this application's own validation and "
         "could not be written; the run was refused."
+    ),
+    FatalReason.VOCABULARY_NAME_UNPUBLISHED: _(
+        "'%(subject)s' has no name this application can store — no skos:prefLabel was "
+        "published for it at all; the run was refused."
     ),
 }
 
