@@ -206,6 +206,30 @@ class TestConcept:
         assert Concept.objects.count() == 0
 
 
+class TestConceptSlugFollowsTheLabelWithNoPublisherIdentifier:
+    """T031 — FR-019/SC-030: a record authored on this site has no publisher identifier
+    to derive a slug from, so it must keep deriving its slug from its label exactly as
+    before T029 (decisions.md D35) changed slug derivation for *imported* records. This
+    guard exists because nothing on the import path (``assign_unique_slug``, T029)
+    exercises a concept with no ``static_uri`` — only ``Concept.save()``'s own
+    ``slug_is_manual`` branch does, and this pins that branch's behaviour directly."""
+
+    @pytest.mark.django_db
+    def test_a_locally_authored_concept_derives_its_slug_from_its_label(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        assert concept.static_uri is None
+        assert concept.slug_is_manual is False
+        assert concept.slug == "heat-flow"
+
+    @pytest.mark.django_db
+    def test_a_locally_authored_concept_s_slug_still_follows_a_relabel(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        concept.label = "Surface Heat Flow"
+        concept.save()
+        assert concept.static_uri is None
+        assert concept.slug == "surface-heat-flow"
+
+
 class TestConceptIdentity:
     """US-3 — Every concept carries a stable identifier. The URI composes from the
     base address, scheme slug and concept slug (FR-005/FR-006); ``get_by_uri``
