@@ -42,6 +42,7 @@ _EXAMPLE_PARAMS = {
     },
     SetAsideReason.URI_HELD_BY_DIFFERENT_KIND: {},
     SetAsideReason.NO_LANGUAGE_TAG: {"predicate": "skos:altLabel"},
+    SetAsideReason.VARIANT_NOT_KEPT: {"language": "en-us", "kept_as": "en-gb"},
 }
 
 # One example params dict per fatal reason (T007), the same shape as _EXAMPLE_PARAMS.
@@ -56,6 +57,7 @@ _EXAMPLE_FATAL_PARAMS = {
 # One example params dict per normalized reason (T021), the same shape as _EXAMPLE_PARAMS.
 _EXAMPLE_NORMALIZED_PARAMS = {
     NormalizedReason.FOREIGN_DEFINITION: {"predicate": "dcterms:description", "language": "en"},
+    NormalizedReason.LANGUAGE_SUBSTITUTION: {"language": "en-gb", "kept_as": "en"},
 }
 
 
@@ -114,6 +116,60 @@ class TestImportReportBuckets:
         assert SetAsideReason.MAPPING not in grouped
 
 
+class TestLanguageAccount:
+    """T004 — the per-published-language account (FR-008, research.md R3): a
+    fold over :attr:`ImportReport.set_aside`, not a field accumulated beside
+    it, so the count can never disagree with the entries a caller can also
+    read directly. Membership is an explicit set of reasons —
+    ``UNCONFIGURED_LANGUAGE`` and ``VARIANT_NOT_KEPT``, nothing else — keyed
+    on ``params["language"]``, which both members put the *published* tag
+    under (T022)."""
+
+    def test_counts_every_value_not_stored_for_a_language_reason_broken_down_by_published_language(self):
+        report = ImportReport()
+        report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, "https://example.org/a", language="fr")
+        report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, "https://example.org/b", language="fr")
+        report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, "https://example.org/c", language="es")
+        assert report.language_account() == {"fr": 2, "es": 1}
+
+    def test_a_value_that_was_stored_is_not_counted(self):
+        report = ImportReport()
+        report.add_created("https://example.org/a")
+        report.add_updated("https://example.org/b")
+        assert report.language_account() == {}
+
+    def test_a_contest_loser_is_counted_under_its_own_published_tag_not_what_it_lost_to(self):
+        # FR-008/T022: en-us lost the contest to en-gb, but it is en-us — the
+        # language configuring would actually recover — that must be counted.
+        report = ImportReport()
+        report.add_set_aside(
+            SetAsideReason.VARIANT_NOT_KEPT, "https://example.org/a", language="en-us", kept_as="en-gb"
+        )
+        assert report.language_account() == {"en-us": 1}
+
+    def test_a_same_language_surplus_is_excluded(self):
+        # SURPLUS_PREFERRED_LABEL's language is a configured code the site
+        # already holds; nothing recovers a same-language duplicate (D14).
+        report = ImportReport()
+        report.add_set_aside(SetAsideReason.SURPLUS_PREFERRED_LABEL, "https://example.org/a", language="de")
+        assert report.language_account() == {}
+
+    def test_present_and_empty_after_a_run_that_left_nothing_behind(self):
+        report = ImportReport()
+        report.add_created("https://example.org/a")
+        assert report.language_account() == {}
+        assert "en" not in report.language_account()
+
+    def test_a_caller_can_rank_languages_by_what_configuring_them_would_recover(self):
+        report = ImportReport()
+        report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, "https://example.org/a", language="fr")
+        report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, "https://example.org/b", language="fr")
+        report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, "https://example.org/c", language="es")
+        # Ranked without parsing any rendered message — read as plain data.
+        ranked = sorted(report.language_account().items(), key=lambda item: -item[1])
+        assert ranked[0] == ("fr", 2)
+
+
 class TestSetAsideEntry:
     """A ``SetAsideEntry`` is a frozen record — nothing downstream can mutate
     a reason, subject or params after it has been reported."""
@@ -146,6 +202,53 @@ class TestSetAsideReasonVocabulary:
         assert "https://example.org/vocab/x" in rendered
         for value in _EXAMPLE_PARAMS[reason].values():
             assert value in rendered
+
+
+class TestVariantNotKeptReason:
+    """T022 — a value that lost a variant contest is set aside under its own
+    reason, not ``SURPLUS_PREFERRED_LABEL``, whose message means more than one
+    preferred label in one and the same language and is factually false here
+    (S3R SPEC-002, decisions.md D14). The published tag goes under
+    ``language``, identically to ``UNCONFIGURED_LANGUAGE``, and the configured
+    destination it lost to under ``kept_as`` — the wrong way round keys T004's
+    account under a language the site already holds."""
+
+    def test_the_entry_carries_the_published_tag_under_language_and_the_destination_under_kept_as(self):
+        report = ImportReport()
+        report.add_set_aside(
+            SetAsideReason.VARIANT_NOT_KEPT,
+            "https://example.org/vocab/rocks/granite",
+            language="en-us",
+            kept_as="en-gb",
+        )
+        entry = report.set_aside[0]
+        assert entry.reason is SetAsideReason.VARIANT_NOT_KEPT
+        assert entry.params == {"language": "en-us", "kept_as": "en-gb"}
+
+    def test_the_rendered_message_is_true_of_the_case_it_names(self):
+        entry = SetAsideEntry(
+            reason=SetAsideReason.VARIANT_NOT_KEPT,
+            subject="https://example.org/vocab/rocks/granite",
+            params={"language": "en-us", "kept_as": "en-gb"},
+        )
+        rendered = entry.render()
+        # A contest loser's file carries exactly one preferred label in its own
+        # published tag — SURPLUS_PREFERRED_LABEL's "more than one" claim would
+        # be false here (research.md R4).
+        assert "more than one preferred label" not in rendered
+        assert "en-us" in rendered
+        assert "en-gb" in rendered
+
+    def test_surplus_preferred_label_meaning_and_message_are_unchanged(self):
+        entry = SetAsideEntry(
+            reason=SetAsideReason.SURPLUS_PREFERRED_LABEL,
+            subject="https://example.org/vocab/rocks/granite",
+            params={"language": "de"},
+        )
+        assert entry.render() == (
+            "'https://example.org/vocab/rocks/granite' carries more than one preferred label in the "
+            "language 'de'; only one is kept and the surplus value was set aside."
+        )
 
 
 class TestFatalBucketAndFinding:
@@ -264,6 +367,49 @@ class TestNormalizedReasonVocabulary:
         assert "https://example.org/vocab/x" in rendered
         for value in _EXAMPLE_NORMALIZED_PARAMS[reason].values():
             assert value in rendered
+
+
+class TestLanguageSubstitutionReason:
+    """T003 — a value stored under a configured language other than its
+    published tag carries a translatable, named-placeholder entry naming
+    both (FR-006), inspectable as data and distinct from a value that was
+    not stored at all (research.md R4)."""
+
+    def test_the_entry_is_inspectable_as_data(self):
+        report = ImportReport()
+        report.add_normalized(
+            NormalizedReason.LANGUAGE_SUBSTITUTION,
+            "https://example.org/vocab/rocks/granite",
+            language="en-gb",
+            kept_as="en",
+        )
+        entry = report.normalized[0]
+        assert entry.reason is NormalizedReason.LANGUAGE_SUBSTITUTION
+        assert entry.subject == "https://example.org/vocab/rocks/granite"
+        assert entry.params == {"language": "en-gb", "kept_as": "en"}
+
+    def test_it_renders_naming_both_the_published_tag_and_the_language_stored_under(self):
+        entry = NormalizedEntry(
+            reason=NormalizedReason.LANGUAGE_SUBSTITUTION,
+            subject="https://example.org/vocab/rocks/granite",
+            params={"language": "en-gb", "kept_as": "en"},
+        )
+        rendered = entry.render()
+        assert "en-gb" in rendered
+        assert "en" in rendered
+
+    def test_it_sits_in_the_normalized_bucket_not_the_set_aside_one(self):
+        # A caller filtering for "things that did not make it in" (research.md
+        # R4) must still get a truthful answer: the value *was* stored.
+        report = ImportReport()
+        report.add_normalized(
+            NormalizedReason.LANGUAGE_SUBSTITUTION,
+            "https://example.org/vocab/rocks/granite",
+            language="en-gb",
+            kept_as="en",
+        )
+        assert len(report.normalized) == 1
+        assert report.set_aside == []
 
 
 class TestNormalizedReasonIsDisjointFromSetAsideAndFatal:
