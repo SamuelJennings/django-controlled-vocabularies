@@ -2242,6 +2242,36 @@ class TestEmptySlugLabelIsSetAsideNotCrashed:
         assert normal.alt_labels("en") == ["Normal-alt"]
 
 
+class TestOverlongValueIsSetAsideNotCrashed:
+    """T025 — SC-024, S6 SEC-002, decisions.md D34: variant matching now routes
+    label values that were previously set aside (an exact-tag-only site never
+    reached them) into ``Concept.add_label``, whose ``full_clean()`` refuses text
+    beyond 255 characters. Guarded the way ``EMPTY_SLUG`` already guards the slug
+    (FIX 5): caught ahead of a rolled-back transaction, set aside with its own
+    reason, and the rest of the file — including the rest of the same concept —
+    still imports."""
+
+    def test_an_overlong_alt_label_is_set_aside_and_named_not_raised(self, db):
+        report = import_skos(FIXTURES / "value_too_long_label.ttl")
+        assert report.fatal == []
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/longvalue/toolong"
+        assert entries[0].params["language"] == "en-GB"
+
+    def test_the_concept_carrying_the_overlong_value_still_imports_on_its_other_content(self, db):
+        import_skos(FIXTURES / "value_too_long_label.ttl")
+        toolong = Concept.objects.get(static_uri="http://example.org/longvalue/toolong")
+        assert toolong.label == "TooLong"
+        assert toolong.alt_labels("en") == []
+
+    def test_the_rest_of_the_file_still_imports(self, db):
+        import_skos(FIXTURES / "value_too_long_label.ttl")
+        ok = Concept.objects.get(static_uri="http://example.org/longvalue/ok")
+        assert ok.label == "OK"
+        assert ok.alt_labels("en") == ["OK-alt"]
+
+
 class TestBroaderAndNarrowerRelations:
     """T023 — FR-010/research.md R4: ``skos:broader`` and ``skos:narrower`` both
     land as the single ``ConceptRelation`` row the models define, ``source`` the
@@ -3309,6 +3339,8 @@ def _coverage_label_covered(
             SetAsideReason.UNCONFIGURED_LANGUAGE,
             SetAsideReason.SURPLUS_PREFERRED_LABEL,
             SetAsideReason.VARIANT_NOT_KEPT,
+            # T025, S6 SEC-002: a value the model's own field refuses on length.
+            SetAsideReason.VALUE_TOO_LONG,
         )
         for entry in report.set_aside
     )
@@ -3331,7 +3363,7 @@ def _coverage_note_covered(
     return any(
         entry.subject == subject_uri
         and entry.params.get("language") == language
-        and entry.reason is SetAsideReason.UNCONFIGURED_LANGUAGE
+        and entry.reason in (SetAsideReason.UNCONFIGURED_LANGUAGE, SetAsideReason.VALUE_TOO_LONG)
         for entry in report.set_aside
     )
 

@@ -656,7 +656,15 @@ class ConceptImporter:
                                 kept_as=resolved_language,
                             )
                         continue
-                concept.add_label(language=resolved_language, kind=kind, text=str(literal))
+                try:
+                    concept.add_label(language=resolved_language, kind=kind, text=str(literal))
+                except ValidationError:
+                    # SEC-002, decisions.md D34: variant matching now routes values that were
+                    # previously unreachable into add_label's own full_clean() — a single
+                    # over-long value must not abort the whole run (Article V: imported RDF is
+                    # untrusted), the same discipline EMPTY_SLUG already applies to the slug.
+                    self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=uri, language=published_tag)
+                    continue
                 if resolved_language.lower() != published_tag.lower():
                     # T009, FR-006: a value stored under a resolved language other than its
                     # published tag is a normalisation, never applied silently (decisions.md D8).
@@ -696,9 +704,16 @@ class ConceptImporter:
                 if resolved_language is None:
                     self.report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, subject=uri, language=published_tag)
                     continue
+                try:
+                    concept.add_note(language=resolved_language, kind=kind, value=str(literal))
+                except ValidationError:
+                    # SEC-002, decisions.md D34: same discipline as import_labels's own guard.
+                    # Checked after the write attempt, not before: not counted into
+                    # definition_languages below either, since it was never actually stored.
+                    self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=uri, language=published_tag)
+                    continue
                 if kind == ConceptNote.Kind.DEFINITION:
                     definition_languages.add(resolved_language)
-                concept.add_note(language=resolved_language, kind=kind, value=str(literal))
                 if resolved_language.lower() != published_tag.lower():
                     # T009, FR-006 (decisions.md D8).
                     self.report.add_normalized(
@@ -721,7 +736,12 @@ class ConceptImporter:
             if resolved_language is None:
                 self.report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, subject=uri, language=published_tag)
                 continue
-            concept.add_note(language=resolved_language, kind=ConceptNote.Kind.DEFINITION, value=str(literal))
+            try:
+                concept.add_note(language=resolved_language, kind=ConceptNote.Kind.DEFINITION, value=str(literal))
+            except ValidationError:
+                # SEC-002, decisions.md D34: same discipline as import_labels's own guard.
+                self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=uri, language=published_tag)
+                continue
             self.report.add_normalized(
                 NormalizedReason.FOREIGN_DEFINITION,
                 subject=uri,
@@ -821,6 +841,16 @@ class ConceptImporter:
                 self.report.add_set_aside(SetAsideReason.NO_PREFERRED_LABEL, subject=uri, language=default_language)
                 continue
             (winning_tag, label), _losers = identity_winner
+
+            label_max_length = Concept._meta.get_field("label").max_length
+            if label_max_length is not None and len(label) > label_max_length:
+                # SEC-002, decisions.md D34: Concept.save() never calls full_clean() (it derives
+                # the slug and refuses a collision, nothing more), so an over-long label would
+                # otherwise reach the database unchecked on SQLite and raise a bare DataError on
+                # PostgreSQL. Checked ahead of the write, the same discipline EMPTY_SLUG already
+                # applies just below — the reason names the value, not the slug it never reaches.
+                self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=uri, language=winning_tag)
+                continue
 
             if not slugify(label, allow_unicode=True):
                 # FIX 5 (D39): a label made up only of characters slugify() strips derives an empty

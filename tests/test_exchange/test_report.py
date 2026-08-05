@@ -43,6 +43,7 @@ _EXAMPLE_PARAMS = {
     SetAsideReason.URI_HELD_BY_DIFFERENT_KIND: {},
     SetAsideReason.NO_LANGUAGE_TAG: {"predicate": "skos:altLabel"},
     SetAsideReason.VARIANT_NOT_KEPT: {"language": "en-us", "kept_as": "en-gb"},
+    SetAsideReason.VALUE_TOO_LONG: {"language": "en-gb"},
 }
 
 # One example params dict per fatal reason (T007), the same shape as _EXAMPLE_PARAMS.

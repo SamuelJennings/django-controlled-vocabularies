@@ -78,6 +78,14 @@ class SetAsideReason(TextChoices):
     The two have different remedies: nothing recovers a same-language
     duplicate, while configuring the published tag recovers a contest loser,
     which is what FR-008's account exists to tell apart.
+    ``VALUE_TOO_LONG`` (fix cycle 1, S6 SEC-002, decisions.md D34) names a
+    label or note value the model's own field refuses on length — variant
+    matching newly routes values that were previously unreachable into
+    ``Concept.add_label``/``add_note``, and a single verbose alternative
+    label in a hostile or merely careless file must not abort an entire
+    import; the value is set aside rather than crashing the run on
+    ``ValidationError`` (the same discipline ``EMPTY_SLUG`` already applies
+    to the slug).
     """
 
     UNCONFIGURED_LANGUAGE = "unconfigured_language", _("language not configured")
@@ -96,6 +104,7 @@ class SetAsideReason(TextChoices):
     URI_HELD_BY_DIFFERENT_KIND = "uri_held_by_different_kind", _("identifier held by a different kind of record")
     NO_LANGUAGE_TAG = "no_language_tag", _("no language tag")
     VARIANT_NOT_KEPT = "variant_not_kept", _("language variant not kept")
+    VALUE_TOO_LONG = "value_too_long", _("value exceeds the maximum length this application can store")
 
     @property
     def template(self) -> Promise:
@@ -169,6 +178,10 @@ _REASON_TEMPLATES: dict[SetAsideReason, Promise] = {
     SetAsideReason.VARIANT_NOT_KEPT: _(
         "'%(subject)s' carries a value in the language '%(language)s'; another variant was kept for "
         "the site's '%(kept_as)s' instead, and this one was not stored."
+    ),
+    SetAsideReason.VALUE_TOO_LONG: _(
+        "'%(subject)s' carries a value in the language '%(language)s' longer than this application "
+        "can store; it was not stored."
     ),
 }
 
