@@ -1000,3 +1000,32 @@ the identifier-derived slug happens not to work.
 **Revisit if:** never — the same reasoning `EMPTY_SLUG` (D39) already gives for the concept side,
 with the fatal-versus-set-aside split accounted for by what each record kind's absence costs the
 rest of the file.
+
+## D40 — SC-022's `name` clause is struck: it belonged to the withdrawn FR-016
+
+**Decided:** 2026-08-05, by the orchestrator, on the S6 round-two architecture lens's ARCH-103.
+No re-gate — this removes a criterion that contradicts an approved requirement rather than
+changing any approved behaviour.
+
+SC-022 required that adding a configured language sharing a base with one the site already holds
+leaves every concept's **name**, slug, and local address exactly as they were. The slug and address
+clauses are right and FR-017 delivers them. The `name` clause cannot be met and should never have
+been written, because it was drafted for FR-016 — the rule that pinned a concept's *displayed label*
+so that an address derived from that label would stay still.
+
+FR-016 is withdrawn. The address no longer comes from the label at all, so the reason for pinning
+the label is gone, and the clause now requires the opposite of FR-002 as restored: a site adding
+`en-gb` correctly moves an `en-us` value out of the `en` slot, because `en-gb` then resolves exactly
+to itself and stops being a candidate for `en`. That is FR-002 working, not a defect.
+
+**The stability this criterion exists to guarantee is the address, and FR-017 guarantees it at the
+right layer.** A displayed name following the site's language configuration is what a curator
+configuring a language is asking for. An address following it is the harm.
+
+The clause is struck through and forward-tagged in place rather than deleted, the same treatment
+D6 received. SC-022's test requirement stands unchanged and is still owed: it MUST add a
+base-sharing language, because the test written for SC-015 only ever added an unrelated one and so
+could not fail. The test fix cycle 1 wrote for this was removed with the T023 revert (D36), so
+there is currently no test on the branch covering it.
+
+**Revisit if:** FR-002 is ever narrowed again, in which case the two need re-reading together.
