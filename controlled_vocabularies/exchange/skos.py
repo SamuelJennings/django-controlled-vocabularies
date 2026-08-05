@@ -19,6 +19,7 @@ import urllib.parse
 from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
+from typing import cast
 
 import rdflib
 import rdflib.util
@@ -79,7 +80,7 @@ def identifier_slug_segment(uri: str) -> str:
     return parsed.path.rstrip("/").rsplit("/", 1)[-1]
 
 
-def unique_slug_for_identifier(static_uri: str, taken_slugs: dict[str, str | None]) -> str:
+def unique_slug_for_identifier(static_uri: str, taken_slugs: dict[str, str | None], max_length: int) -> str:
     """The deterministic, collision-resolved slug for ``static_uri`` (FR-017/FR-018/FR-020,
     decisions.md D35): the same identifier-derived base (:func:`identifier_slug_segment`), with a
     numeric suffix appended only when the candidate already belongs to a *different* record. An
@@ -88,24 +89,32 @@ def unique_slug_for_identifier(static_uri: str, taken_slugs: dict[str, str | Non
     kind (a concept is set aside, decisions.md D39; a vocabulary is fatal, decisions.md D35 fix
     cycle 2, since nothing else in the file has anywhere to import into).
 
-    Shared by :meth:`ConceptImporter.assign_unique_slug` and :meth:`SchemeResolver.resolve_scheme`
-    — a concept's collision and a scheme's collision are the same computation over two record
-    kinds (Article XV), so the shape is not duplicated.
+    Shared by :meth:`ConceptImporter.assign_unique_slug`, :meth:`SchemeResolver.resolve_scheme`
+    and :meth:`CollectionImporter.import_collections` — a collision in any of the three record
+    kinds is the same computation (Article XV), so the shape is not duplicated three times.
 
     ``taken_slugs`` maps every claimed slug to its claimant's ``static_uri``, mutated in place so a
     caller resolving more than one record in the same run sees each prior assignment as taken.
     Because ``static_uri`` never changes once assigned, a record's own previously-stored slug is
     always read back to itself rather than suffixed (FR-020's "same file yields the same slugs
     however it is traversed").
+
+    ``max_length`` (T042, SEC-002-shaped, decisions.md D35 fix cycle 3) bounds the returned value
+    to the calling model's own ``SlugField.max_length`` — never a literal ``255`` written a second
+    time here. A published identifier segment can be arbitrarily long; nothing on this write path
+    calls ``full_clean()``, so an unbounded slug lands unchecked on SQLite and raises a bare
+    ``DataError`` on PostgreSQL. The *base* is truncated, leaving room for the numeric suffix, so
+    the returned candidate never exceeds ``max_length`` however many collisions it resolves.
     """
-    base = slugify(identifier_slug_segment(static_uri), allow_unicode=True)
+    base = slugify(identifier_slug_segment(static_uri), allow_unicode=True)[:max_length]
     if not base:
         return ""
     candidate = base
     suffix = 1
     while taken_slugs.get(candidate, static_uri) != static_uri:
         suffix += 1
-        candidate = f"{base}-{suffix}"
+        suffix_text = f"-{suffix}"
+        candidate = base[: max_length - len(suffix_text)] + suffix_text
     taken_slugs[candidate] = static_uri
     return candidate
 
@@ -544,6 +553,7 @@ class SchemeResolver:
         name_match = _localized_literal(
             self.skos_graph, self.matcher, declared_node, SKOS.prefLabel, row.effective_default_language
         )
+        winning_tag = row.effective_default_language
         if name_match is None:
             # The declared default language (or the site's, on fallback) carries no prefLabel on
             # the scheme itself — fall back to any language rather than leaving name unset.
@@ -560,7 +570,16 @@ class SchemeResolver:
                     language=winning_tag,
                     kept_as=row.effective_default_language,
                 )
-        if name:
+        name_max_length = ConceptScheme._meta.get_field("name").max_length
+        if name and name_max_length is not None and len(name) > name_max_length:
+            # T042, SEC-002-shaped, decisions.md D35 (fix cycle 3): row.save() never calls
+            # full_clean(), so an over-long name would otherwise reach the database unchecked on
+            # SQLite and raise a bare DataError on PostgreSQL — the same hole Concept.label's own
+            # pre-write VALUE_TOO_LONG guard closes. A scheme is the whole file, so this leaves
+            # the name unwritten (row.name keeps whatever it already held) rather than aborting
+            # the run the rest of the file still needs to import into.
+            self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=declared_uri, language=winning_tag)
+        elif name:
             row.name = name
         # SKOS defines no description predicate for a skos:ConceptScheme; dcterms:description is
         # the source (D21), the same alias CONTEXT.md establishes for a concept's own definition.
@@ -597,7 +616,11 @@ class SchemeResolver:
         # imported" reading of FR-020's "same file yields the same slugs however it is traversed").
         if created:
             taken_slugs: dict[str, str | None] = dict(ConceptScheme.objects.values_list("slug", "static_uri"))
-            slug = unique_slug_for_identifier(declared_uri, taken_slugs)
+            # ConceptScheme.slug declares max_length explicitly; cast rather than assert
+            # narrows the type without a runtime check ruff's bandit rules refuse in production
+            # code (S101), for a value Django's own field metadata always supplies here.
+            max_length = cast(int, ConceptScheme._meta.get_field("slug").max_length)
+            slug = unique_slug_for_identifier(declared_uri, taken_slugs, max_length)
             if not slug:
                 # T036, decisions.md D35 (fix cycle 2): an identifier segment made up only of
                 # characters slugify() strips is fatal, not set aside like a concept's EMPTY_SLUG —
@@ -1090,7 +1113,8 @@ class ConceptImporter:
         empty for a concept actually being created here.
         """
         if created:
-            concept.slug = unique_slug_for_identifier(concept.static_uri, taken_slugs)
+            max_length = cast(int, Concept._meta.get_field("slug").max_length)
+            concept.slug = unique_slug_for_identifier(concept.static_uri, taken_slugs, max_length)
         concept.slug_is_manual = True
 
 
@@ -1425,6 +1449,7 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
             row.static_uri = uri
             default_language = self.target_scheme.effective_default_language
             name_match = _localized_literal(self.skos_graph, self.matcher, node, SKOS.prefLabel, default_language)
+            winning_tag = default_language
             if name_match is None:
                 name = self.skos_graph.first_literal(node, SKOS.prefLabel)
             else:
@@ -1438,7 +1463,14 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
                         language=winning_tag,
                         kept_as=default_language,
                     )
-            if name:
+            name_max_length = Collection._meta.get_field("name").max_length
+            if name and name_max_length is not None and len(name) > name_max_length:
+                # T042, SEC-002-shaped, decisions.md D35 (fix cycle 3): the same pre-write guard
+                # resolve_scheme's own name write applies — row.save() never calls full_clean(),
+                # so an over-long name would otherwise reach the database unchecked on SQLite and
+                # raise a bare DataError on PostgreSQL.
+                self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=uri, language=winning_tag)
+            elif name:
                 row.name = name
             row.ordered = ordered
             # T038, FR-017, decisions.md D35: a collection's own slug is identifier-derived,
@@ -1449,7 +1481,8 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
             # the same read-back-don't-recompute rule assign_unique_slug and resolve_scheme
             # apply, so no change in what else currently occupies the scheme can move it.
             if created:
-                row.slug = unique_slug_for_identifier(uri, taken_slugs)
+                max_length = cast(int, Collection._meta.get_field("slug").max_length)
+                row.slug = unique_slug_for_identifier(uri, taken_slugs, max_length)
             row.slug_is_manual = True
             row.save()
             if created:

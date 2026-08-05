@@ -1397,6 +1397,97 @@ class TestASlugAlreadyStoredIsReadBackNeverRecomputed:
         assert concept.slug == "granite"
 
 
+class TestSlugAndNameLengthAreBoundedToTheField:
+    """T042 — SEC-002-shaped, decisions.md D35 (fix cycle 3): a published identifier segment or
+    name can be far longer than the field meant to hold it. Nothing on this write path calls
+    ``full_clean()``, so an over-long value lands unchecked on SQLite and raises a bare
+    ``DataError`` on PostgreSQL, aborting the whole run — the same failure shape SEC-002 already
+    guards for a label. ``unique_slug_for_identifier`` now truncates its derived base to the
+    field's own ``max_length`` (never a literal ``255`` written a second time) rather than
+    minting a slug the model would refuse; ``ConceptScheme.name`` and ``Collection.name`` get the
+    same pre-write ``VALUE_TOO_LONG`` set-aside guard ``Concept.label`` already has.
+    """
+
+    def test_a_concept_s_slug_is_truncated_to_the_field_s_max_length(self, db, tmp_path):
+        long_fragment = "a" * 400
+        path = tmp_path / "long_concept_identifier.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/longconcept> a skos:ConceptScheme ; skos:prefLabel "L"@en .\n'
+            f"<http://pub.example/longconcept#{long_fragment}> a skos:Concept ; "
+            "skos:inScheme <http://pub.example/longconcept> ; "
+            'skos:prefLabel "Long"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        concept = Concept.objects.get(static_uri=f"http://pub.example/longconcept#{long_fragment}")
+        max_length = Concept._meta.get_field("slug").max_length
+        assert len(concept.slug) <= max_length
+        concept.full_clean()
+
+    def test_a_scheme_s_slug_is_truncated_to_the_field_s_max_length(self, db, tmp_path):
+        long_fragment = "b" * 400
+        path = tmp_path / "long_scheme_identifier.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            f'<http://pub.example/longscheme#{long_fragment}> a skos:ConceptScheme ; skos:prefLabel "S"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        scheme = ConceptScheme.objects.get(static_uri=f"http://pub.example/longscheme#{long_fragment}")
+        max_length = ConceptScheme._meta.get_field("slug").max_length
+        assert len(scheme.slug) <= max_length
+        scheme.full_clean()
+
+    def test_a_collection_s_slug_is_truncated_to_the_field_s_max_length(self, db, tmp_path):
+        long_fragment = "c" * 400
+        path = tmp_path / "long_collection_identifier.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/longcollection> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            f'<http://pub.example/longcollection#{long_fragment}> a skos:Collection ; skos:prefLabel "Group"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        collection = Collection.objects.get(static_uri=f"http://pub.example/longcollection#{long_fragment}")
+        max_length = Collection._meta.get_field("slug").max_length
+        assert len(collection.slug) <= max_length
+        collection.full_clean()
+
+    def test_a_scheme_name_longer_than_the_field_is_set_aside_not_written_unchecked(self, db, tmp_path):
+        long_name = "N" * 300
+        path = tmp_path / "long_scheme_name.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            f'<http://pub.example/longschemename> a skos:ConceptScheme ; skos:prefLabel "{long_name}"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        scheme = ConceptScheme.objects.get(static_uri="http://pub.example/longschemename")
+        max_length = ConceptScheme._meta.get_field("name").max_length
+        assert len(scheme.name) <= max_length
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://pub.example/longschemename"
+
+    def test_a_collection_name_longer_than_the_field_is_set_aside_not_written_unchecked(self, db, tmp_path):
+        long_name = "N" * 300
+        path = tmp_path / "long_collection_name.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/longcollectionname> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            f'<http://pub.example/longcollectionname#grp> a skos:Collection ; skos:prefLabel "{long_name}"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        collection = Collection.objects.get(static_uri="http://pub.example/longcollectionname#grp")
+        max_length = Collection._meta.get_field("name").max_length
+        assert len(collection.name) <= max_length
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://pub.example/longcollectionname#grp"
+
+
 def _write_shared_label_file(tmp_path: Path, n: int) -> Path:
     """A Turtle file with ``n`` concepts sharing one ``skos:prefLabel`` — D6's
     "two source concepts commonly sharing a preferred label" case, scaled up
