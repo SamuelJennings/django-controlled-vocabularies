@@ -455,3 +455,32 @@ published tag configuring something would recover.
 configured slot, not only the default one — at that point this same discriminator should read
 identically for both, and worth checking that `import_labels`'s two now-separate computations (this
 one, and T013's) still agree by construction rather than by coincidence.
+
+## D25 — A pre-existing test class lost its `class` statement during US-1's insertions, and is reinstated
+
+**Decided at:** US-1 convergence review (orchestrator), after `tamper-check` flagged
+`tests/test_exchange/test_skos.py` and the flag was triaged line by line.
+
+T007–T009 inserted three new test classes immediately above
+`TestConceptsImpliedByMembershipButNeverGivenAnRdfType`. The insertion landed *between* that class's
+`class` statement and its docstring: the `class` line was removed and the docstring left behind as a
+bare string expression, so its five node-typing tests were silently re-parented onto
+`TestLanguageSubstitutionIsReported` — a class about language substitution, which has nothing to do
+with them.
+
+Nothing failed. The methods still ran, the count was unchanged at 745, and every gate was green,
+because pytest neither knows nor cares which class a test method hangs off. That is what makes this
+worth a decision record rather than a silent fix: the defect is invisible to every machine check the
+loop runs, and only the tamper-check flag plus a by-hand read of the deleted lines surfaced it.
+
+**Chosen:** reinstate the `class` statement verbatim above its own docstring. No test body, name or
+assertion is touched, and the count stays at 745.
+
+**Rejected:** leaving it. Article X's testing structure requires class grouping to carry meaning, and
+a class whose name says "language substitution" holding tests about `rdf:type` inference defeats
+that. It would also have made the next reader of a failure in those five tests look in the wrong
+place entirely.
+
+**Revisit if:** a later story again inserts classes adjacent to an existing one — the same shape can
+recur, and the only thing that caught it was reading the diff's deletions rather than trusting a
+green suite.

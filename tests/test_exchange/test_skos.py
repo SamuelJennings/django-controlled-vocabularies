@@ -747,6 +747,8 @@ class TestLanguageSubstitutionIsReported:
         report = import_skos(path)
         assert report.normalized == []
 
+
+class TestConceptsImpliedByMembershipButNeverGivenAnRdfType:
     """FIX 17 (review, decisions.md D50) — ``concept_nodes`` used to come only
     from ``graph.subjects(rdf.RDF.type, SKOS.Concept)``. A node the file
     identifies as a concept through ``skos:inScheme``, ``skos:topConceptOf``,
