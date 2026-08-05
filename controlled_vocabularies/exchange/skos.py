@@ -595,11 +595,15 @@ class ConceptImporter:
             language: self.matcher.resolve_winner(language, candidates)[0]
             for language, candidates in preferred_candidates_by_language.items()
         }
-        default_language_winner_tag = (
-            preferred_winner_by_language[default_language][0]
-            if default_language in preferred_winner_by_language
-            else None
+        # The identity-anchoring slot's own winner (FR-016, decisions.md D33) — contested
+        # over every tag sharing default_language's base, not only the ones that still
+        # resolve exactly to it once a sibling variant gains its own configured slot. Read
+        # independently of preferred_winner_by_language[default_language], which a
+        # separately-configured sibling variant would otherwise silently narrow.
+        identity_winner = self.matcher.resolve_identity_winner(
+            default_language, self.skos_graph.preferred_label_in(node)
         )
+        default_language_winner_tag = identity_winner[0][0] if identity_winner is not None else None
 
         for predicate, kind in LABEL_PREDICATES.items():
             for literal in self.skos_graph.graph.objects(node, predicate):
@@ -806,15 +810,17 @@ class ConceptImporter:
                 continue
 
             default_language = self.target_scheme.effective_default_language
-            candidates = [
-                (tag, value)
-                for tag, value in self.skos_graph.preferred_label_in(node)
-                if self.matcher.resolve(tag).configured_language == default_language
-            ]
-            if not candidates:
+            # FR-016, decisions.md D33 (S6 ARCH-001): the identity-anchoring slot's contest
+            # runs over every tag sharing default_language's base, not only the ones that
+            # resolve exactly to it — configuring a sibling variant in its own right must
+            # never move an existing concept's stored label, slug or local URL.
+            identity_winner = self.matcher.resolve_identity_winner(
+                default_language, self.skos_graph.preferred_label_in(node)
+            )
+            if identity_winner is None:
                 self.report.add_set_aside(SetAsideReason.NO_PREFERRED_LABEL, subject=uri, language=default_language)
                 continue
-            (winning_tag, label), _losers = self.matcher.resolve_winner(default_language, candidates)
+            (winning_tag, label), _losers = identity_winner
 
             if not slugify(label, allow_unicode=True):
                 # FIX 5 (D39): a label made up only of characters slugify() strips derives an empty
