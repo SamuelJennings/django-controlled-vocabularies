@@ -20,6 +20,7 @@ from django.test.utils import CaptureQueriesContext
 from django.utils.functional import Promise
 
 import controlled_vocabularies.exchange as exchange
+from controlled_vocabularies import conf
 from controlled_vocabularies.exchange.languages import LanguageMatcher
 from controlled_vocabularies.exchange.report import FatalReason, NormalizedReason, SetAsideReason
 from controlled_vocabularies.exchange.safety import UnsafeJsonLdError, UnsafeRdfXmlError
@@ -1287,6 +1288,113 @@ class TestConceptSchemeSlugCollisionIsIdentifierDerived:
 
         assert ConceptScheme.objects.get(static_uri="http://a.org/colours").slug == a_slug_before
         assert ConceptScheme.objects.get(static_uri="http://b.org/colours").slug == b_slug_before
+
+
+class TestASlugAlreadyStoredIsReadBackNeverRecomputed:
+    """T041 — FR-020, decisions.md D35 (fix cycle 3): a record's slug is minted through
+    ``unique_slug_for_identifier`` only when the record does not already have one; a record
+    that does gets its stored slug read back and left alone. Before this, ``assign_unique_slug``
+    and ``resolve_scheme`` recomputed *every* record's slug on *every* import from whatever else
+    currently occupies the scheme/table — so a record's public address could move for a reason
+    that had nothing to do with its own identifier, whenever something else vacated (or newly
+    claimed) the base slug it was minted against. FR-020 requires the opposite: the same file
+    yields the same slugs on every import, "however it is traversed" — reworded here to "however
+    many times it is imported."
+    """
+
+    def test_a_vocabulary_keeps_its_suffixed_slug_after_a_colliding_sibling_is_deleted(self, db, tmp_path):
+        # (a) — two vocabularies whose identifiers both end in "#terms" import as "terms" and
+        # "terms-2"; deleting the first and re-importing the second's UNCHANGED file must not
+        # move the second's address onto the now-vacant "terms".
+        first = tmp_path / "terms_a.ttl"
+        first.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://a.example/x#terms> a skos:ConceptScheme ; skos:prefLabel "Terms A"@en .\n'
+        )
+        second = tmp_path / "terms_b.ttl"
+        second.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://b.example/x#terms> a skos:ConceptScheme ; skos:prefLabel "Terms B"@en .\n'
+        )
+        import_skos(first)
+        import_skos(second)
+        a = ConceptScheme.objects.get(static_uri="http://a.example/x#terms")
+        b = ConceptScheme.objects.get(static_uri="http://b.example/x#terms")
+        assert {a.slug, b.slug} == {"terms", "terms-2"}
+        b_slug_before = b.slug
+        b_local_url_before = b.local_url
+
+        a.delete()
+        report = import_skos(second)
+
+        b.refresh_from_db()
+        assert b.slug == b_slug_before
+        assert b.local_url == b_local_url_before
+        assert "http://b.example/x#terms" in report.updated
+
+    def test_a_concept_keeps_its_suffixed_slug_after_a_colliding_local_record_is_deleted(self, db, tmp_path):
+        # The same defect at concept granularity: an external concept collides on its base slug
+        # with a *locally authored* concept already occupying it (static_uri=None), gets
+        # suffixed on its first import, and must keep that suffix once the local record is
+        # deleted and the same file is re-imported unchanged.
+        path = tmp_path / "v4.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://v4.example/v4> a skos:ConceptScheme ; skos:prefLabel "V4"@en .\n'
+            "<http://v4.example/v4/one> a skos:Concept ; skos:inScheme <http://v4.example/v4> ; "
+            'skos:prefLabel "One"@en .\n'
+        )
+        import_skos(path)
+        scheme = ConceptScheme.objects.get(static_uri="http://v4.example/v4")
+        local_apple = Concept.objects.create(scheme=scheme, label="Apple")
+        assert local_apple.slug == "apple"
+
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://v4.example/v4> a skos:ConceptScheme ; skos:prefLabel "V4"@en .\n'
+            "<http://v4.example/v4/one> a skos:Concept ; skos:inScheme <http://v4.example/v4> ; "
+            'skos:prefLabel "One"@en .\n'
+            "<http://v4.example/v4/apple> a skos:Concept ; skos:inScheme <http://v4.example/v4> ; "
+            'skos:prefLabel "Apple V4"@en .\n'
+        )
+        import_skos(path)
+        remote_apple = Concept.objects.get(static_uri="http://v4.example/v4/apple")
+        assert remote_apple.slug == "apple-2"
+
+        local_apple.delete()
+        import_skos(path)
+
+        remote_apple.refresh_from_db()
+        assert remote_apple.slug == "apple-2"
+
+    def test_a_locally_authored_scheme_and_concept_are_matched_not_duplicated_when_first_imported(self, db, tmp_path):
+        # (c) — a locally authored scheme "Rocks" (slug "rocks", static_uri NULL) holding a
+        # locally authored concept "Granite" (slug "granite", static_uri NULL). Importing a file
+        # naming those exact composed local URIs must match both existing rows via
+        # get_by_uri's local-parse fallback, not recompute a colliding slug for either and not
+        # create a second concept row for the same real record.
+        scheme = ConceptSchemeFactory(name="Rocks")
+        assert scheme.slug == "rocks"
+        concept = ConceptFactory(scheme=scheme, label="Granite")
+        assert concept.slug == "granite"
+        base = conf.get_base_uri()
+
+        path = tmp_path / "local_rocks.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            f'<{base}/rocks> a skos:ConceptScheme ; skos:prefLabel "Rocks"@en .\n'
+            f"<{base}/rocks/granite> a skos:Concept ; skos:inScheme <{base}/rocks> ; "
+            'skos:prefLabel "Granite"@en .\n'
+        )
+        report = import_skos(path)
+
+        assert report.fatal == []
+        assert ConceptScheme.objects.filter(name="Rocks").count() == 1
+        assert Concept.objects.filter(scheme__name="Rocks", label="Granite").count() == 1
+        scheme.refresh_from_db()
+        concept.refresh_from_db()
+        assert scheme.slug == "rocks"
+        assert concept.slug == "granite"
 
 
 def _write_shared_label_file(tmp_path: Path, n: int) -> Path:
