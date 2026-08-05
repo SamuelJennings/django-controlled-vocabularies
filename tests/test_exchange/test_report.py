@@ -116,6 +116,60 @@ class TestImportReportBuckets:
         assert SetAsideReason.MAPPING not in grouped
 
 
+class TestLanguageAccount:
+    """T004 — the per-published-language account (FR-008, research.md R3): a
+    fold over :attr:`ImportReport.set_aside`, not a field accumulated beside
+    it, so the count can never disagree with the entries a caller can also
+    read directly. Membership is an explicit set of reasons —
+    ``UNCONFIGURED_LANGUAGE`` and ``VARIANT_NOT_KEPT``, nothing else — keyed
+    on ``params["language"]``, which both members put the *published* tag
+    under (T022)."""
+
+    def test_counts_every_value_not_stored_for_a_language_reason_broken_down_by_published_language(self):
+        report = ImportReport()
+        report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, "https://example.org/a", language="fr")
+        report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, "https://example.org/b", language="fr")
+        report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, "https://example.org/c", language="es")
+        assert report.language_account() == {"fr": 2, "es": 1}
+
+    def test_a_value_that_was_stored_is_not_counted(self):
+        report = ImportReport()
+        report.add_created("https://example.org/a")
+        report.add_updated("https://example.org/b")
+        assert report.language_account() == {}
+
+    def test_a_contest_loser_is_counted_under_its_own_published_tag_not_what_it_lost_to(self):
+        # FR-008/T022: en-us lost the contest to en-gb, but it is en-us — the
+        # language configuring would actually recover — that must be counted.
+        report = ImportReport()
+        report.add_set_aside(
+            SetAsideReason.VARIANT_NOT_KEPT, "https://example.org/a", language="en-us", kept_as="en-gb"
+        )
+        assert report.language_account() == {"en-us": 1}
+
+    def test_a_same_language_surplus_is_excluded(self):
+        # SURPLUS_PREFERRED_LABEL's language is a configured code the site
+        # already holds; nothing recovers a same-language duplicate (D14).
+        report = ImportReport()
+        report.add_set_aside(SetAsideReason.SURPLUS_PREFERRED_LABEL, "https://example.org/a", language="de")
+        assert report.language_account() == {}
+
+    def test_present_and_empty_after_a_run_that_left_nothing_behind(self):
+        report = ImportReport()
+        report.add_created("https://example.org/a")
+        assert report.language_account() == {}
+        assert "en" not in report.language_account()
+
+    def test_a_caller_can_rank_languages_by_what_configuring_them_would_recover(self):
+        report = ImportReport()
+        report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, "https://example.org/a", language="fr")
+        report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, "https://example.org/b", language="fr")
+        report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, "https://example.org/c", language="es")
+        # Ranked without parsing any rendered message — read as plain data.
+        ranked = sorted(report.language_account().items(), key=lambda item: -item[1])
+        assert ranked[0] == ("fr", 2)
+
+
 class TestSetAsideEntry:
     """A ``SetAsideEntry`` is a frozen record — nothing downstream can mutate
     a reason, subject or params after it has been reported."""

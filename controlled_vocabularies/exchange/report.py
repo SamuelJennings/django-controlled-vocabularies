@@ -385,3 +385,29 @@ class ImportReport:
         for entry in self.set_aside:
             grouped.setdefault(entry.reason, []).append(entry)
         return grouped
+
+    #: The :class:`SetAsideReason` members :meth:`language_account` folds over
+    #: (T004, FR-008, decisions.md D14) — explicit, not "carries a ``language``
+    #: param": :attr:`SetAsideReason.SURPLUS_PREFERRED_LABEL` carries one too,
+    #: and its language is a configured code the site already holds, not a
+    #: published tag configuring something would recover.
+    _LANGUAGE_ACCOUNT_REASONS = frozenset({SetAsideReason.UNCONFIGURED_LANGUAGE, SetAsideReason.VARIANT_NOT_KEPT})
+
+    def language_account(self) -> dict[str, int]:
+        """How many values were not stored for a language reason, broken down by
+        the published language they carried (FR-008, research.md R3).
+
+        A fold over :attr:`set_aside`, not a field accumulated beside it, so it
+        can never disagree with the entries a caller reads directly. Both
+        reasons folded here put the *published* tag under ``params["language"]``
+        (T022), so a contest loser published ``en-us`` is counted under
+        ``en-us``, never under the configured language it lost to. Present and
+        empty — never absent — after a run that left nothing behind, so a
+        caller never has to distinguish "clean run" from "feature absent".
+        """
+        account: dict[str, int] = {}
+        for entry in self.set_aside:
+            if entry.reason in self._LANGUAGE_ACCOUNT_REASONS:
+                language = entry.params["language"]
+                account[language] = account.get(language, 0) + 1
+        return account
