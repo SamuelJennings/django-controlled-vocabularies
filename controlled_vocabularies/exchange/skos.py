@@ -1392,6 +1392,16 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
                 )
                 continue
 
+            if not slugify(identifier_slug_segment(uri), allow_unicode=True):
+                # T039, decisions.md D35 (fix cycle 3): the same guard import_concepts
+                # already applies for EMPTY_SLUG — a publisher-assigned fragment or path
+                # segment made up only of characters slugify() strips. Checked ahead of the
+                # write rather than letting Collection.save()'s own refusal raise. Unlike a
+                # vocabulary, a collection is not something the rest of the file needs in
+                # order to import, so this is set aside rather than fatal.
+                self.report.add_set_aside(SetAsideReason.EMPTY_SLUG, subject=uri)
+                continue
+
             row.scheme = self.target_scheme
             row.static_uri = uri
             default_language = self.target_scheme.effective_default_language

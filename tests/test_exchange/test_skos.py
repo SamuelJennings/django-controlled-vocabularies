@@ -2996,6 +2996,98 @@ class TestCollectionSlugFollowsThePublishedIdentifier:
         assert collection.slug == "silica-bearing-rocks"
 
 
+class TestUnusableCollectionSlugIsSetAsideNotCrashed:
+    """T039 — FR-011/FR-014, decisions.md D35 (fix cycle 3): T038 made a collection's slug
+    derive from its published identifier's own segment, exactly like a concept's, but the
+    concept-side ``EMPTY_SLUG`` guard (``import_concepts``'s pre-write
+    ``slugify(identifier_slug_segment(uri))`` check) was not mirrored for a collection — so an
+    identifier segment made up only of characters ``slugify()`` strips let
+    ``CollectionImporter.import_collections`` write an empty slug straight onto the row, and
+    ``Collection.save()``'s own manual-slug refusal (``An explicit slug must not be empty.``)
+    escaped uncaught, rolling back the whole run (SC-024). Guarded the same way, ahead of the
+    write: the collection is set aside under ``EMPTY_SLUG`` and the rest of the file — including
+    a concept in the very same file — still imports. Unlike a vocabulary, a collection is not
+    something the rest of the file needs in order to import, so this is a set-aside, not fatal.
+    """
+
+    def test_an_identifier_segment_that_slugifies_to_empty_is_set_aside_and_named(self, db, tmp_path):
+        path = tmp_path / "unusable_collection_slug.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://c.org/vocab3/> a skos:ConceptScheme ; skos:prefLabel "Symbols"@en .
+
+            <http://c.org/vocab3/ok> a skos:Concept ;
+                skos:inScheme <http://c.org/vocab3/> ;
+                skos:prefLabel "OK"@en .
+
+            <http://c.org/vocab3/#±> a skos:Collection ;
+                skos:prefLabel "Assorted symbols"@en ;
+                skos:member <http://c.org/vocab3/ok> .
+            """
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.EMPTY_SLUG]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://c.org/vocab3/#±"
+        assert not Collection.objects.filter(static_uri="http://c.org/vocab3/#±").exists()
+
+    def test_the_rest_of_the_file_still_imports(self, db, tmp_path):
+        path = tmp_path / "unusable_collection_slug2.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://c.org/vocab4/> a skos:ConceptScheme ; skos:prefLabel "Symbols"@en .
+
+            <http://c.org/vocab4/ok> a skos:Concept ;
+                skos:inScheme <http://c.org/vocab4/> ;
+                skos:prefLabel "OK"@en .
+
+            <http://c.org/vocab4/#±> a skos:Collection ;
+                skos:prefLabel "Assorted symbols"@en ;
+                skos:member <http://c.org/vocab4/ok> .
+            """
+        )
+        import_skos(path)
+        assert ConceptScheme.objects.filter(static_uri="http://c.org/vocab4/").exists()
+        assert Concept.objects.filter(static_uri="http://c.org/vocab4/ok").exists()
+
+
+class TestCollectionsCollidingOnlyByNameNoLongerCrash:
+    """T039(a) — decisions.md D35 (fix cycle 3): before T038, two collections whose *names*
+    slugified to the same value (e.g. ``'Rock Types'@en`` and ``'rock types'@en``) raised an
+    uncaught ``ValidationError`` from ``Collection.save()``'s own colliding-slug refusal and
+    stored nothing at all — zero schemes, zero concepts. Since T038 a collection's slug is
+    identifier-derived, so two distinct identifiers never produce one slug and there is no
+    second collision mechanism to add (D35 — "assert that rather than adding a second
+    mechanism"); this asserts the already-resolved behaviour directly rather than re-deriving a
+    fix :class:`TestCollectionSlugFollowsThePublishedIdentifier` already proves.
+    """
+
+    def test_two_collections_sharing_a_name_but_not_an_identifier_both_import(self, db, tmp_path):
+        path = tmp_path / "collection_name_collision.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://c.org/vocab5/> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .
+
+            <http://c.org/vocab5/collection/a> a skos:Collection ; skos:prefLabel "Rock Types"@en .
+            <http://c.org/vocab5/collection/b> a skos:Collection ; skos:prefLabel "rock types"@en .
+            """
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        assert report.set_aside == []
+        a = Collection.objects.get(static_uri="http://c.org/vocab5/collection/a")
+        b = Collection.objects.get(static_uri="http://c.org/vocab5/collection/b")
+        assert a.slug != b.slug
+        assert {a.slug, b.slug} == {"a", "b"}
+
+
 class TestCollectionsAndMembership:
     """T027 — FR-012: a ``skos:Collection`` lands as a ``Collection`` holding
     the identifier the file gave it, inside the vocabulary being imported,
