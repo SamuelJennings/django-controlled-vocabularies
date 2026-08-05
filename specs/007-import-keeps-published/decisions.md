@@ -1694,3 +1694,25 @@ reaches this branch either way.
 
 **Revisit if:** never — the docstring's contract and the code now agree unconditionally, so there
 is nothing left to reconcile if a future call site ever does pass a small `max_length`.
+
+## D64 — T054 (fix cycle 5): an empty language tag renders as a phrase, not empty quotes,
+fixed at the one boundary every entry's message passes through
+
+SEC-406 (round 4, low): `SkosGraph.first_literal_with_language` reports `""` for an untagged
+literal (D52), deliberately — the two accessors must never disagree about *which* literal, and an
+untagged one simply has no tag to report. When that value is over-long, `winning_tag` carries `""`
+into `SetAsideReason.VALUE_TOO_LONG` (from either the scheme or the collection path) or
+`FatalReason.VOCABULARY_NAME_UNUSABLE`, and the rendered message reads "...its published name in
+'' is longer than..." — nothing unsafe or leaked (`craft-security`'s own review confirmed only the
+URI and a grammar-constrained language tag ever reach a template), just uninformative.
+
+**Fixed once, at `SetAsideEntry.render()`/`FatalFinding.render()`'s shared parameter-building
+step**, not at each of the two call sites that can produce an empty tag: a new module-level
+`_render_params(subject, params)` substitutes a translatable `"no language tag"` phrase for an
+empty `"language"` value before formatting. Both `render()` methods (and `NormalizedEntry.render()`,
+for symmetry, though `LANGUAGE_SUBSTITUTION` cannot currently receive an empty tag) call it instead
+of building the `%`-format dict inline. A future reason carrying `language` gets the same
+treatment automatically rather than needing its own guard.
+
+**Revisit if:** never — one substitution point for every entry type, matching the "one computation,
+one shape" rule the report module's other shared logic already follows.

@@ -23,6 +23,22 @@ from django.db.models import TextChoices
 from django.utils.functional import Promise
 from django.utils.translation import gettext_lazy as _
 
+#: SEC-406, decisions.md D64 (fix cycle 5): SkosGraph.first_literal_with_language reports "" for
+#: an untagged literal (D52) — a caller naming that value in a %(language)s placeholder would
+#: otherwise render "...in ''...", which leaks nothing but tells a curator nothing either. Every
+#: render() below substitutes this phrase for an empty language, at the one boundary all of a
+#: report's messages pass through, rather than each call site guarding its own params.
+_NO_LANGUAGE_TAG = _("no language tag")
+
+
+def _render_params(subject: str, params: dict[str, str]) -> dict[str, str]:
+    """``params`` merged with ``subject``, substituting :data:`_NO_LANGUAGE_TAG` for an empty
+    ``language`` value (SEC-406, decisions.md D64) — shared by every entry's own ``render()``."""
+    merged = {"subject": subject, **params}
+    if merged.get("language") == "":
+        merged["language"] = str(_NO_LANGUAGE_TAG)
+    return merged
+
 
 class SetAsideReason(TextChoices):
     """The closed vocabulary of reasons an import cannot store something (FR-014).
@@ -227,7 +243,7 @@ class SetAsideEntry:
 
     def render(self) -> str:
         """This entry's message in the caller's active language (Article XII)."""
-        return str(self.reason.template) % {"subject": self.subject, **self.params}
+        return str(self.reason.template) % _render_params(self.subject, self.params)
 
 
 class FatalReason(TextChoices):
@@ -353,7 +369,7 @@ class FatalFinding:
 
     def render(self) -> str:
         """This entry's message in the caller's active language (Article XII)."""
-        return str(self.reason.template) % {"subject": self.subject, **self.params}
+        return str(self.reason.template) % _render_params(self.subject, self.params)
 
 
 class NormalizedReason(TextChoices):
@@ -416,7 +432,7 @@ class NormalizedEntry:
 
     def render(self) -> str:
         """This entry's message in the caller's active language (Article XII)."""
-        return str(self.reason.template) % {"subject": self.subject, **self.params}
+        return str(self.reason.template) % _render_params(self.subject, self.params)
 
 
 @dataclass

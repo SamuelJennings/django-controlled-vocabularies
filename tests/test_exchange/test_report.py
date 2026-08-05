@@ -198,6 +198,34 @@ class TestSetAsideEntry:
             entry.subject = "changed"
 
 
+class TestAnEmptyLanguageTagRendersAsAPhraseNotAnEmptyQuote:
+    """SEC-406, decisions.md D64 (fix cycle 5): ``SkosGraph.first_literal_with_language`` reports
+    ``""`` (D52) for an untagged literal. When that value is over-long, ``winning_tag`` carries
+    ``""`` straight into ``VALUE_TOO_LONG``'s or ``VOCABULARY_NAME_UNUSABLE``'s ``%(language)s``
+    placeholder, rendering "...in ''..." — nothing unsafe or leaked, just uninformative.
+    """
+
+    def test_value_too_long_with_an_untagged_literal_names_no_language_tag_not_empty_quotes(self):
+        entry = SetAsideEntry(
+            reason=SetAsideReason.VALUE_TOO_LONG,
+            subject="https://example.org/vocab/rocks",
+            params={"language": ""},
+        )
+        rendered = entry.render()
+        assert "''" not in rendered
+        assert "no language tag" in rendered
+
+    def test_vocabulary_name_unusable_with_an_untagged_literal_names_no_language_tag_not_empty_quotes(self):
+        finding = FatalFinding(
+            reason=FatalReason.VOCABULARY_NAME_UNUSABLE,
+            subject="https://example.org/vocab/rocks",
+            params={"language": ""},
+        )
+        rendered = finding.render()
+        assert "''" not in rendered
+        assert "no language tag" in rendered
+
+
 class TestSetAsideReasonVocabulary:
     """Every member of the closed ``SetAsideReason`` vocabulary is lazily
     translatable, carries a named ``%(subject)s`` placeholder, and renders
