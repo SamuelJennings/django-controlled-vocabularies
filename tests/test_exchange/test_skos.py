@@ -3445,7 +3445,7 @@ def _coverage_note_covered(
     return any(
         entry.subject == subject_uri
         and entry.params.get("language") == language
-        and entry.reason in (SetAsideReason.UNCONFIGURED_LANGUAGE, SetAsideReason.VALUE_TOO_LONG)
+        and entry.reason is SetAsideReason.UNCONFIGURED_LANGUAGE
         for entry in report.set_aside
     )
 
