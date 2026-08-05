@@ -1307,3 +1307,30 @@ of discarding the tag.
 
 **Revisit if:** never — the same shape `_localized_literal` already gives its own matched branch
 (pairing a value with the tag that won it), extended to the branch where nothing won.
+
+## D53 — T048 (fix cycle 4): FR-020's owed tests for `Collection`, no production change
+
+CORR-301/CORR-302/CORR-304 named a test gap, not a code defect — the round-three review's own
+mutation testing already confirmed the guarded code is correct on all three record kinds; nothing
+in `skos.py` or `models.py` changes for this task. Three additions, all test-only:
+
+- `TestASlugAlreadyStoredIsReadBackNeverRecomputed` gains
+  `test_a_collection_keeps_its_suffixed_slug_after_a_colliding_sibling_is_deleted`, mirroring the
+  scheme case exactly (CORR-301): two collections in one vocabulary colliding on their identifier's
+  last segment, one deleted, the other's unchanged file re-imported.
+- Its existing `test_a_locally_authored_scheme_and_concept_are_matched_not_duplicated_when_first_imported`
+  is extended in place into
+  `test_a_locally_authored_scheme_concept_and_collection_are_matched_not_duplicated_when_first_imported`
+  (CORR-302): a third, locally authored record (a `Collection`) is added to the fixture, and the
+  assertions grow to check `slug_is_manual is True` on all three matched rows and that each
+  address survives an unrelated rename afterward. This is a **rename and extension of a test from
+  fix cycle 3**, not a new parallel test — CORR-302's own recommendation asked for exactly this
+  ("extend ... with a third record"), and every assertion the original test made is still made,
+  unweakened; only the fixture and the assertions grow.
+- `TestCollectionOverridableSlug` gains `test_explicit_slug_that_is_empty_or_malformed_is_refused`
+  (CORR-304/ARCH-303), mirroring `TestConceptOverridableSlug`'s existing malformed-slug coverage
+  and additionally covering the empty-slug raise neither model had a test for.
+
+**Revisit if:** never — these close the "two of three kinds" and "matched vs. created" shapes
+this feature has now hit twice (round two's dominant finding, per CORR-301's own framing), and no
+behaviour changed underneath them.

@@ -1368,16 +1368,61 @@ class TestASlugAlreadyStoredIsReadBackNeverRecomputed:
         remote_apple.refresh_from_db()
         assert remote_apple.slug == "apple-2"
 
-    def test_a_locally_authored_scheme_and_concept_are_matched_not_duplicated_when_first_imported(self, db, tmp_path):
+    def test_a_collection_keeps_its_suffixed_slug_after_a_colliding_sibling_is_deleted(self, db, tmp_path):
+        # CORR-301 — the same (a) shape at collection granularity, the third record kind: two
+        # collections in one vocabulary whose identifiers both end in "#colours" import as
+        # "colours" and "colours-2"; deleting the first and re-importing a file describing only
+        # the second, UNCHANGED, must not move the second's address onto the now-vacant
+        # "colours". Would fail (moving b to "colours") if CollectionImporter's own `if
+        # created:` guard around minting were removed or never existed.
+        path = tmp_path / "collections_collide.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/collcollide> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            '<http://pub.example/a#colours> a skos:Collection ; skos:prefLabel "Colours A"@en .\n'
+            '<http://pub.example/b#colours> a skos:Collection ; skos:prefLabel "Colours B"@en .\n'
+        )
+        import_skos(path)
+        a = Collection.objects.get(static_uri="http://pub.example/a#colours")
+        b = Collection.objects.get(static_uri="http://pub.example/b#colours")
+        assert {a.slug, b.slug} == {"colours", "colours-2"}
+        b_slug_before = b.slug
+        b_local_url_before = b.local_url
+
+        a.delete()
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/collcollide> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            '<http://pub.example/b#colours> a skos:Collection ; skos:prefLabel "Colours B"@en .\n'
+        )
+        report = import_skos(path)
+
+        b.refresh_from_db()
+        assert b.slug == b_slug_before
+        assert b.local_url == b_local_url_before
+        assert "http://pub.example/b#colours" in report.updated
+
+    def test_a_locally_authored_scheme_concept_and_collection_are_matched_not_duplicated_when_first_imported(
+        self, db, tmp_path
+    ):
         # (c) — a locally authored scheme "Rocks" (slug "rocks", static_uri NULL) holding a
-        # locally authored concept "Granite" (slug "granite", static_uri NULL). Importing a file
-        # naming those exact composed local URIs must match both existing rows via
-        # get_by_uri's local-parse fallback, not recompute a colliding slug for either and not
-        # create a second concept row for the same real record.
+        # locally authored concept "Granite" (slug "granite") and a locally authored collection
+        # "Igneous" (slug "igneous"), all static_uri NULL. Importing a file naming those exact
+        # composed local URIs must match all three existing rows via get_by_uri's local-parse
+        # fallback, not recompute a colliding slug for any of them and not create a second row
+        # for any of them. CORR-302: extended with the collection (T048) to also assert that a
+        # record the importer *matched* rather than created gets pinned (`slug_is_manual`) on
+        # all three kinds — D46 names this as the reason `set_slug`/direct attribute assignment
+        # became the write path even for a matched row — and that a subsequent local rename
+        # then leaves every address exactly where it was. Would fail (an address moving after
+        # its own unrelated rename) if any of the three `slug_is_manual = True` assignments on
+        # the matched-row path were ever skipped.
         scheme = ConceptSchemeFactory(name="Rocks")
         assert scheme.slug == "rocks"
         concept = ConceptFactory(scheme=scheme, label="Granite")
         assert concept.slug == "granite"
+        collection = CollectionFactory(scheme=scheme, name="Igneous")
+        assert collection.slug == "igneous"
         base = conf.get_base_uri()
 
         path = tmp_path / "local_rocks.ttl"
@@ -1386,16 +1431,39 @@ class TestASlugAlreadyStoredIsReadBackNeverRecomputed:
             f'<{base}/rocks> a skos:ConceptScheme ; skos:prefLabel "Rocks"@en .\n'
             f"<{base}/rocks/granite> a skos:Concept ; skos:inScheme <{base}/rocks> ; "
             'skos:prefLabel "Granite"@en .\n'
+            f'<{base}/rocks/collection/igneous> a skos:Collection ; skos:prefLabel "Igneous"@en .\n'
         )
         report = import_skos(path)
 
         assert report.fatal == []
         assert ConceptScheme.objects.filter(name="Rocks").count() == 1
         assert Concept.objects.filter(scheme__name="Rocks", label="Granite").count() == 1
+        assert Collection.objects.filter(scheme__name="Rocks", name="Igneous").count() == 1
         scheme.refresh_from_db()
         concept.refresh_from_db()
+        collection.refresh_from_db()
         assert scheme.slug == "rocks"
         assert concept.slug == "granite"
+        assert collection.slug == "igneous"
+        assert scheme.slug_is_manual is True
+        assert concept.slug_is_manual is True
+        assert collection.slug_is_manual is True
+
+        scheme_url_before, concept_url_before, collection_url_before = (
+            scheme.local_url,
+            concept.local_url,
+            collection.local_url,
+        )
+        scheme.name = "Rock Types"
+        scheme.save()
+        concept.label = "Granitic Rock"
+        concept.save()
+        collection.name = "Igneous Rocks"
+        collection.save()
+
+        assert scheme.local_url == scheme_url_before
+        assert concept.local_url == concept_url_before
+        assert collection.local_url == collection_url_before
 
 
 class TestUniqueSlugForIdentifierTruncationNeverSlicesNegative:

@@ -1954,6 +1954,25 @@ class TestCollectionOverridableSlug:
             other.set_slug("igneous-rocks")
         assert scheme.collections.filter(slug="igneous-rocks").count() == 1
 
+    @pytest.mark.django_db
+    def test_explicit_slug_that_is_empty_or_malformed_is_refused(self, scheme):
+        """T048 — CORR-304/ARCH-303: ``Collection.save()``'s manual-slug branch carries the same
+        two refusals ``Concept.save()``'s identical branch already has tests for (empty, and one
+        ``validate_unicode_slug`` rejects) — models.py:1443-1457 — but nothing had ever called
+        ``Collection.set_slug()`` with a value that reaches either raise. Would pass with no
+        ``ValidationError`` if either raise, or the ``validate_unicode_slug`` call, were removed.
+        """
+        collection = Collection.objects.create(scheme=scheme, name="Igneous Rocks")
+        with pytest.raises(ValidationError):
+            collection.set_slug("")
+        with pytest.raises(ValidationError):
+            collection.set_slug("foo/bar")
+        with pytest.raises(ValidationError):
+            collection.set_slug("has spaces")
+        # A valid explicit slug still works (regression guard).
+        collection.set_slug("ig-1")
+        assert collection.slug == "ig-1"
+
 
 class TestOrderedCollection:
     """US-2 — A collection with a deliberate order.
