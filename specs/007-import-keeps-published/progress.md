@@ -35,3 +35,44 @@ Append-only log of stage transitions and gate outcomes.
   language, the predominant variant winning a contest, the vocabulary default language resolving by
   the same rule, and no compatibility path owed. Sam also flagged that the S3R design-review gate
   is newly added and this run is its first trigger, to be watched. Proceeding to S3 PLAN.
+
+## 2026-08-05
+
+- **S3 PLAN** — `plan.md`, `research.md` R1–R5, `tasks.md` T001–T020, ledger schema-valid, committed
+  as `28f69e6`. One new `LanguageMatcher` class, four changed methods in `skos.py`, no model, no
+  migration, no new dependency. Research R1 measured and rejected Django's own
+  `get_supported_language_variant`: it refuses any language Django ships no translation catalog for,
+  *including ones the project declares in `LANGUAGES`*, so a site configured for `sga` would store
+  nothing.
+- **S3R DESIGN REVIEW — first live run of the gate.** `check-skills --role design_reviewer` green
+  before dispatch. Three reviewers in parallel, one lens each, against the plan with no diff in
+  existence. `check-receipts` green on all three returned reports, all three schema-valid against
+  `review-findings.schema.json`.
+  - **Verdict `request_changes` on all three lenses.** 22 findings: 4 high (all `verified`), 8
+    medium, 10 low. Every high was re-checked against the code before it was accepted, and all four
+    held.
+  - **SPEC-001** — the winner rule was assigned to one of the two places that compute a winner, so
+    `Concept.label` and the surplus report could disagree and the report would contradict the
+    database. Fixed by moving the rule onto `LanguageMatcher` (new T021) and having both call sites
+    read it.
+  - **SPEC-002** — reusing `SURPLUS_PREFERRED_LABEL` for contest losers loaded one reason with two
+    populations FR-008 needs kept apart, and rendered a factually false sentence for the new one.
+    Fixed by a dedicated set-aside reason (new T022) and an explicit fold membership in T004.
+  - **ARCH-001** — the plan's "four call sites" missed a fifth raw-tag comparison at `skos.py:543`,
+    which would have crashed the feature's own headline scenario with an uncaught `ValidationError`.
+    Fixed in T008; one comparison changes operand.
+  - **SEC-001** — `configured_language_codes()` returns a `set`, and Django's default `LANGUAGES`
+    contains one ambiguous base (`zh-hans` / `zh-hant`), so a `zh`-tagged file would store under a
+    script chosen by per-process hash order. Verified independently: five fresh processes returned
+    both orders. Fixed by a stated lexicographic tie-break over an ordered sequence (T001, D15).
+  - **Findings that removed work:** the `en`-published fixture in T005 was redundant against 51
+    existing `@en` fixtures, and T002's second constructor was deleted in favour of one method on
+    `SkosGraph`. No task was found without spec or constitution provenance.
+  - Mediums and lows applied in the same pass: fixture paths corrected, the predominance denominator
+    stated, the returned code's spelling pinned, FR-009's identity guarantee scoped, the FR-010
+    invariant test extended to Django's default `LANGUAGES`, README obligation added, and one
+    Complexity Tracking row added for the report bucket that now grows on the success path.
+  - Three findings were spec-adjacent rather than plan faults and are recorded as D15, D16 and D17
+    rather than resolved silently. None changes an approved behaviour, and all three are named in
+    the plan notification for veto.
+  - `design_review_cycles` 1 of 1 used.

@@ -9,37 +9,84 @@ dispatchable in parallel — they cut across the same four methods of `exchange/
 
 ## Phase 0 — Foundational (sequential, blocks every story)
 
-- **T001** — `exchange/languages.py`: the `LanguageMatcher` class and the small frozen result it
-  returns (the configured language a tag resolved to, and whether that was the tag the file used).
-  Construction takes the configured languages and the per-base-language predominance ranking, and
-  the instance is immutable afterwards. Resolution rules, all in this task: case-insensitive
-  comparison; an exact match always wins (FR-002); otherwise the least specific configured language
-  sharing the base (FR-002); otherwise no match (FR-001). Tests: every rule above as its own case,
-  plus **the `sga` regression** — a site configured for a language Django ships no translation
-  catalog for still resolves it — which is the test that stops a later maintainer replacing this
-  with `django.utils.translation.get_supported_language_variant` (`research.md` R1). The docstring
-  states that rejection and why, at the code.
-- **T002** — The predominance pre-pass: a constructor path that builds a `LanguageMatcher` from a
-  parsed graph, counting how often each published tag appears across the vocabulary's labels so a
-  contest can be settled by the variant it predominantly publishes in (FR-003, `research.md` R2).
-  Tests: the ranking reflects the whole file rather than any one concept, ties resolve by language
-  code, and a file whose predominant variant is a language the site does not hold at all decides
-  nothing about which configured variant wins (spec Edge Cases).
+- **T001** — `exchange/languages.py`: the `LanguageMatcher` class and the resolution result it
+  returns. Construction takes the configured languages and the per-base-language predominance
+  ranking, and the instance is immutable afterwards. Resolution rules, all in this task:
+  - Comparison is case-insensitive, and **the value returned is the configured code exactly as
+    declared in `settings.LANGUAGES`**. Case folding is for comparison only, never for the returned
+    value — a project declaring `en-GB` that got `en-gb` back would raise `ValidationError` from
+    `ConceptLabel.clean` on every write and fail the whole import.
+  - An exact match always wins (FR-002); otherwise the least specific configured language sharing
+    the base (FR-002); otherwise no match (FR-001).
+  - **Where two configured candidates are equally specific and neither matches exactly, the lower
+    code wins, ordered lexicographically.** Resolution is computed over a deterministically ordered
+    sequence of configured codes, **never over the `set` that `configured_language_codes()` returns
+    today** — that set's iteration order varies per process, and Django's 99-language default
+    contains exactly one ambiguous base (`zh-hans` / `zh-hant`), so a file tagged `zh` would
+    otherwise land under a different script on different runs.
+  - The result carries the resolved configured code, and whether the match was exact is **derived**
+    from it and the input rather than stored, so the pair cannot disagree with itself.
+
+  Tests: every rule above as its own case; the case-mismatch case (a configured `en-GB` receiving a
+  file's `en-gb`); the two-equally-specific-candidates case; and **the `sga` regression** — a site
+  configured for a language Django ships no translation catalog for still resolves it — which is the
+  test that stops a later maintainer replacing this with
+  `django.utils.translation.get_supported_language_variant` (`research.md` R1). The docstring states
+  that rejection and why, at the code.
+- **T002** — The predominance count and the wiring (FR-003, `research.md` R2 as revised at S3R).
+  One read-only method on `SkosGraph` returning how often each published tag appears across the
+  vocabulary's **`skos:prefLabel` values only** — that denominator, and no other, because it is the
+  count `determine_default_language` already performs and the only one a contest can turn on (D4,
+  D5). `LanguageMatcher` takes `(configured_languages, counts)` and **imports nothing from rdflib**;
+  the graph stays behind `SkosGraph`, which is this codebase's RDF boundary. `SkosImporter.run`
+  builds the matcher once from those counts and passes it to `SchemeResolver` and `ConceptImporter`
+  as a constructor argument. Tests: the ranking reflects the whole file rather than any one concept,
+  ties resolve by language code, a file whose predominant variant is a language the site does not
+  hold at all decides nothing about which configured variant wins (spec Edge Cases), and the matcher
+  is constructible from a plain dict with no graph in sight.
+- **T021** — The winner rule, once, on `LanguageMatcher` (FR-002, FR-003; S3R SPEC-001 and ARCH-005).
+  A method taking the candidate `(published tag, value)` pairs for one resolved configured language
+  and returning the winner and the losers: exact-match-first, then predominance, then the
+  lexicographic tie-break within one tag. It lives here rather than in `import_labels` because
+  **two call sites need it** — `preferred_label_in` chooses `Concept.label` and `import_labels`
+  computes `preferred_kept`, and today they agree only by the coincidence that both are
+  `sorted(...)[0]`. Tests: the rule's three tiers as their own cases, and the property both call
+  sites depend on — for one candidate set the method returns one winner, so the two agree by
+  construction rather than by coincidence. Keeping it here also keeps the predominance ranking
+  private to the matcher.
 - **T003** — `report.py`: `NormalizedReason.LANGUAGE_SUBSTITUTION` with its translatable,
   named-placeholder template, naming the published tag and the language the value was stored under
   (FR-006, Article XII). Tests: the entry is inspectable as data, renders in the caller's active
   language, and sits in the normalised bucket rather than the set-aside one, so a caller filtering
   for "things that did not make it in" still gets a truthful answer (`research.md` R4).
+- **T022** — `report.py`: a second `SetAsideReason` member for a **variant contest loser**, with its
+  own translatable, named-placeholder template naming the published tag and the configured language
+  the value lost to (FR-005, Article XII; S3R SPEC-002). It is not `SURPLUS_PREFERRED_LABEL`, which
+  means *more than one preferred label in one and the same language* and whose template says exactly
+  that — a sentence that is factually false for a value published `en-us` and beaten by an `en-gb`
+  sibling, since the file carries only one `en-us` preferred label. The two also have different
+  remedies, which is what FR-008's account exists to tell apart: nothing recovers a same-language
+  duplicate, while configuring its published tag recovers a contest loser. Tests: the rendered
+  message is true of the case it names, the entry carries the published tag, and
+  `SURPLUS_PREFERRED_LABEL`'s existing meaning and message are unchanged.
 - **T004** — `report.py`: the per-published-language account (FR-008) as a method folding
-  `set_aside`, not a field accumulated beside it (`research.md` R3). Tests: counts cover every value
-  not stored for a language reason and no value that was stored; the result is present and empty
+  `set_aside`, not a field accumulated beside it (`research.md` R3). **The fold's membership is an
+  explicit set of `SetAsideReason` members, not a heuristic** — `UNCONFIGURED_LANGUAGE` and the new
+  contest-loser reason T022 adds, and nothing else. Deciding membership by "carries a `language`
+  param" is wrong twice over: `SURPLUS_PREFERRED_LABEL` carries one and is a same-language duplicate
+  no configuration change recovers, and its `language` is a configured code rather than a published
+  one. Tests: counts cover every value not stored for a language reason and no value that was
+  stored; **a same-language surplus is excluded from the account**; the result is present and empty
   after a run that left nothing behind; a caller can rank languages by what configuring them would
   recover without parsing any rendered message.
-- **T005** — Fixture vocabularies under `tests/fixtures/` (FR-015): one vocabulary carrying several
-  variants of one base language across preferred labels, alternative labels, and notes; one
-  published in a single variant only, for the both-directions scenarios; and one declaring itself in
-  a variant of a configured language, for the default-language path. Test: each is discoverable from
-  the suite and parses.
+- **T005** — Fixture vocabularies under `tests/fixtures/skos/` (FR-015), alongside those #50 shipped
+  there: one carrying several variants of one base language across preferred labels, alternative
+  labels, and notes; one published as `en-gb` only, for the specific-to-general direction (SC-002);
+  and one declaring itself in a variant of a configured language, for the default-language path
+  (SC-010). **The `en`-only fixture is not written** — 51 existing fixtures in that directory are
+  tagged `@en` and the spec's Assumptions already reuse #50's fixtures where they serve, so SC-001's
+  direction names an existing file. Check the same way before writing the `de-at` fixture: 9 `@de`
+  values already exist in that directory. Test: each is discoverable from the suite and parses.
 
 ## Phase US-1 — A vocabulary published in a variant of the site's language imports (#69, P1)
 
@@ -48,20 +95,36 @@ dispatchable in parallel — they cut across the same four methods of `exchange/
   site configured for `de` resolves its default language to `de`, and every concept is named rather
   than set aside for having no label in the default language — the failure `decisions.md` D9
   describes.
-- **T007** — `SkosGraph.preferred_label_in` selects `Concept.label` through the matcher (call site
-  2). Tests: a concept whose only preferred label is a variant of the default language still names
-  the concept and derives its slug the way an exact match would (spec Edge Cases).
-- **T008** — `ConceptImporter.import_labels` and `_import_notes` stop testing set membership and
-  resolve instead, storing a matched value under its resolved configured language (FR-001, call
-  sites 3 and 4). Tests: the two directions of SC-001 and SC-002 end to end from a fixture file; a
-  tag differing only in case is an exact match (SC-004); a tag sharing no base language with any
-  configured language is still stored nowhere and still named in the report (SC-003).
+- **T007** — `SkosGraph.preferred_label_in` selects `Concept.label` through the matcher, **calling
+  T021's winner method** rather than choosing by any rule of its own (call site 2). Tests: a concept
+  whose only preferred label is a variant of the default language still names the concept and derives
+  its slug the way an exact match would (spec Edge Cases); and, for a candidate set carrying both an
+  exact match and a predominant variant, the value stored on `Concept.label` is the one T021 names —
+  which is what makes SC-005 and SC-006 achievable at all, since both land on `Concept.label`.
+- **T008** — `ConceptImporter.import_labels` and `_import_notes` stop comparing raw published tags
+  and resolve instead, storing a matched value under its resolved configured language (FR-001, call
+  sites 3, 4 and 5). **Both comparisons in `import_labels` change, not just the set-membership one**:
+  the default-language skip at `skos.py:543` currently reads `language == default_language` with a
+  raw published tag on the left and a resolved configured language on the right, so on the feature's
+  own headline scenario the skip does not fire and the value reaches
+  `concept.add_label(language="de", kind=PREFERRED)`, which raises an uncaught `ValidationError` from
+  `models.py:970` and ends the run. The comparison must use the resolved language. Tests: the two
+  directions of SC-001 and SC-002 end to end from a fixture file; **a `de-at`-published vocabulary on
+  a `de`-configured site imports its preferred labels without raising** (SC-010's write half, which
+  T006 and T007 stop short of); a tag differing only in case is an exact match (SC-004); a tag
+  sharing no base language with any configured language is still stored nowhere and still named in
+  the report (SC-003).
 - **T009** — Every value stored under a language other than its published tag is reported as a
   substitution (FR-006). Tests: the substitution is named, is distinguishable from a value that was
-  not stored at all, and does not appear in the not-stored account.
+  not stored at all, and does not appear in the not-stored account. *(This task delivers US-2's
+  SC-009 while sitting in Phase US-1, where the substitution first becomes reachable. Phase US-2 does
+  not repeat it.)*
 - **T010** — The invariant test for FR-010: across every matching path in this feature, no content is
   stored in any language absent from the site's configuration (SC-017). This is the test that would
-  fail if a later change made the matcher permissive.
+  fail if a later change made the matcher permissive. **One case runs under Django's default
+  `LANGUAGES` rather than `@override_settings`**, because the ordinary consuming project declares no
+  `LANGUAGES` and inherits a 99-language list — so the behaviour a real consumer gets is pinned,
+  not only the behaviour a test author configured.
 
 ## Phase US-2 — A curator can see what was left behind and what it would take to keep it (#70, P1)
 
@@ -75,12 +138,19 @@ dispatchable in parallel — they cut across the same four methods of `exchange/
 ## Phase US-3 — Competing variants resolve the same way every time (#71, P2)
 
 - **T013** — The contest in `import_labels`: `preferred_by_language` keys on the resolved configured
-  language rather than the raw tag, and the winner is decided exact-match-first, then predominance,
-  then the existing lexicographic tie-break within one tag (FR-003, call site 3). Tests: SC-005 and
-  SC-006, including that importing the same file twice stores the same value both times.
-- **T014** — Contest losers are set aside and reported with their **published** tag, reusing
-  `SetAsideReason.SURPLUS_PREFERRED_LABEL` rather than adding a near-duplicate reason (FR-005,
-  `research.md` R4). Tests: SC-008, and that the run still succeeds.
+  language rather than the raw tag, and the winner comes from **T021's method** rather than a second
+  implementation of the rule (FR-003, call site 3). `preferred_kept` and `preferred_label_in` must
+  therefore agree by construction, not by coincidence — assert that directly. Tests: SC-005 and
+  SC-006, including that importing the same file twice stores the same value both times; and the
+  spec Edge Case with no criterion of its own — **a concept whose exact-match preferred label is
+  empty or slug-unusable is set aside on its own merits and the variant sibling is not promoted into
+  its place**, which is the natural thing for an implementer to write and the opposite of what the
+  spec says.
+- **T014** — Contest losers are set aside and reported with their **published** tag, through
+  **T022's** dedicated reason (FR-005, `research.md` R4 as revised at S3R). Tests: SC-008; the run
+  still succeeds; and a contest loser is distinguishable in the data from a same-language duplicate
+  reported under `SURPLUS_PREFERRED_LABEL`, since only the first is recoverable by configuring a
+  language.
 - **T015** — The asymmetry, as its own task because it is the most likely thing to get wrong
   (FR-004): alternative labels, hidden labels, and notes have no per-language cardinality limit, so
   several variants resolving to one configured language are **all** stored and none set aside
@@ -92,9 +162,15 @@ dispatchable in parallel — they cut across the same four methods of `exchange/
 - **T016** — The additive re-import guarantee (FR-009): import under one configured language,
   reconfigure for two, re-import the same file, and assert the new language's values are stored for
   concepts already present (SC-014). Test drives the whole path from files on disk.
-- **T017** — The nothing-else-changed half of the same guarantee (SC-015, SC-016): every identifier,
-  local address, and database identity is unchanged across that re-import, content in the languages
-  already stored is unchanged, and the newly stored values are no longer counted as left behind.
+- **T017** — The nothing-else-changed half of the same guarantee (SC-015, SC-016). **Scope the
+  identity assertion explicitly:** it covers `Concept`, `ConceptScheme` and `Collection` records —
+  URI, `static_uri`, slug, local URL, and pk — and **not** `ConceptLabel` / `ConceptNote` rows, which
+  #50 deletes and recreates on every run by design (`skos.py:522`). Written literally over all
+  records the test cannot pass, and the wrong fix — stopping the full replace — is a scope expansion
+  this feature never asked for. What is asserted about label and note rows is their **values**: the
+  content stored in languages already held is unchanged, and the newly stored values are no longer
+  counted as left behind. That is FR-009's second clause, and it is the guarantee the requirement is
+  for.
 
 ## Phase US-5 — Translatable messages, deliberate indexing, and reusable test material (#73, P3)
 
@@ -103,7 +179,13 @@ dispatchable in parallel — they cut across the same four methods of `exchange/
 - **T019** — `CONTEXT.md` gains base language, variant, and substitution as glossary entries
   (FR-014, SC-019), so the vocabulary of the report matches the vocabulary of the documentation.
 - **T020** — README's import section states the matching rule and its script caveat, and CHANGELOG
-  records the behaviour change (Article VI). Public markdown, so it is humanized before it lands.
+  records the behaviour change (Article VI). It must also say plainly **which languages a site
+  actually holds**: the package stores content for every code in `settings.LANGUAGES`, Django's
+  default is 99 languages for a project that declares none, and narrowing `LANGUAGES` is how a site
+  narrows what an import stores. Without that, a curator who believes they run an English site can
+  import a vocabulary published in sixty languages and get all sixty — the outcome #51 was written to
+  prevent, arriving through the rule that fixes it. Public markdown, so it is humanized before it
+  lands.
 
 ## Not in this feature
 

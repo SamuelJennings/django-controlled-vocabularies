@@ -72,12 +72,29 @@ explain it. Across the file, one variant wins for the whole run and the outcome 
 This means a pass over the graph's language tags before any concept is written, producing a ranking
 per base language. `SkosGraph` already walks the graph for other purposes and
 `determine_default_language` already counts label languages across concept nodes, so the shape
-exists — this is a second, wider count rather than a new kind of traversal.
+exists.
 
-**Decision.** The matcher is built once per run, from the graph, before `import_concepts`. It is
-immutable for the run. Two consequences the plan carries: the vocabulary's default language must be
-resolved *after* the matcher exists, and the matcher is a constructor argument to the importers
-rather than something they build for themselves.
+**Revised at the design review (S3R, ARCH-003 and ARCH-004).** Two things the first version of this
+entry left open, both of which two implementations would have answered differently:
+
+*Where the traversal lives.* The first version gave `LanguageMatcher` a second constructor that
+reads a parsed graph. That drags rdflib into the new module and duplicates a count `SkosGraph`
+already performs over the same nodes and the same predicate. `SkosGraph` **is** this codebase's RDF
+boundary, and it needs one read-only method returning the tag counts — not a second home for graph
+reading. `LanguageMatcher` then takes `(configured_languages, counts)`, the pure form it was always
+described as, imports nothing from rdflib, and is testable with a dict.
+
+*What is counted.* The denominator is **`skos:prefLabel` only** — not every label predicate, and not
+notes. That is the reading consistent with D4 (a contest exists only where the destination holds one
+value, and only preferred labels do) and with D5 (the rule reuses the count
+`determine_default_language` already performs). Because it is the same denominator, the one new
+`SkosGraph` method feeds both, and the second traversal disappears rather than being justified.
+
+**Decision.** One counting method on `SkosGraph`. The matcher is built once per run from those
+counts, before `import_concepts`, and is immutable for the run. Two consequences the plan carries:
+the vocabulary's default language must be resolved *after* the matcher exists, and `SkosImporter.run`
+builds the matcher and passes it to `SchemeResolver` and `ConceptImporter` as a constructor argument
+rather than letting them build it for themselves.
 
 ## R3 — The account is derived, not accumulated
 
@@ -96,25 +113,47 @@ contradicts.
 returns an empty mapping rather than nothing when there is nothing to report (FR-008), so a caller
 never distinguishes "clean run" from "feature absent".
 
-## R4 — A substitution is a normalisation, and a loser is a surplus
+## R4 — A substitution is a normalisation, and a contest loser needs its own name
 
 **Question.** Two report vocabularies could grow here. What actually needs adding?
 
-**Finding.** One new member, not two.
+**Finding, first version.** One new member, not two.
 
 A value stored under a configured language other than its published tag is a value that *was*
 stored, under something other than what the file said. `NormalizedReason` is exactly that bucket
 and #50's docstring says so in as many words. It needs one new member and one message template.
+**That half stands.**
 
-A value that lost a contest is a value that was not stored because another took its slot.
-`SetAsideReason.SURPLUS_PREFERRED_LABEL` already means precisely that, and its template already
-takes the language to name. Passing the *published* tag rather than the resolved one satisfies
-FR-005's "with its own published language" with no new member at all. Adding a near-duplicate
-reason would split one concept across two names, which Article II and the closed-vocabulary rule in
-Article XII both argue against.
+The second half did not. It reused `SetAsideReason.SURPLUS_PREFERRED_LABEL` for contest losers,
+passing the published tag as `language`, on the argument that a near-duplicate reason would split one
+concept across two names.
 
-**Decision.** Add `NormalizedReason.LANGUAGE_SUBSTITUTION`. Reuse `SURPLUS_PREFERRED_LABEL`
-unchanged for contest losers, passing the published tag as `language`.
+**Overturned at the design review (S3R, SPEC-002, verified).** The argument had the concept wrong.
+`SURPLUS_PREFERRED_LABEL` means *a concept carries more than one preferred label in one and the same
+language* — #50 added it for exactly that, and its template (`report.py:140`) says so in words a
+curator reads: "'%(subject)s' carries more than one preferred label in the language '%(language)s'".
+For a value published `en-us` and beaten by an `en-gb` sibling, the file carries exactly one `en-us`
+preferred label, so that sentence is **false**. Article XI's "surfaced to the user, never silent" is
+not met by surfacing it wrongly.
+
+The two populations also have different remedies, which is what FR-008's account exists to tell a
+curator apart:
+
+- A same-language duplicate: nothing the curator configures will recover it. The file simply asserts
+  two preferred labels in one language.
+- A variant contest loser: configuring its published tag **does** recover it.
+
+Folding both under one reason makes the account fail its stated purpose — FR-008 requires it to be
+"sufficient for a caller to rank languages by what configuring them would recover", and a
+same-language duplicate counted under `en` on an `en` site tells the curator that configuring a
+language they already have would recover content. Folding neither drops the losers FR-005 requires to
+be reported. A closed vocabulary exists precisely so that two causes with two remedies carry two
+names.
+
+**Decision.** Add `NormalizedReason.LANGUAGE_SUBSTITUTION` for a stored-under-another-language value.
+Add a second `SetAsideReason` member for a variant contest loser, with its own truthful template
+naming both the published tag and the configured language it lost to. `SURPLUS_PREFERRED_LABEL`
+keeps its existing meaning, unchanged.
 
 ## R5 — The stories all touch one module, so they run sequentially
 

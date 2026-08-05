@@ -160,3 +160,105 @@ Base language, variant, and substitution are all new to this project's vocabular
 three will appear in messages a curator reads. `CONTEXT.md` is where this project keeps its
 glossary, so that is where they belong. A term defined only inside a spec is a term defined nowhere,
 as far as a reader of the report is concerned.
+
+## D12 — What the design review changed, and what it did not
+
+The S3R panel — three reviewers, one lens each, run against the plan before any code existed —
+returned `request_changes` on all three lenses: four verified high findings, eight medium, ten low.
+Every high was checked against the code before it was accepted, and all four held. They are recorded
+here as D13 to D16 because each settles something the plan had left to the implementer.
+
+Two things the panel did **not** change are worth recording, so a later reader does not reopen them.
+It found no task without spec or constitution provenance, so there was no scope creep to cut. And it
+confirmed the two structural judgements the plan had already made: one `LanguageMatcher` with no base
+class, no registry and no settings hook is right-sized, and `models.py::_configured_language_codes`
+stays where it is, because folding it into `exchange` would invert the dependency.
+
+The panel is also the reason `skos.py::configured_language_codes()` is deleted rather than left in
+place. The plan cited that function as its own Article XV justification and then would have shipped
+it alongside the class that replaced it.
+
+## D13 — The winner rule is one computation, not two that happen to agree
+
+`Concept.label` is chosen in `preferred_label_in`; the surplus report is computed from
+`preferred_kept` in `import_labels`. They are independent, and today they agree only because both are
+`sorted(...)[0]` over the same raw-tag group. The plan changed the rule in one of them.
+
+Left that way, the failure is not a mismatch a test would call cosmetic. `Concept.label` would hold
+one value while the report named that same value as a surplus set-aside, and stored the true winner
+nowhere — a report contradicting the database, inside a feature whose subject is telling a curator
+the truth about what was kept.
+
+The rule therefore lives on `LanguageMatcher` and both call sites read it. This also puts the
+predominance ranking where it is used rather than reaching into the matcher from `import_labels`,
+which is Article XV — the article this plan cites as its own justification.
+
+## D14 — A contest loser is not a surplus preferred label
+
+`research.md` R4 reused `SetAsideReason.SURPLUS_PREFERRED_LABEL` for a value beaten by a sibling
+variant, on the argument that a second reason would split one concept across two names. The argument
+was wrong about the concept.
+
+`SURPLUS_PREFERRED_LABEL` means a concept carries more than one preferred label **in one and the same
+language**, and its message says so in the words a curator reads. For a value published `en-us` and
+beaten by an `en-gb` sibling, the file carries exactly one `en-us` preferred label, so that sentence
+is false. Article XI is not satisfied by surfacing something wrongly.
+
+The deciding argument is FR-008's, though. The account exists so a curator can rank languages by what
+configuring them would recover, and the two populations differ on exactly that: nothing recovers a
+same-language duplicate, while configuring its published tag recovers a contest loser. One reason
+carrying both makes the account tell the curator that configuring a language they already have would
+recover content. A closed vocabulary is what keeps two causes with two remedies apart, so the second
+member is the article's purpose rather than a departure from it.
+
+## D15 — Determinism needs a rule for equally-specific candidates, and FR-002 has none
+
+D3 settled that an orphan value goes to the least specific configured language sharing its base, and
+noted in passing that sorting the codes would give the same answer "for the wrong reason". It never
+answered the case where two candidates are **equally** specific and neither matches exactly.
+
+That case is reachable without anyone configuring it. A project that never declares `LANGUAGES`
+inherits Django's 99-language default, and `zh-hans` / `zh-hant` is the one base in that list with
+two equally-specific variants and no bare base. `configured_language_codes()` returns a `set`, whose
+iteration order varies between processes — measured, both orders came back across five fresh runs. So
+the same file would store Simplified on one run and Traditional on the next, and SC-006 already
+requires the same file to import the same way twice.
+
+The lower code wins, ordered lexicographically, computed over an ordered sequence rather than a set.
+This is FR-003's own tie-break one level up rather than a second rule a reader must hold, and it is
+the only rule that makes an already-approved success criterion achievable. Recorded here rather than
+taken back to the maintainer for that reason — it settles a gap inside an approved requirement, it
+changes no approved behaviour, and it is flagged in the plan notification for veto.
+
+## D16 — FR-009's identity guarantee is about concepts, not label rows
+
+FR-009 forbids altering "any record's identifier, local address, or database identity" across a
+re-import. Read literally over all records, it cannot hold: #50's importer runs
+`concept.labels.all().delete()` and recreates every label and note row on every run, so their primary
+keys change by design.
+
+The requirement is not thereby unsatisfiable, it is unscoped. Its second clause — that no other
+language's **stored values** are removed or altered — is the guarantee a curator cares about and is
+exactly what the full replace preserves. So the identity assertion covers `Concept`, `ConceptScheme`
+and `Collection` records, and the value assertion covers label and note rows.
+
+The alternative reading would have made T017 a test that fails against approved, merged behaviour,
+and the fix an implementer would reach for — stopping the full replace — is a redesign of the
+dependency this feature explicitly extends rather than replaces.
+
+## D17 — The site's configured languages are not what the spec's Assumptions imply
+
+The spec assumes "the site's configured languages are whatever the project declares". That is true of
+the code and misleading about the world: the ordinary consuming project declares nothing, and
+`settings.LANGUAGES` falls back to Django's own 99-language list.
+
+Base-language matching widens what an untrusted file may write into that default. A vocabulary
+published in sixty languages now writes sixty languages' worth of rows into a project whose curator
+believes they run an English site — which is #51's own complaint, arriving through the rule that
+fixes it.
+
+There is no safer setting to read, and inventing one would contradict the spec's deliberate choice
+not to introduce a setting. So this is a documentation and test obligation rather than a guard:
+README says plainly that the package stores content for every code in `settings.LANGUAGES` and that
+narrowing that list is how a site narrows an import, and the FR-010 invariant test runs one case
+under Django's default rather than only under `@override_settings`.

@@ -3,14 +3,48 @@
   "feature": "007-import-keeps-published",
   "branch": "007-import-keeps-published",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "DESIGN_REVIEW",
+  "state": "GATE_PLAN",
   "state_history": [
-    { "state": "INTAKE", "at": "2026-08-04T18:00:00Z", "note": "issue #51 grilled; three questions; feature nearly closed as residue of #50" },
-    { "state": "SPECIFY", "at": "2026-08-04T19:10:00Z", "note": "spec.md, 5 stories, FR-001..015, SC-001..021; clarify scan caught the FR-003 defect" },
-    { "state": "SETUP", "at": "2026-08-04T21:40:00Z", "note": "epic #51 promoted, stories #69-#73, draft PR #74" },
-    { "state": "GATE_SPEC", "at": "2026-08-04T21:55:00Z", "note": "approved by Sam in session" },
-    { "state": "PLAN", "at": "2026-08-04T22:10:00Z", "note": "plan.md, research.md R1-R5, tasks.md T001-T020" },
-    { "state": "DESIGN_REVIEW", "at": "2026-08-04T22:30:00Z", "note": "S3R panel dispatch" }
+    {
+      "state": "INTAKE",
+      "at": "2026-08-04T18:00:00Z",
+      "note": "issue #51 grilled; three questions; feature nearly closed as residue of #50"
+    },
+    {
+      "state": "SPECIFY",
+      "at": "2026-08-04T19:10:00Z",
+      "note": "spec.md, 5 stories, FR-001..015, SC-001..021; clarify scan caught the FR-003 defect"
+    },
+    {
+      "state": "SETUP",
+      "at": "2026-08-04T21:40:00Z",
+      "note": "epic #51 promoted, stories #69-#73, draft PR #74"
+    },
+    {
+      "state": "GATE_SPEC",
+      "at": "2026-08-04T21:55:00Z",
+      "note": "approved by Sam in session"
+    },
+    {
+      "state": "PLAN",
+      "at": "2026-08-04T22:10:00Z",
+      "note": "plan.md, research.md R1-R5, tasks.md T001-T020"
+    },
+    {
+      "state": "DESIGN_REVIEW",
+      "at": "2026-08-04T22:30:00Z",
+      "note": "S3R panel dispatch"
+    },
+    {
+      "state": "PLAN",
+      "at": "2026-08-05T09:05:00Z",
+      "note": "S3R re-plan: 4 verified high findings applied to plan.md, research.md R2/R4, tasks.md; T021 and T022 added"
+    },
+    {
+      "state": "GATE_PLAN",
+      "at": "2026-08-05T09:20:00Z",
+      "note": "plan veto notification carrying the S3R verdict"
+    }
   ],
   "gates": {
     "spec": {
@@ -24,8 +58,14 @@
         "D10 no compatibility path owed, no released version carries the old rule"
       ]
     },
-    "plan": { "approved_by": null, "at": null },
-    "merge": { "approved_by": null, "at": null }
+    "plan": {
+      "approved_by": null,
+      "at": null
+    },
+    "merge": {
+      "approved_by": null,
+      "at": null
+    }
   },
   "stories": [
     {
@@ -36,11 +76,41 @@
       "status": "todo",
       "replans": 0,
       "tasks": [
-        { "id": "T001", "status": "todo", "attempts": 0 },
-        { "id": "T002", "status": "todo", "attempts": 0 },
-        { "id": "T003", "status": "todo", "attempts": 0 },
-        { "id": "T004", "status": "todo", "attempts": 0 },
-        { "id": "T005", "status": "todo", "attempts": 0 }
+        {
+          "id": "T001",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T002",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T003",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T004",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T005",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T021",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T022",
+          "status": "todo",
+          "attempts": 0
+        }
       ]
     },
     {
@@ -51,11 +121,31 @@
       "status": "todo",
       "replans": 0,
       "tasks": [
-        { "id": "T006", "status": "todo", "attempts": 0 },
-        { "id": "T007", "status": "todo", "attempts": 0 },
-        { "id": "T008", "status": "todo", "attempts": 0 },
-        { "id": "T009", "status": "todo", "attempts": 0 },
-        { "id": "T010", "status": "todo", "attempts": 0 }
+        {
+          "id": "T006",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T007",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T008",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T009",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T010",
+          "status": "todo",
+          "attempts": 0
+        }
       ]
     },
     {
@@ -66,8 +156,16 @@
       "status": "todo",
       "replans": 0,
       "tasks": [
-        { "id": "T011", "status": "todo", "attempts": 0 },
-        { "id": "T012", "status": "todo", "attempts": 0 }
+        {
+          "id": "T011",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T012",
+          "status": "todo",
+          "attempts": 0
+        }
       ]
     },
     {
@@ -78,9 +176,21 @@
       "status": "todo",
       "replans": 0,
       "tasks": [
-        { "id": "T013", "status": "todo", "attempts": 0 },
-        { "id": "T014", "status": "todo", "attempts": 0 },
-        { "id": "T015", "status": "todo", "attempts": 0 }
+        {
+          "id": "T013",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T014",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T015",
+          "status": "todo",
+          "attempts": 0
+        }
       ]
     },
     {
@@ -91,8 +201,16 @@
       "status": "todo",
       "replans": 0,
       "tasks": [
-        { "id": "T016", "status": "todo", "attempts": 0 },
-        { "id": "T017", "status": "todo", "attempts": 0 }
+        {
+          "id": "T016",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T017",
+          "status": "todo",
+          "attempts": 0
+        }
       ]
     },
     {
@@ -103,17 +221,44 @@
       "status": "todo",
       "replans": 0,
       "tasks": [
-        { "id": "T018", "status": "todo", "attempts": 0 },
-        { "id": "T019", "status": "todo", "attempts": 0 },
-        { "id": "T020", "status": "todo", "attempts": 0 }
+        {
+          "id": "T018",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T019",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T020",
+          "status": "todo",
+          "attempts": 0
+        }
       ]
     }
   ],
   "budgets": {
-    "converge_cycles": { "used": 0, "max": 2 },
-    "review_cycles": { "used": 0, "max": 2 },
-    "design_review_cycles": { "used": 0, "max": 1 },
-    "tokens": { "used": 0, "max": 4000000 }
+    "converge_cycles": {
+      "used": 0,
+      "max": 2
+    },
+    "review_cycles": {
+      "used": 0,
+      "max": 2
+    },
+    "design_review_cycles": {
+      "used": 1,
+      "max": 1
+    },
+    "tokens": {
+      "used": 0,
+      "max": 4000000
+    }
   },
-  "pr": { "number": 74, "draft": true }
+  "pr": {
+    "number": 74,
+    "draft": true
+  }
 }
