@@ -256,3 +256,16 @@ Append-only log of stage transitions and gate outcomes.
     counts `fr` (three occurrences, one per concept, counted by hand against the fixture) as left
     behind, while the first run's did (SC-016). Both passed on first run — no production code
     changed, recorded as D30, the same shape D26/D29 recorded for T011/T012 and T015.
+  - **T017** — `TestReimportAfterAddingALanguageKeepsEveryOtherRecordUnchanged`, scoped exactly as
+    D16 and the task text require: the identity test snapshots `(pk, uri, static_uri, slug,
+    local_url)` for the scheme, all five `rocks.ttl` concepts and both collections before the
+    second run and compares after, over every record the fixture defines rather than a sample
+    (SC-015); the content test checks `granite`'s alternative label, hidden label and scope note
+    alongside `granite`'s and `igneous`'s preferred label and definition are unchanged in `en`,
+    the language already held before the re-import. `ConceptLabel`/`ConceptNote` pks are
+    deliberately not asserted (#50 deletes and recreates them every run). Both passed on first
+    run — no production change, recorded as D31, the same shape as D30.
+  Full verify green throughout: `poetry run pytest -q` (758 → 760 → 762 passed), `ruff check .`,
+  `ruff format --check .`, `mypy controlled_vocabularies`, `deptry .`. Worktree clean. Two
+  characterization choices recorded as D30–D31. Next: US-5 (#73, T018–T022) — translatable
+  messages, deliberate indexing, and reusable test material.

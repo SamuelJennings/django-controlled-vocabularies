@@ -601,3 +601,25 @@ no report or model object is hand-built.
 
 **Revisit if:** never — the same reasoning as D26/D29 applies: a coverage task for behaviour a prior
 phase's design already delivers has nothing left to drive into existence.
+
+## D31 — T017's identity assertion is scoped to Concept/ConceptScheme/Collection exactly as D16 requires, and it too needed no production change
+
+T017's own tasks.md text spells out the scope D16 already settled: `Concept`, `ConceptScheme` and
+`Collection` keep their URI, `static_uri`, slug, local URL and pk across the re-import; `ConceptLabel`
+and `ConceptNote` rows do not, by #50's design, and are asserted on their values instead. Nothing
+about adding a configured language touches identity assignment at all — `assign_unique_slug` and
+`static_uri` resolution both run from the concept's own URI and label exactly as before, unrelated to
+which languages are configured — so, like T016, this needed no production change. The same shape as
+D26/D29/D30, recorded here rather than re-derived.
+
+The identity test snapshots `(pk, uri, static_uri, slug, local_url)` for the scheme, all five
+`rocks.ttl` concepts, and both collections before the second run and compares after — over every
+record the fixture defines, not a sample, so a regression in any one of them would be caught. The
+content test checks `granite`'s alternative label, hidden label and scope note alongside its and
+`igneous`'s preferred label and definition — the label kinds T013/T014's contest could plausibly
+disturb if the winner computation were ever keyed on the *set* of configured languages rather than
+resolving each value independently, which it is not, but which is exactly the kind of coupling this
+test would catch if introduced later.
+
+**Revisit if:** never, for the same reason D30 gives — this is what a coverage task looks like when
+the guarantee is already true by construction.
