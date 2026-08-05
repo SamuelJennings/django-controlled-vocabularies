@@ -124,10 +124,32 @@ class LanguageMatcher:
         def sort_key(pair: tuple[str, str]) -> tuple[bool, int, str, str]:
             tag, value = pair
             tag_lower = tag.lower()
-            return (tag_lower != config_lower, -self._tag_counts.get(tag, 0), tag_lower, value)
+            return (tag_lower != config_lower, -self._tag_counts.get(tag_lower, 0), tag_lower, value)
 
         ranked = sorted(range(len(candidates)), key=lambda index: sort_key(candidates[index]))
         winner_index = ranked[0]
         winner = candidates[winner_index]
         losers = [pair for index, pair in enumerate(candidates) if index != winner_index]
         return winner, losers
+
+    def resolve_identity_winner(
+        self, default_language: str, published_pairs: Sequence[tuple[str, str]]
+    ) -> tuple[tuple[str, str], list[tuple[str, str]]] | None:
+        """The winner of the identity-anchoring slot — ``Concept.label`` — contested over
+        every published tag sharing ``default_language``'s base, independent of which of
+        those tags happen to be separately configured (FR-016, decisions.md D33).
+
+        Every other slot keeps :meth:`resolve` and :meth:`resolve_winner`'s ordinary,
+        configuration-dependent placement; only this one is pinned, because it is the
+        only slot a concept's stored label, slug and local URL are derived from. Once a
+        sibling variant (``en-gb`` alongside ``en``) is configured in its own right, it
+        would otherwise stop being a candidate for the ``en`` slot and the winner would
+        shift to whichever tag remains — moving a local address for a reason that has
+        nothing to do with the vocabulary itself (Article IX). Returns ``None`` when no
+        published tag shares ``default_language``'s base at all.
+        """
+        base = default_language.lower().split("-", 1)[0]
+        group = [(tag, value) for tag, value in published_pairs if tag.lower().split("-", 1)[0] == base]
+        if not group:
+            return None
+        return self.resolve_winner(default_language, group)

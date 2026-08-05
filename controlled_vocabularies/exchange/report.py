@@ -78,6 +78,14 @@ class SetAsideReason(TextChoices):
     The two have different remedies: nothing recovers a same-language
     duplicate, while configuring the published tag recovers a contest loser,
     which is what FR-008's account exists to tell apart.
+    ``VALUE_TOO_LONG`` (fix cycle 1, S6 SEC-002, decisions.md D34) names a
+    label or note value the model's own field refuses on length — variant
+    matching newly routes values that were previously unreachable into
+    ``Concept.add_label``/``add_note``, and a single verbose alternative
+    label in a hostile or merely careless file must not abort an entire
+    import; the value is set aside rather than crashing the run on
+    ``ValidationError`` (the same discipline ``EMPTY_SLUG`` already applies
+    to the slug).
     """
 
     UNCONFIGURED_LANGUAGE = "unconfigured_language", _("language not configured")
@@ -96,6 +104,7 @@ class SetAsideReason(TextChoices):
     URI_HELD_BY_DIFFERENT_KIND = "uri_held_by_different_kind", _("identifier held by a different kind of record")
     NO_LANGUAGE_TAG = "no_language_tag", _("no language tag")
     VARIANT_NOT_KEPT = "variant_not_kept", _("language variant not kept")
+    VALUE_TOO_LONG = "value_too_long", _("value exceeds the maximum length this application can store")
 
     @property
     def template(self) -> Promise:
@@ -170,6 +179,10 @@ _REASON_TEMPLATES: dict[SetAsideReason, Promise] = {
         "'%(subject)s' carries a value in the language '%(language)s'; another variant was kept for "
         "the site's '%(kept_as)s' instead, and this one was not stored."
     ),
+    SetAsideReason.VALUE_TOO_LONG: _(
+        "'%(subject)s' carries a value in the language '%(language)s' longer than this application "
+        "can store; it was not stored."
+    ),
 }
 
 
@@ -204,6 +217,14 @@ class FatalReason(TextChoices):
     a missing or refused record identity — plus the two ways the vocabulary
     itself cannot be resolved (FR-005): the file names none and the caller
     named no target, or the caller's named target contradicts the file's own.
+    ``DEFAULT_LANGUAGE_UNCONFIGURED`` (fix cycle 1, S6 SEC-001, decisions.md D34)
+    names a vocabulary whose ``effective_default_language`` is not itself one
+    of the site's configured languages — ``settings.LANGUAGE_CODE`` falls back
+    unvalidated against ``settings.LANGUAGES``, and no published tag can ever
+    resolve to a value that is not itself a configured code, so every concept
+    would otherwise be silently set aside for want of a preferred label. Failing
+    the whole run early, naming the one misconfiguration, replaces what would
+    otherwise be one ``NO_PREFERRED_LABEL`` per concept for no gain to a curator.
     """
 
     MISSING_IDENTITY = "missing_identity", _("identifier missing or blank")
@@ -211,6 +232,7 @@ class FatalReason(TextChoices):
     VOCABULARY_UNDETERMINED = "vocabulary_undetermined", _("vocabulary not declared and no target named")
     VOCABULARY_TARGET_MISMATCH = "vocabulary_target_mismatch", _("declared vocabulary does not match the named target")
     VOCABULARY_AMBIGUOUS = "vocabulary_ambiguous", _("the file declares more than one vocabulary and none was named")
+    DEFAULT_LANGUAGE_UNCONFIGURED = "default_language_unconfigured", _("default language not configured")
 
     @property
     def template(self) -> Promise:
@@ -236,6 +258,10 @@ _FATAL_TEMPLATES: dict[FatalReason, Promise] = {
     FatalReason.VOCABULARY_AMBIGUOUS: _(
         "'%(subject)s' declares more than one vocabulary (%(declared)s) and none was named as the import's "
         "target; the run was refused."
+    ),
+    FatalReason.DEFAULT_LANGUAGE_UNCONFIGURED: _(
+        "'%(subject)s' has an effective default language of '%(language)s', which this site is not "
+        "configured for; the run was refused."
     ),
 }
 
@@ -404,10 +430,21 @@ class ImportReport:
         ``en-us``, never under the configured language it lost to. Present and
         empty — never absent — after a run that left nothing behind, so a
         caller never has to distinguish "clean run" from "feature absent".
+
+        Folded case-insensitively (CORR-003/SEC-003, decisions.md D34): FR-001
+        makes matching case-insensitive throughout, so ``PT-br`` and ``pt-BR``
+        are one recoverable language, not two — a curator ranking by what
+        configuring a language would recover must not have its vote split by
+        a spelling difference RFC 5646 itself calls meaningless. The first
+        published spelling seen (a run's :attr:`set_aside` order is
+        deterministic) is kept as the display key.
         """
         account: dict[str, int] = {}
+        display: dict[str, str] = {}
         for entry in self.set_aside:
             if entry.reason in self._LANGUAGE_ACCOUNT_REASONS:
                 language = entry.params["language"]
-                account[language] = account.get(language, 0) + 1
-        return account
+                key = language.lower()
+                display.setdefault(key, language)
+                account[key] = account.get(key, 0) + 1
+        return {display[key]: count for key, count in account.items()}

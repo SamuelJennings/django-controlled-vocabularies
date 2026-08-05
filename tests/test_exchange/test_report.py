@@ -43,6 +43,7 @@ _EXAMPLE_PARAMS = {
     SetAsideReason.URI_HELD_BY_DIFFERENT_KIND: {},
     SetAsideReason.NO_LANGUAGE_TAG: {"predicate": "skos:altLabel"},
     SetAsideReason.VARIANT_NOT_KEPT: {"language": "en-us", "kept_as": "en-gb"},
+    SetAsideReason.VALUE_TOO_LONG: {"language": "en-gb"},
 }
 
 # One example params dict per fatal reason (T007), the same shape as _EXAMPLE_PARAMS.
@@ -52,6 +53,7 @@ _EXAMPLE_FATAL_PARAMS = {
     FatalReason.VOCABULARY_UNDETERMINED: {},
     FatalReason.VOCABULARY_TARGET_MISMATCH: {"target": "https://example.org/vocab/target"},
     FatalReason.VOCABULARY_AMBIGUOUS: {"declared": "https://example.org/vocab/a, https://example.org/vocab/b"},
+    FatalReason.DEFAULT_LANGUAGE_UNCONFIGURED: {"language": "en-us"},
 }
 
 # One example params dict per normalized reason (T021), the same shape as _EXAMPLE_PARAMS.
@@ -168,6 +170,17 @@ class TestLanguageAccount:
         # Ranked without parsing any rendered message — read as plain data.
         ranked = sorted(report.language_account().items(), key=lambda item: -item[1])
         assert ranked[0] == ("fr", 2)
+
+    def test_mixed_case_spellings_of_one_language_fold_into_one_entry(self):
+        # CORR-003/SEC-003: a file tagging some values @PT-br and some @pt-BR
+        # must rank as one recoverable language, not two — FR-001's
+        # case-insensitivity applies to the account as much as to matching.
+        report = ImportReport()
+        report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, "https://example.org/a", language="PT-br")
+        report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, "https://example.org/b", language="pt-BR")
+        account = report.language_account()
+        assert len(account) == 1
+        assert sum(account.values()) == 2
 
 
 class TestSetAsideEntry:

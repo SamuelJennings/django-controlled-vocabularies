@@ -212,11 +212,19 @@ class SkosGraph:
         this population (``skos.py:327``) and a contest can only ever turn on it
         (D4). A caller passing a wider node set would silently change that
         already-shipped rule.
+
+        Keyed case-folded (CORR-003/SEC-003, decisions.md D34): ``rdflib``
+        preserves a literal's published case, but FR-001 makes matching
+        case-insensitive throughout — ``pt-BR`` and ``pt-br`` are one
+        published tag, not two, so :meth:`~controlled_vocabularies.exchange.languages.LanguageMatcher.resolve_winner`
+        (which looks this tally up case-folded too) never splits one
+        population's vote across cases.
         """
         counts: dict[str, int] = {}
         for node in concept_nodes:
             for language in self.label_languages(node, SKOS.prefLabel):
-                counts[language] = counts.get(language, 0) + 1
+                key = language.lower()
+                counts[key] = counts.get(key, 0) + 1
         return counts
 
     def scheme_refs(self, concept_node: rdflib.term.Node) -> set[str]:
@@ -261,9 +269,10 @@ def _localized_literal(
     node: rdflib.term.Node,
     predicate: rdflib.URIRef,
     target_language: str,
-) -> str | None:
+) -> tuple[str, str] | None:
     """The value of ``predicate`` on ``node`` whose published tag resolves to ``target_language``
-    through ``matcher`` (T008, call sites 6/7/8), or ``None``.
+    through ``matcher`` (T008, call sites 6/7/8), paired with the winning published tag, or
+    ``None``.
 
     ``SkosGraph.first_literal``'s own ``language=`` filter is an exact match; resolving a variant
     tag to ``target_language`` is configured-language policy, which stays off ``SkosGraph``
@@ -271,6 +280,13 @@ def _localized_literal(
     this, a site importing a vocabulary declared in a variant of its default language names every
     concept correctly and then falls through to :meth:`SkosGraph.first_literal`'s own any-language
     fallback — ``sorted(...)[0]`` across every language in the file — for the record's own name.
+
+    The winning tag is returned rather than discarded (CORR-002, decisions.md D34) so each of this
+    function's three callers can report a :attr:`~controlled_vocabularies.exchange.report.NormalizedReason.LANGUAGE_SUBSTITUTION`
+    when it differs from ``target_language`` — the same guard :meth:`ConceptImporter.import_concepts`
+    already applies to ``Concept.label`` over an identical candidate computation, so a vocabulary's
+    name and description and a collection's name are held to the one rule everywhere it applies,
+    not silently exempted at three of its four sites.
     """
     candidates = [
         (tag, value)
@@ -280,8 +296,8 @@ def _localized_literal(
     ]
     if not candidates:
         return None
-    (_winning_tag, value), _losers = matcher.resolve_winner(target_language, candidates)
-    return value
+    (winning_tag, value), _losers = matcher.resolve_winner(target_language, candidates)
+    return value, winning_tag
 
 
 def report_unmodelled_predicates(
@@ -476,24 +492,45 @@ class SchemeResolver:
                 declared=declared_default_language,
                 frozen=row.effective_default_language,
             )
-        name = _localized_literal(
+        name_match = _localized_literal(
             self.skos_graph, self.matcher, declared_node, SKOS.prefLabel, row.effective_default_language
         )
-        if not name:
+        if name_match is None:
             # The declared default language (or the site's, on fallback) carries no prefLabel on
             # the scheme itself — fall back to any language rather than leaving name unset.
             name = self.skos_graph.first_literal(declared_node, SKOS.prefLabel)
+        else:
+            name, winning_tag = name_match
+            if winning_tag.lower() != row.effective_default_language.lower():
+                # CORR-002, decisions.md D34: the same guard Concept.label's own write already
+                # applies — a name that made it in under a different language than published is a
+                # normalisation, not a silent substitution (FR-006, Article XI).
+                self.report.add_normalized(
+                    NormalizedReason.LANGUAGE_SUBSTITUTION,
+                    subject=declared_uri,
+                    language=winning_tag,
+                    kept_as=row.effective_default_language,
+                )
         if name:
             row.name = name
         # SKOS defines no description predicate for a skos:ConceptScheme; dcterms:description is
         # the source (D21), the same alias CONTEXT.md establishes for a concept's own definition.
         # Unlike name, description is written unconditionally, including to empty when the file no
         # longer carries one — nothing anchors identity to it the way default_language is anchored.
-        description = _localized_literal(
+        description_match = _localized_literal(
             self.skos_graph, self.matcher, declared_node, DCTERMS.description, row.effective_default_language
         )
-        if not description:
+        if description_match is None:
             description = self.skos_graph.first_literal(declared_node, DCTERMS.description)
+        else:
+            description, winning_tag = description_match
+            if winning_tag.lower() != row.effective_default_language.lower():
+                self.report.add_normalized(
+                    NormalizedReason.LANGUAGE_SUBSTITUTION,
+                    subject=declared_uri,
+                    language=winning_tag,
+                    kept_as=row.effective_default_language,
+                )
         row.description = description or ""
         row.static_uri = declared_uri
         row.save()
@@ -595,11 +632,15 @@ class ConceptImporter:
             language: self.matcher.resolve_winner(language, candidates)[0]
             for language, candidates in preferred_candidates_by_language.items()
         }
-        default_language_winner_tag = (
-            preferred_winner_by_language[default_language][0]
-            if default_language in preferred_winner_by_language
-            else None
+        # The identity-anchoring slot's own winner (FR-016, decisions.md D33) — contested
+        # over every tag sharing default_language's base, not only the ones that still
+        # resolve exactly to it once a sibling variant gains its own configured slot. Read
+        # independently of preferred_winner_by_language[default_language], which a
+        # separately-configured sibling variant would otherwise silently narrow.
+        identity_winner = self.matcher.resolve_identity_winner(
+            default_language, self.skos_graph.preferred_label_in(node)
         )
+        default_language_winner_tag = identity_winner[0][0] if identity_winner is not None else None
 
         for predicate, kind in LABEL_PREDICATES.items():
             for literal in self.skos_graph.graph.objects(node, predicate):
@@ -652,7 +693,15 @@ class ConceptImporter:
                                 kept_as=resolved_language,
                             )
                         continue
-                concept.add_label(language=resolved_language, kind=kind, text=str(literal))
+                try:
+                    concept.add_label(language=resolved_language, kind=kind, text=str(literal))
+                except ValidationError:
+                    # SEC-002, decisions.md D34: variant matching now routes values that were
+                    # previously unreachable into add_label's own full_clean() — a single
+                    # over-long value must not abort the whole run (Article V: imported RDF is
+                    # untrusted), the same discipline EMPTY_SLUG already applies to the slug.
+                    self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=uri, language=published_tag)
+                    continue
                 if resolved_language.lower() != published_tag.lower():
                     # T009, FR-006: a value stored under a resolved language other than its
                     # published tag is a normalisation, never applied silently (decisions.md D8).
@@ -692,9 +741,16 @@ class ConceptImporter:
                 if resolved_language is None:
                     self.report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, subject=uri, language=published_tag)
                     continue
+                try:
+                    concept.add_note(language=resolved_language, kind=kind, value=str(literal))
+                except ValidationError:
+                    # SEC-002, decisions.md D34: same discipline as import_labels's own guard.
+                    # Checked after the write attempt, not before: not counted into
+                    # definition_languages below either, since it was never actually stored.
+                    self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=uri, language=published_tag)
+                    continue
                 if kind == ConceptNote.Kind.DEFINITION:
                     definition_languages.add(resolved_language)
-                concept.add_note(language=resolved_language, kind=kind, value=str(literal))
                 if resolved_language.lower() != published_tag.lower():
                     # T009, FR-006 (decisions.md D8).
                     self.report.add_normalized(
@@ -717,7 +773,12 @@ class ConceptImporter:
             if resolved_language is None:
                 self.report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, subject=uri, language=published_tag)
                 continue
-            concept.add_note(language=resolved_language, kind=ConceptNote.Kind.DEFINITION, value=str(literal))
+            try:
+                concept.add_note(language=resolved_language, kind=ConceptNote.Kind.DEFINITION, value=str(literal))
+            except ValidationError:
+                # SEC-002, decisions.md D34: same discipline as import_labels's own guard.
+                self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=uri, language=published_tag)
+                continue
             self.report.add_normalized(
                 NormalizedReason.FOREIGN_DEFINITION,
                 subject=uri,
@@ -806,15 +867,34 @@ class ConceptImporter:
                 continue
 
             default_language = self.target_scheme.effective_default_language
-            candidates = [
-                (tag, value)
-                for tag, value in self.skos_graph.preferred_label_in(node)
-                if self.matcher.resolve(tag).configured_language == default_language
-            ]
-            if not candidates:
+            preferred_pairs = self.skos_graph.preferred_label_in(node)
+            # FR-016, decisions.md D33 (S6 ARCH-001): the identity-anchoring slot's contest
+            # runs over every tag sharing default_language's base, not only the ones that
+            # resolve exactly to it — configuring a sibling variant in its own right must
+            # never move an existing concept's stored label, slug or local URL.
+            identity_winner = self.matcher.resolve_identity_winner(default_language, preferred_pairs)
+            if identity_winner is None:
+                # SC-025, S6 CORR-001, decisions.md D34: this concept is about to be skipped
+                # entirely, so import_labels never runs for it and none of its own languages
+                # would otherwise enter language_account() — precisely the concept a curator
+                # most needs visibility into. Accounted under its own published tag(s), never
+                # under the configured default it lacks (D14's failure mode).
+                for tag, _value in preferred_pairs:
+                    if self.matcher.resolve(tag).configured_language is None:
+                        self.report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, subject=uri, language=tag)
                 self.report.add_set_aside(SetAsideReason.NO_PREFERRED_LABEL, subject=uri, language=default_language)
                 continue
-            (winning_tag, label), _losers = self.matcher.resolve_winner(default_language, candidates)
+            (winning_tag, label), _losers = identity_winner
+
+            label_max_length = Concept._meta.get_field("label").max_length
+            if label_max_length is not None and len(label) > label_max_length:
+                # SEC-002, decisions.md D34: Concept.save() never calls full_clean() (it derives
+                # the slug and refuses a collision, nothing more), so an over-long label would
+                # otherwise reach the database unchecked on SQLite and raise a bare DataError on
+                # PostgreSQL. Checked ahead of the write, the same discipline EMPTY_SLUG already
+                # applies just below — the reason names the value, not the slug it never reaches.
+                self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=uri, language=winning_tag)
+                continue
 
             if not slugify(label, allow_unicode=True):
                 # FIX 5 (D39): a label made up only of characters slugify() strips derives an empty
@@ -1234,11 +1314,21 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
 
             row.scheme = self.target_scheme
             row.static_uri = uri
-            name = _localized_literal(
-                self.skos_graph, self.matcher, node, SKOS.prefLabel, self.target_scheme.effective_default_language
-            )
-            if not name:
+            default_language = self.target_scheme.effective_default_language
+            name_match = _localized_literal(self.skos_graph, self.matcher, node, SKOS.prefLabel, default_language)
+            if name_match is None:
                 name = self.skos_graph.first_literal(node, SKOS.prefLabel)
+            else:
+                name, winning_tag = name_match
+                if winning_tag.lower() != default_language.lower():
+                    # CORR-002, decisions.md D34: the same guard resolve_scheme's own name/
+                    # description writes already apply.
+                    self.report.add_normalized(
+                        NormalizedReason.LANGUAGE_SUBSTITUTION,
+                        subject=uri,
+                        language=winning_tag,
+                        kept_as=default_language,
+                    )
             if name:
                 row.name = name
             row.ordered = ordered
@@ -1389,15 +1479,29 @@ class SkosImporter:
             )
 
             if target_scheme is not None and declared_uri is not None:
-                concept_importer = ConceptImporter(
-                    skos_graph, self.report, target_scheme, declared_uri, matcher=matcher
-                )
-                successful_concepts = concept_importer.import_concepts(concept_nodes)
-                RelationImporter(skos_graph, self.report, target_scheme).import_relations(successful_concepts)
-                CollectionImporter(skos_graph, self.report, target_scheme, matcher=matcher).import_collections(
-                    successful_concepts
-                )
-                concept_importer.report_absent_concepts()
+                # SEC-001, decisions.md D34: effective_default_language falls back to
+                # settings.LANGUAGE_CODE unvalidated against settings.LANGUAGES — Django's own
+                # shipped defaults are exactly this shape. resolve() can only ever return a code
+                # taken verbatim from LANGUAGES, so if this value is not itself an exact member
+                # (is_exact), no candidate could ever match it and every concept would be set
+                # aside one at a time for no gain to a curator. Caught once, here, naming the
+                # misconfiguration instead.
+                if not matcher.resolve(target_scheme.effective_default_language).is_exact:
+                    self.report.add_fatal(
+                        FatalReason.DEFAULT_LANGUAGE_UNCONFIGURED,
+                        subject=declared_uri,
+                        language=target_scheme.effective_default_language,
+                    )
+                else:
+                    concept_importer = ConceptImporter(
+                        skos_graph, self.report, target_scheme, declared_uri, matcher=matcher
+                    )
+                    successful_concepts = concept_importer.import_concepts(concept_nodes)
+                    RelationImporter(skos_graph, self.report, target_scheme).import_relations(successful_concepts)
+                    CollectionImporter(skos_graph, self.report, target_scheme, matcher=matcher).import_collections(
+                        successful_concepts
+                    )
+                    concept_importer.report_absent_concepts()
 
             if self.report.fatal:
                 raise SkosImportFailed(self.report)

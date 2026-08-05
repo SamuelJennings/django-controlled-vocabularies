@@ -180,3 +180,13 @@ class TestLanguageMatcherResolveWinner:
         winner, losers = matcher.resolve_winner("en", [("en-gb", "Colour")])
         assert winner == ("en-gb", "Colour")
         assert losers == []
+
+    def test_tag_counts_lookup_is_case_folded_so_a_recased_candidate_tag_still_finds_its_count(self):
+        # CORR-003/SEC-003: RFC 5646 and RDF 1.1 both define re-casing a language
+        # tag as meaningless, but the raw lookup split one population's vote
+        # across cases — a candidate tag published in a different case than the
+        # tally's own key must still find its count. counts is keyed lowercase,
+        # as SkosGraph.preferred_label_tag_counts now produces it.
+        matcher = LanguageMatcher(["en"], {"en-gb": 16, "en-us": 8})
+        winner, _losers = matcher.resolve_winner("en", [("en-us", "Color"), ("EN-GB", "Colour")])
+        assert winner == ("EN-GB", "Colour")

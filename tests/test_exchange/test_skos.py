@@ -186,6 +186,34 @@ class TestPreferredLabelTagCounts:
         counts = skos_graph.preferred_label_tag_counts(concept_nodes)
         assert counts == {"en-gb": 2, "en-us": 1}
 
+    def test_case_varying_tags_for_one_language_fold_into_one_count(self, tmp_path):
+        # CORR-003/SEC-003: rdflib preserves published case per literal, but a
+        # re-cased tag is not a different language (RFC 5646/RDF 1.1) — two
+        # concepts publishing "en-GB" and "en-gb" respectively must be one
+        # population, not two.
+        path = tmp_path / "case_counts.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/v/> a skos:ConceptScheme ;
+                skos:prefLabel "V"@en .
+
+            <http://example.org/v/a> a skos:Concept ;
+                skos:inScheme <http://example.org/v/> ;
+                skos:prefLabel "A"@en-GB .
+
+            <http://example.org/v/b> a skos:Concept ;
+                skos:inScheme <http://example.org/v/> ;
+                skos:prefLabel "B"@en-gb .
+            """
+        )
+        skos_graph = SkosGraph.from_file(path)
+        concept_nodes = sorted(skos_graph.graph.subjects(rdflib.RDF.type, SKOS.Concept), key=str)
+        counts = skos_graph.preferred_label_tag_counts(concept_nodes)
+        assert counts == {"en-gb": 2}
+
     def test_counts_exclude_the_scheme_and_collection_nodes_own_labels(self, tmp_path):
         # Counted graph-wide, this would additionally sweep the scheme's and the
         # collection's own de-tagged skos:prefLabel — silently changing the
@@ -658,6 +686,82 @@ class TestLabelsNotesAndNamesResolveThroughTheMatcher:
         assert collection.name == "Named collection"
 
 
+class TestVocabularyAndCollectionNameSubstitutionIsReported:
+    """T027 — CORR-002, FR-006/Article XI, decisions.md D34: a vocabulary's name,
+    a vocabulary's description, and a collection's name are all filled by variant
+    matching through ``_localized_literal`` exactly as ``Concept.label`` is — but
+    unlike ``Concept.label``, none of the three reported a ``LANGUAGE_SUBSTITUTION``.
+    The same one-line guard ``Concept.label``'s own write already applies."""
+
+    def test_the_vocabularys_name_and_description_are_each_reported_as_a_substitution(self, db, tmp_path):
+        path = tmp_path / "named.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+            @prefix dcterms: <http://purl.org/dc/terms/> .
+
+            <http://example.org/named/> a skos:ConceptScheme ;
+                skos:prefLabel "Aardvark scheme"@fr, "Named scheme"@de-at ;
+                dcterms:description "Aardvark description"@fr, "Named description"@de-at .
+
+            <http://example.org/named/item> a skos:Concept ;
+                skos:inScheme <http://example.org/named/> ;
+                skos:prefLabel "Item"@de-at .
+            """
+        )
+        report = import_skos(path)
+        scheme_uri = "http://example.org/named/"
+        matching = [
+            entry
+            for entry in report.normalized
+            if entry.reason is NormalizedReason.LANGUAGE_SUBSTITUTION and entry.subject == scheme_uri
+        ]
+        # One entry each for the name and the description, both de-at -> de.
+        assert len(matching) == 2
+        assert all(entry.params == {"language": "de-at", "kept_as": "de"} for entry in matching)
+
+    def test_a_collections_name_is_reported_as_a_substitution(self, db, tmp_path):
+        path = tmp_path / "named_collection.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/namedcoll/> a skos:ConceptScheme ;
+                skos:prefLabel "Named collection scheme"@de .
+
+            <http://example.org/namedcoll/item> a skos:Concept ;
+                skos:inScheme <http://example.org/namedcoll/> ;
+                skos:prefLabel "Item"@de .
+
+            <http://example.org/namedcoll/coll> a skos:Collection ;
+                skos:prefLabel "Aardvark collection"@fr, "Named collection"@de-at ;
+                skos:member <http://example.org/namedcoll/item> .
+            """
+        )
+        report = import_skos(path)
+        collection = Collection.objects.get(static_uri="http://example.org/namedcoll/coll")
+        matching = [
+            entry
+            for entry in report.normalized
+            if entry.reason is NormalizedReason.LANGUAGE_SUBSTITUTION and entry.subject == collection.static_uri
+        ]
+        assert len(matching) == 1
+        assert matching[0].params == {"language": "de-at", "kept_as": "de"}
+
+    def test_an_exact_match_scheme_name_is_not_reported_as_a_substitution(self, db):
+        # SC-004: no substitution when the scheme's own name is published in
+        # exactly the resolved default language — declares-de-at.ttl's own
+        # de-at is a variant of de, so it must not appear here.
+        report = import_skos(FIXTURES / "rocks.ttl")
+        scheme_uri = "http://example.org/rocks/"
+        assert not any(
+            entry.reason is NormalizedReason.LANGUAGE_SUBSTITUTION and entry.subject == scheme_uri
+            for entry in report.normalized
+        )
+
+
 class TestLanguageSubstitutionIsReported:
     """T009 — FR-006/SC-009: every value stored under a configured language other than the tag
     it was published under is reported as a substitution, distinguishable from a value that was
@@ -1091,6 +1195,60 @@ class TestFatalFindingsAndAtomicity:
         existing.refresh_from_db()
         assert existing.name == "Original name"
         assert Concept.objects.count() == concept_count_before
+
+
+class TestVocabularyDefaultLanguageMustItselfBeConfigured:
+    """T024 — SC-023, S6 SEC-001, decisions.md D34: a vocabulary whose
+    ``effective_default_language`` is not itself one of the site's configured
+    languages fails the whole run with one fatal finding naming it, rather than
+    silently storing nothing while emitting one ``NO_PREFERRED_LABEL`` per
+    concept. ``effective_default_language`` falls back to ``settings.LANGUAGE_CODE``
+    unvalidated against ``settings.LANGUAGES`` — Django's own shipped defaults are
+    exactly this shape (``LANGUAGE_CODE='en-us'``, absent from the 99-code default
+    ``LANGUAGES``), a configuration most consuming projects hold simply by never
+    overriding either setting."""
+
+    def test_an_unconfigured_default_language_fails_the_run_with_one_fatal_finding(self, db):
+        with override_settings(LANGUAGE_CODE="pt"), pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(FIXTURES / "unconfigured_language_vocabulary.ttl")
+        report = exc_info.value.report
+        assert len(report.fatal) == 1
+        assert report.fatal[0].reason is FatalReason.DEFAULT_LANGUAGE_UNCONFIGURED
+        assert report.fatal[0].params["language"] == "pt"
+        assert ConceptScheme.objects.count() == 0
+        assert Concept.objects.count() == 0
+        # SC-023: one problem, not one NO_PREFERRED_LABEL per concept.
+        assert report.set_aside == []
+
+    def test_djangos_own_shipped_defaults_are_refused_cleanly_not_silently_emptied(self, db, tmp_path):
+        # SEC-001's exact repro: an existing, concept-bearing scheme whose
+        # default_language is frozen blank (D18) falls back to LANGUAGE_CODE,
+        # and LANGUAGE_CODE='en-us' is not itself in Django's own 99-code global
+        # LANGUAGES default — a configuration most consuming projects hold
+        # simply by never overriding either setting.
+        path = tmp_path / "soils.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+            <https://example.org/v/soils> a skos:ConceptScheme ; skos:prefLabel "Soils"@en-us .
+            <https://example.org/v/soils/clay> a skos:Concept ;
+                skos:inScheme <https://example.org/v/soils> ;
+                skos:prefLabel "Clay"@en-us .
+            """
+        )
+        with override_settings(LANGUAGE_CODE="en-us", LANGUAGES=global_settings.LANGUAGES):
+            target = ConceptSchemeFactory(static_uri="https://example.org/v/soils", default_language="")
+            ConceptFactory(scheme=target)
+            with pytest.raises(SkosImportFailed) as exc_info:
+                import_skos(path, scheme=target)
+        assert exc_info.value.report.fatal[0].reason is FatalReason.DEFAULT_LANGUAGE_UNCONFIGURED
+        assert exc_info.value.report.fatal[0].params["language"] == "en-us"
+
+    def test_the_sites_own_configured_default_never_trips_this(self, db):
+        # 'en' is literally in tests/settings.py's LANGUAGES — must never be
+        # mistaken for the unconfigured case.
+        report = import_skos(FIXTURES / "rocks.ttl")
+        assert report.fatal == []
 
 
 class TestReportPopulatedByARealRun:
@@ -1869,6 +2027,62 @@ class TestReimportAfterAddingALanguageKeepsEveryOtherRecordUnchanged:
         assert granite.notes("en", ConceptNote.Kind.SCOPE) == ["Used here for coarse-grained intrusive igneous rock."]
 
 
+class TestReimportAfterAddingABaseSharingLanguageKeepsIdentityStill:
+    """T023 — FR-016/SC-022, decisions.md D33 (S6 ARCH-001): the identity-anchoring
+    slot's contest resolves over every published tag sharing the default language's
+    base, whether or not those tags are separately configured — the one slot
+    configuration must never reach, because it anchors every concept's stored
+    label, slug and local URL. TestReimportAfterAddingALanguageKeepsEveryOtherRecordUnchanged's
+    own case (rocks.ttl, en then en+fr) cannot exercise this: fr shares no base with
+    en, so the incumbent's candidate set there never shrinks. This one adds en-gb,
+    which shares en's base — the exact shape ARCH-001 reproduced: on the
+    unpatched branch this moved variants.ttl's concept from ``/colour`` to
+    ``/color`` with the file byte-identical across the two imports."""
+
+    def test_the_concepts_label_slug_and_local_url_are_unchanged_by_adding_a_base_sharing_language(self, db):
+        with override_settings(LANGUAGES=[("en", "English")]):
+            import_skos(FIXTURES / "variants.ttl")
+        concept = Concept.objects.get(static_uri="http://example.org/colours/colour")
+        before = (concept.pk, concept.label, concept.slug, concept.local_url)
+        assert before[1:] == ("Colour", "colour", concept.local_url)
+
+        with override_settings(LANGUAGES=[("en", "English"), ("en-gb", "British English")]):
+            import_skos(FIXTURES / "variants.ttl")
+        concept.refresh_from_db()
+        after = (concept.pk, concept.label, concept.slug, concept.local_url)
+        assert after == before
+
+    def test_the_en_gb_value_is_now_also_stored_under_its_own_newly_configured_slot(self, db):
+        # D33's stated cost: the value that anchors identity can now fill both its
+        # own exact slot and the default-language slot — Colour@en-gb is stored
+        # under en-gb *and* under en (as concept.label), rather than the en-us
+        # spelling silently taking over the identity anchor.
+        with override_settings(LANGUAGES=[("en", "English")]):
+            import_skos(FIXTURES / "variants.ttl")
+        with override_settings(LANGUAGES=[("en", "English"), ("en-gb", "British English")]):
+            import_skos(FIXTURES / "variants.ttl")
+        concept = Concept.objects.get(static_uri="http://example.org/colours/colour")
+        assert concept.label == "Colour"
+        assert concept.preferred_label("en-gb") == "Colour"
+
+    def test_the_en_us_spelling_remains_a_reported_contest_loser_not_stored(self, db):
+        with override_settings(LANGUAGES=[("en", "English")]):
+            import_skos(FIXTURES / "variants.ttl")
+        with override_settings(LANGUAGES=[("en", "English"), ("en-gb", "British English")]):
+            report = import_skos(FIXTURES / "variants.ttl")
+        concept = Concept.objects.get(static_uri="http://example.org/colours/colour")
+        assert concept.preferred_label("en-us") is None
+        losers = [
+            entry
+            for entry in report.set_aside
+            if entry.reason is SetAsideReason.VARIANT_NOT_KEPT
+            and entry.subject == concept.static_uri
+            and entry.params["language"] == "en-us"
+        ]
+        assert len(losers) == 1
+        assert losers[0].params["kept_as"] == "en"
+
+
 class TestUnconfiguredLanguageValuesAreSetAside:
     """T020 — FR-014: a label or note in a language the site is not configured
     for is stored nowhere and is named in the report with its language, and
@@ -2104,6 +2318,40 @@ class TestNoPreferredLabelFinishedByUS3:
         assert b.alt_labels("en") == ["B-alt"]
 
 
+class TestNoPreferredLabelConceptStillAccountsItsOwnLanguages:
+    """T026 — SC-025, S6 CORR-001, decisions.md D34: a concept skipped for
+    having no usable preferred label never reached ``import_labels``, so none
+    of its own published tags ever entered ``language_account()`` — the
+    failure landing precisely on the concept a curator most needs to be told
+    about (FR-008's sufficiency clause, SC-012). Accounted here under the
+    concept's own published tag(s), never under the configured default it
+    lacks — folding ``NO_PREFERRED_LABEL``'s own ``params["language"]`` (a
+    configured code) into the account the way a published tag is would be
+    D14's failure mode all over again."""
+
+    def test_the_skipped_concepts_own_published_language_is_visible_in_the_account(self, db):
+        with override_settings(LANGUAGES=[("en", "English")]):
+            report = import_skos(FIXTURES / "no_default_language_label.ttl")
+        assert "fr" in report.language_account()
+        assert not Concept.objects.filter(static_uri="http://example.org/quarry/c").exists()
+
+    def test_the_configured_default_language_itself_never_appears_in_the_account(self, db):
+        # D14's failure mode: NO_PREFERRED_LABEL's own params["language"] is the
+        # *configured* default the concept lacks, never a published tag — must
+        # never be folded into the account as though it were one.
+        with override_settings(LANGUAGES=[("en", "English")]):
+            report = import_skos(FIXTURES / "no_default_language_label.ttl")
+        assert "en" not in report.language_account()
+
+    def test_the_no_preferred_label_entry_itself_is_still_reported_unchanged(self, db):
+        with override_settings(LANGUAGES=[("en", "English")]):
+            report = import_skos(FIXTURES / "no_default_language_label.ttl")
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.NO_PREFERRED_LABEL]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/quarry/c"
+        assert entries[0].params["language"] == "en"
+
+
 class TestEmptySlugLabelIsSetAsideNotCrashed:
     """FIX 5 (review, decisions.md D39) — ``_assign_unique_slug`` derives a
     concept's slug from its preferred label with ``slugify()``, then sets
@@ -2130,6 +2378,36 @@ class TestEmptySlugLabelIsSetAsideNotCrashed:
         normal = Concept.objects.get(static_uri="http://example.org/emptyslug/normal")
         assert normal.label == "Normal"
         assert normal.alt_labels("en") == ["Normal-alt"]
+
+
+class TestOverlongValueIsSetAsideNotCrashed:
+    """T025 — SC-024, S6 SEC-002, decisions.md D34: variant matching now routes
+    label values that were previously set aside (an exact-tag-only site never
+    reached them) into ``Concept.add_label``, whose ``full_clean()`` refuses text
+    beyond 255 characters. Guarded the way ``EMPTY_SLUG`` already guards the slug
+    (FIX 5): caught ahead of a rolled-back transaction, set aside with its own
+    reason, and the rest of the file — including the rest of the same concept —
+    still imports."""
+
+    def test_an_overlong_alt_label_is_set_aside_and_named_not_raised(self, db):
+        report = import_skos(FIXTURES / "value_too_long_label.ttl")
+        assert report.fatal == []
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/longvalue/toolong"
+        assert entries[0].params["language"] == "en-GB"
+
+    def test_the_concept_carrying_the_overlong_value_still_imports_on_its_other_content(self, db):
+        import_skos(FIXTURES / "value_too_long_label.ttl")
+        toolong = Concept.objects.get(static_uri="http://example.org/longvalue/toolong")
+        assert toolong.label == "TooLong"
+        assert toolong.alt_labels("en") == []
+
+    def test_the_rest_of_the_file_still_imports(self, db):
+        import_skos(FIXTURES / "value_too_long_label.ttl")
+        ok = Concept.objects.get(static_uri="http://example.org/longvalue/ok")
+        assert ok.label == "OK"
+        assert ok.alt_labels("en") == ["OK-alt"]
 
 
 class TestBroaderAndNarrowerRelations:
@@ -3199,6 +3477,8 @@ def _coverage_label_covered(
             SetAsideReason.UNCONFIGURED_LANGUAGE,
             SetAsideReason.SURPLUS_PREFERRED_LABEL,
             SetAsideReason.VARIANT_NOT_KEPT,
+            # T025, S6 SEC-002: a value the model's own field refuses on length.
+            SetAsideReason.VALUE_TOO_LONG,
         )
         for entry in report.set_aside
     )
@@ -3221,7 +3501,7 @@ def _coverage_note_covered(
     return any(
         entry.subject == subject_uri
         and entry.params.get("language") == language
-        and entry.reason is SetAsideReason.UNCONFIGURED_LANGUAGE
+        and entry.reason in (SetAsideReason.UNCONFIGURED_LANGUAGE, SetAsideReason.VALUE_TOO_LONG)
         for entry in report.set_aside
     )
 
