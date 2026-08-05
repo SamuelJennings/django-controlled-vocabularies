@@ -1618,9 +1618,7 @@ class TestSlugAndNameLengthAreBoundedToTheField:
         assert len(entries) == 1
         assert entries[0].subject == "http://pub.example/longcollectionname#grp"
 
-    def test_a_matched_collection_s_over_long_name_is_still_only_set_aside_keeping_the_old_name(
-        self, db, tmp_path
-    ):
+    def test_a_matched_collection_s_over_long_name_is_still_only_set_aside_keeping_the_old_name(self, db, tmp_path):
         """The matched-row half of T044 for a collection: an already-imported collection keeps
         its stored name, and the collection itself is not removed, when a re-import's name is
         unusable. Would fail if the created-only ``continue`` fired for a matched row too.
@@ -1677,9 +1675,7 @@ class TestOverLongNameSetAsideReportsThePublishedLanguage:
     fallback exists because nothing resolved to it.
     """
 
-    def test_a_matched_scheme_s_over_long_fallback_name_reports_its_own_language_not_the_default(
-        self, db, tmp_path
-    ):
+    def test_a_matched_scheme_s_over_long_fallback_name_reports_its_own_language_not_the_default(self, db, tmp_path):
         """The scheme's effective default language is frozen at 'en' (a matched row, D46/D50 —
         resolve_scheme never assigns default_language to a matched row). Its own prefLabel is
         published only in 'fr', so the VALUE_TOO_LONG set-aside must say 'fr'. Would fail
@@ -1762,7 +1758,7 @@ class TestAStoredSlugThatFailsValidationIsSetAsideNotEscaped:
         path.write_text(
             "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
             '<http://pub.example/sec301concept> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
-            '<http://pub.example/sec301concept#one> a skos:Concept ; skos:inScheme <http://pub.example/sec301concept> ; '
+            "<http://pub.example/sec301concept#one> a skos:Concept ; skos:inScheme <http://pub.example/sec301concept> ; "
             'skos:prefLabel "One"@en .\n'
         )
         import_skos(path)
