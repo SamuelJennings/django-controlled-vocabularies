@@ -647,14 +647,32 @@ class SchemeResolver:
                 # Fatal, the same reasoning VOCABULARY_SLUG_UNUSABLE already gives an unusable
                 # identifier: without a resolvable, storable vocabulary there is nothing for
                 # the rest of the file to import into.
-                self.report.add_fatal(FatalReason.VOCABULARY_NAME_UNUSABLE, subject=declared_uri, language=winning_tag)
-                return None, None
-            # T042, SEC-002-shaped, decisions.md D35 (fix cycle 3): row.save() never calls
-            # full_clean(), so an over-long name would otherwise reach the database unchecked on
-            # SQLite and raise a bare DataError on PostgreSQL — the same hole Concept.label's own
-            # pre-write VALUE_TOO_LONG guard closes. A *matched* scheme already has a name, so
-            # this leaves it exactly as held rather than losing it to an unusable replacement.
-            self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=declared_uri, language=winning_tag)
+                #
+                # CORR-402, decisions.md D56 (fix cycle 5): the value above came straight from
+                # the default-language match, which T051's fallback never runs for — a *different*
+                # configured language may still publish a storable name in the same file. Try
+                # that before refusing the run; its own message already promises this fatal is
+                # reserved for "no name this application can store," which is false when another
+                # published language has one.
+                fallback = self.skos_graph.first_literal_with_language(
+                    declared_node, SKOS.prefLabel, max_length=name_max_length
+                )
+                if fallback is None:
+                    self.report.add_fatal(
+                        FatalReason.VOCABULARY_NAME_UNUSABLE, subject=declared_uri, language=winning_tag
+                    )
+                    return None, None
+                self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=declared_uri, language=winning_tag)
+                name, winning_tag = fallback
+                row.name = name
+            else:
+                # T042, SEC-002-shaped, decisions.md D35 (fix cycle 3): row.save() never calls
+                # full_clean(), so an over-long name would otherwise reach the database unchecked
+                # on SQLite and raise a bare DataError on PostgreSQL — the same hole
+                # Concept.label's own pre-write VALUE_TOO_LONG guard closes. A *matched* scheme
+                # already has a name, so this leaves it exactly as held rather than losing it to
+                # an unusable replacement.
+                self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=declared_uri, language=winning_tag)
         elif name:
             row.name = name
         # SKOS defines no description predicate for a skos:ConceptScheme; dcterms:description is
@@ -1593,7 +1611,6 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
                 # resolve_scheme's own name write applies — row.save() never calls full_clean(),
                 # so an over-long name would otherwise reach the database unchecked on SQLite and
                 # raise a bare DataError on PostgreSQL.
-                self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=uri, language=winning_tag)
                 if created:
                     # T044, decisions.md D49 (fix cycle 4, ARCH-301/CORR-303/SEC-302): unlike a
                     # vocabulary, a collection is not something the rest of the file needs in
@@ -1601,7 +1618,22 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
                     # fall back to, so the whole collection is set aside rather than persisted
                     # with a blank name a row full_clean() would then refuse. A *matched*
                     # collection already has a name and keeps it exactly as held.
-                    continue
+                    #
+                    # CORR-402, decisions.md D56 (fix cycle 5): the same second-chance fallback
+                    # resolve_scheme's own copy needed — the value above came straight from the
+                    # default-language match, and a different configured language may still
+                    # publish a storable name in the same file.
+                    fallback = self.skos_graph.first_literal_with_language(
+                        node, SKOS.prefLabel, max_length=name_max_length
+                    )
+                    if fallback is None:
+                        self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=uri, language=winning_tag)
+                        continue
+                    self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=uri, language=winning_tag)
+                    name, winning_tag = fallback
+                    row.name = name
+                else:
+                    self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=uri, language=winning_tag)
             elif name:
                 row.name = name
             row.ordered = ordered

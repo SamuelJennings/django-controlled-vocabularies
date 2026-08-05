@@ -1507,3 +1507,36 @@ raises `SkosImportFailed` with one `VOCABULARY_RECORD_INVALID` fatal, keeping it
 **Revisit if:** never — the same "unwritable vocabulary is fatal" rule `VOCABULARY_SLUG_UNUSABLE`
 already gives an identifier that cannot be minted, applied to a write that fails after the
 identifier was fine.
+
+## D58 — T054 (fix cycle 5): a created record's over-long default-language name also gets a
+second-chance storable fallback, not only the any-language branch
+
+CORR-402 (round 4, medium): D56/T051 fixed the any-language fallback (`name_match is None` —
+nothing published in the effective default language at all) to prefer a storable literal. It left
+one branch untouched: when the default-language `skos:prefLabel` *does* exist but is itself
+over-long, `_localized_literal` returns it directly, `name_match` is not `None`, and the
+any-language fallback never runs at all — so a created scheme was still fatal
+(`VOCABULARY_NAME_UNUSABLE`), and a created collection still dropped whole, even when a different
+configured language published a storable name in the same file.
+
+Reproduced against the D56 fix (before this entry): a scheme publishing `skos:prefLabel
+"AAA…(300)"@en, "Roches"@fr` under a site whose default language is `en` still raised
+`SkosImportFailed`, and the collection counterpart still dropped the whole record — the `@fr`
+value was never considered because the `@en` one satisfied `_localized_literal` first.
+
+**Fixed at the length check itself, not by restructuring the name-resolution branch.** Immediately
+before a *created* record's name is declared unusable — the fatal for a scheme, the whole-record
+`continue` for a collection — the same `first_literal_with_language(..., max_length=...)` call D56
+already added is tried once more. Finding a storable value there reports the lost default-language
+name as `VALUE_TOO_LONG` (the same reason a matched record's over-long name already gets) and uses
+the storable value in its place; finding nothing storable falls through to the original fatal/
+whole-record outcome exactly as before. A matched record's branch is untouched — it already keeps
+its stored name regardless.
+
+Deliberately no `NormalizedReason.LANGUAGE_SUBSTITUTION` for the value that wins here, matching
+D52's own precedent: that reason names a matcher-resolved variant of the *target* language, not an
+unrelated language stepped in for one that failed outright. The `VALUE_TOO_LONG` entry alone
+already tells a curator which value was lost and why.
+
+**Revisit if:** never — the same storable-first-literal fallback D56 introduced, reached from a
+second call site the review named as the branch it does not yet cover.

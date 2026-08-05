@@ -1772,6 +1772,56 @@ class TestAnyLanguageFallbackPrefersAStorableName:
         assert collection.name == "Zebra Group"
 
 
+class TestOverLongDefaultLanguageNameFallsBackToAnotherStorableLanguage:
+    """T054 — CORR-402, decisions.md D56 (fix cycle 5): T051 only fixed the any-language
+    fallback branch (nothing published in the effective default language at all). When the
+    default-language ``skos:prefLabel`` exists but is itself over-long, ``resolve_scheme`` and
+    ``import_collections`` never ran that fallback — ``name_match`` was not ``None`` — so a
+    created record was fatal (a scheme) or dropped whole (a collection) even when another
+    configured language published a storable name in the same file.
+    """
+
+    def test_a_created_scheme_whose_default_language_name_is_over_long_falls_back_to_another_language(
+        self, db, tmp_path
+    ):
+        long_name = "A" * 300
+        path = tmp_path / "corr402_scheme.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            f'<http://pub.example/corr402scheme> a skos:ConceptScheme ; skos:prefLabel "{long_name}"@en, "Roches"@fr .\n'
+            "<http://pub.example/corr402scheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/corr402scheme> ; skos:prefLabel "One"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        scheme = ConceptScheme.objects.get(static_uri="http://pub.example/corr402scheme")
+        assert scheme.name == "Roches"
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(entries) == 1
+        assert entries[0].params["language"] == "en"
+
+    def test_a_created_collection_whose_default_language_name_is_over_long_falls_back_to_another_language(
+        self, db, tmp_path
+    ):
+        long_name = "A" * 300
+        path = tmp_path / "corr402_collection.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/corr402collscheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/corr402collscheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/corr402collscheme> ; skos:prefLabel "One"@en .\n'
+            f"<http://pub.example/corr402collscheme#grp> a skos:Collection ; "
+            f'skos:prefLabel "{long_name}"@en, "Roches"@fr .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        collection = Collection.objects.get(static_uri="http://pub.example/corr402collscheme#grp")
+        assert collection.name == "Roches"
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(entries) == 1
+        assert entries[0].params["language"] == "en"
+
+
 class TestAStoredSlugThatFailsValidationIsSetAsideNotEscaped:
     """T045 — SEC-301, decisions.md D50 (fix cycle 4): T041's read-back means a matched record's
     already-stored slug reaches the model's manual-slug validation unchanged. A slug written out
