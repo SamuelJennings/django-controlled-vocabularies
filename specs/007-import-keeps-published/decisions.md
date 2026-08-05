@@ -1760,3 +1760,40 @@ of consequence" rule the round-5 review's own recommendation states, applied onc
 accessors rather than patched at each of the four call sites (`resolve_scheme`'s exact match, its
 any-language fallback, `import_collections`'s identical pair) that would otherwise each need their
 own guard.
+
+## D66 — T056 (fix cycle 6): `unique_slug_for_identifier`'s collision loop gives up rather than
+looping forever
+
+CORR-503 (round 5, medium) claimed SEC-405's own clamp (D63) turns the collision loop
+non-terminating. Established real before touching anything, per the brief's own instruction: the
+review's exact repro, `unique_slug_for_identifier('http://e.org/#ab', {'ab': 'other', 'a-':
+'other2'}, 2)`, was run under a 20-second `timeout` ahead of any fix and killed (exit 143, no
+return) — confirmed hanging, not merely slow.
+
+**Why it hangs.** Once `len(suffix_text) >= max_length`, `max(max_length - len(suffix_text), 1)`
+is pinned at `1`, so the base contributes exactly one character every subsequent iteration, and
+the final `[:max_length]` clamp (D63) keeps only that one base character plus the first
+`max_length - 1` characters of `suffix_text`. At `max_length=2` those two facts together mean the
+assembled candidate is always `base[0] + suffix_text[0]` — the base's first character, plus
+literally the leading `-` every `suffix_text` starts with — regardless of which suffix number is
+being tried. If that one resulting string is already taken by a different record, no value of
+`suffix` can ever produce a different candidate, and the `while` condition never becomes false.
+
+**Fixed by detecting the repeat, not by pre-judging `max_length` against `len(suffix_text)`.** A
+`tried` set records every candidate this call has already produced; a candidate reappearing proves
+the search has cycled back to a string it already rejected, so the loop cannot make progress and
+returns `""` — the same "unusable" signal an empty base already returns, which every caller
+already knows how to handle (fatal for a vocabulary, a set-aside for a concept or collection). A
+simpler `return "" if len(suffix_text) >= max_length` at the top of each iteration was considered
+and rejected: it fires the moment the *first* retry needs a suffix as long as `max_length`, which
+is exactly the shape the two pre-existing SEC-303/SEC-405 tests exercise
+(`{'ab': 'other', 'b-2': 'other2'}`, `max_length=2`) — and in both of those, the very first retry's
+candidate (`'a-'`) is *not* taken, so the call correctly succeeds today. A length-only pre-check
+would have turned those two passing, correct results into a give-up, weakening behaviour the
+existing tests (not touched by this cycle) already prove correct. Repeat-detection only gives up
+once the loop has actually failed to progress, never before.
+
+**Revisit if:** never — a repeat is the only condition under which this loop cannot terminate;
+detecting it directly is simpler than deriving, and keeping in sync with, a closed-form condition
+on `max_length` and `suffix_text` that would have to be re-derived if the clamp in D63 ever
+changed shape again.

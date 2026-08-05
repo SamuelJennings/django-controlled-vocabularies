@@ -1505,6 +1505,36 @@ class TestUniqueSlugForIdentifierTruncationNeverSlicesNegative:
         assert result == "granite-2"
 
 
+class TestUniqueSlugForIdentifierGivesUpRatherThanLoopingForever:
+    """T056 — CORR-503, decisions.md D66 (fix cycle 6): SEC-405's assembled-candidate clamp (D63)
+    can make two *different* suffixes render as the identical truncated candidate once
+    ``max_length`` is small relative to the suffix text. Reproduced exactly as the round-5 review
+    reported it: with ``max_length=2``, the first retry's candidate ``'a-2'`` clamps to ``'a-'``,
+    and every retry after it clamps to the same ``'a-'`` regardless of how large the suffix grows
+    — a candidate that already belongs to another record (``'a-'`` taken by ``'other2'``) then
+    loops without ever producing a different one. Confirmed hanging (60s+ with no return) before
+    this fix, on a call this module-level helper's own docstring exposes to any direct caller —
+    not reachable through ``import_skos`` today, since all three call sites pass
+    ``SlugField(max_length=255)``.
+    """
+
+    def test_a_collision_that_always_clamps_to_the_same_candidate_gives_up_rather_than_hanging(self):
+        result = unique_slug_for_identifier("http://e.org/#ab", {"ab": "other", "a-": "other2"}, 2)
+        assert result == ""
+
+    def test_giving_up_does_not_disturb_a_collision_that_would_have_resolved_anyway(self):
+        """The existing SEC-303/SEC-405 fixtures resolve on their very first retry (``'a-'`` is
+        not taken in either), so the give-up path must never fire for them.
+        """
+        result = unique_slug_for_identifier("http://e.org/#ab", {"ab": "other", "b-2": "other2"}, 2)
+        assert result == "a-"
+
+    def test_a_normal_collision_chain_is_unaffected(self):
+        taken = {"granite": "other", "granite-2": "other2"}
+        result = unique_slug_for_identifier("http://e.org/#granite", taken, 255)
+        assert result == "granite-3"
+
+
 class TestSlugAndNameLengthAreBoundedToTheField:
     """T042 — SEC-002-shaped, decisions.md D35 (fix cycle 3): a published identifier segment or
     name can be far longer than the field meant to hold it. Nothing on this write path calls

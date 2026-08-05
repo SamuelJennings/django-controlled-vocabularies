@@ -122,12 +122,20 @@ def unique_slug_for_identifier(static_uri: str, taken_slugs: dict[str, str | Non
     cycle 5), so the returned candidate never exceeds ``max_length`` however many collisions it
     resolves — true even at ``max_length < len(suffix_text) + 1``, where keeping one base
     character and the whole suffix would otherwise still overrun the field.
+
+    Returns ``""`` — the same "unusable" signal an empty base already gives — rather than looping
+    forever when no further collision retry can produce a candidate distinct from one already
+    tried (T056, CORR-503, decisions.md D66, fix cycle 6): once ``max_length`` is small enough
+    relative to the suffix text, the clamp above can make two *different* suffixes render as the
+    identical truncated string, and a candidate that keeps re-colliding with the same taken slug
+    would otherwise never terminate.
     """
     base = identifier_slug_base(static_uri)[:max_length]
     if not base:
         return ""
     candidate = base
     suffix = 1
+    tried = {candidate}
     while taken_slugs.get(candidate, static_uri) != static_uri:
         suffix += 1
         suffix_text = f"-{suffix}"
@@ -143,6 +151,16 @@ def unique_slug_for_identifier(static_uri: str, taken_slugs: dict[str, str | Non
         # own "never exceeds max_length" claim was false in that case. The final `[:max_length]`
         # clamps the assembled candidate, not only the base.
         candidate = (base[: max(max_length - len(suffix_text), 1)] + suffix_text)[:max_length]
+        if candidate in tried:
+            # CORR-503 (fix cycle 6): the clamp above can render two different suffixes as the
+            # same truncated string once max_length is small relative to suffix_text — a repeat
+            # proves this call cannot resolve the collision within the field's own width, not
+            # merely that this one candidate is taken. Every one of the three current call sites
+            # passes max_length=255, so this is unreached in practice (D51/D63 already put the
+            # collision count needed at roughly 10^250); a direct caller of this module-level
+            # helper with a small max_length is the only way to reach it.
+            return ""
+        tried.add(candidate)
     taken_slugs[candidate] = static_uri
     return candidate
 
