@@ -133,7 +133,7 @@ Every message this feature puts in front of a person is translatable, any field 
 ### Functional Requirements
 
 - **FR-001**: A published language tag MUST match a configured language when the two share a base language, in both directions, so a file's `en` value MAY be stored under a configured `en-gb` and a file's `en-gb` value MAY be stored under a configured `en`. Matching MUST NOT be case-sensitive. A tag sharing no base language with any configured language MUST continue to be set aside and reported, unchanged from #50.
-- **FR-002**: An exact tag match MUST always take precedence over a variant match, and MUST NOT be displaced by one. Where several configured languages share a base language with a published tag and none matches it exactly, the least specific of them MUST receive the value.
+- **FR-002**: An exact tag match MUST always take precedence over a variant match, and MUST NOT be displaced by one. Where several configured languages share a base language with a published tag and none matches it exactly, the least specific of them MUST receive the value. *(Refined 2026-08-05, `decisions.md` D33: this governs which slot a value is stored under. It does not govern the contest for the vocabulary's default-language slot, which FR-016 makes independent of the configured set — a value MAY therefore fill both its own exact slot and the default-language slot.)*
 - **FR-003**: Where the models hold at most one value of a kind per language — the preferred label — and a file offers several published variants of one configured language with no exact match among them, the variant the vocabulary predominantly publishes in MUST be the one stored, with ties broken deterministically by language code. The same file MUST import to the same stored values on every run.
 - **FR-004**: Where the models hold several values of a kind per language — alternative labels, hidden labels, and notes — every variant value MUST be stored under the configured language. Variant matching MUST NOT reduce them to one, and MUST NOT discard content the models are able to hold.
 - **FR-005**: Every value not stored because FR-003 kept another in its place MUST be set aside and reported with its own published language, and MUST NOT fail the run.
@@ -147,6 +147,7 @@ Every message this feature puts in front of a person is translatable, any field 
 - **FR-013**: Any model field this feature adds MUST carry translatable metadata and non-empty help text, and its indexing MUST be a deliberate recorded decision (Articles XII and XIII).
 - **FR-014**: The terms this feature introduces — base language, variant, and substitution — MUST be added to the project's glossary, so the vocabulary of the report matches the vocabulary of the documentation.
 - **FR-015**: The test suite MUST ship a published vocabulary fixture carrying variant language tags for one base language, discoverable from the suite, so #52 does not rebuild it.
+- **FR-016**: The preferred label a concept is named by — the one in the vocabulary's default language, from which its local address is derived — MUST NOT change because the site's configured languages changed. The contest for that one slot MUST therefore be resolved over every published tag sharing the default language's base, whether or not some of those tags are themselves configured. An exact tag match still wins that contest, and every other slot keeps the placement FR-002 describes. *(Added 2026-08-05, `decisions.md` D33, after the review panel demonstrated a concept's public URL moving from `/colour` to `/color` because an administrator added a language while the file was unchanged.)*
 
 ### Key Entities *(include if feature involves data)*
 
@@ -179,6 +180,10 @@ Every message this feature puts in front of a person is translatable, any field 
 - **SC-019**: Base language, variant, and substitution are defined in the project glossary — verified by review of `CONTEXT.md`.
 - **SC-020**: A published vocabulary fixture carrying variant language tags exists and is loaded by the tests from the suite rather than built inline — verified by test.
 - **SC-021**: Every functional requirement above is exercised by at least one automated test, and the suite passes across the supported Python and Django matrix.
+- **SC-022**: Adding a configured language that **shares a base** with one the site already holds, and re-importing the unchanged file, leaves every concept's name, slug, and local address exactly as they were — verified by test. The test MUST add a base-sharing language, because a test that only ever adds an unrelated one cannot fail (SC-015's did not).
+- **SC-023**: A vocabulary whose effective default language is a code the site does not hold is refused or reported as that one problem, rather than silently importing nothing while reporting a missing preferred label per concept — verified by test under `LANGUAGE_CODE` set outside `LANGUAGES`.
+- **SC-024**: A published value the models cannot store because of its own content — a label longer than the field allows — is set aside and reported, and the rest of the file still imports — verified by test.
+- **SC-025**: A concept set aside for having no usable preferred label still contributes its published languages to the account, so the language whose configuration would recover it is visible — verified by test.
 
 ## Assumptions
 

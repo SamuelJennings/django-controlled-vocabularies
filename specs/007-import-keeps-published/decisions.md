@@ -663,3 +663,82 @@ to `HEAD~3` in this story's final diff.
 **Revisit if:** never — this is the shape T018's own acceptance text specifies, and the redundancy
 with `test_report.py` is documented here precisely so a later reader does not "simplify" one suite
 away believing it duplicates the other for no reason.
+
+## D33 — The identity-anchoring label never moves because of configuration
+
+The S6 architecture lens found, and I reproduced independently, that adding a configured language
+sharing a base with one the site already holds changes an existing concept's stored name, its slug,
+and therefore its public URL — with the imported file byte-identical. On the branch's own
+`variants.ttl`, configuring `en-gb` alongside `en` moved a concept from
+`/vocabularies/colours/colour` to `/vocabularies/colours/color`.
+
+The cause is a composition rather than a bug in any one place. `Concept.label` is the preferred
+label in the vocabulary's default language. That default is frozen after the first import, and
+correctly so, because it anchors every concept's identity. But the *winner* of the contest for that
+slot is a function of which variants are configured: the moment `en-gb` becomes configured in its
+own right, it stops being a candidate for `en`, and the `en` slot falls to the `en-us` value. The
+slug is then re-derived from the new name on every run, by D6's own rule.
+
+This breaks FR-009 and SC-015, and it is the harm Article IX exists to prevent — a local address
+that downstream data already holds, moving for a reason that has nothing to do with the vocabulary.
+SC-015's test could not catch it, because it only ever adds a language sharing no base with an
+existing one.
+
+**Two fixes were available and the choice is not close.**
+
+*Pin the slug for an existing concept*, as `default_language` is already pinned. Rejected on two
+counts. It leaves `Concept.label` itself still flipping, so the displayed name changes and only the
+URL is held still — half a fix. And it overturns D6 from
+[#49](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/49), a landed,
+merged decision that a local URL follows a publisher's rename while the identifier does not.
+Breaking a shipped decision to patch a symptom of a different one is the wrong trade.
+
+*Resolve the default-language contest over the whole base-language group*, independent of which
+variants happen to be configured. Chosen, and narrowed to that one slot: it is the only slot that
+anchors identity, so it is the only one where configuration must not reach. Every other slot keeps
+FR-002's placement, which is what maximises stored content.
+
+**The cost, stated plainly.** A value can now fill both its own exact slot and the default-language
+slot, so `Colour@en-gb` is stored under `en-gb` *and* under `en`. And the `en-us` spelling remains a
+reported contest loser rather than being stored. That second point is the one worth sitting with,
+and it is why this is defensible: it is *exactly what already happened* before the language was
+added. The curator's picture does not change when they configure `en-gb`, which is the entire
+guarantee US-4 promises. Stability across the re-import is the property being bought, and paying for
+it with an outcome that was already true is a cheap price.
+
+The rule states in one sentence, which is how it will be remembered and how the README will carry
+it: **the label a concept is named by never moves because of configuration.**
+
+Spec amended rather than worked around: FR-016 added, FR-002 annotated with the carve-out, SC-022
+added with the explicit requirement that its test add a *base-sharing* language. Sam delegated this
+decision explicitly ("your choice ... you make an informed decision") after I put both options and
+their consequences to him, so it is recorded here rather than re-gated.
+
+## D34 — Three defects the panel found, and why each is a real regression
+
+Recorded together because they share a shape: each is a case where variant matching newly routes a
+value down a path that was previously unreachable, and the path was not ready for it. All three were
+reproduced against the branch and shown to behave correctly on `main`.
+
+**SEC-001 — an unconfigured default language stores nothing.** `effective_default_language` falls
+back to `settings.LANGUAGE_CODE`, which is validated nowhere against `settings.LANGUAGES`. The
+matcher can only ever return a configured code, so when the default is unconfigured, no published
+tag can resolve to it and every concept is set aside for want of a preferred label. Django's own
+defaults are precisely this shape: `LANGUAGE_CODE = "en-us"`, and the 99-code default `LANGUAGES`
+contains no `en-us`. The previous exact-equality comparison matched, so this is a regression against
+a configuration most consuming projects have by simply never overriding it. It is reported as one
+problem naming the unconfigured default, not as one missing-label entry per concept — a curator
+reading ten thousand identical entries learns nothing from the tenth.
+
+**SEC-002 — an over-long label aborts the whole run.** Values in a variant tag now reach
+`Concept.add_label`, whose `full_clean` raises on text beyond 255 characters. Nothing catches it, so
+one verbose alternative label in a hostile or merely careless file rolls back an entire import.
+Guarded the way `EMPTY_SLUG` already guards the slug: catch the refusal, set the value aside with
+its own reason, carry on. Article V names imported RDF untrusted, and a single field length should
+not be able to deny the whole import.
+
+**CORR-001 — the account is blind exactly where it matters most.** A concept skipped for having no
+preferred label never reaches the code that records its other values, so none of its languages enter
+the account. The failure lands precisely on the concept that was wholly lost, which is the one a
+curator most needs to be told about. FR-008's sufficiency clause and SC-012 both fail. Fixed by
+accounting the skipped concept's own published tags before continuing.

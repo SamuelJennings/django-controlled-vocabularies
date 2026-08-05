@@ -247,3 +247,60 @@ dispatchable in parallel — they cut across the same four methods of `exchange/
 - Any script-awareness narrowing of the base-language rule. Raised at the Spec gate, approved as
   specified, and a change to it is a new decision rather than an implementation choice
   (`decisions.md` D6).
+
+## Phase FIX-1 — S6 review cycle 1 (sequential, one worktree)
+
+Every task here is test-first in the strong sense the review demands: the test must be shown RED
+against the current branch before the fix, because three of these four are regressions that a test
+written after the fix would pass vacuously.
+
+- **T023** — FR-016 and SC-022: the default-language contest resolves over every published tag
+  sharing the default language's base, whether or not those tags are separately configured
+  (S6 ARCH-001, `decisions.md` D33). An exact match still wins that contest. Only this one slot
+  changes; every other slot keeps FR-002's placement. **RED first**, using the reproduction already
+  written to `/tmp/arch001_repro.py`: import `tests/fixtures/skos/variants.ttl` under
+  `LANGUAGES=[("en",...)]`, then re-import unchanged under `LANGUAGES=[("en",...),("en-gb",...)]`,
+  and assert name, slug and `local_url` are all unchanged. The existing SC-015 test stays and is
+  **not** the guard — it adds a language sharing no base, which is why it could not fail. A value
+  filling both its own exact slot and the default slot is expected under D33, so assert that too
+  rather than treating the duplicate as a defect.
+- **T024** — SC-023 (S6 SEC-001): a vocabulary whose `effective_default_language` resolves to
+  nothing configured is reported as **that one problem**, naming the unconfigured default, instead of
+  emitting one `NO_PREFERRED_LABEL` per concept and storing nothing. **RED first** under
+  `LANGUAGE_CODE` set outside `LANGUAGES` — note the current test settings make this class
+  structurally unreachable, so the test must override both settings explicitly. A new closed-vocabulary
+  reason with a translatable, named-placeholder template (Article XII).
+- **T025** — SC-024 (S6 SEC-002): catch the model's refusal of a value the field cannot hold and set
+  it aside rather than letting `ValidationError` abort the run and roll back records already written.
+  Guard `add_label`, `add_note`, and the `concept.label` assignment, the way `EMPTY_SLUG` already
+  guards the slug. **RED first**: a concept carrying a 300-character `skos:altLabel` in a variant tag
+  currently raises and stores nothing. New `SetAsideReason` member, translatable template.
+- **T026** — SC-025 (S6 CORR-001): a concept set aside for having no usable preferred label
+  contributes its own published language tags to the account before the run continues, so the
+  language whose configuration would recover it is visible. **RED first**: a concept whose only
+  content is `@fr` on an `en`-only site currently yields `language_account() == {}`. Account the
+  concept's published tags, not the configured default it lacks — the existing `NO_PREFERRED_LABEL`
+  entry carries the configured code and must not be folded in as though it were a published tag
+  (that is D14's failure mode).
+- **T027** — The non-blocking findings worth taking in this pass, each small and each with a test:
+  CORR-003 and SEC-003 (the predominance tally and the account are case-sensitive over published
+  tags, contradicting FR-001's case-insensitivity — `{"PT-br": 1, "pt-BR": 1}` should be one key);
+  CORR-002 (a vocabulary's name and description, and a collection's name, substitute silently — they
+  need the same `LANGUAGE_SUBSTITUTION` entry the concept path already emits, per FR-006 and Article
+  XI); CORR-004 and SEC-005 (a tautological `assert "en" in rendered` that passes on the word
+  "language" — assert the rendered message, not a substring of it); ARCH-002 (`resolve_winner`
+  returns a `losers` list no caller consumes while `import_labels` re-derives the same set — consume
+  it or drop it, do not keep both).
+- **T028** — Re-run the full verification and record it: `forge verify` on the branch, plus a
+  migrate-from-zero check, plus `makemigrations --check`. The three regressions above must each be
+  demonstrated fixed by their own RED-then-GREEN transcript, not by the suite merely being green.
+
+## Deferred from this cycle, with reasons
+
+- **ARCH-003, ARCH-004, ARCH-006, SEC-004** — performance findings (a duplicated tally pass, an
+  unmemoised linear scan, an expensive read before a cheap filter, a quadratic in distinct tags per
+  node). All real, none reachable by a correctness path, and the spec sets no throughput target.
+  They become an issue on the tracker after merge rather than expanding a review-fix cycle, which is
+  what `decisions.md` and the retro's proposal list exist for.
+- **ARCH-007** — CHANGELOG coverage of the two public-surface additions. Folded into T027's docs
+  touch rather than carried as its own task.

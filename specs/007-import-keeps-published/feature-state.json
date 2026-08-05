@@ -79,6 +79,16 @@
       "state": "IMPLEMENT",
       "at": "2026-08-05T12:05:00Z",
       "note": "US-5 merged as 2cff906: 764 tests green, RED re-proven independently on both new standards tests, zero deletions across the diff, receipts verified"
+    },
+    {
+      "state": "REVIEW",
+      "at": "2026-08-05T14:15:00Z",
+      "note": "S6 panel complete: all three lenses returned and receipts-verified (architecture re-dispatched after a round-one receipts failure caused by my own brief). All three request_changes; 4 verified high findings block."
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-05T14:40:00Z",
+      "note": "S6 fix cycle 1 of 2. US6 is the review-fix phase, not a user story, and carries no issue. ARCH-001 reproduced independently; resolved by spec amendment FR-016/SC-022 (D33) on Sam's explicit delegation. T023-T028 cover ARCH-001, SEC-001, SEC-002, CORR-001 and the small non-blocking findings; four performance findings deferred to a post-merge issue."
     }
   ],
   "gates": {
@@ -618,6 +628,46 @@
           }
         }
       ]
+    },
+    {
+      "id": "US6",
+      "priority": "P1",
+      "issue": null,
+      "worktree": null,
+      "status": "todo",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T023",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T024",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T025",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T026",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T027",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T028",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
     }
   ],
   "budgets": {
@@ -626,7 +676,7 @@
       "max": 2
     },
     "review_cycles": {
-      "used": 0,
+      "used": 1,
       "max": 2
     },
     "design_review_cycles": {
