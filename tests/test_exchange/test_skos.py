@@ -1725,6 +1725,53 @@ class TestOverLongNameSetAsideReportsThePublishedLanguage:
         assert collection.name == "Existing Group"
 
 
+class TestAnyLanguageFallbackPrefersAStorableName:
+    """T051 — SEC-401, decisions.md D56: T047's any-language fallback
+    (``SkosGraph.first_literal_with_language``) selected the lexicographically first literal
+    regardless of length, so a single over-long ``skos:prefLabel`` in one language could refuse
+    an entire first import even though the same file also published a perfectly storable name in
+    another language. The fallback now selects the first *storable* literal; only when nothing
+    published fits the field does the vocabulary become fatal (a scheme) or the whole collection
+    get set aside (a collection).
+    """
+
+    def test_a_created_scheme_with_one_over_long_and_one_storable_name_imports_using_the_storable_one(
+        self, db, tmp_path
+    ):
+        long_name = "A" * 300
+        path = tmp_path / "sec401_scheme.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            f"<http://pub.example/sec401scheme> a skos:ConceptScheme ; "
+            f'skos:prefLabel "{long_name}"@de, "Zebra Vocabulary"@fr .\n'
+            "<http://pub.example/sec401scheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec401scheme> ; skos:prefLabel "One"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        scheme = ConceptScheme.objects.get(static_uri="http://pub.example/sec401scheme")
+        assert scheme.name == "Zebra Vocabulary"
+        assert Concept.objects.filter(static_uri="http://pub.example/sec401scheme#c1").exists()
+
+    def test_a_created_collection_with_one_over_long_and_one_storable_name_imports_using_the_storable_one(
+        self, db, tmp_path
+    ):
+        long_name = "A" * 300
+        path = tmp_path / "sec401_collection.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec401collscheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/sec401collscheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec401collscheme> ; skos:prefLabel "One"@en .\n'
+            f"<http://pub.example/sec401collscheme#grp> a skos:Collection ; "
+            f'skos:prefLabel "{long_name}"@de, "Zebra Group"@fr .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        collection = Collection.objects.get(static_uri="http://pub.example/sec401collscheme#grp")
+        assert collection.name == "Zebra Group"
+
+
 class TestAStoredSlugThatFailsValidationIsSetAsideNotEscaped:
     """T045 — SEC-301, decisions.md D50 (fix cycle 4): T041's read-back means a matched record's
     already-stored slug reaches the model's manual-slug validation unchanged. A slug written out

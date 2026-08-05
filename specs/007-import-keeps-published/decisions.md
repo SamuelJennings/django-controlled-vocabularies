@@ -1417,3 +1417,41 @@ guard.
 
 **Revisit if:** never — all four are legibility/consistency cleanups with no behaviour change;
 verified by the unchanged 847-test suite, `mypy`, and `makemigrations --check --dry-run`.
+
+## D56 — T051 (fix cycle 5): the any-language name fallback picks a storable literal, not
+merely the lexicographically first one
+
+SEC-401 (round 4, high): T047's `SkosGraph.first_literal_with_language` selects the
+lexicographically first literal of a predicate, full stop — it has no idea whether the caller can
+store it. `resolve_scheme` and `import_collections` both use it as their any-language fallback
+only when the effective default language carries no `skos:prefLabel` at all. When a publisher's
+file carries, say, a 300-character `@de` name and a 16-character `@fr` one, and the site's default
+language is neither, the fallback sorts on the raw string and can pick the 300-character value —
+which T044 then measures against `name_max_length` and treats as "no name this application can
+store," fatal for a created scheme, whole-record set-aside for a created collection — even though
+the file plainly carries a storable name one triple away.
+
+Reproduced against `540648a`: exactly that file (300-char `@de` scheme name plus a storable `@fr`
+one, one concept) raised `SkosImportFailed` with zero rows written; the collection counterpart
+dropped the whole collection. Removing either the `@de` triple or renaming it to sort after `@fr`
+made the import succeed, which is the sort-order dependency by itself.
+
+**Fixed at the one place the fallback is computed**, not at each of its two callers separately:
+`first_literal_with_language` takes an optional `max_length` and, when given, restricts its
+candidate pool to literals that fit before sorting. Both callers now compute their field's
+`max_length` before the name/description block (previously computed after, since nothing earlier
+needed it) and pass it to the fallback call. When nothing published fits — the genuine "no name
+this application can store" case — the filtered call returns `None` and the caller falls through
+to the original unfiltered call, purely to have a representative value for the fatal/set-aside
+message; the length check immediately below still catches it and refuses (scheme) or drops
+(collection) exactly as T044 already does when every candidate is unusable.
+
+Deliberately narrow: this only fixes the fallback branch (`name_match is None` — no candidate in
+the effective default language at all). CORR-402 (round 4, medium) names a related but distinct
+shape — the effective-default-language match itself being over-long while another language has a
+storable name — which fix cycle 5 addresses separately (T054, this file's own next entry) because
+it is a different branch of the same function and the review scoped it as its own finding.
+
+**Revisit if:** never — a caller wanting "the best value I can actually store" from an RDF literal
+set is exactly what `max_length` on this one shared accessor gives both callers, without a second
+copy of the filtering logic.

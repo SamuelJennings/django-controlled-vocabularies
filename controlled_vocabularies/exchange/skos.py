@@ -258,18 +258,35 @@ class SkosGraph:
         )
         return values[0] if values else None
 
-    def first_literal_with_language(self, node: rdflib.term.Node, predicate: rdflib.URIRef) -> tuple[str, str] | None:
+    def first_literal_with_language(
+        self,
+        node: rdflib.term.Node,
+        predicate: rdflib.URIRef,
+        *,
+        max_length: int | None = None,
+    ) -> tuple[str, str] | None:
         """The lexicographically-first literal value of ``predicate`` on ``node``, paired with the
         published language tag it actually carried (``""`` for an untagged literal), or ``None``.
 
         The any-language counterpart of :meth:`first_literal` (T047, decisions.md D52, fix cycle
         4): a caller reporting a value this fallback selected needs to name the language that
         value was published in, not the target language the fallback exists because nothing
-        resolved to. Selects the identical value :meth:`first_literal` (called with no
-        ``language``) would — same sort key — so the two never disagree about *which* literal.
+        resolved to. With no ``max_length``, selects the identical value :meth:`first_literal`
+        (called with no ``language``) would — same sort key — so the two never disagree about
+        *which* literal.
+
+        ``max_length`` (T051, SEC-401, decisions.md D56) restricts the selection to literals a
+        caller can actually store: an any-language fallback exists so a record is not left with
+        no name at all, and picking the lexicographically first literal regardless of length
+        defeated that purpose whenever it happened to sort ahead of a shorter, storable one in
+        the same file. Returns ``None`` when no literal exists at all, or (with ``max_length``
+        given) when none of them fit — a caller distinguishes the two only when it needs to,
+        by calling again with no ``max_length`` to get a representative value for a message.
         """
         pairs = sorted(
-            (str(literal), getattr(literal, "language", None) or "") for literal in self.graph.objects(node, predicate)
+            (str(literal), getattr(literal, "language", None) or "")
+            for literal in self.graph.objects(node, predicate)
+            if max_length is None or len(str(literal)) <= max_length
         )
         return pairs[0] if pairs else None
 
@@ -585,6 +602,13 @@ class SchemeResolver:
                 declared=declared_default_language,
                 frozen=row.effective_default_language,
             )
+        # ARCH-306, fix cycle 4, decisions.md D55: cast rather than an `is not None` runtime
+        # check, the same narrowing unique_slug_for_identifier's own max_length reads already
+        # use (skos.py above) — Django's field metadata always supplies this for a CharField
+        # the model itself declares, so the two Optional[int] narrowings were one computation
+        # handled two different ways. Read ahead of the name resolution below (T051, decisions.md
+        # D56): the any-language fallback needs it to pick a literal it can actually store.
+        name_max_length = cast(int, ConceptScheme._meta.get_field("name").max_length)
         name_match = _localized_literal(
             self.skos_graph, self.matcher, declared_node, SKOS.prefLabel, row.effective_default_language
         )
@@ -594,7 +618,13 @@ class SchemeResolver:
             # T047, CORR-305, decisions.md D52 (fix cycle 4): the tag reported alongside this
             # fallback value is the one it was actually published in, not the target language
             # the fallback exists because nothing matched — the two can differ.
-            any_literal = self.skos_graph.first_literal_with_language(declared_node, SKOS.prefLabel)
+            # T051, SEC-401, decisions.md D56: prefer a literal this record can actually store —
+            # the plain (unfiltered) lexicographically-first pick only stands in when nothing
+            # published fits, so the length check below still has a representative name for its
+            # fatal/set-aside message.
+            any_literal = self.skos_graph.first_literal_with_language(
+                declared_node, SKOS.prefLabel, max_length=name_max_length
+            ) or self.skos_graph.first_literal_with_language(declared_node, SKOS.prefLabel)
             name, winning_tag = any_literal if any_literal is not None else (None, row.effective_default_language)
         else:
             name, winning_tag = name_match
@@ -608,12 +638,6 @@ class SchemeResolver:
                     language=winning_tag,
                     kept_as=row.effective_default_language,
                 )
-        # ARCH-306, fix cycle 4, decisions.md D55: cast rather than an `is not None` runtime
-        # check, the same narrowing unique_slug_for_identifier's own max_length reads already
-        # use (skos.py above) — Django's field metadata always supplies this for a CharField
-        # the model itself declares, so the two Optional[int] narrowings were one computation
-        # handled two different ways.
-        name_max_length = cast(int, ConceptScheme._meta.get_field("name").max_length)
         if name and len(name) > name_max_length:
             if created:
                 # T044, decisions.md D49 (fix cycle 4, ARCH-301/CORR-303/SEC-302): a scheme is
@@ -1521,12 +1545,21 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
             row.scheme = self.target_scheme
             row.static_uri = uri
             default_language = self.target_scheme.effective_default_language
+            # ARCH-306, fix cycle 4, decisions.md D55: cast, not an `is not None` check — see
+            # the identical note on resolve_scheme's own name-length read. Read ahead of the name
+            # resolution below (T051, decisions.md D56), the same reordering resolve_scheme's own
+            # copy needed.
+            name_max_length = cast(int, Collection._meta.get_field("name").max_length)
             name_match = _localized_literal(self.skos_graph, self.matcher, node, SKOS.prefLabel, default_language)
             if name_match is None:
                 # T047, CORR-305, decisions.md D52 (fix cycle 4): report the language this
                 # any-language fallback actually found the value in, not the default it fell
                 # back from — resolve_scheme's own name fallback has the identical fix.
-                any_literal = self.skos_graph.first_literal_with_language(node, SKOS.prefLabel)
+                # T051, SEC-401, decisions.md D56: prefer a literal this record can actually
+                # store — the identical fix resolve_scheme's own fallback needed.
+                any_literal = self.skos_graph.first_literal_with_language(
+                    node, SKOS.prefLabel, max_length=name_max_length
+                ) or self.skos_graph.first_literal_with_language(node, SKOS.prefLabel)
                 name, winning_tag = any_literal if any_literal is not None else (None, default_language)
             else:
                 name, winning_tag = name_match
@@ -1539,9 +1572,6 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
                         language=winning_tag,
                         kept_as=default_language,
                     )
-            # ARCH-306, fix cycle 4, decisions.md D55: cast, not an `is not None` check — see
-            # the identical note on resolve_scheme's own name-length read.
-            name_max_length = cast(int, Collection._meta.get_field("name").max_length)
             if name and len(name) > name_max_length:
                 # T042, SEC-002-shaped, decisions.md D35 (fix cycle 3): the same pre-write guard
                 # resolve_scheme's own name write applies — row.save() never calls full_clean(),
