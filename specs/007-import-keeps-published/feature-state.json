@@ -1286,6 +1286,58 @@
           }
         }
       ]
+    },
+    {
+      "id": "US12",
+      "priority": "P1",
+      "issue": null,
+      "worktree": "/home/sam/projects/samueljennings/dcv-fs007-fix7",
+      "status": "done",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T059",
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 893 passed",
+              "forge verify  # lint/typecheck/test/build pass; conformance red on pre-existing pyproject line-length"
+            ]
+          }
+        },
+        {
+          "id": "T060",
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 893 passed",
+              "forge verify  # lint/typecheck/test/build pass; conformance red on pre-existing pyproject line-length"
+            ]
+          }
+        },
+        {
+          "id": "T061",
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 893 passed",
+              "forge verify  # lint/typecheck/test/build pass; conformance red on pre-existing pyproject line-length"
+            ]
+          }
+        }
+      ]
     }
   ],
   "budgets": {
@@ -1294,8 +1346,8 @@
       "max": 2
     },
     "review_cycles": {
-      "used": 5,
-      "max": 5
+      "used": 6,
+      "max": 6
     },
     "design_review_cycles": {
       "used": 1,
