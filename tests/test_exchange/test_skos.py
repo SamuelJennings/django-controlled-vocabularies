@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 import rdflib
+from django.conf import global_settings
+from django.conf import settings as django_settings
 from django.db import connection
 from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
@@ -3235,3 +3237,56 @@ class TestFailureMessagesUseOnlyNamedPlaceholders:
         assert isinstance(err.message, Promise)
         assert uses_only_named_placeholders(str(err.message))
         assert err.code == "skos_import_failed"
+
+
+class TestNoContentIsStoredInAnUnconfiguredLanguage:
+    """T010 — FR-010/SC-017: across every matching path this feature introduces — the default
+    language, ``Concept.label``, labels, notes, and the vocabulary/collection name and
+    description — no value is ever stored in a language absent from the site's configuration.
+    This is the test that would fail if a later change made the matcher permissive."""
+
+    @staticmethod
+    def _assert_only_configured_languages_are_stored():
+        configured = {code for code, _label in django_settings.LANGUAGES}
+        stray_labels = ConceptLabel.objects.exclude(language__in=configured)
+        stray_notes = ConceptNote.objects.exclude(language__in=configured)
+        assert list(stray_labels) == []
+        assert list(stray_notes) == []
+        for scheme in ConceptScheme.objects.all():
+            assert scheme.effective_default_language in configured
+
+    @pytest.mark.parametrize("filename", ["rocks.ttl", "variants.ttl", "en-gb-only.ttl", "declares-de-at.ttl"])
+    def test_no_stray_language_lands_across_every_matching_path_this_feature_touches(self, db, filename):
+        report = import_skos(FIXTURES / filename)
+        assert report.fatal == []
+        self._assert_only_configured_languages_are_stored()
+
+    def test_the_invariant_holds_under_djangos_own_99_language_default(self, db, tmp_path):
+        # tests/settings.py declares its own three-language LANGUAGES list, so simply not
+        # overriding it here would silently mean that list rather than Django's own default —
+        # the obvious-looking test that pins nothing (decisions.md D12/D17). The ordinary
+        # consuming project declares no LANGUAGES at all, so this is the behaviour that needs
+        # holding still.
+        path = tmp_path / "many_languages.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/manylang/> a skos:ConceptScheme ;
+                skos:prefLabel "Many languages"@en .
+
+            <http://example.org/manylang/item> a skos:Concept ;
+                skos:inScheme <http://example.org/manylang/> ;
+                skos:prefLabel "Item"@en-us ;
+                skos:altLabel "Artikel"@de-at, "Nothing shares this base"@zzz .
+            """
+        )
+        with override_settings(LANGUAGES=global_settings.LANGUAGES):
+            report = import_skos(path)
+            assert report.fatal == []
+            self._assert_only_configured_languages_are_stored()
+            # A tag sharing no base with any of Django's 99 shipped languages is still refused,
+            # even under the largest configured set the package will ever see.
+            entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.UNCONFIGURED_LANGUAGE]
+            assert any(entry.params["language"] == "zzz" for entry in entries)
