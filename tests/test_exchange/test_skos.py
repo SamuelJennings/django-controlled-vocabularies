@@ -2214,6 +2214,40 @@ class TestNoPreferredLabelFinishedByUS3:
         assert b.alt_labels("en") == ["B-alt"]
 
 
+class TestNoPreferredLabelConceptStillAccountsItsOwnLanguages:
+    """T026 — SC-025, S6 CORR-001, decisions.md D34: a concept skipped for
+    having no usable preferred label never reached ``import_labels``, so none
+    of its own published tags ever entered ``language_account()`` — the
+    failure landing precisely on the concept a curator most needs to be told
+    about (FR-008's sufficiency clause, SC-012). Accounted here under the
+    concept's own published tag(s), never under the configured default it
+    lacks — folding ``NO_PREFERRED_LABEL``'s own ``params["language"]`` (a
+    configured code) into the account the way a published tag is would be
+    D14's failure mode all over again."""
+
+    def test_the_skipped_concepts_own_published_language_is_visible_in_the_account(self, db):
+        with override_settings(LANGUAGES=[("en", "English")]):
+            report = import_skos(FIXTURES / "no_default_language_label.ttl")
+        assert "fr" in report.language_account()
+        assert not Concept.objects.filter(static_uri="http://example.org/quarry/c").exists()
+
+    def test_the_configured_default_language_itself_never_appears_in_the_account(self, db):
+        # D14's failure mode: NO_PREFERRED_LABEL's own params["language"] is the
+        # *configured* default the concept lacks, never a published tag — must
+        # never be folded into the account as though it were one.
+        with override_settings(LANGUAGES=[("en", "English")]):
+            report = import_skos(FIXTURES / "no_default_language_label.ttl")
+        assert "en" not in report.language_account()
+
+    def test_the_no_preferred_label_entry_itself_is_still_reported_unchanged(self, db):
+        with override_settings(LANGUAGES=[("en", "English")]):
+            report = import_skos(FIXTURES / "no_default_language_label.ttl")
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.NO_PREFERRED_LABEL]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/quarry/c"
+        assert entries[0].params["language"] == "en"
+
+
 class TestEmptySlugLabelIsSetAsideNotCrashed:
     """FIX 5 (review, decisions.md D39) — ``_assign_unique_slug`` derives a
     concept's slug from its preferred label with ``slugify()``, then sets

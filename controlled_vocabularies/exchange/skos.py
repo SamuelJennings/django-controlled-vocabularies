@@ -830,14 +830,21 @@ class ConceptImporter:
                 continue
 
             default_language = self.target_scheme.effective_default_language
+            preferred_pairs = self.skos_graph.preferred_label_in(node)
             # FR-016, decisions.md D33 (S6 ARCH-001): the identity-anchoring slot's contest
             # runs over every tag sharing default_language's base, not only the ones that
             # resolve exactly to it — configuring a sibling variant in its own right must
             # never move an existing concept's stored label, slug or local URL.
-            identity_winner = self.matcher.resolve_identity_winner(
-                default_language, self.skos_graph.preferred_label_in(node)
-            )
+            identity_winner = self.matcher.resolve_identity_winner(default_language, preferred_pairs)
             if identity_winner is None:
+                # SC-025, S6 CORR-001, decisions.md D34: this concept is about to be skipped
+                # entirely, so import_labels never runs for it and none of its own languages
+                # would otherwise enter language_account() — precisely the concept a curator
+                # most needs visibility into. Accounted under its own published tag(s), never
+                # under the configured default it lacks (D14's failure mode).
+                for tag, _value in preferred_pairs:
+                    if self.matcher.resolve(tag).configured_language is None:
+                        self.report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, subject=uri, language=tag)
                 self.report.add_set_aside(SetAsideReason.NO_PREFERRED_LABEL, subject=uri, language=default_language)
                 continue
             (winning_tag, label), _losers = identity_winner
