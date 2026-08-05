@@ -645,38 +645,155 @@
       "priority": "P1",
       "issue": null,
       "worktree": null,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T029",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py",
+              "tests/test_models.py",
+              "tests/test_exchange/test_report.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 798 passed",
+              "forge check-receipts  # craft-tdd, craft-increments ok"
+            ]
+          }
         },
         {
           "id": "T030",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py",
+              "tests/test_models.py",
+              "tests/test_exchange/test_report.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 798 passed",
+              "forge check-receipts  # craft-tdd, craft-increments ok"
+            ]
+          }
         },
         {
           "id": "T031",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py",
+              "tests/test_models.py",
+              "tests/test_exchange/test_report.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 798 passed",
+              "forge check-receipts  # craft-tdd, craft-increments ok"
+            ]
+          }
         },
         {
           "id": "T032",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py",
+              "tests/test_models.py",
+              "tests/test_exchange/test_report.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 798 passed",
+              "forge check-receipts  # craft-tdd, craft-increments ok"
+            ]
+          }
         },
         {
           "id": "T033",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py",
+              "tests/test_models.py",
+              "tests/test_exchange/test_report.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 798 passed",
+              "forge check-receipts  # craft-tdd, craft-increments ok"
+            ]
+          }
         },
         {
           "id": "T034",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py",
+              "tests/test_models.py",
+              "tests/test_exchange/test_report.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 798 passed",
+              "forge check-receipts  # craft-tdd, craft-increments ok"
+            ]
+          }
+        },
+        {
+          "id": "T035",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py",
+              "tests/test_exchange/test_report.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 806 passed",
+              "forge verify --base main  # 5/5 green",
+              "forge tamper-check --base 936c7b7  # 2 flags, zero deleted lines, structural compare clean",
+              "forge check-receipts  # craft-tdd, craft-increments ok"
+            ]
+          }
+        },
+        {
+          "id": "T036",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py",
+              "tests/test_exchange/test_report.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 806 passed",
+              "forge verify --base main  # 5/5 green",
+              "forge tamper-check --base 936c7b7  # 2 flags, zero deleted lines, structural compare clean",
+              "forge check-receipts  # craft-tdd, craft-increments ok"
+            ]
+          }
+        },
+        {
+          "id": "T037",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py",
+              "tests/test_exchange/test_report.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 806 passed",
+              "forge verify --base main  # 5/5 green",
+              "forge tamper-check --base 936c7b7  # 2 flags, zero deleted lines, structural compare clean",
+              "forge check-receipts  # craft-tdd, craft-increments ok"
+            ]
+          }
         }
       ]
     },
