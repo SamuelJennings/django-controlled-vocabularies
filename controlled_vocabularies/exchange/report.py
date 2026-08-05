@@ -70,6 +70,14 @@ class SetAsideReason(TextChoices):
     a label or note to be stored "with its language", which a value carrying
     none cannot meet; the value is set aside rather than guessed into the
     vocabulary's default language, a language the file itself never asserted.
+    ``VARIANT_NOT_KEPT`` (T022, FR-005, decisions.md D14) names a preferred
+    label beaten by a *sibling variant* in a language contest (FR-003) —
+    never ``SURPLUS_PREFERRED_LABEL``, whose message means more than one
+    preferred label in one and the same language and is false for a value
+    whose file carries exactly one preferred label in its own published tag.
+    The two have different remedies: nothing recovers a same-language
+    duplicate, while configuring the published tag recovers a contest loser,
+    which is what FR-008's account exists to tell apart.
     """
 
     UNCONFIGURED_LANGUAGE = "unconfigured_language", _("language not configured")
@@ -87,6 +95,7 @@ class SetAsideReason(TextChoices):
     ALREADY_IN_ANOTHER_VOCABULARY = "already_in_another_vocabulary", _("already belongs to another vocabulary")
     URI_HELD_BY_DIFFERENT_KIND = "uri_held_by_different_kind", _("identifier held by a different kind of record")
     NO_LANGUAGE_TAG = "no_language_tag", _("no language tag")
+    VARIANT_NOT_KEPT = "variant_not_kept", _("language variant not kept")
 
     @property
     def template(self) -> Promise:
@@ -156,6 +165,10 @@ _REASON_TEMPLATES: dict[SetAsideReason, Promise] = {
     SetAsideReason.NO_LANGUAGE_TAG: _(
         "'%(subject)s' carries a '%(predicate)s' value with no language tag (or one that is not text "
         "at all); it was not stored."
+    ),
+    SetAsideReason.VARIANT_NOT_KEPT: _(
+        "'%(subject)s' carries a value in the language '%(language)s'; another variant was kept for "
+        "the site's '%(kept_as)s' instead, and this one was not stored."
     ),
 }
 

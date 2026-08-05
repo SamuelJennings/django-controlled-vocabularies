@@ -42,6 +42,7 @@ _EXAMPLE_PARAMS = {
     },
     SetAsideReason.URI_HELD_BY_DIFFERENT_KIND: {},
     SetAsideReason.NO_LANGUAGE_TAG: {"predicate": "skos:altLabel"},
+    SetAsideReason.VARIANT_NOT_KEPT: {"language": "en-us", "kept_as": "en-gb"},
 }
 
 # One example params dict per fatal reason (T007), the same shape as _EXAMPLE_PARAMS.
@@ -147,6 +148,53 @@ class TestSetAsideReasonVocabulary:
         assert "https://example.org/vocab/x" in rendered
         for value in _EXAMPLE_PARAMS[reason].values():
             assert value in rendered
+
+
+class TestVariantNotKeptReason:
+    """T022 — a value that lost a variant contest is set aside under its own
+    reason, not ``SURPLUS_PREFERRED_LABEL``, whose message means more than one
+    preferred label in one and the same language and is factually false here
+    (S3R SPEC-002, decisions.md D14). The published tag goes under
+    ``language``, identically to ``UNCONFIGURED_LANGUAGE``, and the configured
+    destination it lost to under ``kept_as`` — the wrong way round keys T004's
+    account under a language the site already holds."""
+
+    def test_the_entry_carries_the_published_tag_under_language_and_the_destination_under_kept_as(self):
+        report = ImportReport()
+        report.add_set_aside(
+            SetAsideReason.VARIANT_NOT_KEPT,
+            "https://example.org/vocab/rocks/granite",
+            language="en-us",
+            kept_as="en-gb",
+        )
+        entry = report.set_aside[0]
+        assert entry.reason is SetAsideReason.VARIANT_NOT_KEPT
+        assert entry.params == {"language": "en-us", "kept_as": "en-gb"}
+
+    def test_the_rendered_message_is_true_of_the_case_it_names(self):
+        entry = SetAsideEntry(
+            reason=SetAsideReason.VARIANT_NOT_KEPT,
+            subject="https://example.org/vocab/rocks/granite",
+            params={"language": "en-us", "kept_as": "en-gb"},
+        )
+        rendered = entry.render()
+        # A contest loser's file carries exactly one preferred label in its own
+        # published tag — SURPLUS_PREFERRED_LABEL's "more than one" claim would
+        # be false here (research.md R4).
+        assert "more than one preferred label" not in rendered
+        assert "en-us" in rendered
+        assert "en-gb" in rendered
+
+    def test_surplus_preferred_label_meaning_and_message_are_unchanged(self):
+        entry = SetAsideEntry(
+            reason=SetAsideReason.SURPLUS_PREFERRED_LABEL,
+            subject="https://example.org/vocab/rocks/granite",
+            params={"language": "de"},
+        )
+        assert entry.render() == (
+            "'https://example.org/vocab/rocks/granite' carries more than one preferred label in the "
+            "language 'de'; only one is kept and the surplus value was set aside."
+        )
 
 
 class TestFatalBucketAndFinding:
