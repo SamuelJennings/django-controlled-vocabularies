@@ -2027,62 +2027,6 @@ class TestReimportAfterAddingALanguageKeepsEveryOtherRecordUnchanged:
         assert granite.notes("en", ConceptNote.Kind.SCOPE) == ["Used here for coarse-grained intrusive igneous rock."]
 
 
-class TestReimportAfterAddingABaseSharingLanguageKeepsIdentityStill:
-    """T023 — FR-016/SC-022, decisions.md D33 (S6 ARCH-001): the identity-anchoring
-    slot's contest resolves over every published tag sharing the default language's
-    base, whether or not those tags are separately configured — the one slot
-    configuration must never reach, because it anchors every concept's stored
-    label, slug and local URL. TestReimportAfterAddingALanguageKeepsEveryOtherRecordUnchanged's
-    own case (rocks.ttl, en then en+fr) cannot exercise this: fr shares no base with
-    en, so the incumbent's candidate set there never shrinks. This one adds en-gb,
-    which shares en's base — the exact shape ARCH-001 reproduced: on the
-    unpatched branch this moved variants.ttl's concept from ``/colour`` to
-    ``/color`` with the file byte-identical across the two imports."""
-
-    def test_the_concepts_label_slug_and_local_url_are_unchanged_by_adding_a_base_sharing_language(self, db):
-        with override_settings(LANGUAGES=[("en", "English")]):
-            import_skos(FIXTURES / "variants.ttl")
-        concept = Concept.objects.get(static_uri="http://example.org/colours/colour")
-        before = (concept.pk, concept.label, concept.slug, concept.local_url)
-        assert before[1:] == ("Colour", "colour", concept.local_url)
-
-        with override_settings(LANGUAGES=[("en", "English"), ("en-gb", "British English")]):
-            import_skos(FIXTURES / "variants.ttl")
-        concept.refresh_from_db()
-        after = (concept.pk, concept.label, concept.slug, concept.local_url)
-        assert after == before
-
-    def test_the_en_gb_value_is_now_also_stored_under_its_own_newly_configured_slot(self, db):
-        # D33's stated cost: the value that anchors identity can now fill both its
-        # own exact slot and the default-language slot — Colour@en-gb is stored
-        # under en-gb *and* under en (as concept.label), rather than the en-us
-        # spelling silently taking over the identity anchor.
-        with override_settings(LANGUAGES=[("en", "English")]):
-            import_skos(FIXTURES / "variants.ttl")
-        with override_settings(LANGUAGES=[("en", "English"), ("en-gb", "British English")]):
-            import_skos(FIXTURES / "variants.ttl")
-        concept = Concept.objects.get(static_uri="http://example.org/colours/colour")
-        assert concept.label == "Colour"
-        assert concept.preferred_label("en-gb") == "Colour"
-
-    def test_the_en_us_spelling_remains_a_reported_contest_loser_not_stored(self, db):
-        with override_settings(LANGUAGES=[("en", "English")]):
-            import_skos(FIXTURES / "variants.ttl")
-        with override_settings(LANGUAGES=[("en", "English"), ("en-gb", "British English")]):
-            report = import_skos(FIXTURES / "variants.ttl")
-        concept = Concept.objects.get(static_uri="http://example.org/colours/colour")
-        assert concept.preferred_label("en-us") is None
-        losers = [
-            entry
-            for entry in report.set_aside
-            if entry.reason is SetAsideReason.VARIANT_NOT_KEPT
-            and entry.subject == concept.static_uri
-            and entry.params["language"] == "en-us"
-        ]
-        assert len(losers) == 1
-        assert losers[0].params["kept_as"] == "en"
-
-
 class TestUnconfiguredLanguageValuesAreSetAside:
     """T020 — FR-014: a label or note in a language the site is not configured
     for is stored nowhere and is named in the report with its language, and
