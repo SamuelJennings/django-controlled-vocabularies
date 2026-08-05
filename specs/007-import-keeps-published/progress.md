@@ -362,3 +362,39 @@ Append-only log of stage transitions and gate outcomes.
   never-committed FR-016 implementation) confirmed absent from the branch — nothing to remove.
   A record's local address can now move for exactly one reason: the publisher reassigning its own
   identifier. Next: FS-007 re-gate and convergence.
+
+## 2026-08-05 (continued further)
+
+- **S4 IMPLEMENT — FIX-2 (T035–T037), Implementer.** `craft-tdd` and `craft-increments` loaded by
+  name, receipts verified before any task started. Baseline confirmed green (798 tests, HEAD
+  `936c7b7`) before touching anything. Two regressions, each proven RED with the orchestrator's own
+  reproduction before any production code changed, two commits, tree green and clean after each.
+  - **T035** — `SchemeResolver.resolve_scheme` wrote an identifier-derived slug straight onto
+    `row.slug` with no collision handling, so two published vocabularies ending in the same
+    identifier segment (e.g. two `/colours` schemes) hit `ConceptScheme.save()`'s refusal as an
+    uncaught `ValidationError` and rolled back the run. RED proven first: importing
+    `<http://a.org/colours>` then `<http://b.org/colours>` raised exactly that on this branch and
+    imported cleanly on `cd4f1c6`. Fixed by factoring `assign_unique_slug`'s own collision shape
+    into a shared `unique_slug_for_identifier(static_uri, taken_slugs)`, called by both
+    `ConceptImporter.assign_unique_slug` and `SchemeResolver.resolve_scheme` (Article XV) — a
+    numeric suffix minted only when the candidate already belongs to a different record's
+    `static_uri`. `ConceptScheme.save()`'s own refusal is untouched. Full rationale in D41.
+  - **T036** — The scheme path had no guard for an identifier segment that `slugify()` strips to
+    nothing, unlike the concept path's pre-write `EMPTY_SLUG` check; `resolve_scheme` let
+    `ConceptScheme.save()` raise `ValidationError({'slug': ['An explicit slug must not be
+    empty.']})` instead. RED proven first: importing `<http://c.org/vocab/#±> a
+    skos:ConceptScheme ; skos:prefLabel "Symbols"@en` raised exactly that on this branch and
+    imported cleanly on `cd4f1c6`. Fixed by checking `unique_slug_for_identifier`'s result ahead of
+    `row.save()` and adding `FatalReason.VOCABULARY_SLUG_UNUSABLE` — fatal rather than set aside,
+    since without a resolvable vocabulary there is nothing for the rest of the file to import into.
+    No fallback to `row.name`. Full rationale in D42.
+  - **T037** — Full re-verification: `poetry run pytest -q` (798 → 806 passed), `ruff check .`,
+    `ruff format --check .` (25 files), `mypy controlled_vocabularies` (11 source files),
+    `deptry .`, `makemigrations --check --dry-run` (clean), and a standalone migrate-from-zero run
+    against tests' in-memory SQLite database (all six `controlled_vocabularies` migrations plus
+    `auth`/`contenttypes` applied cleanly, ending at `0006_conceptscheme_slug_is_manual`, no new
+    migration). `decisions.md` gains D41–D42, one entry per defect, each recording the regression
+    against `cd4f1c6`, the reproduction that established it, and the resolution chosen.
+  Two non-obvious choices recorded as D41–D42. Worktree clean. A vocabulary's own slug now resolves
+  a collision or an unusable derivation exactly as a concept's already did, closing the one gap
+  T030 left between the two paths. Next: FS-007 re-gate and convergence.

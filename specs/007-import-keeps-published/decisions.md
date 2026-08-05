@@ -938,3 +938,65 @@ correct, this time as a consequence of T029 rather than of an earlier phase.
 
 **Revisit if:** never — the same shape as D26/D29/D30/D31, recorded so a later reader does not look
 for a second collision algorithm and conclude one is missing.
+
+## D41 — T035 (fix cycle 2): T030 gave a vocabulary's own slug a collision, and no mechanism to resolve one
+
+A regression against `cd4f1c6`, reproduced and confirmed on both branches by the orchestrator before
+dispatch. T030 (D39) moved a scheme's own slug from `slugify(row.name)` to
+`slugify(identifier_slug_segment(declared_uri))`, mirroring T029's concept-side change, but stopped
+short of also mirroring T029's collision handling: `resolve_scheme` wrote the identifier-derived
+candidate straight onto `row.slug` and called `row.save()`, and `ConceptScheme.save()` refuses
+rather than resolves a collision (research R4). Two published vocabularies whose identifiers happen
+to end in the same segment — `.../a/colours` and `.../b/colours`, or any pair sharing a generic
+final path component such as `/scheme`, `/vocab`, `/thesaurus`, `/core` — are ordinary in SKOS, not
+an edge case. Reproduced exactly: importing `<http://a.org/colours>` then
+`<http://b.org/colours>`, both `skos:ConceptScheme` with distinct `prefLabel`s, imported cleanly on
+`cd4f1c6` (each slug came from its own distinct name) and raised an uncaught
+`ValidationError({'slug': ["A vocabulary with the slug 'colours' already exists."]})` out of the
+second scheme's `save()` on this branch, rolling back the whole second run.
+
+**Resolved by reusing, not reinventing, `assign_unique_slug`'s own shape.** The importer — not the
+model — resolves its own collisions: a numeric suffix minted only when the identifier-derived
+candidate already belongs to a *different* record, matched on `static_uri` so a record always reads
+its own prior slug back to itself (stable across a re-import) and the resolution is
+identifier-derived rather than order-dependent (FR-020). Rather than duplicate that computation for
+`ConceptScheme`, it is factored out of `assign_unique_slug` into a shared function,
+`unique_slug_for_identifier(static_uri, taken_slugs)`, called by both
+`ConceptImporter.assign_unique_slug` and `SchemeResolver.resolve_scheme` — Article XV's cohesion
+rule read literally: a concept's collision and a scheme's collision are the same computation over
+two record kinds, and this story's own conventions text named the reuse explicitly rather than
+leaving it to be noticed at review. `ConceptScheme.save()`'s own refusal is untouched: a curator
+setting two vocabularies' slugs equal by hand is still refused, never silently auto-suffixed — only
+the importer's own collisions, which a publisher cannot avoid by hand, are resolved here.
+
+**Revisit if:** never — the same reasoning D35 and D39 already give for the scheme slug generally,
+extended to its collision case.
+
+## D42 — T036 (fix cycle 2): an unusable derived scheme slug must be fatal, and the concept-side guard was never mirrored
+
+A second regression against `cd4f1c6`, reproduced and confirmed the same way. T030 changed what a
+scheme's slug is derived from without carrying over T029's own guard: `import_concepts` checks
+`slugify(identifier_slug_segment(uri))` for emptiness *before* ever calling `assign_unique_slug`,
+and sets the concept aside under `EMPTY_SLUG` (D39) rather than let `Concept.save()`'s identical
+refusal raise. `resolve_scheme` had no equivalent check at all — it wrote whatever
+`unique_slug_for_identifier` returned (including `""`) straight onto `row.slug` and called
+`row.save()`. Reproduced exactly: importing `<http://c.org/vocab/#±> a skos:ConceptScheme ;
+skos:prefLabel "Symbols"@en` imported cleanly on `cd4f1c6` (the slug came from 'Symbols', which
+slugifies fine) and raised an uncaught `ValidationError({'slug': ['An explicit slug must not be
+empty.']})` on this branch, because the identifier's own fragment (`±`) is made up only of
+characters `slugify()` strips.
+
+**Fatal, not set aside — the two guards land differently on purpose.** A concept with an unusable
+derived slug is one record the rest of the file can still be imported around; a vocabulary with an
+unusable derived slug leaves nothing for the rest of the file to import *into*, so the whole run is
+refused rather than reporting one unusable-slug problem and then reporting every concept in the file
+as belonging to no resolvable vocabulary. Added `FatalReason.VOCABULARY_SLUG_UNUSABLE` alongside the
+other `VOCABULARY_*` fatals, with a translatable, named-placeholder template (Article XII), and
+checked in `resolve_scheme` ahead of `row.save()` — the same discipline `EMPTY_SLUG` already applies
+on the concept side — rather than letting `ConceptScheme.save()`'s own refusal raise. No fallback to
+`row.name`: that would reinstate the exact defect FR-018 exists to remove, for the one case where
+the identifier-derived slug happens not to work.
+
+**Revisit if:** never — the same reasoning `EMPTY_SLUG` (D39) already gives for the concept side,
+with the fatal-versus-set-aside split accounted for by what each record kind's absence costs the
+rest of the file.
