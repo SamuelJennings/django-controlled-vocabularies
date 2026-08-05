@@ -269,3 +269,40 @@ Append-only log of stage transitions and gate outcomes.
   `ruff format --check .`, `mypy controlled_vocabularies`, `deptry .`. Worktree clean. Two
   characterization choices recorded as D30–D31. Next: US-5 (#73, T018–T022) — translatable
   messages, deliberate indexing, and reusable test material.
+
+- **S4 IMPLEMENT — US-5 (#73, T018–T020), Implementer.** `craft-tdd` and `craft-increments` loaded
+  by name, receipts verified against the brief before any task started. Baseline confirmed green
+  (762 tests, HEAD `e669de1`) before touching anything. Three commits, one per task, tree green and
+  clean after each. T021 and T022 (the foundational-phase reason additions themselves) were already
+  done; this dispatch's own brief scoped it to T018–T020.
+  - **T018** — Two tests added to `tests/test_standards.py`,
+    `TestImportLanguageMessagesUseNamedPlaceholders`, following that file's own
+    translatable-message form: each asserts `NormalizedReason.LANGUAGE_SUBSTITUTION`'s and
+    `SetAsideReason.VARIANT_NOT_KEPT`'s templates are lazily translatable, carry only named
+    placeholders, and render correctly with real values. `tests/test_exchange/test_report.py`
+    already sweeps every member of both closed vocabularies (`TestSetAsideReasonVocabulary`,
+    `TestNormalizedReasonVocabulary`, `TestReasonTemplatesUseOnlyNamedPlaceholders`) and so already
+    covered both reasons before this task; the brief named `test_standards.py` specifically, so the
+    two are additional, deliberately overlapping coverage rather than a gap being filled (D32). RED
+    proven by hand: `report.py` was locally edited twice — a bare non-lazy string with a positional
+    `%s`, then a lazy string with two positional placeholders instead of named ones — running the
+    two new tests after each edit and observing the correct one fail for the reported reason, then
+    reverting with `git checkout` before the next edit and before committing. No test or production
+    file outside this task's own new tests was touched.
+  - **T019** — `CONTEXT.md` gains a new "Importing published vocabularies" glossary table: base
+    language, variant, and substitution, worded to match `report.py`'s own reason labels and
+    templates rather than paraphrasing them (FR-014, SC-019). No test — verified by reading the
+    file, per the acceptance scenario's own terms.
+  - **T020** — README's "Importing a published vocabulary" section gains three paragraphs between
+    the upsert paragraph and the `ImportReport` bucket list: the base-language matching rule in both
+    directions and its script caveat (D6), that the package stores content for every code in
+    `settings.LANGUAGES` and Django's own 99-language default applies when a project declares none,
+    and that a concept's local URL can move between imports when the file's predominant variant
+    changes (D18). CHANGELOG's `[Unreleased]` → `Added` section gains one new bullet, alongside the
+    existing `import_skos` entry, stating the same behaviour change at changelog length. Public
+    markdown, written plainly, no internal process language.
+  Full verify green throughout: `poetry run pytest -q` (762 → 764 passed, T019/T020 doc-only and
+  added no tests), `ruff check .`, `ruff format --check .`, `mypy controlled_vocabularies`,
+  `deptry .`. Worktree clean, diff scoped to `tests/test_standards.py`, `CONTEXT.md`, `README.md`,
+  and `CHANGELOG.md` — no importer behaviour touched. One non-obvious choice recorded as D32. This
+  is the last story of the feature.
