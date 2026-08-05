@@ -8,6 +8,7 @@ before rdflib ever sees it.
 """
 
 import re
+import threading
 from pathlib import Path
 
 import pytest
@@ -1520,8 +1521,25 @@ class TestUniqueSlugForIdentifierGivesUpRatherThanLoopingForever:
     """
 
     def test_a_collision_that_always_clamps_to_the_same_candidate_gives_up_rather_than_hanging(self):
-        result = unique_slug_for_identifier("http://e.org/#ab", {"ab": "other", "a-": "other2"}, 2)
-        assert result == ""
+        """T061 — CORR-604 (round 6, low): asserting on the return value alone means a
+        regression of the give-up itself hangs this call forever rather than failing — pytest
+        never reaches the assertion below, and CI cannot tell the difference between that and a
+        stuck runner. No ``pytest-timeout`` dependency is added for one test; the call runs in a
+        daemon worker thread with a bounded ``join()`` instead, which is the same "fail within
+        seconds, not never" property using only the standard library. Five seconds is generous
+        for a call that, when it does not hang, returns in microseconds.
+        """
+        result_holder: list[str] = []
+        worker = threading.Thread(
+            target=lambda: result_holder.append(
+                unique_slug_for_identifier("http://e.org/#ab", {"ab": "other", "a-": "other2"}, 2)
+            ),
+            daemon=True,
+        )
+        worker.start()
+        worker.join(timeout=5)
+        assert not worker.is_alive(), "unique_slug_for_identifier did not return within 5s (non-termination regression)"
+        assert result_holder == [""]
 
     def test_giving_up_does_not_disturb_a_collision_that_would_have_resolved_anyway(self):
         """The existing SEC-303/SEC-405 fixtures resolve on their very first retry (``'a-'`` is
@@ -1534,6 +1552,110 @@ class TestUniqueSlugForIdentifierGivesUpRatherThanLoopingForever:
         taken = {"granite": "other", "granite-2": "other2"}
         result = unique_slug_for_identifier("http://e.org/#granite", taken, 255)
         assert result == "granite-3"
+
+
+class TestUniqueSlugForIdentifierResolvesACollisionEvenWhenTheBaseIsAlreadyMaxLength:
+    """T060 — CORR-601/SEC-604 (round 6, high): D66's give-up (T056, fix cycle 6) seeds ``tried``
+    with ``base`` itself before the loop has generated any candidate. Whenever ``len(base) ==
+    max_length`` and ``base`` ends in ``-2``, the clamp (D63) makes the *first* retry's candidate
+    reproduce ``base`` exactly — ``base[:253] + "-2" == base`` at ``max_length=255`` — so the
+    give-up fires on the very first retry and abandons a collision the next suffix (``-3``)
+    resolves trivially. Reproduced exactly as the round-6 review reported it: two concepts whose
+    identifier fragments both slugify (then truncate to 255 characters) to the identical string
+    ``"a" * 253 + "-2"``.
+    """
+
+    def test_a_255_character_base_ending_in_dash_2_still_resolves_its_collision(self):
+        base = "a" * 253 + "-2"
+        assert len(base) == 255
+        result = unique_slug_for_identifier(f"http://e.org/#{base}", {base: "other"}, 255)
+        assert result != ""
+        assert result != base
+
+    def test_two_concepts_sharing_a_255_character_slug_base_both_import(self, db, tmp_path):
+        """The two fragments the round-6 review reproduced this with — both slugify (and
+        truncate) to the identical 255-character base, so this exercises the give-up through the
+        public ``import_skos``, not only the module-level helper directly.
+        """
+        fragment_a = "a" * 253 + "-2" + "xx"
+        fragment_b = "a" * 253 + "-2" + "yy"
+        path = tmp_path / "t060_collision.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/t060scheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            f"<http://pub.example/t060scheme#{fragment_a}> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/t060scheme> ; skos:prefLabel "Concept A"@en .\n'
+            f"<http://pub.example/t060scheme#{fragment_b}> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/t060scheme> ; skos:prefLabel "Concept B"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        assert report.set_aside == []
+        concepts = Concept.objects.filter(scheme__static_uri="http://pub.example/t060scheme")
+        assert concepts.count() == 2
+        slugs = set(concepts.values_list("slug", flat=True))
+        assert len(slugs) == 2
+
+
+class TestAGiveUpSlugIsReportedNotWrittenOrMislabeled:
+    """T060 — SEC-604 (round 6, low): D66's give-up return (``""``) is checked at
+    ``SchemeResolver.resolve_scheme``'s own call site (``VOCABULARY_SLUG_UNUSABLE``), but not at
+    ``ConceptImporter.assign_unique_slug`` or ``CollectionImporter.import_collections`` — an
+    empty slug from either reached ``save()`` unchecked and was caught only by the model's own
+    manual-slug validation, reported as ``STORED_SLUG_INVALID`` — a reason whose own message says
+    a *stored* slug fails validation, which is false for a record whose slug was never written at
+    all. ``unique_slug_for_identifier`` is monkeypatched to always give up, the shape a
+    to-date-unreachable collision (D51/D63: ~10^250 prior collisions at ``max_length=255``) would
+    produce, without needing to actually construct one.
+    """
+
+    def test_a_concept_s_give_up_slug_is_empty_slug_not_stored_slug_invalid(self, db, tmp_path, monkeypatch):
+        """The scheme itself is pre-created (matched, not created) so the patched give-up is
+        exercised only through the concept's own call site — a *created* scheme would hit
+        ``resolve_scheme``'s own already-guarded call first and refuse the whole run instead.
+        """
+        ConceptSchemeFactory(name="Vocab", static_uri="http://pub.example/sec604scheme")
+        path = tmp_path / "sec604_concept.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec604scheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/sec604scheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec604scheme> ; skos:prefLabel "One"@en .\n'
+        )
+        monkeypatch.setattr(exchange.skos, "unique_slug_for_identifier", lambda *args, **kwargs: "")
+        report = import_skos(path)
+        assert report.fatal == []
+        assert not Concept.objects.filter(static_uri="http://pub.example/sec604scheme#c1").exists()
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.EMPTY_SLUG]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://pub.example/sec604scheme#c1"
+        stored_slug_entries = [
+            entry for entry in report.set_aside if entry.reason is SetAsideReason.STORED_SLUG_INVALID
+        ]
+        assert stored_slug_entries == []
+
+    def test_a_collection_s_give_up_slug_is_empty_slug_not_stored_slug_invalid(self, db, tmp_path, monkeypatch):
+        """Same pre-creation reasoning as the concept test above."""
+        ConceptSchemeFactory(name="Vocab", static_uri="http://pub.example/sec604collscheme")
+        path = tmp_path / "sec604_collection.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec604collscheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/sec604collscheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec604collscheme> ; skos:prefLabel "One"@en .\n'
+            "<http://pub.example/sec604collscheme#grp> a skos:Collection ; "
+            'skos:prefLabel "Group"@en .\n'
+        )
+        monkeypatch.setattr(exchange.skos, "unique_slug_for_identifier", lambda *args, **kwargs: "")
+        report = import_skos(path)
+        assert report.fatal == []
+        assert not Collection.objects.filter(static_uri="http://pub.example/sec604collscheme#grp").exists()
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.EMPTY_SLUG]
+        assert any(entry.subject == "http://pub.example/sec604collscheme#grp" for entry in entries)
+        stored_slug_entries = [
+            entry for entry in report.set_aside if entry.reason is SetAsideReason.STORED_SLUG_INVALID
+        ]
+        assert stored_slug_entries == []
 
 
 class TestSlugAndNameLengthAreBoundedToTheField:
@@ -1929,6 +2051,15 @@ class TestNoPublishedNameAtAllIsUnusableTheSameAsOverLong:
         ``VOCABULARY_NAME_UNPUBLISHED`` names what actually happened. The type-only assertion
         this test previously made could not have caught the message being wrong, so ``render()``
         is now asserted too.
+
+        T061, SEC-603/CORR-603, decisions.md D71 (fix cycle 7): overturns this test's own
+        substring assertion in turn. T055's ``str(literal).strip()`` filter (this same cycle 6,
+        after this test was written) routes a *whitespace-only* published vocabulary name into
+        this identical fatal, and the message's claim that "no skos:prefLabel was published for
+        it at all" is false on that path — a triple was published, it was merely unusable. The
+        template is reworded to name the actual condition ("no skos:prefLabel with a usable
+        value was published ... in any language") rather than a fact about the file that does
+        not always hold; the substring this test checks for is updated to match.
         """
         path = tmp_path / "sec404_scheme.ttl"
         path.write_text(
@@ -1945,7 +2076,7 @@ class TestNoPublishedNameAtAllIsUnusableTheSameAsOverLong:
         assert report.fatal[0].reason is FatalReason.VOCABULARY_NAME_UNPUBLISHED
         message = report.fatal[0].render()
         assert "longer than" not in message
-        assert "no skos:prefLabel was published" in message
+        assert "no skos:prefLabel with a usable value was published" in message
         assert not ConceptScheme.objects.filter(static_uri="http://pub.example/sec404scheme").exists()
 
     def test_a_created_collection_with_no_preflabel_at_all_is_set_aside_not_persisted_blank(self, db, tmp_path):
@@ -2120,6 +2251,137 @@ class TestAnEmptyPublishedLiteralIsNeverTreatedAsAUsableName:
         assert len(report.fatal) == 1
         assert report.fatal[0].reason is FatalReason.VOCABULARY_NAME_UNPUBLISHED
         assert not ConceptScheme.objects.filter(static_uri="http://pub.example/sec501schemenone").exists()
+
+    def test_a_whitespace_only_vocabulary_name_is_refused_with_a_message_that_stays_true(self, db, tmp_path):
+        """T061 — SEC-603 (round 6, medium): a scheme publishing only a whitespace-only
+        ``skos:prefLabel`` reaches this identical fatal (T055's filter makes ``name`` arrive
+        ``None``, exactly as if nothing had been published), but a triple *was* published — the
+        message must not tell a curator to add one that is already in their file.
+        """
+        path = tmp_path / "sec603_scheme_whitespace_only.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec603schemewsonly> a skos:ConceptScheme ; skos:prefLabel "   "@en .\n'
+            "<http://pub.example/sec603schemewsonly#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec603schemewsonly> ; skos:prefLabel "One"@en .\n'
+        )
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(path)
+        report = exc_info.value.report
+        assert len(report.fatal) == 1
+        assert report.fatal[0].reason is FatalReason.VOCABULARY_NAME_UNPUBLISHED
+        message = report.fatal[0].render()
+        assert "at all" not in message
+        assert "no skos:prefLabel with a usable value was published" in message
+        assert not ConceptScheme.objects.filter(static_uri="http://pub.example/sec603schemewsonly").exists()
+
+
+class TestAnEmptyPublishedLiteralIsNeverAUsableNameForAnyRecordKind:
+    """T059 — SEC-601/CORR-602, decisions.md D69 (fix cycle 7): D65 (T055, fix cycle 6) filtered
+    an empty-or-whitespace-only literal out of ``SkosGraph.first_literal`` and
+    ``first_literal_with_language`` — the two accessors a vocabulary's and a collection's own
+    name are selected through. A concept's label is selected through a third accessor,
+    ``SkosGraph.preferred_label_in``, which D65 never touched, so a concept published as
+    ``skos:prefLabel ""@en, "Real Name"@en`` stored ``Concept.label == ''`` and reported "Real
+    Name" as a surplus preferred label discarded, not merely passed over.
+
+    Fixed structurally rather than by copying the same inline check to a third place:
+    ``SkosGraph.is_usable_literal`` is now the one predicate every literal-to-name-candidate read
+    shares (``first_literal``, ``first_literal_with_language``, ``preferred_label_in`` and
+    ``label_languages`` all call it), so a fourth record kind or a fifth call site inherits the
+    rule by construction rather than needing its own copy minted for it.
+    """
+
+    @pytest.mark.parametrize("record_kind", ["scheme", "concept", "collection"])
+    def test_an_empty_literal_never_beats_a_real_one_regardless_of_record_kind(self, db, tmp_path, record_kind):
+        """One parametrized test drives all three record kinds through the identical fixture
+        shape — an empty literal published alongside a real one, in the record's own name
+        predicate — so a regression in any single kind's selection path fails this one test,
+        not a kind-specific test nobody thought to write.
+        """
+        path = tmp_path / f"t059_{record_kind}.ttl"
+        if record_kind == "scheme":
+            path.write_text(
+                "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+                "<http://pub.example/t059scheme> a skos:ConceptScheme ; "
+                'skos:prefLabel ""@en, "Real Name"@en .\n'
+                "<http://pub.example/t059scheme#c1> a skos:Concept ; "
+                'skos:inScheme <http://pub.example/t059scheme> ; skos:prefLabel "One"@en .\n'
+            )
+        elif record_kind == "concept":
+            path.write_text(
+                "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+                '<http://pub.example/t059concept> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+                "<http://pub.example/t059concept#c1> a skos:Concept ; "
+                'skos:inScheme <http://pub.example/t059concept> ; skos:prefLabel ""@en, "Real Name"@en .\n'
+            )
+        else:
+            path.write_text(
+                "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+                '<http://pub.example/t059collection> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+                "<http://pub.example/t059collection#c1> a skos:Concept ; "
+                'skos:inScheme <http://pub.example/t059collection> ; skos:prefLabel "One"@en .\n'
+                "<http://pub.example/t059collection#grp> a skos:Collection ; "
+                'skos:prefLabel ""@en, "Real Name"@en .\n'
+            )
+
+        report = import_skos(path)
+        assert report.fatal == []
+
+        if record_kind == "scheme":
+            stored_name = ConceptScheme.objects.get(static_uri="http://pub.example/t059scheme").name
+        elif record_kind == "concept":
+            stored_name = Concept.objects.get(static_uri="http://pub.example/t059concept#c1").label
+        else:
+            stored_name = Collection.objects.get(static_uri="http://pub.example/t059collection#grp").name
+
+        assert stored_name == "Real Name"
+        assert not any(entry.reason is SetAsideReason.SURPLUS_PREFERRED_LABEL for entry in report.set_aside)
+
+    def test_a_whitespace_only_alternative_label_is_not_stored(self, db, tmp_path):
+        """Audit finding, T059 brief: ``ConceptImporter.import_labels`` reads ``skos:altLabel``/
+        ``skos:hiddenLabel`` (and a non-default-language ``skos:prefLabel``) straight off the
+        graph rather than through any of the four filtered accessors — the "fifth call site" the
+        structural fix exists to catch. A true empty string is already refused by
+        ``ConceptLabel.text``'s own ``blank=False`` (``full_clean()`` raises before the row is
+        written), but Django's blank check does not treat a whitespace-only string as blank, so
+        ``"   "`` used to pass straight through and get stored as a visible-nothing alternative
+        label. Routing this loop through the same ``is_usable_literal`` predicate closes it.
+        """
+        path = tmp_path / "t059_altlabel_whitespace.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/t059altlabel> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/t059altlabel#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/t059altlabel> ; skos:prefLabel "One"@en ; '
+            'skos:altLabel "   "@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        concept = Concept.objects.get(static_uri="http://pub.example/t059altlabel#c1")
+        assert list(concept.labels.all()) == []
+
+    def test_an_empty_only_non_default_language_preferred_label_is_silently_absent_not_a_crash(self, db, tmp_path):
+        """Audit finding, T059 brief: before the raw ``import_labels`` loop was routed through
+        ``is_usable_literal``, closing ``preferred_label_in``'s own gap alone would have made
+        this scenario raise ``KeyError`` instead of importing cleanly — a concept whose *only*
+        ``fr`` (a configured, non-default) preferred label is empty has no ``fr`` winner in
+        ``preferred_winner_by_language`` once empty candidates are excluded from it, but the raw
+        loop would still try to look one up for this literal without the same exclusion.
+        """
+        path = tmp_path / "t059_empty_only_variant.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/t059variantonly> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/t059variantonly#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/t059variantonly> ; skos:prefLabel "One"@en, ""@fr .\n'
+        )
+        with override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]):
+            report = import_skos(path)
+        assert report.fatal == []
+        concept = Concept.objects.get(static_uri="http://pub.example/t059variantonly#c1")
+        assert concept.label == "One"
+        assert list(concept.labels.all()) == []
 
 
 class TestAStoredSlugThatFailsValidationIsSetAsideNotEscaped:
@@ -3168,6 +3430,58 @@ class TestVariantContestLosersAreDiscriminatedInEveryConfiguredLanguage:
         assert variant[0].params["kept_as"] == "de"
         assert report.language_account().get("de-ch") == 1
         assert "de" not in report.language_account()
+
+
+class TestAnEmptyLiteralDoesNotVoteOnPredominance:
+    """T061 — SEC-602 (round 6, medium): closed as a consequence of T059's structural fix
+    (decisions.md D69) rather than needing a fix of its own — ``SkosGraph.label_languages`` is
+    one of ``is_usable_literal``'s four call sites, so ``preferred_label_tag_counts`` (built
+    entirely from it) no longer tallies a literal that could never itself win a name slot.
+    Pinned here as its own regression test, in the shape the round-6 review reported it: before
+    T059, an empty or whitespace-only literal was excluded from ever winning a contest but still
+    counted toward its published tag's predominance, letting a publisher tip which of two *real*
+    variants fills a configured language's slot — for an entirely unrelated concept — using
+    literals that could not themselves be stored anywhere.
+    """
+
+    def test_two_unusable_literals_in_one_variant_cannot_flip_predominance_for_another_concept(self, db, tmp_path):
+        """Baseline predominance (without ``unusable1``/``unusable2``): ``de-de`` appears twice
+        (``filler`` and ``c1``), ``de-at`` once (``c1`` only) — ``de-de`` wins and
+        ``c1.preferred_label("de")`` is ``"Alpha DE"``. Before the fix, ``unusable1`` and
+        ``unusable2``'s own empty/whitespace ``de-at`` literals each still counted a vote,
+        pushing ``de-at`` to three against ``de-de``'s two and flipping ``c1``'s own stored value
+        to ``"Alpha AT"`` — neither publishing anything storable themselves.
+        """
+        path = tmp_path / "sec602_predominance.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/sec602/> a skos:ConceptScheme ;
+                skos:prefLabel "Sec Six O Two"@en .
+
+            <http://example.org/sec602/filler> a skos:Concept ;
+                skos:inScheme <http://example.org/sec602/> ;
+                skos:prefLabel "Filler"@en, "Filler DE"@de-de .
+
+            <http://example.org/sec602/c1> a skos:Concept ;
+                skos:inScheme <http://example.org/sec602/> ;
+                skos:prefLabel "One"@en, "Alpha DE"@de-de, "Alpha AT"@de-at .
+
+            <http://example.org/sec602/unusable1> a skos:Concept ;
+                skos:inScheme <http://example.org/sec602/> ;
+                skos:prefLabel "Two"@en, ""@de-at .
+
+            <http://example.org/sec602/unusable2> a skos:Concept ;
+                skos:inScheme <http://example.org/sec602/> ;
+                skos:prefLabel "Three"@en, "   "@de-at .
+            """
+        )
+        with override_settings(LANGUAGES=[("en", "English"), ("de", "German")]):
+            report = import_skos(path)
+        assert report.fatal == []
+        c1 = Concept.objects.get(static_uri="http://example.org/sec602/c1")
+        assert c1.preferred_label("de") == "Alpha DE"
 
 
 class TestConceptNotes:

@@ -19,7 +19,7 @@ import urllib.parse
 from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard, cast
 
 import rdflib
 import rdflib.util
@@ -129,13 +129,21 @@ def unique_slug_for_identifier(static_uri: str, taken_slugs: dict[str, str | Non
     relative to the suffix text, the clamp above can make two *different* suffixes render as the
     identical truncated string, and a candidate that keeps re-colliding with the same taken slug
     would otherwise never terminate.
+
+    ``tried`` (T060, CORR-601/SEC-604, decisions.md D70, fix cycle 7) records only candidates this
+    loop has itself *generated*, never ``base`` — the ``while`` condition above has already tested
+    ``base`` on its own. Seeding it with ``base`` made the give-up fire on a collision's very
+    first retry whenever ``len(base) == max_length`` and ``base`` ends in ``-2``: the clamp above
+    then renders that retry's candidate as ``base`` itself (``base[:253] + "-2" == base`` at
+    ``max_length=255``), which looked like a repeat of a *tried* candidate rather than what it
+    actually was — the first and only attempt so far, resolvable by the very next suffix.
     """
     base = identifier_slug_base(static_uri)[:max_length]
     if not base:
         return ""
     candidate = base
     suffix = 1
-    tried = {candidate}
+    tried: set[str] = set()
     while taken_slugs.get(candidate, static_uri) != static_uri:
         suffix += 1
         suffix_text = f"-{suffix}"
@@ -264,6 +272,24 @@ class SkosGraph:
             raise _FatalIdentity(FatalReason.REFUSED_IDENTITY, subject=uri) from exc
         return uri
 
+    @staticmethod
+    def is_usable_literal(literal: object) -> TypeGuard[rdflib.Literal]:
+        """Whether ``literal`` is a published value this application can store as a name (T059,
+        SEC-601/CORR-602, decisions.md D69): an :class:`rdflib.Literal` whose text survives
+        stripping surrounding whitespace.
+
+        The one predicate every literal-to-name-candidate read shares (:meth:`first_literal`,
+        :meth:`first_literal_with_language`, :meth:`label_languages`, :meth:`preferred_label_in`,
+        and :class:`ConceptImporter`'s own read of the same label predicates for a concept's
+        non-default-language labels), rather than each repeating an equivalent check — which is
+        exactly how T055 (D65, fix cycle 6) applied an equivalent test inline in only the first
+        two of those and left the others, most notably a concept's own preferred label, still
+        treating an empty literal as a usable name. A :class:`~typing.TypeGuard` rather than a
+        plain ``bool`` so a caller's own ``isinstance`` narrowing (``literal.language`` below) is
+        not lost behind the method call.
+        """
+        return isinstance(literal, rdflib.Literal) and bool(str(literal).strip())
+
     def first_literal(
         self,
         node: rdflib.term.Node,
@@ -279,14 +305,14 @@ class SkosGraph:
         (T010). ``language``, when given, restricts to literals tagged with that language.
 
         An empty or whitespace-only literal is excluded from selection entirely (T055, SEC-501/
-        SEC-504, decisions.md D65) — it is not a name or description any caller can actually
-        store, and sorting on the raw string alone let it win over a real value published
-        alongside it in the same file.
+        SEC-504, decisions.md D65; :meth:`is_usable_literal`, T059, decisions.md D69) — it is not
+        a name or description any caller can actually store, and sorting on the raw string alone
+        let it win over a real value published alongside it in the same file.
         """
         values = sorted(
             str(literal)
             for literal in self.graph.objects(node, predicate)
-            if (language is None or getattr(literal, "language", None) == language) and str(literal).strip()
+            if (language is None or getattr(literal, "language", None) == language) and self.is_usable_literal(literal)
         )
         return values[0] if values else None
 
@@ -316,29 +342,35 @@ class SkosGraph:
         by calling again with no ``max_length`` to get a representative value for a message.
 
         An empty or whitespace-only literal is excluded unconditionally, with or without
-        ``max_length`` (T055, SEC-501/SEC-502/SEC-504, decisions.md D65) — it always satisfies a
-        length filter and always sorts first, so without this it wins the fallback over any real
-        value published alongside it, in both branches this fallback is called from (nothing
-        published in the target language at all, and the target-language value itself being
-        unusable).
+        ``max_length`` (T055, SEC-501/SEC-502/SEC-504, decisions.md D65; :meth:`is_usable_literal`,
+        T059, decisions.md D69) — it always satisfies a length filter and always sorts first, so
+        without this it wins the fallback over any real value published alongside it, in both
+        branches this fallback is called from (nothing published in the target language at all,
+        and the target-language value itself being unusable).
         """
         pairs = sorted(
             (str(literal), getattr(literal, "language", None) or "")
             for literal in self.graph.objects(node, predicate)
-            if str(literal).strip() and (max_length is None or len(str(literal)) <= max_length)
+            if self.is_usable_literal(literal) and (max_length is None or len(str(literal)) <= max_length)
         )
         return pairs[0] if pairs else None
 
     def label_languages(self, node: rdflib.term.Node, predicate: rdflib.URIRef) -> list[str]:
-        """The language tags of ``predicate``'s literal values on ``node`` (empty-tag values excluded)."""
+        """The language tags of ``predicate``'s usable literal values on ``node`` (empty-tag
+        values excluded, T059/SEC-602, decisions.md D69: an empty or whitespace-only literal is
+        excluded here too, the same as every other name-candidate read — otherwise it could not
+        itself win a name slot, yet it still tipped :meth:`preferred_label_tag_counts`'
+        predominance vote between two real variants that could).
+        """
         return [
             literal.language
             for literal in self.graph.objects(node, predicate)
-            if isinstance(literal, rdflib.Literal) and literal.language
+            if self.is_usable_literal(literal) and literal.language
         ]
 
     def preferred_label_in(self, node: rdflib.term.Node) -> list[tuple[str, str]]:
-        """Every ``(published tag, value)`` pair ``node`` carries a ``skos:prefLabel`` in (T007).
+        """Every ``(published tag, value)`` pair ``node`` carries a usable ``skos:prefLabel`` in
+        (T007; :meth:`is_usable_literal`, T059, SEC-601/CORR-602, decisions.md D69).
 
         Unfiltered by language: which pair fills a configured language's slot is decided by
         :meth:`~controlled_vocabularies.exchange.languages.LanguageMatcher.resolve_winner`, and that
@@ -348,7 +380,7 @@ class SkosGraph:
         return sorted(
             (str(literal.language), str(literal))
             for literal in self.graph.objects(node, SKOS.prefLabel)
-            if isinstance(literal, rdflib.Literal) and literal.language
+            if self.is_usable_literal(literal) and literal.language
         )
 
     def preferred_label_tag_counts(self, concept_nodes: Iterable[rdflib.term.Node]) -> dict[str, int]:
@@ -933,6 +965,19 @@ class ConceptImporter:
                         SetAsideReason.NO_LANGUAGE_TAG, subject=uri, predicate=self.skos_graph.skos_curie(predicate)
                     )
                     continue
+                if not SkosGraph.is_usable_literal(literal):
+                    # T059, decisions.md D69 (fix cycle 7): this loop reads the raw graph
+                    # directly rather than through preferred_label_in, so it is the "fifth call
+                    # site" the structural fix exists to keep from missing this rule — an empty
+                    # or whitespace-only literal is never a usable name. Treated exactly as
+                    # SkosGraph's own accessors treat one: silently excluded, not reported, a
+                    # real value in this same predicate/language (if the file published one)
+                    # still wins undisturbed. Also what keeps a non-default-language preferred
+                    # label whose only candidate is unusable from reaching the
+                    # preferred_winner_by_language lookup below with no entry to find — an
+                    # unusable literal never becomes a candidate there either (D69), so it must
+                    # never reach that lookup as a literal instead.
+                    continue
                 published_tag = literal.language
                 resolved_language = self.matcher.resolve(published_tag).configured_language
                 if kind == ConceptLabel.Kind.PREFERRED and resolved_language == default_language:
@@ -1220,6 +1265,19 @@ class ConceptImporter:
             concept.static_uri = uri
             concept.label = label
             self.assign_unique_slug(concept, taken_slugs, created=created)
+            if created and not concept.slug:
+                # T060, SEC-604, decisions.md D70 (fix cycle 7): unique_slug_for_identifier's
+                # give-up (D66) is a genuine "this collision could not be resolved" outcome, not
+                # yet checked here the way SchemeResolver.resolve_scheme's own call already is.
+                # Left unguarded, this empty slug reached save() and was caught only by the
+                # model's own manual-slug validation below, reported as STORED_SLUG_INVALID — a
+                # reason whose message says a *stored* slug fails validation, which is false for
+                # a slug that was never written. EMPTY_SLUG is the same reason the identifier's
+                # own unusable base already gets just above; the two are the same outcome for a
+                # curator (no address for this concept) even though the identifier itself was
+                # perfectly usable here.
+                self.report.add_set_aside(SetAsideReason.EMPTY_SLUG, subject=uri)
+                continue
             try:
                 concept.save()
             except ValidationError:
@@ -1723,6 +1781,16 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
             if created:
                 max_length = cast(int, Collection._meta.get_field("slug").max_length)
                 row.slug = unique_slug_for_identifier(uri, taken_slugs, max_length)
+                if not row.slug:
+                    # T060, SEC-604, decisions.md D70 (fix cycle 7): the same guard
+                    # ConceptImporter.import_concepts now applies — a give-up here reached
+                    # row.save() unchecked and was caught only by the model's own manual-slug
+                    # validation, reported as STORED_SLUG_INVALID even though nothing was ever
+                    # stored. EMPTY_SLUG is the identifier-unusable reason this collection's own
+                    # pre-write guard above already gives; the give-up is the same outcome for a
+                    # curator even though the identifier itself was perfectly usable here.
+                    self.report.add_set_aside(SetAsideReason.EMPTY_SLUG, subject=uri)
+                    continue
             row.slug_is_manual = True
             try:
                 row.save()

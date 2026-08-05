@@ -290,10 +290,14 @@ class FatalReason(TextChoices):
     is reported separately, as a :class:`SetAsideReason` where one exists
     (``STORED_SLUG_INVALID``) rather than folded into this fatal's own message.
     ``VOCABULARY_NAME_UNPUBLISHED`` (fix cycle 6, CORR-504, decisions.md D68)
-    names a *created* scheme that publishes no ``skos:prefLabel`` at all —
-    distinct from ``VOCABULARY_NAME_UNUSABLE``, whose own message names a
-    published value that is too long, which is false when nothing was
-    published in any language to begin with.
+    names a *created* scheme with no ``skos:prefLabel`` this application can
+    store, in any language — distinct from ``VOCABULARY_NAME_UNUSABLE``, whose
+    own message names a published value that is too long, which is false both
+    when nothing was published at all and when everything published in every
+    language was empty or whitespace-only (T059/T061, SEC-603/CORR-603,
+    decisions.md D69/D71: the empty-literal case is this same reason, not a
+    second one, because T059's own rule already makes the two indistinguishable
+    at the point a name is selected).
     """
 
     MISSING_IDENTITY = "missing_identity", _("identifier missing or blank")
@@ -358,8 +362,8 @@ _FATAL_TEMPLATES: dict[FatalReason, Promise] = {
         "could not be written; the run was refused."
     ),
     FatalReason.VOCABULARY_NAME_UNPUBLISHED: _(
-        "'%(subject)s' has no name this application can store — no skos:prefLabel was "
-        "published for it at all; the run was refused."
+        "'%(subject)s' has no name this application can store — no skos:prefLabel with a "
+        "usable value was published for it in any language; the run was refused."
     ),
 }
 

@@ -1872,3 +1872,144 @@ list, per this file's own append-only numbering — nothing renumbered, nothing 
 already applied to the collection side, extended to the one place it had not yet reached; the two
 new success criteria describe behaviour already proven by an existing test, so there is nothing
 further to reconcile.
+
+## D69 — T059 (fix cycle 7): the empty-literal-is-never-a-name rule reaches a concept's own
+label, structurally rather than as a third copy of the check
+
+SEC-601/CORR-602 (round 6, high and medium): D65 (T055, fix cycle 6) applied "an empty or
+whitespace-only literal is never a usable name" inline in exactly two places —
+`SkosGraph.first_literal` and `SkosGraph.first_literal_with_language`. A vocabulary's name and a
+collection's name are both selected through one of those two accessors, so both were fixed. A
+concept's label is selected through a third accessor, `SkosGraph.preferred_label_in`, which D65
+never touched — reproduced end to end: a concept published as `skos:prefLabel ""@en, "Real
+Name"@en` stored `Concept.label == ''` and reported `"Real Name"` as `SURPLUS_PREFERRED_LABEL`,
+discarded rather than merely passed over. This is the fourth time this feature's review has found
+a rule reaching some record kinds and not all (round 2's FR-017 reaching `Concept`/
+`ConceptScheme` but not `Collection`; round 5's SEC-501/SEC-504 scoped to the scheme/collection
+name paths; this round's own SEC-602 finding the identical gap in the predominance vote).
+
+**Fixed by naming the check once and routing every literal-to-name-candidate read through it**,
+rather than adding a third inline copy. `SkosGraph.is_usable_literal` is a static predicate —
+`isinstance(literal, rdflib.Literal) and bool(str(literal).strip())` — and `first_literal`,
+`first_literal_with_language`, `label_languages` and `preferred_label_in` all call it. A fourth
+record kind's own accessor, or a fifth call site reading the graph directly, now has to actively
+avoid this predicate to reintroduce the defect, rather than simply being written without knowing
+the rule exists.
+
+**Audited for other paths reaching a stored name field without going through the predicate, per
+the brief's own instruction, and found one:** `ConceptImporter.import_labels` reads
+`skos:altLabel`/`skos:hiddenLabel` (and a non-default-language `skos:prefLabel`) directly off the
+graph, not through `preferred_label_in` — the fifth call site the structural fix exists to catch.
+A true empty string was already refused before this task (`ConceptLabel.text` is `blank=False`,
+and `add_label` calls `full_clean()`), but Django's blank check does not treat a whitespace-only
+string as blank, so `"   "` passed straight through and was stored as a visible-nothing
+alternative label. Routing this loop through `is_usable_literal` too closes it, and is not
+optional: without it, closing `preferred_label_in`'s own gap makes a concept whose *only*
+candidate for a configured non-default language is empty raise `KeyError` in this same loop —
+`preferred_winner_by_language` would no longer have an entry for that language once its one
+candidate is excluded, and the raw loop's own lookup for a `PREFERRED`-kind literal in that
+language has to find one. Both fixed by the same one-line change: an unusable literal is skipped
+before this loop asks the matcher anything about it, silently, exactly as `SkosGraph`'s own
+accessors already treat one.
+
+No other path was found. `_import_notes` and the `dcterms:description` alias are documentary
+text, not a name a curator identifies a record by, and are out of the predicate's scope on that
+basis (`is_usable_literal` is a *name* rule, not a general emptiness rule — an empty note is
+already storable content, just an unhelpful one, and changing that is no part of this task).
+
+**Revisit if:** a fifth name-selection path is added anywhere in this module and does not read
+through one of the four `SkosGraph` accessors above or `ConceptImporter.import_labels`'s own now-
+guarded loop — at that point the predicate needs a fifth caller taught about it explicitly, the
+one shape this decision exists to make rare.
+
+## D70 — T060 (fix cycle 7): the collision loop's give-up seeded `tried` with `base` itself,
+abandoning a resolvable collision; the give-up return is now guarded at all three call sites
+
+CORR-601/SEC-604 (round 6, high and low). D66 (T056, fix cycle 6) added a give-up to
+`unique_slug_for_identifier`'s collision loop, returning `""` once a candidate repeats one
+already recorded in `tried`. `tried = {candidate}` seeded that set with `base` itself, before the
+loop had generated anything — the `while` condition above had already tested `base` on its own,
+so recording it a second time as a *tried candidate* was never necessary and, at one specific
+shape, actively wrong. Reproduced exactly as the round-6 review reported it: at `max_length=255`
+with `base` exactly 255 characters long and ending in `-2`, the clamp (D63) makes the first
+retry's candidate `base[:253] + "-2"` — identical to `base` itself — which then looked like a
+repeat of the seeded entry and gave up on the very first retry, abandoning a collision the next
+suffix (`-3`) resolves without difficulty. Two concepts whose identifiers both slugify to that
+one 255-character base — a real shape, not a contrived one, since any published identifier
+segment of 255 or more characters produces it — imported as one concept and one
+`STORED_SLUG_INVALID` set-aside, where they should both import.
+
+**Fixed by only ever recording a candidate the loop itself produced**: `tried: set[str] = set()`,
+seeded empty. The repeat-detection logic below is otherwise unchanged — it still gives up once a
+*generated* candidate repeats one already generated, the genuine non-termination case D66 exists
+to catch (verified: the round-5 `{'ab': 'other', 'a-': 'other2'}`, `max_length=2` repro still
+gives up; the SEC-303/SEC-405 fixtures and a normal 255-length chain still resolve on their first
+or second retry as before).
+
+**SEC-604**, closed in the same task since an unresolvable collision must be reported, never
+silently written: D66's own text claimed "every caller already knows how to handle it," true only
+of `SchemeResolver.resolve_scheme`'s call site (`if not slug: add_fatal(VOCABULARY_SLUG_UNUSABLE)`).
+`ConceptImporter.import_concepts` and `CollectionImporter.import_collections` both assigned the
+return value straight onto the row and let an empty slug reach `save()` unguarded, where it was
+caught only by the model's own manual-slug validation and reported `STORED_SLUG_INVALID` — a
+reason whose own message says a *stored* slug fails validation, false for a slug that was never
+written at all. Both call sites now check `if not <field>.slug:` immediately after minting one for
+a newly created record and report `EMPTY_SLUG` — the same reason the identifier's own unusable
+base already gets just above each call site — before ever reaching `save()`. Unreachable through
+`import_skos` today at either fixed call site (both still pass `max_length=255`, and D51/D63 put
+the collision count needed to exhaust that space at roughly 10^250), verified instead by
+monkeypatching `unique_slug_for_identifier` to always give up, the shape a reachable-in-principle
+exhaustion would produce.
+
+**Revisit if:** never for the seeding fix — recording only generated candidates is simply correct,
+not a tuned threshold that could need re-deriving. Revisit the two new guards only if a fourth
+record kind gains its own slug-minting call site and its own author does not know to copy them —
+at which point folding the guard into `unique_slug_for_identifier` itself (raising, or returning a
+tri-state) is worth reconsidering; not done here because that would change the contract for
+`SchemeResolver`'s own, already-correct call site too, which this task's scope does not require.
+
+## D71 — T061 (fix cycle 7): the round-6 mediums and lows — a predominance vote already closed by
+D69, two refusal messages made true, and a hanging test made fail-fast
+
+**SEC-602** (round 6, medium): an empty or whitespace-only literal could never itself win a name
+slot after D65, but still counted toward its published tag's predominance in
+`preferred_label_tag_counts`, built entirely from `SkosGraph.label_languages`. Already closed as a
+consequence of T059's structural fix (D69) — `label_languages` is one of `is_usable_literal`'s
+four call sites — rather than needing a change of its own in this task. Verified as its own
+regression: reverting only the `label_languages` line and rerunning
+`TestAnEmptyLiteralDoesNotVoteOnPredominance` reproduces the round-6 evidence exactly (`c1`'s
+stored value flips from `"Alpha DE"` to `"Alpha AT"`), confirming the fix is doing the work and
+not merely coincidentally passing.
+
+**SEC-603/CORR-603** (round 6, medium and low, one message): `FatalReason.VOCABULARY_NAME_UNPUBLISHED`'s
+template said "no skos:prefLabel was published for it at all," true when T058 (D68) minted it for
+a scheme publishing no `skos:prefLabel` whatsoever, false on a path T055 opened in the same cycle
+(fix cycle 6) — a scheme publishing only a whitespace-only `skos:prefLabel` reaches this identical
+fatal (T055's filter makes `name` arrive `None`, exactly as if nothing had been published), and a
+triple *was* published. **Reworded** to name the actual condition rather than a fact about the
+file that does not always hold: "no skos:prefLabel with a usable value was published for it in
+any language." One template change closes both findings (SEC-603 diagnosed the whitespace
+trigger, CORR-603 the same message from the correctness lens).
+
+**A pre-existing test's substring assertion is overturned**, named here per this cycle's own rule
+for doing so (D68's own precedent): `TestNoPublishedNameAtAllIsUnusableTheSameAsOverLong
+.test_a_created_scheme_with_no_preflabel_at_all_is_fatal_not_persisted_blank` asserted `"no
+skos:prefLabel was published" in message` — true of the old template, false of the reworded one
+(the new template does not contain that literal substring). Updated to the new substring; the
+reason and the "longer than" absence it also checks are unchanged, since the rewording did not
+touch what the message must *not* say.
+
+**CORR-604** (round 6, low): `TestUniqueSlugForIdentifierGivesUpRatherThanLoopingForever`'s
+primary test asserted only the return value of a call whose own failure mode, pre-D70, was to
+never return — a regression of the give-up hangs the test process rather than failing it, and CI
+cannot tell that apart from a stuck runner. No `pytest-timeout` dependency is added for one test:
+the call now runs in a daemon worker thread with a bounded `join(timeout=5)`, the same "fail
+within seconds, not never" property using only the standard library, verified directly (a
+throwaway infinite loop run the identical way reports `is_alive() is True` within the 2-second
+join used to check it, rather than blocking).
+
+**Revisit if:** never for SEC-602 (already covered by D69's own revisit condition) or for the
+message reword (the same "must hold on every path that reaches it" rule already governs it, with
+nothing further to reconcile). Revisit CORR-604's thread-based bound only if this suite ever needs
+a *general* per-test timeout policy across many tests, at which point `pytest-timeout` earns its
+place as a real dependency rather than infrastructure for one test.
