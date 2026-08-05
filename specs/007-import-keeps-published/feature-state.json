@@ -54,6 +54,11 @@
       "state": "IMPLEMENT",
       "at": "2026-08-05T09:37:18Z",
       "note": "S3R gate green; plan veto notification sent; US0 foundational phase dispatched (sonnet)"
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-05T12:05:00Z",
+      "note": "US0 foundational phase verified independently (724 tests, lint/typecheck/build green, receipts green, tamper-check flags additive-only) and merged to the feature branch as 0f7777c"
     }
   ],
   "gates": {
@@ -83,7 +88,7 @@
       "priority": "P0",
       "issue": null,
       "worktree": "/home/sam/projects/samueljennings/dcv-fs007-us0",
-      "status": "in_progress",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
