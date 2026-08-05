@@ -74,6 +74,11 @@
       "state": "IMPLEMENT",
       "at": "2026-08-05T14:05:00Z",
       "note": "US-3 merged as ec5e80f; 758 tests green, receipts verified, tamper flag triaged clean (0 deletions, AST diff shows every pre-existing class intact)"
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-05T12:05:00Z",
+      "note": "US-5 merged as 2cff906: 764 tests green, RED re-proven independently on both new standards tests, zero deletions across the diff, receipts verified"
     }
   ],
   "gates": {
@@ -557,24 +562,60 @@
       "id": "US5",
       "priority": "P3",
       "issue": 73,
-      "worktree": null,
-      "status": "todo",
+      "worktree": "/home/sam/projects/samueljennings/dcv-fs007-us5",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T018",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_standards.py::TestImportLanguageMessagesUseNamedPlaceholders::test_language_substitution_reason_message_uses_named_placeholders",
+              "tests/test_standards.py::TestImportLanguageMessagesUseNamedPlaceholders::test_variant_not_kept_reason_message_uses_named_placeholders"
+            ],
+            "commands": [
+              "poetry run pytest -q tests/test_standards.py::TestImportLanguageMessagesUseNamedPlaceholders -v (2 passed)",
+              "RED proven by hand, not committed: report.py locally edited to make NormalizedReason.LANGUAGE_SUBSTITUTION's template a bare non-lazy string with a positional %s -> test_language_substitution_reason_message_uses_named_placeholders FAILED for the reported reason (not lazily translatable); git checkout -- report.py to revert",
+              "RED proven by hand, not committed: report.py locally edited to swap SetAsideReason.VARIANT_NOT_KEPT's two named placeholders for positional ones (kept gettext_lazy) -> test_variant_not_kept_reason_message_uses_named_placeholders FAILED for the reported reason (template lacks named placeholders); git checkout -- report.py to revert",
+              "poetry run pytest -q (764 passed)",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "poetry run deptry ."
+            ]
+          }
         },
         {
           "id": "T019",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [],
+            "commands": [
+              "poetry run pytest -q (764 passed, unaffected by doc-only change)",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "poetry run deptry ."
+            ]
+          }
         },
         {
           "id": "T020",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [],
+            "commands": [
+              "poetry run pytest -q (764 passed, unaffected by doc-only change)",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "poetry run deptry ."
+            ]
+          }
         }
       ]
     }
