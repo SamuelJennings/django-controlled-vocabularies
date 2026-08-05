@@ -204,6 +204,14 @@ class FatalReason(TextChoices):
     a missing or refused record identity — plus the two ways the vocabulary
     itself cannot be resolved (FR-005): the file names none and the caller
     named no target, or the caller's named target contradicts the file's own.
+    ``DEFAULT_LANGUAGE_UNCONFIGURED`` (fix cycle 1, S6 SEC-001, decisions.md D34)
+    names a vocabulary whose ``effective_default_language`` is not itself one
+    of the site's configured languages — ``settings.LANGUAGE_CODE`` falls back
+    unvalidated against ``settings.LANGUAGES``, and no published tag can ever
+    resolve to a value that is not itself a configured code, so every concept
+    would otherwise be silently set aside for want of a preferred label. Failing
+    the whole run early, naming the one misconfiguration, replaces what would
+    otherwise be one ``NO_PREFERRED_LABEL`` per concept for no gain to a curator.
     """
 
     MISSING_IDENTITY = "missing_identity", _("identifier missing or blank")
@@ -211,6 +219,7 @@ class FatalReason(TextChoices):
     VOCABULARY_UNDETERMINED = "vocabulary_undetermined", _("vocabulary not declared and no target named")
     VOCABULARY_TARGET_MISMATCH = "vocabulary_target_mismatch", _("declared vocabulary does not match the named target")
     VOCABULARY_AMBIGUOUS = "vocabulary_ambiguous", _("the file declares more than one vocabulary and none was named")
+    DEFAULT_LANGUAGE_UNCONFIGURED = "default_language_unconfigured", _("default language not configured")
 
     @property
     def template(self) -> Promise:
@@ -236,6 +245,10 @@ _FATAL_TEMPLATES: dict[FatalReason, Promise] = {
     FatalReason.VOCABULARY_AMBIGUOUS: _(
         "'%(subject)s' declares more than one vocabulary (%(declared)s) and none was named as the import's "
         "target; the run was refused."
+    ),
+    FatalReason.DEFAULT_LANGUAGE_UNCONFIGURED: _(
+        "'%(subject)s' has an effective default language of '%(language)s', which this site is not "
+        "configured for; the run was refused."
     ),
 }
 

@@ -52,6 +52,7 @@ _EXAMPLE_FATAL_PARAMS = {
     FatalReason.VOCABULARY_UNDETERMINED: {},
     FatalReason.VOCABULARY_TARGET_MISMATCH: {"target": "https://example.org/vocab/target"},
     FatalReason.VOCABULARY_AMBIGUOUS: {"declared": "https://example.org/vocab/a, https://example.org/vocab/b"},
+    FatalReason.DEFAULT_LANGUAGE_UNCONFIGURED: {"language": "en-us"},
 }
 
 # One example params dict per normalized reason (T021), the same shape as _EXAMPLE_PARAMS.

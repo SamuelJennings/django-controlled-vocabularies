@@ -1093,6 +1093,60 @@ class TestFatalFindingsAndAtomicity:
         assert Concept.objects.count() == concept_count_before
 
 
+class TestVocabularyDefaultLanguageMustItselfBeConfigured:
+    """T024 — SC-023, S6 SEC-001, decisions.md D34: a vocabulary whose
+    ``effective_default_language`` is not itself one of the site's configured
+    languages fails the whole run with one fatal finding naming it, rather than
+    silently storing nothing while emitting one ``NO_PREFERRED_LABEL`` per
+    concept. ``effective_default_language`` falls back to ``settings.LANGUAGE_CODE``
+    unvalidated against ``settings.LANGUAGES`` — Django's own shipped defaults are
+    exactly this shape (``LANGUAGE_CODE='en-us'``, absent from the 99-code default
+    ``LANGUAGES``), a configuration most consuming projects hold simply by never
+    overriding either setting."""
+
+    def test_an_unconfigured_default_language_fails_the_run_with_one_fatal_finding(self, db):
+        with override_settings(LANGUAGE_CODE="pt"), pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(FIXTURES / "unconfigured_language_vocabulary.ttl")
+        report = exc_info.value.report
+        assert len(report.fatal) == 1
+        assert report.fatal[0].reason is FatalReason.DEFAULT_LANGUAGE_UNCONFIGURED
+        assert report.fatal[0].params["language"] == "pt"
+        assert ConceptScheme.objects.count() == 0
+        assert Concept.objects.count() == 0
+        # SC-023: one problem, not one NO_PREFERRED_LABEL per concept.
+        assert report.set_aside == []
+
+    def test_djangos_own_shipped_defaults_are_refused_cleanly_not_silently_emptied(self, db, tmp_path):
+        # SEC-001's exact repro: an existing, concept-bearing scheme whose
+        # default_language is frozen blank (D18) falls back to LANGUAGE_CODE,
+        # and LANGUAGE_CODE='en-us' is not itself in Django's own 99-code global
+        # LANGUAGES default — a configuration most consuming projects hold
+        # simply by never overriding either setting.
+        path = tmp_path / "soils.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+            <https://example.org/v/soils> a skos:ConceptScheme ; skos:prefLabel "Soils"@en-us .
+            <https://example.org/v/soils/clay> a skos:Concept ;
+                skos:inScheme <https://example.org/v/soils> ;
+                skos:prefLabel "Clay"@en-us .
+            """
+        )
+        with override_settings(LANGUAGE_CODE="en-us", LANGUAGES=global_settings.LANGUAGES):
+            target = ConceptSchemeFactory(static_uri="https://example.org/v/soils", default_language="")
+            ConceptFactory(scheme=target)
+            with pytest.raises(SkosImportFailed) as exc_info:
+                import_skos(path, scheme=target)
+        assert exc_info.value.report.fatal[0].reason is FatalReason.DEFAULT_LANGUAGE_UNCONFIGURED
+        assert exc_info.value.report.fatal[0].params["language"] == "en-us"
+
+    def test_the_sites_own_configured_default_never_trips_this(self, db):
+        # 'en' is literally in tests/settings.py's LANGUAGES — must never be
+        # mistaken for the unconfigured case.
+        report = import_skos(FIXTURES / "rocks.ttl")
+        assert report.fatal == []
+
+
 class TestReportPopulatedByARealRun:
     """T012 — FR-015: a real run's report distinguishes what was created,
     what was updated, and what was set aside with its reason, all as data a

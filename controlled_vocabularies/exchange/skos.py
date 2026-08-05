@@ -1395,15 +1395,29 @@ class SkosImporter:
             )
 
             if target_scheme is not None and declared_uri is not None:
-                concept_importer = ConceptImporter(
-                    skos_graph, self.report, target_scheme, declared_uri, matcher=matcher
-                )
-                successful_concepts = concept_importer.import_concepts(concept_nodes)
-                RelationImporter(skos_graph, self.report, target_scheme).import_relations(successful_concepts)
-                CollectionImporter(skos_graph, self.report, target_scheme, matcher=matcher).import_collections(
-                    successful_concepts
-                )
-                concept_importer.report_absent_concepts()
+                # SEC-001, decisions.md D34: effective_default_language falls back to
+                # settings.LANGUAGE_CODE unvalidated against settings.LANGUAGES — Django's own
+                # shipped defaults are exactly this shape. resolve() can only ever return a code
+                # taken verbatim from LANGUAGES, so if this value is not itself an exact member
+                # (is_exact), no candidate could ever match it and every concept would be set
+                # aside one at a time for no gain to a curator. Caught once, here, naming the
+                # misconfiguration instead.
+                if not matcher.resolve(target_scheme.effective_default_language).is_exact:
+                    self.report.add_fatal(
+                        FatalReason.DEFAULT_LANGUAGE_UNCONFIGURED,
+                        subject=declared_uri,
+                        language=target_scheme.effective_default_language,
+                    )
+                else:
+                    concept_importer = ConceptImporter(
+                        skos_graph, self.report, target_scheme, declared_uri, matcher=matcher
+                    )
+                    successful_concepts = concept_importer.import_concepts(concept_nodes)
+                    RelationImporter(skos_graph, self.report, target_scheme).import_relations(successful_concepts)
+                    CollectionImporter(skos_graph, self.report, target_scheme, matcher=matcher).import_collections(
+                        successful_concepts
+                    )
+                    concept_importer.report_absent_concepts()
 
             if self.report.fatal:
                 raise SkosImportFailed(self.report)
