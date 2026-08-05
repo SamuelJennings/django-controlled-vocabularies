@@ -129,13 +129,21 @@ def unique_slug_for_identifier(static_uri: str, taken_slugs: dict[str, str | Non
     relative to the suffix text, the clamp above can make two *different* suffixes render as the
     identical truncated string, and a candidate that keeps re-colliding with the same taken slug
     would otherwise never terminate.
+
+    ``tried`` (T060, CORR-601/SEC-604, decisions.md D70, fix cycle 7) records only candidates this
+    loop has itself *generated*, never ``base`` — the ``while`` condition above has already tested
+    ``base`` on its own. Seeding it with ``base`` made the give-up fire on a collision's very
+    first retry whenever ``len(base) == max_length`` and ``base`` ends in ``-2``: the clamp above
+    then renders that retry's candidate as ``base`` itself (``base[:253] + "-2" == base`` at
+    ``max_length=255``), which looked like a repeat of a *tried* candidate rather than what it
+    actually was — the first and only attempt so far, resolvable by the very next suffix.
     """
     base = identifier_slug_base(static_uri)[:max_length]
     if not base:
         return ""
     candidate = base
     suffix = 1
-    tried = {candidate}
+    tried: set[str] = set()
     while taken_slugs.get(candidate, static_uri) != static_uri:
         suffix += 1
         suffix_text = f"-{suffix}"
@@ -1257,6 +1265,19 @@ class ConceptImporter:
             concept.static_uri = uri
             concept.label = label
             self.assign_unique_slug(concept, taken_slugs, created=created)
+            if created and not concept.slug:
+                # T060, SEC-604, decisions.md D70 (fix cycle 7): unique_slug_for_identifier's
+                # give-up (D66) is a genuine "this collision could not be resolved" outcome, not
+                # yet checked here the way SchemeResolver.resolve_scheme's own call already is.
+                # Left unguarded, this empty slug reached save() and was caught only by the
+                # model's own manual-slug validation below, reported as STORED_SLUG_INVALID — a
+                # reason whose message says a *stored* slug fails validation, which is false for
+                # a slug that was never written. EMPTY_SLUG is the same reason the identifier's
+                # own unusable base already gets just above; the two are the same outcome for a
+                # curator (no address for this concept) even though the identifier itself was
+                # perfectly usable here.
+                self.report.add_set_aside(SetAsideReason.EMPTY_SLUG, subject=uri)
+                continue
             try:
                 concept.save()
             except ValidationError:
@@ -1760,6 +1781,16 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
             if created:
                 max_length = cast(int, Collection._meta.get_field("slug").max_length)
                 row.slug = unique_slug_for_identifier(uri, taken_slugs, max_length)
+                if not row.slug:
+                    # T060, SEC-604, decisions.md D70 (fix cycle 7): the same guard
+                    # ConceptImporter.import_concepts now applies — a give-up here reached
+                    # row.save() unchecked and was caught only by the model's own manual-slug
+                    # validation, reported as STORED_SLUG_INVALID even though nothing was ever
+                    # stored. EMPTY_SLUG is the identifier-unusable reason this collection's own
+                    # pre-write guard above already gives; the give-up is the same outcome for a
+                    # curator even though the identifier itself was perfectly usable here.
+                    self.report.add_set_aside(SetAsideReason.EMPTY_SLUG, subject=uri)
+                    continue
             row.slug_is_manual = True
             try:
                 row.save()

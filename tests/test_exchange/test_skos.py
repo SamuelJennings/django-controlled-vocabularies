@@ -1536,6 +1536,110 @@ class TestUniqueSlugForIdentifierGivesUpRatherThanLoopingForever:
         assert result == "granite-3"
 
 
+class TestUniqueSlugForIdentifierResolvesACollisionEvenWhenTheBaseIsAlreadyMaxLength:
+    """T060 — CORR-601/SEC-604 (round 6, high): D66's give-up (T056, fix cycle 6) seeds ``tried``
+    with ``base`` itself before the loop has generated any candidate. Whenever ``len(base) ==
+    max_length`` and ``base`` ends in ``-2``, the clamp (D63) makes the *first* retry's candidate
+    reproduce ``base`` exactly — ``base[:253] + "-2" == base`` at ``max_length=255`` — so the
+    give-up fires on the very first retry and abandons a collision the next suffix (``-3``)
+    resolves trivially. Reproduced exactly as the round-6 review reported it: two concepts whose
+    identifier fragments both slugify (then truncate to 255 characters) to the identical string
+    ``"a" * 253 + "-2"``.
+    """
+
+    def test_a_255_character_base_ending_in_dash_2_still_resolves_its_collision(self):
+        base = "a" * 253 + "-2"
+        assert len(base) == 255
+        result = unique_slug_for_identifier(f"http://e.org/#{base}", {base: "other"}, 255)
+        assert result != ""
+        assert result != base
+
+    def test_two_concepts_sharing_a_255_character_slug_base_both_import(self, db, tmp_path):
+        """The two fragments the round-6 review reproduced this with — both slugify (and
+        truncate) to the identical 255-character base, so this exercises the give-up through the
+        public ``import_skos``, not only the module-level helper directly.
+        """
+        fragment_a = "a" * 253 + "-2" + "xx"
+        fragment_b = "a" * 253 + "-2" + "yy"
+        path = tmp_path / "t060_collision.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/t060scheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            f"<http://pub.example/t060scheme#{fragment_a}> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/t060scheme> ; skos:prefLabel "Concept A"@en .\n'
+            f"<http://pub.example/t060scheme#{fragment_b}> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/t060scheme> ; skos:prefLabel "Concept B"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        assert report.set_aside == []
+        concepts = Concept.objects.filter(scheme__static_uri="http://pub.example/t060scheme")
+        assert concepts.count() == 2
+        slugs = set(concepts.values_list("slug", flat=True))
+        assert len(slugs) == 2
+
+
+class TestAGiveUpSlugIsReportedNotWrittenOrMislabeled:
+    """T060 — SEC-604 (round 6, low): D66's give-up return (``""``) is checked at
+    ``SchemeResolver.resolve_scheme``'s own call site (``VOCABULARY_SLUG_UNUSABLE``), but not at
+    ``ConceptImporter.assign_unique_slug`` or ``CollectionImporter.import_collections`` — an
+    empty slug from either reached ``save()`` unchecked and was caught only by the model's own
+    manual-slug validation, reported as ``STORED_SLUG_INVALID`` — a reason whose own message says
+    a *stored* slug fails validation, which is false for a record whose slug was never written at
+    all. ``unique_slug_for_identifier`` is monkeypatched to always give up, the shape a
+    to-date-unreachable collision (D51/D63: ~10^250 prior collisions at ``max_length=255``) would
+    produce, without needing to actually construct one.
+    """
+
+    def test_a_concept_s_give_up_slug_is_empty_slug_not_stored_slug_invalid(self, db, tmp_path, monkeypatch):
+        """The scheme itself is pre-created (matched, not created) so the patched give-up is
+        exercised only through the concept's own call site — a *created* scheme would hit
+        ``resolve_scheme``'s own already-guarded call first and refuse the whole run instead.
+        """
+        ConceptSchemeFactory(name="Vocab", static_uri="http://pub.example/sec604scheme")
+        path = tmp_path / "sec604_concept.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec604scheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/sec604scheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec604scheme> ; skos:prefLabel "One"@en .\n'
+        )
+        monkeypatch.setattr(exchange.skos, "unique_slug_for_identifier", lambda *args, **kwargs: "")
+        report = import_skos(path)
+        assert report.fatal == []
+        assert not Concept.objects.filter(static_uri="http://pub.example/sec604scheme#c1").exists()
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.EMPTY_SLUG]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://pub.example/sec604scheme#c1"
+        stored_slug_entries = [
+            entry for entry in report.set_aside if entry.reason is SetAsideReason.STORED_SLUG_INVALID
+        ]
+        assert stored_slug_entries == []
+
+    def test_a_collection_s_give_up_slug_is_empty_slug_not_stored_slug_invalid(self, db, tmp_path, monkeypatch):
+        """Same pre-creation reasoning as the concept test above."""
+        ConceptSchemeFactory(name="Vocab", static_uri="http://pub.example/sec604collscheme")
+        path = tmp_path / "sec604_collection.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec604collscheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/sec604collscheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec604collscheme> ; skos:prefLabel "One"@en .\n'
+            "<http://pub.example/sec604collscheme#grp> a skos:Collection ; "
+            'skos:prefLabel "Group"@en .\n'
+        )
+        monkeypatch.setattr(exchange.skos, "unique_slug_for_identifier", lambda *args, **kwargs: "")
+        report = import_skos(path)
+        assert report.fatal == []
+        assert not Collection.objects.filter(static_uri="http://pub.example/sec604collscheme#grp").exists()
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.EMPTY_SLUG]
+        assert any(entry.subject == "http://pub.example/sec604collscheme#grp" for entry in entries)
+        stored_slug_entries = [
+            entry for entry in report.set_aside if entry.reason is SetAsideReason.STORED_SLUG_INVALID
+        ]
+        assert stored_slug_entries == []
+
+
 class TestSlugAndNameLengthAreBoundedToTheField:
     """T042 — SEC-002-shaped, decisions.md D35 (fix cycle 3): a published identifier segment or
     name can be far longer than the field meant to hold it. Nothing on this write path calls

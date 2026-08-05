@@ -1921,3 +1921,49 @@ already storable content, just an unhelpful one, and changing that is no part of
 through one of the four `SkosGraph` accessors above or `ConceptImporter.import_labels`'s own now-
 guarded loop — at that point the predicate needs a fifth caller taught about it explicitly, the
 one shape this decision exists to make rare.
+
+## D70 — T060 (fix cycle 7): the collision loop's give-up seeded `tried` with `base` itself,
+abandoning a resolvable collision; the give-up return is now guarded at all three call sites
+
+CORR-601/SEC-604 (round 6, high and low). D66 (T056, fix cycle 6) added a give-up to
+`unique_slug_for_identifier`'s collision loop, returning `""` once a candidate repeats one
+already recorded in `tried`. `tried = {candidate}` seeded that set with `base` itself, before the
+loop had generated anything — the `while` condition above had already tested `base` on its own,
+so recording it a second time as a *tried candidate* was never necessary and, at one specific
+shape, actively wrong. Reproduced exactly as the round-6 review reported it: at `max_length=255`
+with `base` exactly 255 characters long and ending in `-2`, the clamp (D63) makes the first
+retry's candidate `base[:253] + "-2"` — identical to `base` itself — which then looked like a
+repeat of the seeded entry and gave up on the very first retry, abandoning a collision the next
+suffix (`-3`) resolves without difficulty. Two concepts whose identifiers both slugify to that
+one 255-character base — a real shape, not a contrived one, since any published identifier
+segment of 255 or more characters produces it — imported as one concept and one
+`STORED_SLUG_INVALID` set-aside, where they should both import.
+
+**Fixed by only ever recording a candidate the loop itself produced**: `tried: set[str] = set()`,
+seeded empty. The repeat-detection logic below is otherwise unchanged — it still gives up once a
+*generated* candidate repeats one already generated, the genuine non-termination case D66 exists
+to catch (verified: the round-5 `{'ab': 'other', 'a-': 'other2'}`, `max_length=2` repro still
+gives up; the SEC-303/SEC-405 fixtures and a normal 255-length chain still resolve on their first
+or second retry as before).
+
+**SEC-604**, closed in the same task since an unresolvable collision must be reported, never
+silently written: D66's own text claimed "every caller already knows how to handle it," true only
+of `SchemeResolver.resolve_scheme`'s call site (`if not slug: add_fatal(VOCABULARY_SLUG_UNUSABLE)`).
+`ConceptImporter.import_concepts` and `CollectionImporter.import_collections` both assigned the
+return value straight onto the row and let an empty slug reach `save()` unguarded, where it was
+caught only by the model's own manual-slug validation and reported `STORED_SLUG_INVALID` — a
+reason whose own message says a *stored* slug fails validation, false for a slug that was never
+written at all. Both call sites now check `if not <field>.slug:` immediately after minting one for
+a newly created record and report `EMPTY_SLUG` — the same reason the identifier's own unusable
+base already gets just above each call site — before ever reaching `save()`. Unreachable through
+`import_skos` today at either fixed call site (both still pass `max_length=255`, and D51/D63 put
+the collision count needed to exhaust that space at roughly 10^250), verified instead by
+monkeypatching `unique_slug_for_identifier` to always give up, the shape a reachable-in-principle
+exhaustion would produce.
+
+**Revisit if:** never for the seeding fix — recording only generated candidates is simply correct,
+not a tuned threshold that could need re-deriving. Revisit the two new guards only if a fourth
+record kind gains its own slug-minting call site and its own author does not know to copy them —
+at which point folding the guard into `unique_slug_for_identifier` itself (raising, or returning a
+tri-state) is worth reconsidering; not done here because that would change the contract for
+`SchemeResolver`'s own, already-correct call site too, which this task's scope does not require.
