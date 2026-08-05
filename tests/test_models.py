@@ -1911,6 +1911,50 @@ class TestCollectionMembership:
         assert str(coll) == "Common igneous rocks"
 
 
+class TestCollectionOverridableSlug:
+    """T038 — FR-017/decisions.md D35: a collection's slug can be set explicitly and then
+    survives a later rename, the same mechanism :class:`TestConceptOverridableSlug` already
+    covers for a concept — the model-level half of the import path's identifier-derived slug
+    (:class:`~controlled_vocabularies.exchange.skos.CollectionImporter`)."""
+
+    @pytest.mark.django_db
+    def test_explicit_slug_is_exactly_the_value_set_not_derived(self, scheme):
+        collection = Collection.objects.create(scheme=scheme, name="Igneous Rocks")
+        collection.set_slug("custom-identifier")
+        assert collection.slug == "custom-identifier"
+        assert collection.slug_is_manual is True
+        collection.refresh_from_db()
+        assert collection.slug == "custom-identifier"
+        assert collection.slug != "igneous-rocks"
+
+    @pytest.mark.django_db
+    def test_explicit_slug_survives_a_rename(self, scheme):
+        collection = Collection.objects.create(scheme=scheme, name="Igneous Rocks")
+        collection.set_slug("ig")
+        collection.name = "Igneous and Volcanic Rocks"
+        collection.save()
+        assert collection.slug == "ig"
+        collection.refresh_from_db()
+        assert collection.slug == "ig"
+
+    @pytest.mark.django_db
+    def test_slug_without_override_still_derives_from_name(self, scheme):
+        collection = Collection.objects.create(scheme=scheme, name="Igneous Rocks")
+        assert collection.slug == "igneous-rocks"
+        assert collection.slug_is_manual is False
+        collection.name = "Volcanic Rocks"
+        collection.save()
+        assert collection.slug == "volcanic-rocks"
+
+    @pytest.mark.django_db
+    def test_explicit_slug_colliding_within_scheme_is_refused(self, scheme):
+        Collection.objects.create(scheme=scheme, name="Igneous Rocks")  # slug "igneous-rocks"
+        other = Collection.objects.create(scheme=scheme, name="Sedimentary Rocks")
+        with pytest.raises(ValidationError):
+            other.set_slug("igneous-rocks")
+        assert scheme.collections.filter(slug="igneous-rocks").count() == 1
+
+
 class TestOrderedCollection:
     """US-2 — A collection with a deliberate order.
 

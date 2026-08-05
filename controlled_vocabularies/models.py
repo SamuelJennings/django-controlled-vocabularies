@@ -1316,8 +1316,13 @@ class Collection(StaticUriModel):
     is many-to-many and asserts no semantic relation between members (FS-004 FR-008). When
     :attr:`ordered` (a ``skos:OrderedCollection``) the members carry a deliberate sequence
     read back by :meth:`members`; otherwise the collection is a set. The ``slug`` is derived
-    from ``name`` on save and unique within the scheme; the ``uri`` is composed on read under
-    a ``/collection/`` segment so it can never collide with a concept URI (research R4).
+    from ``name`` on every save (dynamic while unpublished) unless :attr:`slug_is_manual` is
+    set, in which case it is held exactly as assigned (FR-017, decisions.md D35) — the same
+    mechanism :attr:`Concept.slug_is_manual`/:attr:`ConceptScheme.slug_is_manual` already give
+    a concept and a vocabulary, so an imported collection's own published identifier can
+    anchor its address the same way. It is unique within the scheme; the ``uri`` is composed
+    on read under a ``/collection/`` segment so it can never collide with a concept URI
+    (research R4).
     """
 
     scheme = models.ForeignKey(
@@ -1338,6 +1343,16 @@ class Collection(StaticUriModel):
         verbose_name=_("slug"),
         help_text=_(
             "A URL-safe identifier derived automatically from the name. A slug must be unique within a given vocabulary."
+        ),
+    )
+    slug_is_manual = models.BooleanField(
+        default=False,
+        # No db_index: mirrors Concept.slug_is_manual/ConceptScheme.slug_is_manual — a
+        # low-cardinality flag read only inside save()'s own row, never filtered or ordered on.
+        verbose_name=_("slug set manually"),
+        help_text=_(
+            "Whether the slug was set explicitly rather than derived from the name. "
+            "A manual slug is left untouched when the name later changes."
         ),
     )
     ordered = models.BooleanField(
@@ -1392,17 +1407,54 @@ class Collection(StaticUriModel):
         """
         return f"{self.scheme.local_url}/collection/{self.slug}"
 
+    def set_slug(self, slug: str) -> None:
+        """Set an explicit slug that survives a later rename (FR-017, decisions.md D35).
+
+        Marks the slug manual and saves, so from now on :meth:`save` leaves it untouched
+        when :attr:`name` changes — the same mechanism :meth:`Concept.set_slug` and
+        :meth:`ConceptScheme.set_slug` already give a concept and a vocabulary, used here
+        so an imported collection's own published identifier can anchor its address the
+        same way. The value is stored exactly as given rather than re-slugified. The usual
+        non-empty and within-scheme uniqueness checks still apply.
+        """
+        self.slug = slug
+        self.slug_is_manual = True
+        self.save()
+
     def save(self, *args, **kwargs):
-        """Derive the slug from ``name`` and refuse an empty or colliding slug.
+        """Derive the slug from ``name`` unless :attr:`slug_is_manual`, and refuse an
+        empty or colliding slug.
 
         The same identity discipline :class:`ConceptScheme`/:class:`Concept` use: a
         non-empty slug, and no collision with another collection in the same vocabulary
         (the ``UniqueConstraint`` is the integrity backstop), with translatable
         named-placeholder messages.
         """
-        self.slug = slugify(self.name, allow_unicode=True)
-        if not self.slug:
-            raise ValidationError({"name": _("Name must produce a non-empty slug.")})
+        if not self.slug_is_manual:
+            # An auto slug tracks the name; a manual one is left exactly as set
+            # (FR-017, decisions.md D35).
+            self.slug = slugify(self.name, allow_unicode=True)
+            if not self.slug:
+                raise ValidationError({"name": _("Name must produce a non-empty slug.")})
+        else:
+            # A manual slug is stored verbatim (not re-slugified) but must still be a
+            # well-formed single-segment slug (Concept.save()'s identical guard, Article IX
+            # — identity IS the URI, and save() never runs full_clean()).
+            if not self.slug:
+                raise ValidationError({"slug": _("An explicit slug must not be empty.")})
+            try:
+                validate_unicode_slug(self.slug)
+            except ValidationError as exc:
+                raise ValidationError(
+                    {
+                        "slug": ValidationError(
+                            _(
+                                "An explicit slug must be a valid slug — letters, numbers, "
+                                "hyphens or underscores, with no spaces or slashes."
+                            ),
+                        )
+                    }
+                ) from exc
         if Collection.objects.filter(scheme=self.scheme, slug=self.slug).exclude(pk=self.pk).exists():
             raise ValidationError(
                 {

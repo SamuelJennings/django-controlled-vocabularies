@@ -1001,7 +1001,164 @@ the identifier-derived slug happens not to work.
 with the fatal-versus-set-aside split accounted for by what each record kind's absence costs the
 rest of the file.
 
-## D40 — SC-022's `name` clause is struck: it belonged to the withdrawn FR-016
+## D43 — T038 (fix cycle 3): a collection is the third imported record with a published
+identifier, and it was the one D35 missed
+
+Round two of the S6 review panel returned all three lenses red, and every lens independently
+found the same gap: `Collection` never received the identifier-derived, pinned slug D35 gave
+`Concept` (T029) and `ConceptScheme` (T030). Reproduced exactly: importing a collection whose
+identifier segment is `colours`, then re-importing the same file with only its `skos:prefLabel`
+changed, moved the collection's slug from `colours` to `colors` and its `local_url` with it —
+`Collection.local_url` is a real public address a curator can bookmark or cite, so Article IX
+applies to it identically to a concept's or a vocabulary's.
+
+**Fixed the way `Concept` and `ConceptScheme` were fixed, and no other way**, per the maintainer's
+own instruction: `Collection` gains `slug_is_manual` (mirroring `Concept.slug_is_manual`) and
+`set_slug()`; `Collection.save()` leaves a manual slug alone instead of re-deriving it from `name`
+on every save; `CollectionImporter.import_collections` derives the slug from
+`identifier_slug_segment(uri)` through `unique_slug_for_identifier`, with a per-scheme
+`taken_slugs` map seeded the same way `ConceptImporter.import_concepts` already seeds one. One
+migration (0007), the only one across T038–T042. A collection created on this site (never
+imported, no `static_uri`) keeps deriving its slug from its name — FR-019's carve-out applies to
+it exactly as it already does to a concept and a vocabulary.
+
+**Revisit if:** never — this closes the third address space FR-017 was written to pin; the
+reasoning is identical to D35's and D39's, extended to the one record kind they didn't reach.
+
+## D44 — T039 (fix cycle 3): an unusable derived collection slug is set aside; a name collision
+is no longer reachable at all
+
+Two triggers from the same round-two review, both reproduced against `b3e1e1d` and against `main`
+identically — pre-existing, not a regression introduced by this story. **(a)** Two collections in
+one vocabulary named `'Rock Types'@en` and `'rock types'@en` raised an uncaught
+`ValidationError({'slug': ["A collection with the slug 'rock-types' already exists..."]})` and
+stored nothing at all — zero schemes, zero concepts, because the whole run sits in one
+transaction. **(b)** A collection named `'---'@en` raised
+`ValidationError({'name': ['Name must produce a non-empty slug.']})`, likewise storing nothing.
+
+**Trigger (a) needed no second mechanism.** T038 already removes it: two collections with
+distinct identifiers no longer produce one slug to collide on, the same way T029 already removed
+the equivalent concept-side collision (D35's `TestConceptSlugs` note: "there is no collision left
+for this fixture to exercise"). Asserted directly as resolved behaviour rather than re-fixed.
+
+**Trigger (b) is restated by T038, not removed.** A collection's slug no longer reads `name` at
+all, so an unusable *name* can no longer produce an unusable slug — but an unusable *identifier
+segment* now can, exactly the shape `EMPTY_SLUG` already guards for a concept
+(`import_concepts`'s pre-write `slugify(identifier_slug_segment(uri))` check, D39). Mirrored for
+`CollectionImporter.import_collections`: checked ahead of the write, the collection is set aside
+under the existing `EMPTY_SLUG` reason rather than left to `Collection.save()`'s own manual-slug
+refusal. Unlike a vocabulary (`VOCABULARY_SLUG_UNUSABLE`, D42), a collection is not something the
+rest of the file needs in order to import, so this is a set-aside, never fatal.
+
+**Revisit if:** never — the same reasoning D39/D42 already give, split the same way between "the
+rest of the file can import around this" (set-aside) and "nothing can" (fatal).
+
+## D45 — T040 (fix cycle 3): the default-language commonest fallback now folds tag case exactly
+as the tally it echoes
+
+`SchemeResolver.determine_default_language`'s commonest-concept-language fallback held its own,
+character-for-character copy of the walk `SkosGraph.preferred_label_tag_counts` already performs
+over the identical `concept_nodes` and the identical `skos:prefLabel` predicate — except without
+that method's case fold (`key = language.lower()`, CORR-003/SEC-003, D34). FR-001 makes matching
+case-insensitive throughout, so `EN-GB` and `en-gb` are one published tag, not two; the unfolded
+copy split one tag's vote across two tally keys instead.
+
+Reproduced exactly: ten concepts, four tagged `fr`, three `EN-GB`, three `en-gb`, under
+`LANGUAGES=[('en','English'),('fr','French')]`. The folded tally (what should have run) gives
+`{'fr': 4, 'en-gb': 6}` — `en-gb` wins and resolves to `en` (its shared base). The unfolded copy
+(what actually ran) gives `{'fr': 4, 'en-gb': 3, 'EN-GB': 3}` — `fr` wins by a plurality that only
+exists because the real majority was split — so a vocabulary that is 60% English by its own
+publication imported as French, wrongly setting aside six of its ten concepts as
+`NO_PREFERRED_LABEL`.
+
+**The fix is a deletion, not an edit (Article XV)**: `determine_default_language` now calls
+`self.skos_graph.preferred_label_tag_counts(concept_nodes)` in place of its own copy of the same
+walk. The existing lowest-code tie-break (D15) is unchanged — it runs over whichever tally it is
+handed.
+
+**Revisit if:** never — one computation, one shape, the same rule D13 and D27 already state for
+the two other places this codebase once kept a winner computed twice.
+
+## D46 — T041 (fix cycle 3): a record's slug is read back from storage, never recomputed, once it
+has one
+
+Three reproductions, all the same defect at three granularities, all confirmed against `b3e1e1d`.
+**(a)** Two vocabularies whose identifiers both end in `#terms` import as `terms` and `terms-2`;
+deleting the first and re-importing the second's *unchanged* file moves the second's address from
+`.../terms-2` to `.../terms` — a record's own address moving for a reason that has nothing to do
+with its own identifier. **(b)** The same shape at concept granularity: an externally-identified
+concept colliding on its base slug with a locally authored record occupying it gets suffixed on
+first import; deleting the local record and re-importing the *same* file moves the external
+concept's slug onto the now-vacant base. **(c)** A locally authored scheme `Rocks`
+(slug `rocks`, `static_uri` NULL) holding a locally authored concept `Granite`
+(slug `granite`, `static_uri` NULL); importing a file naming those exact composed local URIs
+ended with `scheme.slug` `rocks-2` and **two** concept rows for one real `Granite` — the scheme's
+own slug self-collided against its own not-yet-written `static_uri` (`taken_slugs` seeded `None`
+for its row, compared against the new `static_uri`, never equal), and once the scheme's slug
+moved, the concept's local-URI-parse match (`{base}/rocks/granite`, textually encoding the *old*
+scheme slug) no longer found the scheme it was actually about.
+
+**The cause, common to all three**: `assign_unique_slug`, `resolve_scheme` and (after T038)
+`import_collections` all recomputed *every* record's slug through `unique_slug_for_identifier` on
+*every* touch, matched-and-existing records included. That was safe in isolation — the base is a
+pure function of a record's own `static_uri`, invariant once assigned — but not stable, because
+`taken_slugs` is reseeded fresh from the database on every run: whatever else currently occupies
+the scheme (or the app-wide scheme table) decides whether a given base is "taken", and that can
+change between two imports of the identical file for reasons that have nothing to do with the
+record being resolved.
+
+**The fix: mint only for a record this run is creating.** A slug is computed through
+`unique_slug_for_identifier` only when `created` is true; a matched record's slug is read back
+exactly as stored and left alone — `taken_slugs` is still seeded from the database up front (so a
+*sibling* created in the same run still resolves its own collision against every existing record,
+matched ones included), but a record is never asked to re-derive an answer it already gave. Fixing
+this for the scheme is what fixes (c): once the scheme's own slug stops moving, the concept's
+local-parse match finds it correctly and is recognised as itself rather than duplicated — no
+separate "key the read-back on identity, not on a possibly-`None` `static_uri`" mechanism was
+needed once the scheme-level defect that caused it was closed at its source.
+
+**`ConceptScheme.set_slug()` is now the importer's own write path.** It was public API this
+feature added (T030) with no caller and no test — `resolve_scheme` set `slug`/`slug_is_manual`
+directly and called `save()` itself. Routed through `set_slug()` instead, for both a freshly
+minted slug and a matched row's unchanged one, so a locally-authored scheme the importer matches
+for the first time also gets pinned (`slug_is_manual = True`) through the one path, rather than
+left un-pinned until some later, unrelated save. `Concept.assign_unique_slug` keeps its own direct
+attribute assignment rather than routing through `Concept.set_slug()`, unchanged from T029/D35:
+its docstring already states why (avoiding a second write per imported concept), and nothing in
+this cycle's review touched that reasoning.
+
+**Revisit if:** never — the read-back rule is the same one `assign_unique_slug`'s own docstring
+already stated as the intent behind seeding `taken_slugs` from a record's prior slug; this cycle
+makes it load-bearing for every call site rather than true only by the coincidence that nothing
+had yet vacated a slot.
+
+## D47 — T042 (fix cycle 3): a derived slug is bounded to its field, and a name gets the guard
+`Concept.label` already has
+
+Reproduced against `b3e1e1d`: a concept identified as `<http://pub.example/L#>` plus 400 `a`
+characters imported with `fatal=[]` and stored a 400-character slug in a `SlugField(max_length=255)`
+— a row `full_clean()` then refuses (`"Ensure this value has at most 255 characters"`), so no
+`ModelForm` can ever save it again. `local_url` came out 435 characters. `static_uri` accepts up to
+500 and no `save()` on this path calls `full_clean()`, so nothing catches it — silent on SQLite,
+which does not enforce `VARCHAR` length; a bare `DataError` on PostgreSQL, aborting the whole run
+(the failure SEC-002's own code comment already names). The same hole reaches `ConceptScheme.name`
+and `Collection.name`, and the scheme's own slug — a scheme is the whole file, so that one takes
+the run down with it rather than losing one record.
+
+**Two independent guards, because the two failures are different shapes.** `unique_slug_for_identifier`
+now takes `max_length` (read from the calling model's own `SlugField`, via `Model._meta.get_field(
+"slug").max_length` — never a literal `255` written a second time) and truncates its derived base
+to fit, leaving room for a numeric collision suffix, so the returned candidate never exceeds the
+field regardless of how many collisions it resolves. `ConceptScheme.name` and `Collection.name`
+get the same pre-write length check `Concept.label` already has (`VALUE_TOO_LONG`, SEC-002, D34):
+checked before the write, the record is set aside rather than written with a value the model would
+refuse; the record still imports, holding whatever name it already had (or none, if this is its
+first import) rather than an unchecked over-long one.
+
+**Revisit if:** never — the same discipline SEC-002/D34 already established for a label, applied
+to the two other free-text fields and the one length this codebase had not yet bounded.
+
+## D48 — SC-022's `name` clause is struck: it belonged to the withdrawn FR-016
 
 **Decided:** 2026-08-05, by the orchestrator, on the S6 round-two architecture lens's ARCH-103.
 No re-gate — this removes a criterion that contradicts an approved requirement rather than

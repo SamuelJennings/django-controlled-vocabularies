@@ -19,6 +19,7 @@ import urllib.parse
 from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
+from typing import cast
 
 import rdflib
 import rdflib.util
@@ -79,7 +80,7 @@ def identifier_slug_segment(uri: str) -> str:
     return parsed.path.rstrip("/").rsplit("/", 1)[-1]
 
 
-def unique_slug_for_identifier(static_uri: str, taken_slugs: dict[str, str | None]) -> str:
+def unique_slug_for_identifier(static_uri: str, taken_slugs: dict[str, str | None], max_length: int) -> str:
     """The deterministic, collision-resolved slug for ``static_uri`` (FR-017/FR-018/FR-020,
     decisions.md D35): the same identifier-derived base (:func:`identifier_slug_segment`), with a
     numeric suffix appended only when the candidate already belongs to a *different* record. An
@@ -88,24 +89,32 @@ def unique_slug_for_identifier(static_uri: str, taken_slugs: dict[str, str | Non
     kind (a concept is set aside, decisions.md D39; a vocabulary is fatal, decisions.md D35 fix
     cycle 2, since nothing else in the file has anywhere to import into).
 
-    Shared by :meth:`ConceptImporter.assign_unique_slug` and :meth:`SchemeResolver.resolve_scheme`
-    — a concept's collision and a scheme's collision are the same computation over two record
-    kinds (Article XV), so the shape is not duplicated.
+    Shared by :meth:`ConceptImporter.assign_unique_slug`, :meth:`SchemeResolver.resolve_scheme`
+    and :meth:`CollectionImporter.import_collections` — a collision in any of the three record
+    kinds is the same computation (Article XV), so the shape is not duplicated three times.
 
     ``taken_slugs`` maps every claimed slug to its claimant's ``static_uri``, mutated in place so a
     caller resolving more than one record in the same run sees each prior assignment as taken.
     Because ``static_uri`` never changes once assigned, a record's own previously-stored slug is
     always read back to itself rather than suffixed (FR-020's "same file yields the same slugs
     however it is traversed").
+
+    ``max_length`` (T042, SEC-002-shaped, decisions.md D35 fix cycle 3) bounds the returned value
+    to the calling model's own ``SlugField.max_length`` — never a literal ``255`` written a second
+    time here. A published identifier segment can be arbitrarily long; nothing on this write path
+    calls ``full_clean()``, so an unbounded slug lands unchecked on SQLite and raises a bare
+    ``DataError`` on PostgreSQL. The *base* is truncated, leaving room for the numeric suffix, so
+    the returned candidate never exceeds ``max_length`` however many collisions it resolves.
     """
-    base = slugify(identifier_slug_segment(static_uri), allow_unicode=True)
+    base = slugify(identifier_slug_segment(static_uri), allow_unicode=True)[:max_length]
     if not base:
         return ""
     candidate = base
     suffix = 1
     while taken_slugs.get(candidate, static_uri) != static_uri:
         suffix += 1
-        candidate = f"{base}-{suffix}"
+        suffix_text = f"-{suffix}"
+        candidate = base[: max_length - len(suffix_text)] + suffix_text
     taken_slugs[candidate] = static_uri
     return candidate
 
@@ -436,10 +445,10 @@ class SchemeResolver:
             if resolved:
                 return resolved
 
-        counts: dict[str, int] = {}
-        for node in concept_nodes:
-            for language in self.skos_graph.label_languages(node, SKOS.prefLabel):
-                counts[language] = counts.get(language, 0) + 1
+        # T040, decisions.md D34/D35 (fix cycle 3): reuses SkosGraph.preferred_label_tag_counts
+        # (Article XV) rather than keeping its own unfolded copy of the identical walk — that
+        # copy counted 'EN-GB' and 'en-gb' as two tags instead of the one FR-001 says they are.
+        counts = self.skos_graph.preferred_label_tag_counts(concept_nodes)
         if counts:
             commonest = sorted(counts.items(), key=lambda item: (-item[1], item[0]))[0][0]
             resolved = self.matcher.resolve(commonest).configured_language
@@ -544,6 +553,7 @@ class SchemeResolver:
         name_match = _localized_literal(
             self.skos_graph, self.matcher, declared_node, SKOS.prefLabel, row.effective_default_language
         )
+        winning_tag = row.effective_default_language
         if name_match is None:
             # The declared default language (or the site's, on fallback) carries no prefLabel on
             # the scheme itself — fall back to any language rather than leaving name unset.
@@ -560,7 +570,16 @@ class SchemeResolver:
                     language=winning_tag,
                     kept_as=row.effective_default_language,
                 )
-        if name:
+        name_max_length = ConceptScheme._meta.get_field("name").max_length
+        if name and name_max_length is not None and len(name) > name_max_length:
+            # T042, SEC-002-shaped, decisions.md D35 (fix cycle 3): row.save() never calls
+            # full_clean(), so an over-long name would otherwise reach the database unchecked on
+            # SQLite and raise a bare DataError on PostgreSQL — the same hole Concept.label's own
+            # pre-write VALUE_TOO_LONG guard closes. A scheme is the whole file, so this leaves
+            # the name unwritten (row.name keeps whatever it already held) rather than aborting
+            # the run the rest of the file still needs to import into.
+            self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=declared_uri, language=winning_tag)
+        elif name:
             row.name = name
         # SKOS defines no description predicate for a skos:ConceptScheme; dcterms:description is
         # the source (D21), the same alias CONTEXT.md establishes for a concept's own definition.
@@ -583,30 +602,41 @@ class SchemeResolver:
         row.description = description or ""
         row.static_uri = declared_uri
         # T030, FR-018, decisions.md D35: the vocabulary's own slug is identifier-derived,
-        # exactly like a concept's (T029, assign_unique_slug) — recomputed from declared_uri
-        # on every touch rather than gated on `created`, which is safe rather than merely
-        # convenient: `declared_uri` is what `_get_or_create_scheme` matched this row on, so
-        # it is invariant across a re-import and the recomputed value always agrees with what
-        # is already stored.
+        # exactly like a concept's (T029, assign_unique_slug).
         # T035, FR-020, decisions.md D35 (fix cycle 2): two published vocabularies can end in the
         # same identifier segment, so the importer resolves that collision itself, the same shape
         # assign_unique_slug already resolves a concept's — ConceptScheme.save() keeps refusing
         # (never auto-suffixing) a colliding slug (research R4), which is a different case: a
         # curator setting two vocabularies' slugs equal by hand.
-        taken_slugs: dict[str, str | None] = dict(ConceptScheme.objects.values_list("slug", "static_uri"))
-        slug = unique_slug_for_identifier(declared_uri, taken_slugs)
-        if not slug:
-            # T036, decisions.md D35 (fix cycle 2): an identifier segment made up only of
-            # characters slugify() strips is fatal, not set aside like a concept's EMPTY_SLUG —
-            # without a resolvable vocabulary there is nothing for the rest of the file to import
-            # into. Checked ahead of row.save() (the same discipline EMPTY_SLUG already applies)
-            # rather than letting ConceptScheme.save()'s own refusal raise. Falling back to
-            # row.name here would reinstate the exact defect FR-018 exists to remove.
-            self.report.add_fatal(FatalReason.VOCABULARY_SLUG_UNUSABLE, subject=declared_uri)
-            return None, None
-        row.slug = slug
-        row.slug_is_manual = True
-        row.save()
+        # T041, FR-020, decisions.md D35 (fix cycle 3): minted through unique_slug_for_identifier
+        # only for a scheme this run is creating — a matched row already holds a slug, which is
+        # read back exactly as stored rather than recomputed, so no change in what else currently
+        # occupies the table (a sibling vocabulary deleted, a slot vacated) can move an address
+        # that has nothing to do with this scheme's own identifier (the "however many times it is
+        # imported" reading of FR-020's "same file yields the same slugs however it is traversed").
+        if created:
+            taken_slugs: dict[str, str | None] = dict(ConceptScheme.objects.values_list("slug", "static_uri"))
+            # ConceptScheme.slug declares max_length explicitly; cast rather than assert
+            # narrows the type without a runtime check ruff's bandit rules refuse in production
+            # code (S101), for a value Django's own field metadata always supplies here.
+            max_length = cast(int, ConceptScheme._meta.get_field("slug").max_length)
+            slug = unique_slug_for_identifier(declared_uri, taken_slugs, max_length)
+            if not slug:
+                # T036, decisions.md D35 (fix cycle 2): an identifier segment made up only of
+                # characters slugify() strips is fatal, not set aside like a concept's EMPTY_SLUG —
+                # without a resolvable vocabulary there is nothing for the rest of the file to
+                # import into. Checked ahead of the write (the same discipline EMPTY_SLUG already
+                # applies) rather than letting ConceptScheme.save()'s own refusal raise. Falling
+                # back to row.name here would reinstate the exact defect FR-018 exists to remove.
+                self.report.add_fatal(FatalReason.VOCABULARY_SLUG_UNUSABLE, subject=declared_uri)
+                return None, None
+            row.slug = slug
+        # T041: ConceptScheme.set_slug() is public API this feature added for exactly this
+        # purpose (its own docstring: "an imported vocabulary's own published identifier can
+        # anchor its address the same way") — routed through here rather than left uncalled,
+        # for both a freshly minted slug and a matched row's own unchanged one, so a
+        # locally-authored scheme the importer is matching for the first time also gets pinned.
+        row.set_slug(row.slug)
         if created:
             self.report.add_created(row.uri)
         else:
@@ -1005,7 +1035,7 @@ class ConceptImporter:
             concept.scheme = self.target_scheme
             concept.static_uri = uri
             concept.label = label
-            self.assign_unique_slug(concept, taken_slugs)
+            self.assign_unique_slug(concept, taken_slugs, created=created)
             concept.save()
             if winning_tag.lower() != default_language.lower():
                 # T009, FR-006: concept.label is stored content too — a value that made it in
@@ -1041,7 +1071,7 @@ class ConceptImporter:
             self.report.add_absent_from_source(concept.uri)
 
     @staticmethod
-    def assign_unique_slug(concept: Concept, taken_slugs: dict[str, str | None]) -> None:
+    def assign_unique_slug(concept: Concept, taken_slugs: dict[str, str | None], *, created: bool) -> None:
         """Give ``concept`` a deterministic, scheme-unique slug derived from its published
         identifier (T029, FR-017, decisions.md D35).
 
@@ -1053,25 +1083,38 @@ class ConceptImporter:
         it itself via :func:`unique_slug_for_identifier` — the same computation
         :meth:`SchemeResolver.resolve_scheme` reuses for a vocabulary's own collision (Article XV).
 
-        ``taken_slugs`` (FIX 16, D49) maps every claimed slug to its claimant's ``static_uri`` —
-        fetched once by :meth:`import_concepts`, mutated in place by
-        :func:`unique_slug_for_identifier` so the next concept in the run sees it as taken. Keyed
-        by ``static_uri`` rather than ``pk``, since a newly created concept has no pk yet at the
-        point its slug is decided. Because ``concept_nodes`` is always processed in URI-sorted
-        order (never the order a file happens to declare them in), and each concept's own prior
-        slug is read back via ``taken_slugs`` before ever minting a suffix, a collision between two
-        identifiers resolves identically whichever order the file is read in (FR-020, D35's "same
-        file yields the same slugs however it is traversed").
+        ``created`` (T041, FR-020, decisions.md D35 fix cycle 3) decides whether a slug is minted
+        at all: a slug is computed through :func:`unique_slug_for_identifier` only for a concept
+        this run is creating. A concept :meth:`import_concepts` *matched* to an existing row
+        already holds a slug — it is read back exactly as stored, never recomputed, so no change
+        in what else currently occupies the scheme (a sibling deleted, a slot vacated) can move an
+        address that has nothing to do with this concept's own identifier. Recomputing
+        unconditionally used to be *safe* (the base is a pure function of ``concept.static_uri``,
+        invariant once assigned) but not *stable*: ``taken_slugs`` is reseeded fresh from the
+        database on every run, so a collision this concept was once suffixed against can vanish
+        between two imports of the identical file, silently moving its address (FR-020's "same
+        file yields the same slugs however it is traversed" — reread here as "however many times
+        it is imported").
 
-        ``slug_is_manual`` stops ``Concept.save()`` from re-deriving this value on a later,
-        unrelated save. Recomputing it here on every re-import is safe rather than merely
-        convenient: the base is a pure function of ``concept.static_uri``, which never changes once
-        assigned, so a re-import always derives the identical candidate a previously-stored concept
-        already holds and the ``taken_slugs`` seed confirms it back to itself. The caller
-        (:meth:`import_concepts`) already sets aside a concept whose identifier segment slugifies
-        to nothing (``EMPTY_SLUG``) before this method ever runs, so the base is never empty here.
+        ``taken_slugs`` (FIX 16, D49) maps every claimed slug to its claimant's ``static_uri`` —
+        fetched once by :meth:`import_concepts` from every concept currently in the scheme
+        (matched rows included), mutated in place by :func:`unique_slug_for_identifier` so the
+        next *newly created* concept in the run sees a just-minted sibling's slug as taken. Because
+        ``concept_nodes`` is always processed in URI-sorted order (never the order a file happens
+        to declare them in), a collision between two identifiers created in the same run resolves
+        identically whichever order the file is read in.
+
+        ``slug_is_manual`` is always set ``True``, matched or created alike: it stops
+        ``Concept.save()`` from re-deriving this value on a later, unrelated save — including for a
+        concept the importer is touching for the first time after it was authored locally (no prior
+        ``static_uri``), which otherwise keeps deriving its slug from its label (FR-019) forever.
+        The caller (:meth:`import_concepts`) already sets aside a concept whose identifier segment
+        slugifies to nothing (``EMPTY_SLUG``) before this method ever runs, so the base is never
+        empty for a concept actually being created here.
         """
-        concept.slug = unique_slug_for_identifier(concept.static_uri, taken_slugs)
+        if created:
+            max_length = cast(int, Concept._meta.get_field("slug").max_length)
+            concept.slug = unique_slug_for_identifier(concept.static_uri, taken_slugs, max_length)
         concept.slug_is_manual = True
 
 
@@ -1345,6 +1388,12 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
         )
         successful_ids = {concept.pk for concept in successful_concepts.values()}
         mentioned_uris: set[str] = set()
+        # slug -> the static_uri of the collection currently holding it, seeded from every
+        # collection already in target_scheme (T038, FR-017/FR-020, decisions.md D35) — the
+        # same shape ConceptImporter.import_concepts already seeds for concepts.
+        taken_slugs: dict[str, str | None] = dict(
+            Collection.objects.filter(scheme=self.target_scheme).values_list("slug", "static_uri")
+        )
 
         for node in collection_nodes:
             hint = self.skos_graph.first_literal(node, SKOS.prefLabel)
@@ -1386,10 +1435,21 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
                 )
                 continue
 
+            if not slugify(identifier_slug_segment(uri), allow_unicode=True):
+                # T039, decisions.md D35 (fix cycle 3): the same guard import_concepts
+                # already applies for EMPTY_SLUG — a publisher-assigned fragment or path
+                # segment made up only of characters slugify() strips. Checked ahead of the
+                # write rather than letting Collection.save()'s own refusal raise. Unlike a
+                # vocabulary, a collection is not something the rest of the file needs in
+                # order to import, so this is set aside rather than fatal.
+                self.report.add_set_aside(SetAsideReason.EMPTY_SLUG, subject=uri)
+                continue
+
             row.scheme = self.target_scheme
             row.static_uri = uri
             default_language = self.target_scheme.effective_default_language
             name_match = _localized_literal(self.skos_graph, self.matcher, node, SKOS.prefLabel, default_language)
+            winning_tag = default_language
             if name_match is None:
                 name = self.skos_graph.first_literal(node, SKOS.prefLabel)
             else:
@@ -1403,9 +1463,27 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
                         language=winning_tag,
                         kept_as=default_language,
                     )
-            if name:
+            name_max_length = Collection._meta.get_field("name").max_length
+            if name and name_max_length is not None and len(name) > name_max_length:
+                # T042, SEC-002-shaped, decisions.md D35 (fix cycle 3): the same pre-write guard
+                # resolve_scheme's own name write applies — row.save() never calls full_clean(),
+                # so an over-long name would otherwise reach the database unchecked on SQLite and
+                # raise a bare DataError on PostgreSQL.
+                self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=uri, language=winning_tag)
+            elif name:
                 row.name = name
             row.ordered = ordered
+            # T038, FR-017, decisions.md D35: a collection's own slug is identifier-derived,
+            # exactly like a concept's (assign_unique_slug) and a scheme's (resolve_scheme) —
+            # nothing is derived from row.name, so a publisher rename never moves it.
+            # T041, FR-020, decisions.md D35 (fix cycle 3): minted only when this collection is
+            # being created; a matched row already holds a slug and keeps it exactly as stored,
+            # the same read-back-don't-recompute rule assign_unique_slug and resolve_scheme
+            # apply, so no change in what else currently occupies the scheme can move it.
+            if created:
+                max_length = cast(int, Collection._meta.get_field("slug").max_length)
+                row.slug = unique_slug_for_identifier(uri, taken_slugs, max_length)
+            row.slug_is_manual = True
             row.save()
             if created:
                 self.report.add_created(uri)
