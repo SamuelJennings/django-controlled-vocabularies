@@ -572,12 +572,21 @@ class SchemeResolver:
                 )
         name_max_length = ConceptScheme._meta.get_field("name").max_length
         if name and name_max_length is not None and len(name) > name_max_length:
+            if created:
+                # T044, decisions.md D49 (fix cycle 4, ARCH-301/CORR-303/SEC-302): a scheme is
+                # what the rest of the file imports into, so a *created* scheme with no usable
+                # name has nothing to fall back to — row.name would stay '', and a row
+                # full_clean() then refuses is exactly what D47's guard exists to prevent.
+                # Fatal, the same reasoning VOCABULARY_SLUG_UNUSABLE already gives an unusable
+                # identifier: without a resolvable, storable vocabulary there is nothing for
+                # the rest of the file to import into.
+                self.report.add_fatal(FatalReason.VOCABULARY_NAME_UNUSABLE, subject=declared_uri, language=winning_tag)
+                return None, None
             # T042, SEC-002-shaped, decisions.md D35 (fix cycle 3): row.save() never calls
             # full_clean(), so an over-long name would otherwise reach the database unchecked on
             # SQLite and raise a bare DataError on PostgreSQL — the same hole Concept.label's own
-            # pre-write VALUE_TOO_LONG guard closes. A scheme is the whole file, so this leaves
-            # the name unwritten (row.name keeps whatever it already held) rather than aborting
-            # the run the rest of the file still needs to import into.
+            # pre-write VALUE_TOO_LONG guard closes. A *matched* scheme already has a name, so
+            # this leaves it exactly as held rather than losing it to an unusable replacement.
             self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=declared_uri, language=winning_tag)
         elif name:
             row.name = name
@@ -1470,6 +1479,14 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
                 # so an over-long name would otherwise reach the database unchecked on SQLite and
                 # raise a bare DataError on PostgreSQL.
                 self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=uri, language=winning_tag)
+                if created:
+                    # T044, decisions.md D49 (fix cycle 4, ARCH-301/CORR-303/SEC-302): unlike a
+                    # vocabulary, a collection is not something the rest of the file needs in
+                    # order to import — but a *created* collection still has no earlier name to
+                    # fall back to, so the whole collection is set aside rather than persisted
+                    # with a blank name a row full_clean() would then refuse. A *matched*
+                    # collection already has a name and keeps it exactly as held.
+                    continue
             elif name:
                 row.name = name
             row.ordered = ordered

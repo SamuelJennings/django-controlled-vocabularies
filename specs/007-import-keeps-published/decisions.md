@@ -1186,3 +1186,41 @@ could not fail. The test fix cycle 1 wrote for this was removed with the T023 re
 there is currently no test on the branch covering it.
 
 **Revisit if:** FR-002 is ever narrowed again, in which case the two need re-reading together.
+
+## D49 — T044 (fix cycle 4): an over-long name on a *first* import has nowhere to fall back to,
+and the fallback differs by what the record costs the rest of the file
+
+Round-three review (ARCH-301/CORR-303/SEC-302) found the residue D47 left: the `VALUE_TOO_LONG`
+guard sets an over-long name aside and falls through to the write without assigning `row.name`.
+For a *matched* row that is correct — D47's own words, "row.name keeps whatever it already
+held." For a row this run is *creating*, there is no earlier value to keep, so `row.name` stays
+the field default, `''`, and both `ConceptScheme.name` and `Collection.name` are
+`CharField(blank=False)` — the stored row then fails its own `full_clean()`, the exact shape D47
+was written to remove, just moved from the slug to the name.
+
+Reproduced against `10c069a`: a scheme (or a collection) whose only `skos:prefLabel` is 300
+characters imports with `report.fatal == []`, `name == ''`, and `full_clean()` raising `{'name':
+['This field cannot be blank.']}`.
+
+**Two different outcomes, because a scheme and a collection cost the rest of the file
+differently on creation, exactly as D42 already splits an unusable *slug*.** A vocabulary is what
+the rest of the file imports into: a created scheme with an unusable name is now
+`FatalReason.VOCABULARY_NAME_UNUSABLE`, the whole run refused, nothing written — the same
+reasoning `VOCABULARY_SLUG_UNUSABLE` already gives. A collection is not something the rest of the
+file needs: a created collection with an unusable name is set aside *entirely* (the existing
+`VALUE_TOO_LONG` reason, `continue`d before `row.save()` ever runs) rather than persisted with a
+name it cannot legally carry — the whole record, not merely its name field, because there is
+nothing else to keep it for.
+
+The matched-row half of both guards is untouched: a scheme or collection that already has a name
+keeps it, set aside rather than fatal or skipped, exactly as D47 left it.
+
+Two round-three tests asserted only `len(name) <= max_length` on the created path, which `''`
+also satisfies. Both are strengthened in place (`test_a_scheme_name_longer_than_the_field_is_set_aside_not_written_unchecked`
+renamed `..._is_fatal_on_first_import`; `test_a_collection_name_longer_than_the_field_is_set_aside_not_written_unchecked`
+renamed `..._sets_aside_the_whole_collection_on_first_import`) to assert the outcome this cycle
+overturns, and a matched-row counterpart is added for each so the surviving half of D47 stays
+proven.
+
+**Revisit if:** never — the same fatal-versus-set-aside split D42 already gives an unusable slug,
+applied to the one other field a first import can leave unusably empty.

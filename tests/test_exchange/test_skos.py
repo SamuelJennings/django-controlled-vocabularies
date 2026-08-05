@@ -1454,23 +1454,58 @@ class TestSlugAndNameLengthAreBoundedToTheField:
         assert len(collection.slug) <= max_length
         collection.full_clean()
 
-    def test_a_scheme_name_longer_than_the_field_is_set_aside_not_written_unchecked(self, db, tmp_path):
+    def test_a_scheme_name_longer_than_the_field_is_fatal_on_first_import(self, db, tmp_path):
+        """T044, decisions.md D49 (fix cycle 4, ARCH-301/CORR-303/SEC-302): a *created* scheme
+        has no earlier name to fall back to, so an unusable one is fatal rather than stored
+        blank. Overturns the previous version of this test, which asserted
+        ``report.fatal == []`` and only checked ``len(scheme.name) <= max_length`` — a blank
+        name (the actual defect this cycle fixes) satisfies that length check too, so the old
+        assertion could not have caught it.
+        """
         long_name = "N" * 300
         path = tmp_path / "long_scheme_name.ttl"
         path.write_text(
             "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
             f'<http://pub.example/longschemename> a skos:ConceptScheme ; skos:prefLabel "{long_name}"@en .\n'
         )
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(path)
+        report = exc_info.value.report
+        assert len(report.fatal) == 1
+        assert report.fatal[0].reason is FatalReason.VOCABULARY_NAME_UNUSABLE
+        assert report.fatal[0].subject == "http://pub.example/longschemename"
+        assert not ConceptScheme.objects.filter(static_uri="http://pub.example/longschemename").exists()
+
+    def test_a_matched_scheme_s_over_long_name_is_still_only_set_aside_keeping_the_old_name(self, db, tmp_path):
+        """The matched-row half of T044: a scheme that already has a name keeps it when a
+        re-import's name is unusable, set aside rather than fatal. Would fail if the new
+        created-only fatal branch fired for a matched row too.
+        """
+        scheme = ConceptSchemeFactory(name="Kept Name", static_uri="http://pub.example/longschemename2")
+        long_name = "N" * 300
+        path = tmp_path / "long_scheme_name_reimport.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            f'<http://pub.example/longschemename2> a skos:ConceptScheme ; skos:prefLabel "{long_name}"@en .\n'
+        )
         report = import_skos(path)
         assert report.fatal == []
-        scheme = ConceptScheme.objects.get(static_uri="http://pub.example/longschemename")
-        max_length = ConceptScheme._meta.get_field("name").max_length
-        assert len(scheme.name) <= max_length
+        scheme.refresh_from_db()
+        assert scheme.name == "Kept Name"
         entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
         assert len(entries) == 1
-        assert entries[0].subject == "http://pub.example/longschemename"
+        assert entries[0].subject == "http://pub.example/longschemename2"
 
-    def test_a_collection_name_longer_than_the_field_is_set_aside_not_written_unchecked(self, db, tmp_path):
+    def test_a_collection_name_longer_than_the_field_sets_aside_the_whole_collection_on_first_import(
+        self, db, tmp_path
+    ):
+        """T044, decisions.md D49 (fix cycle 4, ARCH-301/CORR-303/SEC-302): a *created*
+        collection has no earlier name to fall back to either — but unlike a scheme, the rest of
+        the file does not need this collection in order to import, so the whole record is set
+        aside (never created) rather than failing the run. Overturns the previous version of
+        this test, which only checked ``len(collection.name) <= max_length`` — a blank name (the
+        actual defect) satisfies that too.
+        """
         long_name = "N" * 300
         path = tmp_path / "long_collection_name.ttl"
         path.write_text(
@@ -1480,12 +1515,40 @@ class TestSlugAndNameLengthAreBoundedToTheField:
         )
         report = import_skos(path)
         assert report.fatal == []
-        collection = Collection.objects.get(static_uri="http://pub.example/longcollectionname#grp")
-        max_length = Collection._meta.get_field("name").max_length
-        assert len(collection.name) <= max_length
+        assert not Collection.objects.filter(static_uri="http://pub.example/longcollectionname#grp").exists()
         entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
         assert len(entries) == 1
         assert entries[0].subject == "http://pub.example/longcollectionname#grp"
+
+    def test_a_matched_collection_s_over_long_name_is_still_only_set_aside_keeping_the_old_name(
+        self, db, tmp_path
+    ):
+        """The matched-row half of T044 for a collection: an already-imported collection keeps
+        its stored name, and the collection itself is not removed, when a re-import's name is
+        unusable. Would fail if the created-only ``continue`` fired for a matched row too.
+        """
+        path = tmp_path / "long_collection_name_first.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/longcollectionname2> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            '<http://pub.example/longcollectionname2#grp> a skos:Collection ; skos:prefLabel "Group"@en .\n'
+        )
+        import_skos(path)
+        collection = Collection.objects.get(static_uri="http://pub.example/longcollectionname2#grp")
+        assert collection.name == "Group"
+
+        long_name = "N" * 300
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/longcollectionname2> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            f'<http://pub.example/longcollectionname2#grp> a skos:Collection ; skos:prefLabel "{long_name}"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        collection.refresh_from_db()
+        assert collection.name == "Group"
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(entries) == 1
 
 
 def _write_shared_label_file(tmp_path: Path, n: int) -> Path:
