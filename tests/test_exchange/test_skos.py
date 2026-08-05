@@ -1486,6 +1486,16 @@ class TestUniqueSlugForIdentifierTruncationNeverSlicesNegative:
         assert result != "-2"
         assert result.startswith("a")
 
+    def test_a_collision_suffix_longer_than_max_length_still_fits_within_max_length(self):
+        """SEC-405, decisions.md D63 (fix cycle 5): the docstring's own contract is "the returned
+        candidate never exceeds max_length however many collisions it resolves" — true only once
+        the fix below clamps the whole candidate, not only the base. Before it, ``max_length=2``
+        with a two-character suffix returned ``'a-2'`` (length 3): ``base[: max(2 - 2, 1)]`` keeps
+        one base character, but nothing then trims the assembled ``base + suffix`` back down.
+        """
+        result = unique_slug_for_identifier("http://e.org/#ab", {"ab": "other", "b-2": "other2"}, 2)
+        assert len(result) <= 2
+
     def test_a_normal_collision_is_unaffected_by_the_fix(self):
         """max_length comfortably larger than any suffix (the shape every real field is in,
         SlugField(max_length=255)) must keep resolving collisions exactly as before.

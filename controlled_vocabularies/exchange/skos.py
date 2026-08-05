@@ -117,8 +117,11 @@ def unique_slug_for_identifier(static_uri: str, taken_slugs: dict[str, str | Non
     to the calling model's own ``SlugField.max_length`` — never a literal ``255`` written a second
     time here. A published identifier segment can be arbitrarily long; nothing on this write path
     calls ``full_clean()``, so an unbounded slug lands unchecked on SQLite and raises a bare
-    ``DataError`` on PostgreSQL. The *base* is truncated, leaving room for the numeric suffix, so
-    the returned candidate never exceeds ``max_length`` however many collisions it resolves.
+    ``DataError`` on PostgreSQL. The *base* is truncated, leaving room for the numeric suffix, and
+    the assembled candidate is itself clamped to ``max_length`` (SEC-405, decisions.md D63, fix
+    cycle 5), so the returned candidate never exceeds ``max_length`` however many collisions it
+    resolves — true even at ``max_length < len(suffix_text) + 1``, where keeping one base
+    character and the whole suffix would otherwise still overrun the field.
     """
     base = identifier_slug_base(static_uri)[:max_length]
     if not base:
@@ -134,7 +137,12 @@ def unique_slug_for_identifier(static_uri: str, taken_slugs: dict[str, str | Non
         # relationship to the base entirely (at equality, the bare suffix). Unreachable at any
         # of the three current call sites (all pass 255), fixed by construction anyway: always
         # keep at least one base character.
-        candidate = base[: max(max_length - len(suffix_text), 1)] + suffix_text
+        #
+        # SEC-405 (fix cycle 5): keeping one base character plus the whole suffix can still
+        # exceed max_length when the suffix alone is longer than max_length - 1 — the docstring's
+        # own "never exceeds max_length" claim was false in that case. The final `[:max_length]`
+        # clamps the assembled candidate, not only the base.
+        candidate = (base[: max(max_length - len(suffix_text), 1)] + suffix_text)[:max_length]
     taken_slugs[candidate] = static_uri
     return candidate
 

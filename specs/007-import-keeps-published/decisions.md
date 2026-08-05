@@ -1294,6 +1294,12 @@ exceeds the field.
 **Revisit if:** never — a one-line unit test on the helper (`TestUniqueSlugForIdentifierTruncationNeverSlicesNegative`)
 covers it directly; no call site needs to change.
 
+**Correction (SEC-405, 2026-08-05, fix cycle 5):** the "does not guarantee" caveat above is
+resolved, not merely documented — see D63, below. The docstring's own claim that the candidate
+"never exceeds `max_length`" was left false for the case this entry already named as unreachable
+in practice; D63 makes it true by construction instead of leaving the gap between the code and its
+own documented contract open.
+
 ## D52 — T047 (fix cycle 4): the any-language name fallback now names its own language, not the
 target it fell back from
 
@@ -1664,3 +1670,27 @@ a living description of the current call graph, so the correction is additive.
 
 **Revisit if:** never — both are wording-only; `poetry run pytest tests/test_models.py
 tests/test_standards.py`, `ruff`, and `mypy` are unchanged.
+
+## D63 — T054 (fix cycle 5): unique_slug_for_identifier's candidate is clamped to max_length,
+matching its own documented contract
+
+SEC-405 (round 4, low): T046/D51 truncated the *base* to leave room for the suffix
+(`base[: max(max_length - len(suffix_text), 1)]`), but the function's own docstring claimed the
+returned candidate "never exceeds `max_length` however many collisions it resolves" — false once
+`max_length` is smaller than `len(suffix_text) + 1`: keeping one base character plus the whole
+suffix still overruns the field. Reproduced: `unique_slug_for_identifier('http://e.org/#ab',
+{'ab': 'other', 'b-2': 'other2'}, 2)` returns `'a-2'`, three characters against a `max_length` of
+two. D51 already named this gap and judged it unreachable at any of the three current call sites
+(`SlugField(max_length=255)` everywhere; a suffix long enough to reach it needs on the order of
+10^250 colliding records sharing one base) — correct as a risk assessment, but the docstring still
+asserted a guarantee the code did not keep.
+
+**Fixed by clamping the assembled candidate, not only the base:** `(base[: max(max_length -
+len(suffix_text), 1)] + suffix_text)[:max_length]`. A new test,
+`test_a_collision_suffix_longer_than_max_length_still_fits_within_max_length`, reproduced the gap
+RED (`len('a-2') == 3 > 2`) before the fix and is green after it, alongside the existing
+`TestUniqueSlugForIdentifierTruncationNeverSlicesNegative` cases, both unaffected since 255 never
+reaches this branch either way.
+
+**Revisit if:** never — the docstring's contract and the code now agree unconditionally, so there
+is nothing left to reconcile if a future call site ever does pass a small `max_length`.
