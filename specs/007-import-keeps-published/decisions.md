@@ -1967,3 +1967,49 @@ record kind gains its own slug-minting call site and its own author does not kno
 at which point folding the guard into `unique_slug_for_identifier` itself (raising, or returning a
 tri-state) is worth reconsidering; not done here because that would change the contract for
 `SchemeResolver`'s own, already-correct call site too, which this task's scope does not require.
+
+## D71 — T061 (fix cycle 7): the round-6 mediums and lows — a predominance vote already closed by
+D69, two refusal messages made true, and a hanging test made fail-fast
+
+**SEC-602** (round 6, medium): an empty or whitespace-only literal could never itself win a name
+slot after D65, but still counted toward its published tag's predominance in
+`preferred_label_tag_counts`, built entirely from `SkosGraph.label_languages`. Already closed as a
+consequence of T059's structural fix (D69) — `label_languages` is one of `is_usable_literal`'s
+four call sites — rather than needing a change of its own in this task. Verified as its own
+regression: reverting only the `label_languages` line and rerunning
+`TestAnEmptyLiteralDoesNotVoteOnPredominance` reproduces the round-6 evidence exactly (`c1`'s
+stored value flips from `"Alpha DE"` to `"Alpha AT"`), confirming the fix is doing the work and
+not merely coincidentally passing.
+
+**SEC-603/CORR-603** (round 6, medium and low, one message): `FatalReason.VOCABULARY_NAME_UNPUBLISHED`'s
+template said "no skos:prefLabel was published for it at all," true when T058 (D68) minted it for
+a scheme publishing no `skos:prefLabel` whatsoever, false on a path T055 opened in the same cycle
+(fix cycle 6) — a scheme publishing only a whitespace-only `skos:prefLabel` reaches this identical
+fatal (T055's filter makes `name` arrive `None`, exactly as if nothing had been published), and a
+triple *was* published. **Reworded** to name the actual condition rather than a fact about the
+file that does not always hold: "no skos:prefLabel with a usable value was published for it in
+any language." One template change closes both findings (SEC-603 diagnosed the whitespace
+trigger, CORR-603 the same message from the correctness lens).
+
+**A pre-existing test's substring assertion is overturned**, named here per this cycle's own rule
+for doing so (D68's own precedent): `TestNoPublishedNameAtAllIsUnusableTheSameAsOverLong
+.test_a_created_scheme_with_no_preflabel_at_all_is_fatal_not_persisted_blank` asserted `"no
+skos:prefLabel was published" in message` — true of the old template, false of the reworded one
+(the new template does not contain that literal substring). Updated to the new substring; the
+reason and the "longer than" absence it also checks are unchanged, since the rewording did not
+touch what the message must *not* say.
+
+**CORR-604** (round 6, low): `TestUniqueSlugForIdentifierGivesUpRatherThanLoopingForever`'s
+primary test asserted only the return value of a call whose own failure mode, pre-D70, was to
+never return — a regression of the give-up hangs the test process rather than failing it, and CI
+cannot tell that apart from a stuck runner. No `pytest-timeout` dependency is added for one test:
+the call now runs in a daemon worker thread with a bounded `join(timeout=5)`, the same "fail
+within seconds, not never" property using only the standard library, verified directly (a
+throwaway infinite loop run the identical way reports `is_alive() is True` within the 2-second
+join used to check it, rather than blocking).
+
+**Revisit if:** never for SEC-602 (already covered by D69's own revisit condition) or for the
+message reword (the same "must hold on every path that reaches it" rule already governs it, with
+nothing further to reconcile). Revisit CORR-604's thread-based bound only if this suite ever needs
+a *general* per-test timeout policy across many tests, at which point `pytest-timeout` earns its
+place as a real dependency rather than infrastructure for one test.
