@@ -1716,3 +1716,47 @@ treatment automatically rather than needing its own guard.
 
 **Revisit if:** never — one substitution point for every entry type, matching the "one computation,
 one shape" rule the report module's other shared logic already follows.
+
+## D65 — T055 (fix cycle 6): an empty or whitespace-only literal is never a usable name, fixed at
+every place one is selected
+
+SEC-501/SEC-502/CORR-501/CORR-502/SEC-504 (round 5, three high, one medium, one low), all one root
+cause reproduced from both directions. `SkosGraph.first_literal` applied no content filter at all;
+`first_literal_with_language`'s `max_length` filter (T051, D56) tested only `len(str(literal)) <=
+max_length`, which an empty literal always satisfies. Both sort on the raw string, so `""` sorts
+ahead of every real value. Two opposite, independently reproduced symptoms:
+
+**A file publishing a usable name was refused outright.** `skos:prefLabel ""@en, "Geology
+Vocabulary"@en` on a site defaulting to `en` — `_localized_literal`'s own per-tag exact match
+picked the empty literal for the `en` slot, `name` arrived at the length check as `''`, and
+T054's `elif created:` guard (D59) fired `VOCABULARY_NAME_UNUSABLE`, refusing a file that plainly
+carries a storable name one triple away.
+
+**A created record was persisted with a blank name.** `skos:prefLabel "<300 chars>"@en, ""@de,
+"Geologie Vokabular"@fr` — T054's own second-chance fallback (D58) called
+`first_literal_with_language(..., max_length=...)` to find *something* storable when the
+default-language name was over-long, and the empty `de` literal satisfied that filter and sorted
+first, so the fallback returned `('', 'de')` and `row.name = ''` was written unconditionally. This
+is exactly the state D49 declares impossible for a created record, reopened through the fallback
+D58 itself added to close a different gap.
+
+**Fixed at the two accessors that select a literal, not at either consequence.** `first_literal`
+and `first_literal_with_language` both now require `str(literal).strip()` to be truthy, in
+addition to whatever language or length filter already applied — an empty or whitespace-only
+(SEC-504) literal is excluded from the candidate pool before sorting, at every call site, rather
+than reaching `name` and being caught (or not) after the fact. `_localized_literal` needed no
+change of its own: its per-tag candidates are built by calling `first_literal(node, predicate,
+language=tag)` (skos.py:412), so a tag whose only literal is empty now yields no candidate for
+that tag automatically, the same way a missing predicate already does.
+
+**Determinism was checked, not assumed**, per the round-5 brief's own instruction — two literals
+equally usable (same value, or a genuine tie after the emptiness filter) still resolve through
+`sorted()` over `(str, str)` tuples, a total order with no set or dict iteration reaching the
+comparison at any point in either accessor. Unaffected by this fix, since it is a filter on the
+candidate pool, not a change to how the pool is ordered.
+
+**Revisit if:** never — the same "unusable is unusable at the point of selection, not the point
+of consequence" rule the round-5 review's own recommendation states, applied once at both
+accessors rather than patched at each of the four call sites (`resolve_scheme`'s exact match, its
+any-language fallback, `import_collections`'s identical pair) that would otherwise each need their
+own guard.

@@ -1926,6 +1926,158 @@ class TestNoPublishedNameAtAllIsUnusableTheSameAsOverLong:
         assert entries[0].subject == "http://pub.example/sec404collscheme#grp"
 
 
+class TestAnEmptyPublishedLiteralIsNeverTreatedAsAUsableName:
+    """T055 — SEC-501/SEC-502/CORR-501/CORR-502/SEC-504, decisions.md D65 (fix cycle 6): every
+    name-selection path sorted an empty (or whitespace-only) literal ahead of a real one, because
+    the only filters applied so far (``max_length`` on the fallback, nothing at all on
+    ``first_literal``) admit ``""`` — it has length zero and it sorts first. Two opposite
+    symptoms, one root cause:
+
+    - A file that plainly publishes a usable name was refused outright, when the empty literal
+      happened to occupy the exact slot ``_localized_literal`` or the any-language fallback would
+      otherwise fill.
+    - A record was created and persisted with ``name == ''`` when T054's own second-chance
+      fallback treated the empty literal as "found a storable value" — the exact state D49 exists
+      to prevent, reopened through the fallback it added.
+
+    Fixed at the one place each is selected: ``SkosGraph.first_literal``,
+    ``SkosGraph.first_literal_with_language`` and (by construction, since it composes
+    ``first_literal``) ``_localized_literal`` now all treat a literal whose value is empty or
+    whitespace-only as unusable, never a candidate.
+    """
+
+    def test_a_created_scheme_with_an_empty_and_a_usable_name_in_the_same_language_uses_the_usable_one(
+        self, db, tmp_path
+    ):
+        """SEC-501 probe A: the empty literal and the usable one share the exact-match language
+        (the site default, ``en``), so ``_localized_literal``'s own per-tag exact match is what
+        must skip the empty one — the any-language fallback never runs at all for this probe.
+        """
+        path = tmp_path / "sec501_scheme_probe_a.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            "<http://pub.example/sec501schemea> a skos:ConceptScheme ; "
+            'skos:prefLabel ""@en, "Geology Vocabulary"@en .\n'
+            "<http://pub.example/sec501schemea#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec501schemea> ; skos:prefLabel "One"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        scheme = ConceptScheme.objects.get(static_uri="http://pub.example/sec501schemea")
+        assert scheme.name == "Geology Vocabulary"
+
+    def test_a_created_scheme_with_only_an_empty_default_language_literal_falls_back_to_another_language(
+        self, db, tmp_path
+    ):
+        """SEC-501 probe B: the default language (``en``) carries only the empty literal, so
+        ``_localized_literal`` finds no candidate at all and the any-language fallback
+        (``first_literal_with_language``) is what must skip the empty one and select the
+        storable ``de`` value instead.
+        """
+        path = tmp_path / "sec501_scheme_probe_b.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            "<http://pub.example/sec501schemeb> a skos:ConceptScheme ; "
+            'skos:prefLabel ""@en, "Geologie"@de .\n'
+            "<http://pub.example/sec501schemeb#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec501schemeb> ; skos:prefLabel "One"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        scheme = ConceptScheme.objects.get(static_uri="http://pub.example/sec501schemeb")
+        assert scheme.name == "Geologie"
+
+    def test_a_created_collection_with_an_empty_and_a_usable_name_uses_the_usable_one(self, db, tmp_path):
+        """SEC-501 probe C, collection counterpart."""
+        path = tmp_path / "sec501_collection.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec501collscheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/sec501collscheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec501collscheme> ; skos:prefLabel "One"@en .\n'
+            "<http://pub.example/sec501collscheme#grp> a skos:Collection ; "
+            'skos:prefLabel ""@en, "Igneous Rocks"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        collection = Collection.objects.get(static_uri="http://pub.example/sec501collscheme#grp")
+        assert collection.name == "Igneous Rocks"
+
+    def test_a_created_scheme_s_second_chance_fallback_never_picks_the_empty_literal(self, db, tmp_path):
+        """SEC-502/CORR-501: the over-long default-language name has nowhere storable to fall
+        back to except the empty ``de`` literal and the storable ``fr`` one — before the fix, the
+        second-chance fallback (T054, D58) treated the empty literal as found and persisted
+        ``name == ''``, exactly the state D49 declares impossible for a created record.
+        """
+        long_name = "A" * 300
+        path = tmp_path / "sec502_scheme.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            f"<http://pub.example/sec502scheme> a skos:ConceptScheme ; "
+            f'skos:prefLabel "{long_name}"@en, ""@de, "Geologie Vokabular"@fr .\n'
+            "<http://pub.example/sec502scheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec502scheme> ; skos:prefLabel "One"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        scheme = ConceptScheme.objects.get(static_uri="http://pub.example/sec502scheme")
+        assert scheme.name == "Geologie Vokabular"
+
+    def test_a_created_collection_s_second_chance_fallback_never_picks_the_empty_literal(self, db, tmp_path):
+        """SEC-502/CORR-501, collection counterpart."""
+        long_name = "A" * 300
+        path = tmp_path / "sec502_collection.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec502collscheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/sec502collscheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec502collscheme> ; skos:prefLabel "One"@en .\n'
+            f"<http://pub.example/sec502collscheme#grp> a skos:Collection ; "
+            f'skos:prefLabel "{long_name}"@en, ""@de, "Geologie Vokabular"@fr .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        collection = Collection.objects.get(static_uri="http://pub.example/sec502collscheme#grp")
+        assert collection.name == "Geologie Vokabular"
+
+    def test_a_whitespace_only_literal_is_treated_the_same_as_an_empty_one(self, db, tmp_path):
+        """SEC-504: a whitespace-only literal sorts ahead of a real name exactly as an empty
+        string does, and has no visible content once stored — the same emptiness test must treat
+        it the same way.
+        """
+        path = tmp_path / "sec504_scheme.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            "<http://pub.example/sec504scheme> a skos:ConceptScheme ; "
+            'skos:prefLabel "   "@en, "Geology Vocabulary"@en .\n'
+            "<http://pub.example/sec504scheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec504scheme> ; skos:prefLabel "One"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        scheme = ConceptScheme.objects.get(static_uri="http://pub.example/sec504scheme")
+        assert scheme.name == "Geology Vocabulary"
+
+    def test_a_node_publishing_only_an_empty_literal_is_treated_as_no_usable_name_at_all(self, db, tmp_path):
+        """The record-level outcome when *every* published literal is unusable must be unchanged:
+        this is not a new way to have a name, it is the same "nothing storable" case D59 already
+        makes fatal for a created scheme.
+        """
+        path = tmp_path / "sec501_scheme_none_usable.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec501schemenone> a skos:ConceptScheme ; skos:prefLabel ""@en .\n'
+            "<http://pub.example/sec501schemenone#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec501schemenone> ; skos:prefLabel "One"@en .\n'
+        )
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(path)
+        report = exc_info.value.report
+        assert len(report.fatal) == 1
+        assert report.fatal[0].reason is FatalReason.VOCABULARY_NAME_UNUSABLE
+        assert not ConceptScheme.objects.filter(static_uri="http://pub.example/sec501schemenone").exists()
+
+
 class TestAStoredSlugThatFailsValidationIsSetAsideNotEscaped:
     """T045 — SEC-301, decisions.md D50 (fix cycle 4): T041's read-back means a matched record's
     already-stored slug reaches the model's manual-slug validation unchanged. A slug written out

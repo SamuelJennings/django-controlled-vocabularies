@@ -253,16 +253,22 @@ class SkosGraph:
         *,
         language: str | None = None,
     ) -> str | None:
-        """The lexicographically-first literal value of ``predicate`` on ``node``, or ``None``.
+        """The lexicographically-first *usable* literal value of ``predicate`` on ``node``, or
+        ``None``.
 
         Deterministic rather than "whichever rdflib happens to yield first" — the graph's own
         iteration order is not something to depend on for a value that ends up in a stored record
         (T010). ``language``, when given, restricts to literals tagged with that language.
+
+        An empty or whitespace-only literal is excluded from selection entirely (T055, SEC-501/
+        SEC-504, decisions.md D65) — it is not a name or description any caller can actually
+        store, and sorting on the raw string alone let it win over a real value published
+        alongside it in the same file.
         """
         values = sorted(
             str(literal)
             for literal in self.graph.objects(node, predicate)
-            if language is None or getattr(literal, "language", None) == language
+            if (language is None or getattr(literal, "language", None) == language) and str(literal).strip()
         )
         return values[0] if values else None
 
@@ -290,11 +296,18 @@ class SkosGraph:
         the same file. Returns ``None`` when no literal exists at all, or (with ``max_length``
         given) when none of them fit — a caller distinguishes the two only when it needs to,
         by calling again with no ``max_length`` to get a representative value for a message.
+
+        An empty or whitespace-only literal is excluded unconditionally, with or without
+        ``max_length`` (T055, SEC-501/SEC-502/SEC-504, decisions.md D65) — it always satisfies a
+        length filter and always sorts first, so without this it wins the fallback over any real
+        value published alongside it, in both branches this fallback is called from (nothing
+        published in the target language at all, and the target-language value itself being
+        unusable).
         """
         pairs = sorted(
             (str(literal), getattr(literal, "language", None) or "")
             for literal in self.graph.objects(node, predicate)
-            if max_length is None or len(str(literal)) <= max_length
+            if str(literal).strip() and (max_length is None or len(str(literal)) <= max_length)
         )
         return pairs[0] if pairs else None
 
