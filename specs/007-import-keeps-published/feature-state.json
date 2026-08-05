@@ -509,19 +509,47 @@
       "id": "US4",
       "priority": "P2",
       "issue": 72,
-      "worktree": null,
-      "status": "todo",
+      "worktree": "/home/sam/projects/samueljennings/dcv-fs007-us4",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T016",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py::TestReimportAfterAddingALanguageStoresItsValues::test_the_added_language_s_preferred_labels_are_stored_for_existing_concepts",
+              "tests/test_exchange/test_skos.py::TestReimportAfterAddingALanguageStoresItsValues::test_the_second_run_s_report_no_longer_counts_the_newly_stored_language_as_left_behind"
+            ],
+            "commands": [
+              "poetry run pytest -q tests/test_exchange/test_skos.py::TestReimportAfterAddingALanguageStoresItsValues -v (passed on first run \u2014 no production change needed, D30)",
+              "poetry run pytest -q (760 passed)",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "poetry run deptry ."
+            ]
+          }
         },
         {
           "id": "T017",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py::TestReimportAfterAddingALanguageKeepsEveryOtherRecordUnchanged::test_every_concept_scheme_and_collection_keeps_its_identity_across_the_reimport",
+              "tests/test_exchange/test_skos.py::TestReimportAfterAddingALanguageKeepsEveryOtherRecordUnchanged::test_content_already_held_in_english_is_unchanged_by_the_reimport"
+            ],
+            "commands": [
+              "poetry run pytest -q tests/test_exchange/test_skos.py::TestReimportAfterAddingALanguageKeepsEveryOtherRecordUnchanged -v (passed on first run \u2014 no production change needed, D31)",
+              "poetry run pytest -q (762 passed)",
+              "poetry run ruff check .",
+              "poetry run ruff format --check .",
+              "poetry run mypy controlled_vocabularies",
+              "poetry run deptry ."
+            ]
+          }
         }
       ]
     },
