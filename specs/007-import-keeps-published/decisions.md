@@ -1379,3 +1379,41 @@ the extraction; the full suite (638 tests across `test_models.py`, `test_skos.py
 
 **Revisit if:** never — the same remedy the repo already chose for `static_uri`'s identical
 drift, applied to the one other field this feature added to all three models.
+
+## D55 — T050 (fix cycle 4): the four small architecture cleanups (ARCH-304–307)
+
+All four applied on their merits; none was judged wrong.
+
+**ARCH-304 — `resolve_scheme`'s only write is now visible at the call site.** `row.set_slug(row.slug)`
+read as a no-op (the argument is the object's own current attribute) and hid that it was also the
+row's only write of `default_language`/`name`/`description`/`static_uri`. Replaced with the two
+statements `set_slug()` itself performs — `row.slug_is_manual = True` then `row.save()` (now
+wrapped for T045's `STORED_SLUG_INVALID`, unchanged) — so the write is legible without tracing
+into a method whose name promises only a slug change.
+
+**Incidental consequence, not separately decided: ARCH-307 is now moot.** `ConceptImporter` and
+`CollectionImporter` already assigned `slug`/`slug_is_manual` directly rather than calling
+`set_slug()` (D46's stated reason: avoiding a second write per imported record); ARCH-304's fix
+makes `SchemeResolver` do the same. `set_slug()` is no longer called from anywhere in the import
+path — grep confirms zero production callers — so the three-way asymmetry ARCH-307 asked to have
+documented no longer exists to document. `set_slug()` remains public API, exercised directly by
+each model's own test class.
+
+**ARCH-305 — one definition of "this identifier has no usable base."** `identifier_slug_base(uri)`
+(module-level, beside `identifier_slug_segment`) replaces the hand-inlined
+`slugify(identifier_slug_segment(uri), allow_unicode=True)` at both `EMPTY_SLUG` guards
+(`import_concepts`, `import_collections`) and inside `unique_slug_for_identifier` itself. Not
+folded together with the guards, per the review's own caution: a guard runs for a *matched*
+record too (which never calls the minter), so merging them would silently change a matched
+record's unusable-base handling from set-aside to updated.
+
+**ARCH-306 — one narrowing for `Model._meta.get_field(...).max_length`.** The five reads of an
+`Optional[int]` max_length were narrowed two ways in one commit: `cast(int, ...)` for the three
+slug reads, an `is not None` runtime check for the three name/label reads. Picked `cast(int, ...)`
+everywhere (the smaller change, and the one the existing comment at the slug reads already
+justifies): Django's own field metadata always supplies a `max_length` for a `CharField`/
+`SlugField` the model itself declares, so a runtime `None` check was dead code, not a genuine
+guard.
+
+**Revisit if:** never — all four are legibility/consistency cleanups with no behaviour change;
+verified by the unchanged 847-test suite, `mypy`, and `makemigrations --check --dry-run`.
