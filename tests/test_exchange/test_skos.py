@@ -4648,3 +4648,51 @@ class TestNoContentIsStoredInAnUnconfiguredLanguage:
             # even under the largest configured set the package will ever see.
             entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.UNCONFIGURED_LANGUAGE]
             assert any(entry.params["language"] == "zzz" for entry in entries)
+
+
+class TestAddingABaseSharingLanguageLeavesEveryAddressWhereItWas:
+    """SC-022 — adding a configured language that *shares a base* with one the site already
+    holds, then re-importing the unchanged file, leaves every record's slug and local address
+    exactly as they were.
+
+    SC-015's test could never have failed this, because it only ever adds a language sharing no
+    base with an existing one (``en`` → ``en``+``fr``), so no incumbent's candidate set can
+    shrink. ``variants.ttl`` publishes one concept as ``"Colour"@en-gb`` and ``"Color"@en-us``
+    with no bare ``en`` anywhere, so adding ``en-gb`` genuinely moves which value wins the ``en``
+    slot — which is the case that must leave the address alone.
+
+    The concept's *name* is deliberately not asserted: SC-022's ``name`` clause is struck
+    (decisions.md D48). A displayed label following the site's language configuration is what
+    configuring a language asks for; an address following it is the harm FR-017 removes.
+    """
+
+    SCHEME_URI = "http://example.org/colours/"
+    CONCEPT_URI = "http://example.org/colours/colour"
+
+    @staticmethod
+    def _address(obj) -> tuple[int, str | None, str, str]:
+        return (obj.pk, obj.static_uri, obj.slug, obj.local_url)
+
+    def test_adding_en_gb_to_an_en_site_moves_no_slug_and_no_local_url(self, db):
+        with override_settings(LANGUAGES=[("en", "English")]):
+            assert import_skos(FIXTURES / "variants.ttl").fatal == []
+
+        scheme_before = self._address(ConceptScheme.objects.get(static_uri=self.SCHEME_URI))
+        concept_before = self._address(Concept.objects.get(static_uri=self.CONCEPT_URI))
+
+        with override_settings(LANGUAGES=[("en", "English"), ("en-gb", "British English")]):
+            assert import_skos(FIXTURES / "variants.ttl").fatal == []
+
+        assert self._address(ConceptScheme.objects.get(static_uri=self.SCHEME_URI)) == scheme_before
+        assert self._address(Concept.objects.get(static_uri=self.CONCEPT_URI)) == concept_before
+
+    def test_the_added_language_does_reach_the_stored_content(self, db):
+        # The guard above is only meaningful if the second run genuinely changed what is stored;
+        # otherwise it would pass against an import that did nothing at all.
+        with override_settings(LANGUAGES=[("en", "English")]):
+            import_skos(FIXTURES / "variants.ttl")
+        assert Concept.objects.get(static_uri=self.CONCEPT_URI).labels.filter(language="en-gb").count() == 0
+
+        with override_settings(LANGUAGES=[("en", "English"), ("en-gb", "British English")]):
+            import_skos(FIXTURES / "variants.ttl")
+        assert Concept.objects.get(static_uri=self.CONCEPT_URI).labels.filter(language="en-gb").count() > 0
