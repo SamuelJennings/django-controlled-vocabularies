@@ -640,6 +640,15 @@ class ConceptImporter:
                     )
                     continue
                 concept.add_label(language=resolved_language, kind=kind, text=str(literal))
+                if resolved_language.lower() != published_tag.lower():
+                    # T009, FR-006: a value stored under a resolved language other than its
+                    # published tag is a normalisation, never applied silently (decisions.md D8).
+                    self.report.add_normalized(
+                        NormalizedReason.LANGUAGE_SUBSTITUTION,
+                        subject=uri,
+                        language=published_tag,
+                        kept_as=resolved_language,
+                    )
 
     def _import_notes(self, node: rdflib.term.Node, concept: Concept, uri: str) -> None:
         """Store ``concept``'s documentary notes — the definition and the six SKOS note kinds
@@ -673,6 +682,14 @@ class ConceptImporter:
                 if kind == ConceptNote.Kind.DEFINITION:
                     definition_languages.add(resolved_language)
                 concept.add_note(language=resolved_language, kind=kind, value=str(literal))
+                if resolved_language.lower() != published_tag.lower():
+                    # T009, FR-006 (decisions.md D8).
+                    self.report.add_normalized(
+                        NormalizedReason.LANGUAGE_SUBSTITUTION,
+                        subject=uri,
+                        language=published_tag,
+                        kept_as=resolved_language,
+                    )
 
         for literal in self.skos_graph.graph.objects(node, DCTERMS.description):
             if not isinstance(literal, rdflib.Literal) or not literal.language:
@@ -694,6 +711,15 @@ class ConceptImporter:
                 predicate="dcterms:description",
                 language=resolved_language,
             )
+            if resolved_language.lower() != published_tag.lower():
+                # T009, FR-006: a second, independent axis of normalisation from the predicate
+                # substitution just reported — the language changed too (decisions.md D8).
+                self.report.add_normalized(
+                    NormalizedReason.LANGUAGE_SUBSTITUTION,
+                    subject=uri,
+                    language=published_tag,
+                    kept_as=resolved_language,
+                )
 
     def _import_unheld_values(self, node: rdflib.term.Node, uri: str) -> None:
         """Set aside and report the values on ``concept`` the models have no place for (T021, FR-014).
@@ -775,7 +801,7 @@ class ConceptImporter:
             if not candidates:
                 self.report.add_set_aside(SetAsideReason.NO_PREFERRED_LABEL, subject=uri, language=default_language)
                 continue
-            (_winning_tag, label), _losers = self.matcher.resolve_winner(default_language, candidates)
+            (winning_tag, label), _losers = self.matcher.resolve_winner(default_language, candidates)
 
             if not slugify(label, allow_unicode=True):
                 # FIX 5 (D39): a label made up only of characters slugify() strips derives an empty
@@ -818,6 +844,13 @@ class ConceptImporter:
             concept.label = label
             self.assign_unique_slug(concept, taken_slugs)
             concept.save()
+            if winning_tag.lower() != default_language.lower():
+                # T009, FR-006: concept.label is stored content too — a value that made it in
+                # under a different language than published is a normalisation, not a silent
+                # substitution (decisions.md D8).
+                self.report.add_normalized(
+                    NormalizedReason.LANGUAGE_SUBSTITUTION, subject=uri, language=winning_tag, kept_as=default_language
+                )
             concepts_by_uri[uri] = concept
             self._import_concept_content(node, concept, uri)
             if created:

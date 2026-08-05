@@ -656,7 +656,95 @@ class TestLabelsNotesAndNamesResolveThroughTheMatcher:
         assert collection.name == "Named collection"
 
 
-class TestConceptsImpliedByMembershipButNeverGivenAnRdfType:
+class TestLanguageSubstitutionIsReported:
+    """T009 — FR-006/SC-009: every value stored under a configured language other than the tag
+    it was published under is reported as a substitution, distinguishable from a value that was
+    not stored at all, and never counted in ``language_account()`` — that account is for what a
+    curator could recover by configuring something, and a substitution already made it in."""
+
+    def test_the_concepts_label_alt_label_and_note_are_each_reported_as_a_substitution(self, db):
+        report = import_skos(FIXTURES / "declares-de-at.ttl")
+        rot_uri = "http://example.org/farben/rot"
+        substitutions = {
+            (entry.params["language"], entry.params["kept_as"])
+            for entry in report.normalized
+            if entry.reason is NormalizedReason.LANGUAGE_SUBSTITUTION and entry.subject == rot_uri
+        }
+        assert substitutions == {("de-at", "de")}
+        assert (
+            len(
+                [
+                    entry
+                    for entry in report.normalized
+                    if entry.reason is NormalizedReason.LANGUAGE_SUBSTITUTION and entry.subject == rot_uri
+                ]
+            )
+            == 3
+        )  # the label, the alternative label, and the note
+
+    def test_a_substitution_is_distinguishable_from_a_value_that_was_not_stored(self, db, tmp_path):
+        path = tmp_path / "mixed.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/mixed/> a skos:ConceptScheme ;
+                skos:prefLabel "Mixed"@en .
+
+            <http://example.org/mixed/item> a skos:Concept ;
+                skos:inScheme <http://example.org/mixed/> ;
+                skos:prefLabel "Item"@en ;
+                skos:altLabel "Article"@en-gb, "記事"@ja .
+            """
+        )
+        report = import_skos(path)
+        item = Concept.objects.get(static_uri="http://example.org/mixed/item")
+        assert item.alt_labels("en") == ["Article"]
+        substitution_subjects = {
+            entry.subject for entry in report.normalized if entry.reason is NormalizedReason.LANGUAGE_SUBSTITUTION
+        }
+        not_stored_subjects = {
+            entry.subject for entry in report.set_aside if entry.reason is SetAsideReason.UNCONFIGURED_LANGUAGE
+        }
+        assert item.static_uri in substitution_subjects
+        assert item.static_uri in not_stored_subjects
+        substitution_languages = {
+            entry.params["language"]
+            for entry in report.normalized
+            if entry.reason is NormalizedReason.LANGUAGE_SUBSTITUTION and entry.subject == item.static_uri
+        }
+        assert substitution_languages == {"en-gb"}
+        not_stored_languages = {
+            entry.params["language"]
+            for entry in report.set_aside
+            if entry.reason is SetAsideReason.UNCONFIGURED_LANGUAGE and entry.subject == item.static_uri
+        }
+        assert not_stored_languages == {"ja"}
+
+    def test_a_substitution_does_not_appear_in_the_language_account(self, db):
+        report = import_skos(FIXTURES / "declares-de-at.ttl")
+        assert "de-at" not in report.language_account()
+
+    def test_an_exact_case_insensitive_match_is_not_reported_as_a_substitution(self, db, tmp_path):
+        # SC-004: a case-only difference is an exact match, not a variant.
+        path = tmp_path / "case_no_substitution.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/casesub/> a skos:ConceptScheme ;
+                skos:prefLabel "Case"@en .
+
+            <http://example.org/casesub/item> a skos:Concept ;
+                skos:inScheme <http://example.org/casesub/> ;
+                skos:prefLabel "Item"@en, "Artikel"@DE .
+            """
+        )
+        report = import_skos(path)
+        assert report.normalized == []
+
     """FIX 17 (review, decisions.md D50) — ``concept_nodes`` used to come only
     from ``graph.subjects(rdf.RDF.type, SKOS.Concept)``. A node the file
     identifies as a concept through ``skos:inScheme``, ``skos:topConceptOf``,
