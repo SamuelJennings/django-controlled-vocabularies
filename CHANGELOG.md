@@ -34,19 +34,21 @@ All notable changes to this project are documented in this file. The format foll
   context. Reading a file never makes a network request. Both refusals raise an exported,
   translatable `UnsafeRdfXmlError`/`UnsafeJsonLdError`, each a `SkosImportError` subclass. No
   command-line or web-facing entry point yet — programmatic only. See the README.
-- Importing now matches a published language tag by base language rather than exact string
-  equality: a file's `en` value fills a site configured for `en-gb`, and a file's `en-gb` value
-  fills a site configured for `en`, matching case-insensitively in both directions. Where a
-  preferred label has several variants of one configured language and no exact match, the
-  vocabulary's predominant variant is stored, ties broken by language code, and losing variants are
-  set aside and reported with their own published language; alternative labels, hidden labels, and
-  notes have no such limit, and every variant offered is stored. A value stored under a variant
-  match is reported as a substitution, distinct from a value set aside outright. `ImportReport`
-  gains `language_account()`: a per-published-language count of everything left behind for a
-  language reason, present and empty after a run that left nothing behind, so a caller can see what
-  configuring a language would recover. The site's configured languages are still read from
-  `settings.LANGUAGES` — a project declaring none inherits Django's 99-language default, so
-  narrowing that list is how a site narrows what an import stores.
+- Importing now matches a published language tag by base language rather than by exact string
+  equality. A file's `en` value fills a site configured for `en-gb`, and a file's `en-gb` value
+  fills a site configured for `en`, matched case-insensitively in both directions, with an exact
+  tag match always winning over a variant. A value stored under a variant match is reported as a
+  substitution, which is distinct from a value set aside outright.
+- Where a preferred label has several variants of one configured language and no exact match, the
+  vocabulary's predominant variant is stored and ties are broken by language code. Each losing
+  variant is set aside and reported under its own published language. Alternative labels, hidden
+  labels, and notes have no such limit, so every variant offered is stored.
+- `ImportReport` gains `language_account()`, a per-published-language count of everything left
+  behind for a language reason. It is present and empty after a run that left nothing behind, so a
+  caller can see what configuring a language would recover.
+- The site's configured languages are still read from `settings.LANGUAGES`. A project that declares
+  none inherits Django's 99-language default, so narrowing that list is how a site narrows what an
+  import stores.
 - Static, externally assigned identifiers: `ConceptScheme`, `Concept`, and `Collection` each gain a
   `static_uri` field holding an identifier assigned by an external publisher, held exactly as given
   and never recomputed by the app. Nothing in the package overwrites a stored value, and nothing

@@ -122,26 +122,34 @@ file no longer carries. A record the file does not mention at all is left comple
 named in the report instead, never deleted.
 
 Labels and notes are matched by language, not only by predicate. A file's `en` value fills a site
-configured for `en-gb`, and a file's `en-gb` value fills a site configured for `en`: matching runs
-on the base language — the first subtag of the tag — case-insensitively and in both directions. An
-exact tag match always wins over a variant. Where a file offers several variants of one configured
-language for a preferred label, the variant the vocabulary predominantly publishes in is the one
-kept, with ties broken by language code; alternative labels, hidden labels, and notes carry no such
-limit, so every variant a file offers is stored. A value stored under a variant match is named in
-the report as a substitution rather than applied silently. Base-language matching also joins
-variants that differ by script — a site configured for `zh-Hans` importing a vocabulary published
-only as `zh-Hant` receives that content, in a script its readers may not be able to read, reported
-as a substitution so a curator can see it and decide what to do.
+configured for `en-gb`, and a file's `en-gb` value fills a site configured for `en`. Matching runs
+on the base language, the first subtag of the tag, case-insensitively and in both directions, and
+an exact tag match always wins over a variant.
+
+Where a file offers several variants of one configured language, what happens next depends on how
+many values that kind of label or note can hold:
+
+- A preferred label holds one per language, so the variant the vocabulary predominantly publishes
+  in is the one kept, with ties broken by language code. Each variant that lost is named in the
+  report under its own published language.
+- Alternative labels, hidden labels, and notes have no such limit, so every variant the file offers
+  is stored.
+
+A value stored under a variant match is named in the report as a substitution rather than applied
+silently. That matters most where two variants differ by script. A site configured for `zh-Hans`
+importing a vocabulary published only as `zh-Hant` receives that content, in a script its readers
+may not be able to read. The report is what makes that visible, so a curator can decide what to do
+about it.
 
 The package stores content for every language code in `settings.LANGUAGES`. A project that declares
 none inherits Django's own default list of 99 languages, so a vocabulary published in sixty
-languages imports into all sixty unless the site's `LANGUAGES` is narrowed first — narrowing that
-list is how a site limits what an import stores.
+languages imports into all sixty. Narrowing `LANGUAGES` is how a site limits what an import stores.
 
-Because a concept's default-language preferred label can arrive only by variant match, which
-variant wins is a property of the whole file rather than of that one concept. A later release of
-the same vocabulary can therefore change which variant wins and, with it, a concept's stored label
-and local URL, even though nothing about that concept itself changed.
+One consequence is worth knowing before you rely on a concept's address. A concept's preferred
+label in the vocabulary's default language can arrive by variant match, and which variant wins is
+decided by the file as a whole rather than by that one concept. A later release of the same
+vocabulary can therefore change a concept's stored label and its local URL even though nothing
+about that concept itself changed.
 
 The call returns an `ImportReport`, a plain dataclass rather than rendered text, so a caller can
 inspect what happened without parsing anything:
