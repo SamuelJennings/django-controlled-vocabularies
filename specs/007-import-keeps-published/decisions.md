@@ -1186,3 +1186,234 @@ could not fail. The test fix cycle 1 wrote for this was removed with the T023 re
 there is currently no test on the branch covering it.
 
 **Revisit if:** FR-002 is ever narrowed again, in which case the two need re-reading together.
+
+## D49 — T044 (fix cycle 4): an over-long name on a *first* import has nowhere to fall back to,
+and the fallback differs by what the record costs the rest of the file
+
+Round-three review (ARCH-301/CORR-303/SEC-302) found the residue D47 left: the `VALUE_TOO_LONG`
+guard sets an over-long name aside and falls through to the write without assigning `row.name`.
+For a *matched* row that is correct — D47's own words, "row.name keeps whatever it already
+held." For a row this run is *creating*, there is no earlier value to keep, so `row.name` stays
+the field default, `''`, and both `ConceptScheme.name` and `Collection.name` are
+`CharField(blank=False)` — the stored row then fails its own `full_clean()`, the exact shape D47
+was written to remove, just moved from the slug to the name.
+
+Reproduced against `10c069a`: a scheme (or a collection) whose only `skos:prefLabel` is 300
+characters imports with `report.fatal == []`, `name == ''`, and `full_clean()` raising `{'name':
+['This field cannot be blank.']}`.
+
+**Two different outcomes, because a scheme and a collection cost the rest of the file
+differently on creation, exactly as D42 already splits an unusable *slug*.** A vocabulary is what
+the rest of the file imports into: a created scheme with an unusable name is now
+`FatalReason.VOCABULARY_NAME_UNUSABLE`, the whole run refused, nothing written — the same
+reasoning `VOCABULARY_SLUG_UNUSABLE` already gives. A collection is not something the rest of the
+file needs: a created collection with an unusable name is set aside *entirely* (the existing
+`VALUE_TOO_LONG` reason, `continue`d before `row.save()` ever runs) rather than persisted with a
+name it cannot legally carry — the whole record, not merely its name field, because there is
+nothing else to keep it for.
+
+The matched-row half of both guards is untouched: a scheme or collection that already has a name
+keeps it, set aside rather than fatal or skipped, exactly as D47 left it.
+
+Two round-three tests asserted only `len(name) <= max_length` on the created path, which `''`
+also satisfies. Both are strengthened in place (`test_a_scheme_name_longer_than_the_field_is_set_aside_not_written_unchecked`
+renamed `..._is_fatal_on_first_import`; `test_a_collection_name_longer_than_the_field_is_set_aside_not_written_unchecked`
+renamed `..._sets_aside_the_whole_collection_on_first_import`) to assert the outcome this cycle
+overturns, and a matched-row counterpart is added for each so the surviving half of D47 stays
+proven.
+
+**Revisit if:** never — the same fatal-versus-set-aside split D42 already gives an unusable slug,
+applied to the one other field a first import can leave unusably empty.
+
+## D50 — T045 (fix cycle 4): a matched record's stored slug is now on the write path, so it must
+be caught, not merely trusted
+
+Round-three security review (SEC-301) reproduced: after T041, a matched record's slug is read
+back and given straight to `set_slug()`/`save()` rather than recomputed. That is correct for a
+slug that was always written through a model's own `save()` — it already passed the manual-slug
+validation once. It is not correct for a slug written out of band: `.update()`, `loaddata`,
+`bulk_create()`, or a data migration all bypass `save()` entirely, so a malformed value can sit in
+the database untouched by validation until an import later matches that row and calls
+`set_slug()`/`save()` again — at which point the model's own refusal (`ValidationError`) escaped
+`import_skos` entirely, outside its own (`SkosImportError`/`SkosImportFailed`) exception
+hierarchy, aborting the whole run for a hostility the imported *file* had no part in.
+
+Reproduced against `10c069a` for all three kinds: create the row normally, plant an invalid slug
+with `.filter(pk=...).update(slug="has spaces/and-slash")`, then import a file that matches the
+row by its published identifier. All three raised the bare `ValidationError` out of `import_skos`.
+
+**Fixed by wrapping the write, not by re-validating before it.** `ConceptScheme.set_slug()`
+(inside `resolve_scheme`), `Concept.save()` (inside `import_concepts`) and `Collection.save()`
+(inside `import_collections`) are each wrapped in `except ValidationError`, converting the escape
+into `SetAsideReason.STORED_SLUG_INVALID` — the same discipline `import_labels`/`_import_notes`
+already apply to a value's own `add_label`/`add_note` call. The record is left exactly as stored
+(nothing about it is touched or removed) and the rest of the file still imports around it. For a
+scheme specifically, this means `resolve_scheme` returns `(None, None)` without adding a fatal
+finding — the run completes normally with nothing created or updated for that vocabulary, named by
+the one set-aside entry, rather than refusing a file that is not itself at fault. Chosen over
+treating it as `FatalReason` (the shape a broken *identifier* takes, D42): the file publishing the
+scheme is fine, and there is nothing else in the file to salvage or protect by rolling the whole
+run back — a corrupted database row, once named, is exactly the shape `SetAsideReason` exists to
+report.
+
+**Revisit if:** never — the same discipline `EMPTY_SLUG`/`VALUE_TOO_LONG` already give a value the
+model refuses, applied to a whole record's own write for a reason the published file did not
+cause.
+
+## D51 — T046 (fix cycle 4): a collision suffix as long as the field slices the base away
+
+SEC-303: `unique_slug_for_identifier`'s collision retry computed `base[: max_length -
+len(suffix_text)] + suffix_text`. Once `len(suffix_text) >= max_length` that slice bound is zero
+or negative, and Python slices from the *end* of the string rather than raising — at
+`max_length == len(suffix_text)` the candidate is the bare suffix, with no relationship to the
+base at all (`unique_slug_for_identifier('http://e.org/#ab', {'ab': 'other', 'b-2': 'other2'},
+2)` returns `'-2'`).
+
+Unreachable at any of the three current call sites — `Concept`, `ConceptScheme` and `Collection`
+all pass their own `SlugField(max_length=255)`, and a suffix would need roughly 250 decimal
+digits (≈10^250 colliding records sharing one base) to reach it. Fixed by construction anyway,
+the same reasoning D47 already gives a helper this cycle keeps handing a new caller: `base[:
+max(max_length - len(suffix_text), 1)]` always keeps at least one base character, so the
+candidate is never merely the disambiguator. This does not guarantee `len(candidate) <=
+max_length` in the (equally unreachable) case where `max_length` is smaller than `len(suffix_text)
++ 1` — there is no value that both fits the field and still carries any of the base at
+`max_length < 2` — but it never again discards the base to make room for a suffix that alone
+exceeds the field.
+
+**Revisit if:** never — a one-line unit test on the helper (`TestUniqueSlugForIdentifierTruncationNeverSlicesNegative`)
+covers it directly; no call site needs to change.
+
+## D52 — T047 (fix cycle 4): the any-language name fallback now names its own language, not the
+target it fell back from
+
+CORR-305: `resolve_scheme` and `import_collections` both initialise `winning_tag` to the
+scheme's effective default language before checking whether `_localized_literal` found a
+matching-language name. When it does not — the scheme or collection publishes no name in the
+default language at all — `name` falls back to `SkosGraph.first_literal` (any language), but
+`winning_tag` was never reassigned, so a later `VALUE_TOO_LONG` set-aside on that name reported
+the *default* language even when the value it names was never published in it.
+
+Reproduced: a scheme whose only `skos:prefLabel` is a 300-character `fr` value, matched into a
+scheme whose effective default language is `en` (frozen, since the file's own declared default is
+never applied to a matched row per D46), set-aside `language=en` — the curator is told the
+over-long value was published in a language it never carried.
+
+**Fixed with one new query on the RDF boundary, not a second copy of the fallback.**
+`SkosGraph.first_literal_with_language` pairs the identical value `first_literal` (any language)
+already selects with the language tag it was actually published under (`""` for an untagged
+literal) — same sort key, so the two can never pick different literals. `resolve_scheme`'s and
+`import_collections`' own any-language branches now unpack `(name, winning_tag)` from it instead
+of discarding the tag.
+
+**Revisit if:** never — the same shape `_localized_literal` already gives its own matched branch
+(pairing a value with the tag that won it), extended to the branch where nothing won.
+
+## D53 — T048 (fix cycle 4): FR-020's owed tests for `Collection`, no production change
+
+CORR-301/CORR-302/CORR-304 named a test gap, not a code defect — the round-three review's own
+mutation testing already confirmed the guarded code is correct on all three record kinds; nothing
+in `skos.py` or `models.py` changes for this task. Three additions, all test-only:
+
+- `TestASlugAlreadyStoredIsReadBackNeverRecomputed` gains
+  `test_a_collection_keeps_its_suffixed_slug_after_a_colliding_sibling_is_deleted`, mirroring the
+  scheme case exactly (CORR-301): two collections in one vocabulary colliding on their identifier's
+  last segment, one deleted, the other's unchanged file re-imported.
+- Its existing `test_a_locally_authored_scheme_and_concept_are_matched_not_duplicated_when_first_imported`
+  is extended in place into
+  `test_a_locally_authored_scheme_concept_and_collection_are_matched_not_duplicated_when_first_imported`
+  (CORR-302): a third, locally authored record (a `Collection`) is added to the fixture, and the
+  assertions grow to check `slug_is_manual is True` on all three matched rows and that each
+  address survives an unrelated rename afterward. This is a **rename and extension of a test from
+  fix cycle 3**, not a new parallel test — CORR-302's own recommendation asked for exactly this
+  ("extend ... with a third record"), and every assertion the original test made is still made,
+  unweakened; only the fixture and the assertions grow.
+- `TestCollectionOverridableSlug` gains `test_explicit_slug_that_is_empty_or_malformed_is_refused`
+  (CORR-304/ARCH-303), mirroring `TestConceptOverridableSlug`'s existing malformed-slug coverage
+  and additionally covering the empty-slug raise neither model had a test for.
+
+**Revisit if:** never — these close the "two of three kinds" and "matched vs. created" shapes
+this feature has now hit twice (round two's dominant finding, per CORR-301's own framing), and no
+behaviour changed underneath them.
+
+## D54 — T049 (fix cycle 4): the slug-pinning machinery is extracted, the same way `static_uri`
+already was
+
+ARCH-302: `slug_is_manual` (the field declaration), `set_slug()`, and the manual-slug branch of
+`save()` (the empty/malformed-slug raise) were declared three times — on `ConceptScheme`,
+`Concept` and `Collection` — byte-identical apart from `help_text` wording. The repo had already
+diagnosed and fixed this exact shape once, for `static_uri`: `_static_uri_field(help_text)`
+exists so the field's shared attributes are declared once, and `tests/test_standards.py`'s
+`TestStaticUriFieldAttributesAgree` guards the copies from drifting apart. There was no equivalent
+for `slug_is_manual`, so the same drift was unguarded — and CORR-304/ARCH-303 had already found
+one instance of it (Collection's copy untested while Concept's was).
+
+**Extracted onto `StaticUriModel`, the abstract base all three already subclass, following the
+`static_uri` precedent exactly**, not a new mechanism:
+
+- `_slug_is_manual_field(help_text)` beside `_static_uri_field`, called once per concrete model
+  with that model's own `help_text` (a concept's slug tracks its *label*; a scheme's or a
+  collection's tracks its *name*) — the one legitimate difference, same as before.
+- `StaticUriModel.set_slug(slug)` — the three-statement body was identical; the one prose
+  difference between the three per-model docstrings is now one shared docstring naming both
+  exceptions (`assign_unique_slug`/`import_collections` writing the two attributes directly
+  rather than calling it, per D46).
+- `StaticUriModel._validate_manual_slug()` — the empty/malformed-slug raise, called from each
+  concrete `save()`'s manual branch. The auto-derivation branch beside it (tracking a label or a
+  name, and the collision check against a different scope per model) stays on each subclass,
+  since what it derives *from*, and what it collides against, legitimately differs.
+
+**A bare `slug: str` annotation on `StaticUriModel`** (no field, no column — Django only turns a
+*field instance* into a column, never a plain type annotation) lets `set_slug`/
+`_validate_manual_slug` reference `self.slug` with a type mypy/django-stubs can resolve from the
+base, even though the concrete `SlugField` is still declared per-subclass (its uniqueness scope
+— app-wide for `ConceptScheme`, per-scheme for `Concept` and `Collection` — is the one thing that
+does not belong on a shared base).
+
+**Verified migration-neutral**, the task's own hard requirement: `slug_is_manual`'s field
+attributes (`default`, `verbose_name`, `help_text` text) are unchanged by moving them into a
+factory function called from the same three places — Django's migration state depends on a
+field's attributes, not the Python expression that constructed it. `poetry run python -m django
+makemigrations --check --dry-run --settings=tests.settings` reports "No changes detected" after
+the extraction; the full suite (638 tests across `test_models.py`, `test_skos.py`,
+`test_standards.py`) and `mypy` are both clean.
+
+**Revisit if:** never — the same remedy the repo already chose for `static_uri`'s identical
+drift, applied to the one other field this feature added to all three models.
+
+## D55 — T050 (fix cycle 4): the four small architecture cleanups (ARCH-304–307)
+
+All four applied on their merits; none was judged wrong.
+
+**ARCH-304 — `resolve_scheme`'s only write is now visible at the call site.** `row.set_slug(row.slug)`
+read as a no-op (the argument is the object's own current attribute) and hid that it was also the
+row's only write of `default_language`/`name`/`description`/`static_uri`. Replaced with the two
+statements `set_slug()` itself performs — `row.slug_is_manual = True` then `row.save()` (now
+wrapped for T045's `STORED_SLUG_INVALID`, unchanged) — so the write is legible without tracing
+into a method whose name promises only a slug change.
+
+**Incidental consequence, not separately decided: ARCH-307 is now moot.** `ConceptImporter` and
+`CollectionImporter` already assigned `slug`/`slug_is_manual` directly rather than calling
+`set_slug()` (D46's stated reason: avoiding a second write per imported record); ARCH-304's fix
+makes `SchemeResolver` do the same. `set_slug()` is no longer called from anywhere in the import
+path — grep confirms zero production callers — so the three-way asymmetry ARCH-307 asked to have
+documented no longer exists to document. `set_slug()` remains public API, exercised directly by
+each model's own test class.
+
+**ARCH-305 — one definition of "this identifier has no usable base."** `identifier_slug_base(uri)`
+(module-level, beside `identifier_slug_segment`) replaces the hand-inlined
+`slugify(identifier_slug_segment(uri), allow_unicode=True)` at both `EMPTY_SLUG` guards
+(`import_concepts`, `import_collections`) and inside `unique_slug_for_identifier` itself. Not
+folded together with the guards, per the review's own caution: a guard runs for a *matched*
+record too (which never calls the minter), so merging them would silently change a matched
+record's unusable-base handling from set-aside to updated.
+
+**ARCH-306 — one narrowing for `Model._meta.get_field(...).max_length`.** The five reads of an
+`Optional[int]` max_length were narrowed two ways in one commit: `cast(int, ...)` for the three
+slug reads, an `is not None` runtime check for the three name/label reads. Picked `cast(int, ...)`
+everywhere (the smaller change, and the one the existing comment at the slug reads already
+justifies): Django's own field metadata always supplies a `max_length` for a `CharField`/
+`SlugField` the model itself declares, so a runtime `None` check was dead code, not a genuine
+guard.
+
+**Revisit if:** never — all four are legibility/consistency cleanups with no behaviour change;
+verified by the unchanged 847-test suite, `mypy`, and `makemigrations --check --dry-run`.

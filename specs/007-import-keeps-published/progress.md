@@ -398,3 +398,62 @@ Append-only log of stage transitions and gate outcomes.
   Two non-obvious choices recorded as D41–D42. Worktree clean. A vocabulary's own slug now resolves
   a collision or an unusable derivation exactly as a concept's already did, closing the one gap
   T030 left between the two paths. Next: FS-007 re-gate and convergence.
+
+## 2026-08-05 (fix cycle 4)
+
+- **S4 IMPLEMENT — fix cycle 4 (T044–T050), Implementer.** `craft-tdd` and `craft-increments`
+  loaded by name. Baseline confirmed green (828 tests, HEAD `10c069a`) before touching anything.
+  Round-three review reports (correctness/security/architecture) read in full; seven tasks, one
+  commit each, tree green after every one. RED proven first for T044/T045/T046 per the brief.
+  - **T044** (ARCH-301/CORR-303/SEC-302) — a *created* scheme or collection with an over-long
+    only name was persisted with `name == ''`, a blank required `CharField` `full_clean()` then
+    refuses. RED: importing a 300-character `skos:prefLabel` gave `report.fatal == []` and a
+    stored row with `name == ''` on this branch. Fixed by splitting on what the record costs the
+    rest of the file (D42's own reasoning, applied to the name): a created scheme is now fatal
+    (`FatalReason.VOCABULARY_NAME_UNUSABLE`); a created collection is set aside entirely
+    (`continue`d before `row.save()`). A matched row of either kind is unaffected. Two round-three
+    tests that asserted only `len(name) <= max_length` (satisfied by `''`) were strengthened in
+    place — quoted and explained in the completion report as an intentionally overturned
+    assertion, not a silent edit. D49.
+  - **T045** (SEC-301) — T041's read-back means a matched record's stored slug now reaches
+    `set_slug()`/`save()`'s manual-slug validation unchanged; a value written out of band
+    (`.update()`, `bulk_create`, a migration) let `ValidationError` escape `import_skos` entirely
+    for all three kinds. RED: planting an invalid slug via `.filter(pk=...).update(slug=...)`
+    then re-importing a matching file raised uncaught on this branch, for scheme, concept and
+    collection alike. Fixed by wrapping each of the three writes and converting to
+    `SetAsideReason.STORED_SLUG_INVALID`, the same discipline `import_labels`/`_import_notes`
+    already apply. D50.
+  - **T046** (SEC-303) — `unique_slug_for_identifier`'s `base[: max_length - len(suffix_text)]`
+    goes to zero or negative once the suffix is as long as the field, discarding the base
+    entirely. RED: `unique_slug_for_identifier(..., max_length=2)` with a colliding suffix
+    returned the bare suffix `'-2'`. Fixed by construction with
+    `max(max_length - len(suffix_text), 1)`; unreachable at the three real call sites
+    (`max_length=255`), a direct unit test added on the helper regardless. D51.
+  - **T047** (CORR-305) — the `VALUE_TOO_LONG` set-aside for a scheme's or collection's
+    any-language name fallback reported the effective default language even when the value was
+    published in a different one. `SkosGraph.first_literal_with_language` now pairs the same
+    value `first_literal` selects with the tag it actually carried. D52.
+  - **T048** (CORR-301/CORR-302/CORR-304) — test-only, no production change (round-three's own
+    mutation testing already confirmed the guarded code correct). Added the Collection collision/
+    read-back case to `TestASlugAlreadyStoredIsReadBackNeverRecomputed`; extended its
+    locally-authored-record test in place with a third record (a Collection) plus
+    `slug_is_manual`/rename-stability assertions on all three; added `Collection`'s empty/
+    malformed manual-slug refusal tests mirroring `Concept`'s. D53.
+  - **T049** (ARCH-302) — `slug_is_manual`, `set_slug()`, and `save()`'s manual-slug validation
+    branch were declared three times, byte-identical apart from `help_text`. Extracted onto
+    `StaticUriModel` the same way the repo already fixed the identical `static_uri` drift
+    (`_static_uri_field`): `_slug_is_manual_field(help_text)`, `set_slug()`,
+    `_validate_manual_slug()`. Migration-neutral, verified: `makemigrations --check --dry-run` →
+    "No changes detected". D54.
+  - **T050** (ARCH-304/305/306) — three legibility cleanups, no behaviour change: `resolve_scheme`'s
+    `row.set_slug(row.slug)` (a no-op-looking call that was also the row's only write) replaced
+    with the explicit `slug_is_manual = True` + `save()`, which incidentally makes ARCH-307's
+    asymmetry disappear (no importer calls `set_slug()` anymore); `identifier_slug_base(uri)`
+    gives "no usable base" one definition shared by the `EMPTY_SLUG` guards and
+    `unique_slug_for_identifier`; the five `Optional[int]` `max_length` reads narrowed one way
+    (`cast`) instead of two. D55.
+  - **Verification** — `poetry run pytest -q`: 847 passed. `ruff check .` / `ruff format --check .`
+    / `mypy` / `deptry .`: clean. `makemigrations --check --dry-run --settings=tests.settings`:
+    "No changes detected". Seven commits, `b722585`..`18b382c`.
+  Seven non-obvious choices recorded as D49–D55. Worktree clean. Next: FS-007 re-gate and
+  convergence.

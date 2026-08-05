@@ -85,7 +85,13 @@ class SetAsideReason(TextChoices):
     label in a hostile or merely careless file must not abort an entire
     import; the value is set aside rather than crashing the run on
     ``ValidationError`` (the same discipline ``EMPTY_SLUG`` already applies
-    to the slug).
+    to the slug). ``STORED_SLUG_INVALID`` (fix cycle 4, S6 SEC-301,
+    decisions.md D50) names a matched record whose already-stored slug was
+    written out of band (``.update()``, ``loaddata``, ``bulk_create``, a data
+    migration) and no longer passes the model's own manual-slug validation —
+    T041's read-back means that value now reaches the write path unchanged,
+    and the record is set aside rather than letting ``ValidationError``
+    escape ``import_skos`` outside its own exception hierarchy.
     """
 
     UNCONFIGURED_LANGUAGE = "unconfigured_language", _("language not configured")
@@ -105,6 +111,7 @@ class SetAsideReason(TextChoices):
     NO_LANGUAGE_TAG = "no_language_tag", _("no language tag")
     VARIANT_NOT_KEPT = "variant_not_kept", _("language variant not kept")
     VALUE_TOO_LONG = "value_too_long", _("value exceeds the maximum length this application can store")
+    STORED_SLUG_INVALID = "stored_slug_invalid", _("stored slug no longer passes validation")
 
     @property
     def template(self) -> Promise:
@@ -183,6 +190,10 @@ _REASON_TEMPLATES: dict[SetAsideReason, Promise] = {
         "'%(subject)s' carries a value in the language '%(language)s' longer than this application "
         "can store; it was not stored."
     ),
+    SetAsideReason.STORED_SLUG_INVALID: _(
+        "'%(subject)s' has a stored slug that no longer passes this application's own validation; "
+        "it was left exactly as stored, and nothing else about it was imported this run."
+    ),
 }
 
 
@@ -232,7 +243,15 @@ class FatalReason(TextChoices):
     aside like a concept's own ``EMPTY_SLUG``: a concept missing its slug is one
     record the rest of the file can still import around, but without a
     resolvable vocabulary there is nothing for the rest of the file to import
-    into.
+    into. ``VOCABULARY_NAME_UNUSABLE`` (fix cycle 4, FR-014, decisions.md D49)
+    names a vocabulary this run is *creating* whose only published name is
+    longer than the field can store: a matched scheme keeps whatever name it
+    already held (``VALUE_TOO_LONG``, a set-aside), but a created one has no
+    earlier name to fall back to, and writing it anyway leaves a row
+    ``full_clean()`` immediately refuses — the same reasoning
+    ``VOCABULARY_SLUG_UNUSABLE`` already gives for an unusable identifier,
+    applied to the other field nothing else in the file can supply on the
+    vocabulary's behalf.
     """
 
     MISSING_IDENTITY = "missing_identity", _("identifier missing or blank")
@@ -242,6 +261,10 @@ class FatalReason(TextChoices):
     VOCABULARY_AMBIGUOUS = "vocabulary_ambiguous", _("the file declares more than one vocabulary and none was named")
     DEFAULT_LANGUAGE_UNCONFIGURED = "default_language_unconfigured", _("default language not configured")
     VOCABULARY_SLUG_UNUSABLE = "vocabulary_slug_unusable", _("vocabulary's identifier produces no usable slug")
+    VOCABULARY_NAME_UNUSABLE = (
+        "vocabulary_name_unusable",
+        _("vocabulary's name is longer than this application can store"),
+    )
 
     @property
     def template(self) -> Promise:
@@ -274,6 +297,11 @@ _FATAL_TEMPLATES: dict[FatalReason, Promise] = {
     ),
     FatalReason.VOCABULARY_SLUG_UNUSABLE: _(
         "'%(subject)s' produces no usable slug from its own identifier; the run was refused."
+    ),
+    FatalReason.VOCABULARY_NAME_UNUSABLE: _(
+        "'%(subject)s' has no name this application can store — its published name in "
+        "'%(language)s' is longer than this application can store, and there is no earlier "
+        "name to keep; the run was refused."
     ),
 }
 

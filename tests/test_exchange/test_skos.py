@@ -31,6 +31,7 @@ from controlled_vocabularies.exchange.skos import (
     SkosImportError,
     SkosImportFailed,
     import_skos,
+    unique_slug_for_identifier,
 )
 from controlled_vocabularies.models import (
     Collection,
@@ -1367,16 +1368,61 @@ class TestASlugAlreadyStoredIsReadBackNeverRecomputed:
         remote_apple.refresh_from_db()
         assert remote_apple.slug == "apple-2"
 
-    def test_a_locally_authored_scheme_and_concept_are_matched_not_duplicated_when_first_imported(self, db, tmp_path):
+    def test_a_collection_keeps_its_suffixed_slug_after_a_colliding_sibling_is_deleted(self, db, tmp_path):
+        # CORR-301 — the same (a) shape at collection granularity, the third record kind: two
+        # collections in one vocabulary whose identifiers both end in "#colours" import as
+        # "colours" and "colours-2"; deleting the first and re-importing a file describing only
+        # the second, UNCHANGED, must not move the second's address onto the now-vacant
+        # "colours". Would fail (moving b to "colours") if CollectionImporter's own `if
+        # created:` guard around minting were removed or never existed.
+        path = tmp_path / "collections_collide.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/collcollide> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            '<http://pub.example/a#colours> a skos:Collection ; skos:prefLabel "Colours A"@en .\n'
+            '<http://pub.example/b#colours> a skos:Collection ; skos:prefLabel "Colours B"@en .\n'
+        )
+        import_skos(path)
+        a = Collection.objects.get(static_uri="http://pub.example/a#colours")
+        b = Collection.objects.get(static_uri="http://pub.example/b#colours")
+        assert {a.slug, b.slug} == {"colours", "colours-2"}
+        b_slug_before = b.slug
+        b_local_url_before = b.local_url
+
+        a.delete()
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/collcollide> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            '<http://pub.example/b#colours> a skos:Collection ; skos:prefLabel "Colours B"@en .\n'
+        )
+        report = import_skos(path)
+
+        b.refresh_from_db()
+        assert b.slug == b_slug_before
+        assert b.local_url == b_local_url_before
+        assert "http://pub.example/b#colours" in report.updated
+
+    def test_a_locally_authored_scheme_concept_and_collection_are_matched_not_duplicated_when_first_imported(
+        self, db, tmp_path
+    ):
         # (c) — a locally authored scheme "Rocks" (slug "rocks", static_uri NULL) holding a
-        # locally authored concept "Granite" (slug "granite", static_uri NULL). Importing a file
-        # naming those exact composed local URIs must match both existing rows via
-        # get_by_uri's local-parse fallback, not recompute a colliding slug for either and not
-        # create a second concept row for the same real record.
+        # locally authored concept "Granite" (slug "granite") and a locally authored collection
+        # "Igneous" (slug "igneous"), all static_uri NULL. Importing a file naming those exact
+        # composed local URIs must match all three existing rows via get_by_uri's local-parse
+        # fallback, not recompute a colliding slug for any of them and not create a second row
+        # for any of them. CORR-302: extended with the collection (T048) to also assert that a
+        # record the importer *matched* rather than created gets pinned (`slug_is_manual`) on
+        # all three kinds — D46 names this as the reason `set_slug`/direct attribute assignment
+        # became the write path even for a matched row — and that a subsequent local rename
+        # then leaves every address exactly where it was. Would fail (an address moving after
+        # its own unrelated rename) if any of the three `slug_is_manual = True` assignments on
+        # the matched-row path were ever skipped.
         scheme = ConceptSchemeFactory(name="Rocks")
         assert scheme.slug == "rocks"
         concept = ConceptFactory(scheme=scheme, label="Granite")
         assert concept.slug == "granite"
+        collection = CollectionFactory(scheme=scheme, name="Igneous")
+        assert collection.slug == "igneous"
         base = conf.get_base_uri()
 
         path = tmp_path / "local_rocks.ttl"
@@ -1385,16 +1431,68 @@ class TestASlugAlreadyStoredIsReadBackNeverRecomputed:
             f'<{base}/rocks> a skos:ConceptScheme ; skos:prefLabel "Rocks"@en .\n'
             f"<{base}/rocks/granite> a skos:Concept ; skos:inScheme <{base}/rocks> ; "
             'skos:prefLabel "Granite"@en .\n'
+            f'<{base}/rocks/collection/igneous> a skos:Collection ; skos:prefLabel "Igneous"@en .\n'
         )
         report = import_skos(path)
 
         assert report.fatal == []
         assert ConceptScheme.objects.filter(name="Rocks").count() == 1
         assert Concept.objects.filter(scheme__name="Rocks", label="Granite").count() == 1
+        assert Collection.objects.filter(scheme__name="Rocks", name="Igneous").count() == 1
         scheme.refresh_from_db()
         concept.refresh_from_db()
+        collection.refresh_from_db()
         assert scheme.slug == "rocks"
         assert concept.slug == "granite"
+        assert collection.slug == "igneous"
+        assert scheme.slug_is_manual is True
+        assert concept.slug_is_manual is True
+        assert collection.slug_is_manual is True
+
+        scheme_url_before, concept_url_before, collection_url_before = (
+            scheme.local_url,
+            concept.local_url,
+            collection.local_url,
+        )
+        scheme.name = "Rock Types"
+        scheme.save()
+        concept.label = "Granitic Rock"
+        concept.save()
+        collection.name = "Igneous Rocks"
+        collection.save()
+
+        assert scheme.local_url == scheme_url_before
+        assert concept.local_url == concept_url_before
+        assert collection.local_url == collection_url_before
+
+
+class TestUniqueSlugForIdentifierTruncationNeverSlicesNegative:
+    """T046 — SEC-303: ``base[: max_length - len(suffix_text)]`` goes negative once a collision
+    suffix is as long as (or longer than) ``max_length``, and Python silently slices from the
+    *end* of the string instead of raising — at ``max_length == len(suffix_text)`` the slice
+    bound is exactly ``0``, and the returned candidate is the bare suffix, with no relationship
+    to the base at all. Unreachable from the three current call sites (all pass 255), fixed by
+    construction anyway with ``max(max_length - len(suffix_text), 1)``, which always keeps at
+    least one character of the base.
+    """
+
+    def test_a_collision_suffix_as_long_as_max_length_does_not_discard_the_base(self):
+        """Reproduces SEC-303's own evidence: with max_length=2, the base 'ab' collides, and the
+        retry appends suffix '-2' (also length 2). The unfixed slice, base[:2 - 2] + '-2', is
+        base[:0] + '-2' == '-2' — the base is gone entirely, and the result is indistinguishable
+        from another record's own base 'b-2'. Would fail (return '-2') without the fix.
+        """
+        result = unique_slug_for_identifier("http://e.org/#ab", {"ab": "other", "b-2": "other2"}, 2)
+        assert result != "-2"
+        assert result.startswith("a")
+
+    def test_a_normal_collision_is_unaffected_by_the_fix(self):
+        """max_length comfortably larger than any suffix (the shape every real field is in,
+        SlugField(max_length=255)) must keep resolving collisions exactly as before.
+        """
+        taken = {"granite": "other"}
+        result = unique_slug_for_identifier("http://e.org/#granite", taken, 255)
+        assert result == "granite-2"
 
 
 class TestSlugAndNameLengthAreBoundedToTheField:
@@ -1454,23 +1552,58 @@ class TestSlugAndNameLengthAreBoundedToTheField:
         assert len(collection.slug) <= max_length
         collection.full_clean()
 
-    def test_a_scheme_name_longer_than_the_field_is_set_aside_not_written_unchecked(self, db, tmp_path):
+    def test_a_scheme_name_longer_than_the_field_is_fatal_on_first_import(self, db, tmp_path):
+        """T044, decisions.md D49 (fix cycle 4, ARCH-301/CORR-303/SEC-302): a *created* scheme
+        has no earlier name to fall back to, so an unusable one is fatal rather than stored
+        blank. Overturns the previous version of this test, which asserted
+        ``report.fatal == []`` and only checked ``len(scheme.name) <= max_length`` — a blank
+        name (the actual defect this cycle fixes) satisfies that length check too, so the old
+        assertion could not have caught it.
+        """
         long_name = "N" * 300
         path = tmp_path / "long_scheme_name.ttl"
         path.write_text(
             "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
             f'<http://pub.example/longschemename> a skos:ConceptScheme ; skos:prefLabel "{long_name}"@en .\n'
         )
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(path)
+        report = exc_info.value.report
+        assert len(report.fatal) == 1
+        assert report.fatal[0].reason is FatalReason.VOCABULARY_NAME_UNUSABLE
+        assert report.fatal[0].subject == "http://pub.example/longschemename"
+        assert not ConceptScheme.objects.filter(static_uri="http://pub.example/longschemename").exists()
+
+    def test_a_matched_scheme_s_over_long_name_is_still_only_set_aside_keeping_the_old_name(self, db, tmp_path):
+        """The matched-row half of T044: a scheme that already has a name keeps it when a
+        re-import's name is unusable, set aside rather than fatal. Would fail if the new
+        created-only fatal branch fired for a matched row too.
+        """
+        scheme = ConceptSchemeFactory(name="Kept Name", static_uri="http://pub.example/longschemename2")
+        long_name = "N" * 300
+        path = tmp_path / "long_scheme_name_reimport.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            f'<http://pub.example/longschemename2> a skos:ConceptScheme ; skos:prefLabel "{long_name}"@en .\n'
+        )
         report = import_skos(path)
         assert report.fatal == []
-        scheme = ConceptScheme.objects.get(static_uri="http://pub.example/longschemename")
-        max_length = ConceptScheme._meta.get_field("name").max_length
-        assert len(scheme.name) <= max_length
+        scheme.refresh_from_db()
+        assert scheme.name == "Kept Name"
         entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
         assert len(entries) == 1
-        assert entries[0].subject == "http://pub.example/longschemename"
+        assert entries[0].subject == "http://pub.example/longschemename2"
 
-    def test_a_collection_name_longer_than_the_field_is_set_aside_not_written_unchecked(self, db, tmp_path):
+    def test_a_collection_name_longer_than_the_field_sets_aside_the_whole_collection_on_first_import(
+        self, db, tmp_path
+    ):
+        """T044, decisions.md D49 (fix cycle 4, ARCH-301/CORR-303/SEC-302): a *created*
+        collection has no earlier name to fall back to either — but unlike a scheme, the rest of
+        the file does not need this collection in order to import, so the whole record is set
+        aside (never created) rather than failing the run. Overturns the previous version of
+        this test, which only checked ``len(collection.name) <= max_length`` — a blank name (the
+        actual defect) satisfies that too.
+        """
         long_name = "N" * 300
         path = tmp_path / "long_collection_name.ttl"
         path.write_text(
@@ -1480,12 +1613,38 @@ class TestSlugAndNameLengthAreBoundedToTheField:
         )
         report = import_skos(path)
         assert report.fatal == []
-        collection = Collection.objects.get(static_uri="http://pub.example/longcollectionname#grp")
-        max_length = Collection._meta.get_field("name").max_length
-        assert len(collection.name) <= max_length
+        assert not Collection.objects.filter(static_uri="http://pub.example/longcollectionname#grp").exists()
         entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
         assert len(entries) == 1
         assert entries[0].subject == "http://pub.example/longcollectionname#grp"
+
+    def test_a_matched_collection_s_over_long_name_is_still_only_set_aside_keeping_the_old_name(self, db, tmp_path):
+        """The matched-row half of T044 for a collection: an already-imported collection keeps
+        its stored name, and the collection itself is not removed, when a re-import's name is
+        unusable. Would fail if the created-only ``continue`` fired for a matched row too.
+        """
+        path = tmp_path / "long_collection_name_first.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/longcollectionname2> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            '<http://pub.example/longcollectionname2#grp> a skos:Collection ; skos:prefLabel "Group"@en .\n'
+        )
+        import_skos(path)
+        collection = Collection.objects.get(static_uri="http://pub.example/longcollectionname2#grp")
+        assert collection.name == "Group"
+
+        long_name = "N" * 300
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/longcollectionname2> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            f'<http://pub.example/longcollectionname2#grp> a skos:Collection ; skos:prefLabel "{long_name}"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        collection.refresh_from_db()
+        assert collection.name == "Group"
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(entries) == 1
 
 
 def _write_shared_label_file(tmp_path: Path, n: int) -> Path:
@@ -1506,6 +1665,134 @@ def _write_shared_label_file(tmp_path: Path, n: int) -> Path:
     path = tmp_path / "shared_label.ttl"
     path.write_text("\n".join(lines))
     return path
+
+
+class TestOverLongNameSetAsideReportsThePublishedLanguage:
+    """T047 — CORR-305, decisions.md D52 (fix cycle 4): when a scheme's or collection's own
+    default-language ``skos:prefLabel`` is absent, the over-long name comes from the
+    any-language fallback (``SkosGraph.first_literal``) — the ``VALUE_TOO_LONG`` set-aside must
+    name the language that value was actually published in, not the target language the
+    fallback exists because nothing resolved to it.
+    """
+
+    def test_a_matched_scheme_s_over_long_fallback_name_reports_its_own_language_not_the_default(self, db, tmp_path):
+        """The scheme's effective default language is frozen at 'en' (a matched row, D46/D50 —
+        resolve_scheme never assigns default_language to a matched row). Its own prefLabel is
+        published only in 'fr', so the VALUE_TOO_LONG set-aside must say 'fr'. Would fail
+        (reporting 'en') if winning_tag stayed at its pre-fallback default.
+        """
+        scheme = ConceptSchemeFactory(name="Existing", static_uri="http://pub.example/corr305scheme")
+        long_name = "N" * 300
+        path = tmp_path / "corr305_scheme.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            f'<http://pub.example/corr305scheme> a skos:ConceptScheme ; skos:prefLabel "{long_name}"@fr .\n'
+        )
+        with override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]):
+            report = import_skos(path)
+
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(entries) == 1
+        assert entries[0].params["language"] == "fr"
+        scheme.refresh_from_db()
+        assert scheme.name == "Existing"
+
+    def test_a_matched_collection_s_over_long_fallback_name_reports_its_own_language_not_the_default(
+        self, db, tmp_path
+    ):
+        """The same shape one record kind over: an existing collection's own scheme has effective
+        default language 'en', the collection's re-published name is 'fr'-only and over-long.
+        Would fail (reporting 'en') without the fix.
+        """
+        scheme = ConceptSchemeFactory(name="Vocab", static_uri="http://pub.example/corr305collscheme")
+        collection = CollectionFactory(
+            scheme=scheme, name="Existing Group", static_uri="http://pub.example/corr305collscheme#grp"
+        )
+        long_name = "N" * 300
+        path = tmp_path / "corr305_collection.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/corr305collscheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            f'<http://pub.example/corr305collscheme#grp> a skos:Collection ; skos:prefLabel "{long_name}"@fr .\n'
+        )
+        with override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]):
+            report = import_skos(path)
+
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(entries) == 1
+        assert entries[0].params["language"] == "fr"
+        collection.refresh_from_db()
+        assert collection.name == "Existing Group"
+
+
+class TestAStoredSlugThatFailsValidationIsSetAsideNotEscaped:
+    """T045 — SEC-301, decisions.md D50 (fix cycle 4): T041's read-back means a matched record's
+    already-stored slug reaches the model's manual-slug validation unchanged. A slug written out
+    of band (``.update()``, ``loaddata``, ``bulk_create``, a data migration) never runs through
+    ``save()``'s own validation when it is written, so it can be malformed by the time an import
+    later matches that row and calls ``set_slug()``/``save()`` again — which, before this fix,
+    let ``django.core.exceptions.ValidationError`` escape ``import_skos`` entirely, outside its
+    own (``SkosImportError``/``SkosImportFailed``) exception hierarchy.
+    """
+
+    def test_a_scheme_s_out_of_band_slug_failing_validation_does_not_escape_import_skos(self, db, tmp_path):
+        scheme = ConceptSchemeFactory(name="Sec Three O One Scheme", static_uri="http://pub.example/sec301scheme")
+        ConceptScheme.objects.filter(pk=scheme.pk).update(slug="has spaces/and-slash")
+        path = tmp_path / "sec301_scheme.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec301scheme> a skos:ConceptScheme ; skos:prefLabel "Sec Three O One Scheme"@en .\n'
+        )
+
+        report = import_skos(path)
+
+        assert report.fatal == []
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.STORED_SLUG_INVALID]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://pub.example/sec301scheme"
+        scheme.refresh_from_db()
+        assert scheme.slug == "has spaces/and-slash"
+
+    def test_a_concept_s_out_of_band_slug_failing_validation_does_not_escape_import_skos(self, db, tmp_path):
+        path = tmp_path / "sec301_concept.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec301concept> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/sec301concept#one> a skos:Concept ; skos:inScheme <http://pub.example/sec301concept> ; "
+            'skos:prefLabel "One"@en .\n'
+        )
+        import_skos(path)
+        concept = Concept.objects.get(static_uri="http://pub.example/sec301concept#one")
+        Concept.objects.filter(pk=concept.pk).update(slug="has spaces/and-slash")
+
+        report = import_skos(path)
+
+        assert report.fatal == []
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.STORED_SLUG_INVALID]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://pub.example/sec301concept#one"
+        concept.refresh_from_db()
+        assert concept.slug == "has spaces/and-slash"
+
+    def test_a_collection_s_out_of_band_slug_failing_validation_does_not_escape_import_skos(self, db, tmp_path):
+        path = tmp_path / "sec301_collection.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec301collection> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            '<http://pub.example/sec301collection#grp> a skos:Collection ; skos:prefLabel "Group"@en .\n'
+        )
+        import_skos(path)
+        collection = Collection.objects.get(static_uri="http://pub.example/sec301collection#grp")
+        Collection.objects.filter(pk=collection.pk).update(slug="has spaces/and-slash")
+
+        report = import_skos(path)
+
+        assert report.fatal == []
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.STORED_SLUG_INVALID]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://pub.example/sec301collection#grp"
+        collection.refresh_from_db()
+        assert collection.slug == "has spaces/and-slash"
 
 
 class TestSlugAssignmentQueryCountIsLinearInASharedLabelGroup:

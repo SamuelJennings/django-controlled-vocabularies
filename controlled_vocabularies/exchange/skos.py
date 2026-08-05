@@ -80,6 +80,20 @@ def identifier_slug_segment(uri: str) -> str:
     return parsed.path.rstrip("/").rsplit("/", 1)[-1]
 
 
+def identifier_slug_base(uri: str) -> str:
+    """The slugified identifier segment (FR-017/FR-018/FR-020) — ``""`` when the segment is made
+    up only of characters ``slugify()`` strips (ARCH-305, fix cycle 4, decisions.md D55).
+
+    One definition of "this identifier has no usable base", shared by :func:`unique_slug_for_identifier`
+    (which suffixes it on a collision) and the pre-write ``EMPTY_SLUG`` guards in
+    :meth:`ConceptImporter.import_concepts` and :meth:`CollectionImporter.import_collections`
+    (which run for a *matched* record too, so they can never simply call
+    :func:`unique_slug_for_identifier` itself — see that function's own note about matched
+    records never being re-minted).
+    """
+    return slugify(identifier_slug_segment(uri), allow_unicode=True)
+
+
 def unique_slug_for_identifier(static_uri: str, taken_slugs: dict[str, str | None], max_length: int) -> str:
     """The deterministic, collision-resolved slug for ``static_uri`` (FR-017/FR-018/FR-020,
     decisions.md D35): the same identifier-derived base (:func:`identifier_slug_segment`), with a
@@ -106,7 +120,7 @@ def unique_slug_for_identifier(static_uri: str, taken_slugs: dict[str, str | Non
     ``DataError`` on PostgreSQL. The *base* is truncated, leaving room for the numeric suffix, so
     the returned candidate never exceeds ``max_length`` however many collisions it resolves.
     """
-    base = slugify(identifier_slug_segment(static_uri), allow_unicode=True)[:max_length]
+    base = identifier_slug_base(static_uri)[:max_length]
     if not base:
         return ""
     candidate = base
@@ -114,7 +128,13 @@ def unique_slug_for_identifier(static_uri: str, taken_slugs: dict[str, str | Non
     while taken_slugs.get(candidate, static_uri) != static_uri:
         suffix += 1
         suffix_text = f"-{suffix}"
-        candidate = base[: max_length - len(suffix_text)] + suffix_text
+        # T046, SEC-303 (fix cycle 4): a bare `max_length - len(suffix_text)` goes to zero or
+        # negative once the suffix is as long as (or longer than) max_length, and Python slices
+        # from the *end* of the string instead of raising — the candidate then loses its
+        # relationship to the base entirely (at equality, the bare suffix). Unreachable at any
+        # of the three current call sites (all pass 255), fixed by construction anyway: always
+        # keep at least one base character.
+        candidate = base[: max(max_length - len(suffix_text), 1)] + suffix_text
     taken_slugs[candidate] = static_uri
     return candidate
 
@@ -237,6 +257,21 @@ class SkosGraph:
             if language is None or getattr(literal, "language", None) == language
         )
         return values[0] if values else None
+
+    def first_literal_with_language(self, node: rdflib.term.Node, predicate: rdflib.URIRef) -> tuple[str, str] | None:
+        """The lexicographically-first literal value of ``predicate`` on ``node``, paired with the
+        published language tag it actually carried (``""`` for an untagged literal), or ``None``.
+
+        The any-language counterpart of :meth:`first_literal` (T047, decisions.md D52, fix cycle
+        4): a caller reporting a value this fallback selected needs to name the language that
+        value was published in, not the target language the fallback exists because nothing
+        resolved to. Selects the identical value :meth:`first_literal` (called with no
+        ``language``) would — same sort key — so the two never disagree about *which* literal.
+        """
+        pairs = sorted(
+            (str(literal), getattr(literal, "language", None) or "") for literal in self.graph.objects(node, predicate)
+        )
+        return pairs[0] if pairs else None
 
     def label_languages(self, node: rdflib.term.Node, predicate: rdflib.URIRef) -> list[str]:
         """The language tags of ``predicate``'s literal values on ``node`` (empty-tag values excluded)."""
@@ -553,11 +588,14 @@ class SchemeResolver:
         name_match = _localized_literal(
             self.skos_graph, self.matcher, declared_node, SKOS.prefLabel, row.effective_default_language
         )
-        winning_tag = row.effective_default_language
         if name_match is None:
             # The declared default language (or the site's, on fallback) carries no prefLabel on
             # the scheme itself — fall back to any language rather than leaving name unset.
-            name = self.skos_graph.first_literal(declared_node, SKOS.prefLabel)
+            # T047, CORR-305, decisions.md D52 (fix cycle 4): the tag reported alongside this
+            # fallback value is the one it was actually published in, not the target language
+            # the fallback exists because nothing matched — the two can differ.
+            any_literal = self.skos_graph.first_literal_with_language(declared_node, SKOS.prefLabel)
+            name, winning_tag = any_literal if any_literal is not None else (None, row.effective_default_language)
         else:
             name, winning_tag = name_match
             if winning_tag.lower() != row.effective_default_language.lower():
@@ -570,14 +608,28 @@ class SchemeResolver:
                     language=winning_tag,
                     kept_as=row.effective_default_language,
                 )
-        name_max_length = ConceptScheme._meta.get_field("name").max_length
-        if name and name_max_length is not None and len(name) > name_max_length:
+        # ARCH-306, fix cycle 4, decisions.md D55: cast rather than an `is not None` runtime
+        # check, the same narrowing unique_slug_for_identifier's own max_length reads already
+        # use (skos.py above) — Django's field metadata always supplies this for a CharField
+        # the model itself declares, so the two Optional[int] narrowings were one computation
+        # handled two different ways.
+        name_max_length = cast(int, ConceptScheme._meta.get_field("name").max_length)
+        if name and len(name) > name_max_length:
+            if created:
+                # T044, decisions.md D49 (fix cycle 4, ARCH-301/CORR-303/SEC-302): a scheme is
+                # what the rest of the file imports into, so a *created* scheme with no usable
+                # name has nothing to fall back to — row.name would stay '', and a row
+                # full_clean() then refuses is exactly what D47's guard exists to prevent.
+                # Fatal, the same reasoning VOCABULARY_SLUG_UNUSABLE already gives an unusable
+                # identifier: without a resolvable, storable vocabulary there is nothing for
+                # the rest of the file to import into.
+                self.report.add_fatal(FatalReason.VOCABULARY_NAME_UNUSABLE, subject=declared_uri, language=winning_tag)
+                return None, None
             # T042, SEC-002-shaped, decisions.md D35 (fix cycle 3): row.save() never calls
             # full_clean(), so an over-long name would otherwise reach the database unchecked on
             # SQLite and raise a bare DataError on PostgreSQL — the same hole Concept.label's own
-            # pre-write VALUE_TOO_LONG guard closes. A scheme is the whole file, so this leaves
-            # the name unwritten (row.name keeps whatever it already held) rather than aborting
-            # the run the rest of the file still needs to import into.
+            # pre-write VALUE_TOO_LONG guard closes. A *matched* scheme already has a name, so
+            # this leaves it exactly as held rather than losing it to an unusable replacement.
             self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=declared_uri, language=winning_tag)
         elif name:
             row.name = name
@@ -631,12 +683,23 @@ class SchemeResolver:
                 self.report.add_fatal(FatalReason.VOCABULARY_SLUG_UNUSABLE, subject=declared_uri)
                 return None, None
             row.slug = slug
-        # T041: ConceptScheme.set_slug() is public API this feature added for exactly this
-        # purpose (its own docstring: "an imported vocabulary's own published identifier can
-        # anchor its address the same way") — routed through here rather than left uncalled,
-        # for both a freshly minted slug and a matched row's own unchanged one, so a
-        # locally-authored scheme the importer is matching for the first time also gets pinned.
-        row.set_slug(row.slug)
+        # T041: this is resolve_scheme's only write of the row — every field assigned above
+        # (default_language, name, description, static_uri) is persisted here too, not by a
+        # separate row.save() (ARCH-304, fix cycle 4). slug_is_manual is pinned True for both a
+        # freshly minted slug and a matched row's own unchanged one, so a locally-authored
+        # scheme the importer is matching for the first time also gets pinned.
+        row.slug_is_manual = True
+        try:
+            row.save()
+        except ValidationError:
+            # T045, SEC-301, decisions.md D50 (fix cycle 4): a matched row's slug is now read
+            # back unchanged (T041) rather than recomputed, so a value written out of band
+            # (.update(), loaddata, bulk_create, a data migration) reaches this validation
+            # exactly as stored. Set aside rather than letting ValidationError escape
+            # import_skos outside its own exception hierarchy — the same discipline
+            # import_labels/_import_notes already apply to a value's own save().
+            self.report.add_set_aside(SetAsideReason.STORED_SLUG_INVALID, subject=declared_uri)
+            return None, None
         if created:
             self.report.add_created(row.uri)
         else:
@@ -985,8 +1048,10 @@ class ConceptImporter:
                 continue
             (winning_tag, label), _losers = self.matcher.resolve_winner(default_language, candidates)
 
-            label_max_length = Concept._meta.get_field("label").max_length
-            if label_max_length is not None and len(label) > label_max_length:
+            # ARCH-306, fix cycle 4, decisions.md D55: cast, not an `is not None` check — see
+            # the identical note on resolve_scheme's own name-length read.
+            label_max_length = cast(int, Concept._meta.get_field("label").max_length)
+            if len(label) > label_max_length:
                 # SEC-002, decisions.md D34: Concept.save() never calls full_clean() (it derives
                 # the slug and refuses a collision, nothing more), so an over-long label would
                 # otherwise reach the database unchecked on SQLite and raise a bare DataError on
@@ -995,7 +1060,7 @@ class ConceptImporter:
                 self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=uri, language=winning_tag)
                 continue
 
-            if not slugify(identifier_slug_segment(uri), allow_unicode=True):
+            if not identifier_slug_base(uri):
                 # T029, decisions.md D35: the slug now derives from the identifier's own
                 # segment, not the label, so this is what can slugify to nothing — a
                 # publisher-assigned fragment or path segment made up only of characters
@@ -1036,7 +1101,15 @@ class ConceptImporter:
             concept.static_uri = uri
             concept.label = label
             self.assign_unique_slug(concept, taken_slugs, created=created)
-            concept.save()
+            try:
+                concept.save()
+            except ValidationError:
+                # T045, SEC-301, decisions.md D50 (fix cycle 4): the same escape as
+                # SchemeResolver's own row.save() call, one record kind over — a matched
+                # concept's slug is read back unchanged (T041), so a value written out of band
+                # reaches Concept.save()'s manual-slug validation exactly as stored.
+                self.report.add_set_aside(SetAsideReason.STORED_SLUG_INVALID, subject=uri)
+                continue
             if winning_tag.lower() != default_language.lower():
                 # T009, FR-006: concept.label is stored content too — a value that made it in
                 # under a different language than published is a normalisation, not a silent
@@ -1435,7 +1508,7 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
                 )
                 continue
 
-            if not slugify(identifier_slug_segment(uri), allow_unicode=True):
+            if not identifier_slug_base(uri):
                 # T039, decisions.md D35 (fix cycle 3): the same guard import_concepts
                 # already applies for EMPTY_SLUG — a publisher-assigned fragment or path
                 # segment made up only of characters slugify() strips. Checked ahead of the
@@ -1449,9 +1522,12 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
             row.static_uri = uri
             default_language = self.target_scheme.effective_default_language
             name_match = _localized_literal(self.skos_graph, self.matcher, node, SKOS.prefLabel, default_language)
-            winning_tag = default_language
             if name_match is None:
-                name = self.skos_graph.first_literal(node, SKOS.prefLabel)
+                # T047, CORR-305, decisions.md D52 (fix cycle 4): report the language this
+                # any-language fallback actually found the value in, not the default it fell
+                # back from — resolve_scheme's own name fallback has the identical fix.
+                any_literal = self.skos_graph.first_literal_with_language(node, SKOS.prefLabel)
+                name, winning_tag = any_literal if any_literal is not None else (None, default_language)
             else:
                 name, winning_tag = name_match
                 if winning_tag.lower() != default_language.lower():
@@ -1463,13 +1539,23 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
                         language=winning_tag,
                         kept_as=default_language,
                     )
-            name_max_length = Collection._meta.get_field("name").max_length
-            if name and name_max_length is not None and len(name) > name_max_length:
+            # ARCH-306, fix cycle 4, decisions.md D55: cast, not an `is not None` check — see
+            # the identical note on resolve_scheme's own name-length read.
+            name_max_length = cast(int, Collection._meta.get_field("name").max_length)
+            if name and len(name) > name_max_length:
                 # T042, SEC-002-shaped, decisions.md D35 (fix cycle 3): the same pre-write guard
                 # resolve_scheme's own name write applies — row.save() never calls full_clean(),
                 # so an over-long name would otherwise reach the database unchecked on SQLite and
                 # raise a bare DataError on PostgreSQL.
                 self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=uri, language=winning_tag)
+                if created:
+                    # T044, decisions.md D49 (fix cycle 4, ARCH-301/CORR-303/SEC-302): unlike a
+                    # vocabulary, a collection is not something the rest of the file needs in
+                    # order to import — but a *created* collection still has no earlier name to
+                    # fall back to, so the whole collection is set aside rather than persisted
+                    # with a blank name a row full_clean() would then refuse. A *matched*
+                    # collection already has a name and keeps it exactly as held.
+                    continue
             elif name:
                 row.name = name
             row.ordered = ordered
@@ -1484,7 +1570,16 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
                 max_length = cast(int, Collection._meta.get_field("slug").max_length)
                 row.slug = unique_slug_for_identifier(uri, taken_slugs, max_length)
             row.slug_is_manual = True
-            row.save()
+            try:
+                row.save()
+            except ValidationError:
+                # T045, SEC-301, decisions.md D50 (fix cycle 4): the same escape as
+                # ConceptImporter.import_concepts and SchemeResolver.resolve_scheme, the third
+                # record kind — a matched collection's slug is read back unchanged (T041), so a
+                # value written out of band reaches Collection.save()'s manual-slug validation
+                # exactly as stored.
+                self.report.add_set_aside(SetAsideReason.STORED_SLUG_INVALID, subject=uri)
+                continue
             if created:
                 self.report.add_created(uri)
             else:
