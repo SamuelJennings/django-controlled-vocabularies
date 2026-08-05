@@ -579,3 +579,25 @@ distinguishing signal here, not membership.
 **Revisit if:** never — the asymmetry's underlying rule is a `craft-simplify` case for staying
 where it is: no cardinality contest is not an omission needing a control-flow branch, it is the
 model's own constraint (or its absence) already deciding whether one is needed.
+
+## D30 — T016 needed no production change, and its two tests are the same shape as D26/D29
+
+FR-009's additive guarantee — a re-import after a language is added stores that language's values
+for the concepts already present — is, per its own spec section, already true as a consequence of
+`import_labels`/`import_concepts` resolving every published tag through `LanguageMatcher` on every
+run: nothing in the matching path remembers which languages a previous run saw configured, so a
+second run under a wider `LANGUAGES` simply matches more of the same file's tags than the first did.
+T016 is a coverage task by tasks.md's own text, the same shape D26 recorded for T011/T012 and D29
+for T015: two tests, each asserting a falsifiable claim rather than a tautology, both passed on
+first run, no production code changed.
+
+`rocks.ttl` — already the reference fixture per D16 — was reused rather than a new one written: its
+`igneous`/`granite`/`sedimentary` concepts each carry an exact `fr` preferred label with no variant
+contest to entangle, and the file's `fr` occurrences are countable by hand (three, one per concept),
+which is what makes `first_report.language_account().get("fr") == 3` a real assertion rather than a
+guess at the fixture's shape. The two-run scenario is driven through `import_skos` from the file on
+disk both times, `override_settings(LANGUAGES=...)` between them, per the brief's acceptance text —
+no report or model object is hand-built.
+
+**Revisit if:** never — the same reasoning as D26/D29 applies: a coverage task for behaviour a prior
+phase's design already delivers has nothing left to drive into existence.

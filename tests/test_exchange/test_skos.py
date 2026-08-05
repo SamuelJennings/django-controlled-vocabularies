@@ -1779,6 +1779,39 @@ class TestAlternativeLabelsHiddenLabelsAndNotesHaveNoPerLanguageContest:
         ]
 
 
+class TestReimportAfterAddingALanguageStoresItsValues:
+    """T016 — FR-009/SC-014/SC-016: a file imported into a site configured for one language, then
+    re-imported after the site is reconfigured for a second language the file also carries, stores
+    that language's values for the concepts already present, and the report no longer counts them
+    as left behind. ``rocks.ttl`` already carries ``en``/``de``/``fr`` preferred labels for exactly
+    this population (decisions.md D16's own reference fixture)."""
+
+    def test_the_added_language_s_preferred_labels_are_stored_for_existing_concepts(self, db):
+        with override_settings(LANGUAGES=[("en", "English")]):
+            import_skos(FIXTURES / "rocks.ttl")
+        igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
+        assert igneous.preferred_label("fr") is None
+
+        with override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]):
+            import_skos(FIXTURES / "rocks.ttl")
+
+        igneous.refresh_from_db()
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        sedimentary = Concept.objects.get(static_uri="http://example.org/rocks/sedimentary")
+        assert igneous.preferred_label("fr") == "Roche ignée"
+        assert granite.preferred_label("fr") == "Granite"
+        assert sedimentary.preferred_label("fr") == "Roche sédimentaire"
+
+    def test_the_second_run_s_report_no_longer_counts_the_newly_stored_language_as_left_behind(self, db):
+        with override_settings(LANGUAGES=[("en", "English")]):
+            first_report = import_skos(FIXTURES / "rocks.ttl")
+        assert first_report.language_account().get("fr") == 3
+
+        with override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]):
+            second_report = import_skos(FIXTURES / "rocks.ttl")
+        assert "fr" not in second_report.language_account()
+
+
 class TestUnconfiguredLanguageValuesAreSetAside:
     """T020 — FR-014: a label or note in a language the site is not configured
     for is stored nowhere and is named in the report with its language, and

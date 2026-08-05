@@ -243,3 +243,16 @@ Append-only log of stage transitions and gate outcomes.
   .`, `ruff format --check .`, `mypy controlled_vocabularies`, `deptry .`. Worktree clean. Two
   non-obvious choices recorded as D27–D28, one characterization choice as D29. Next: US-4 (#72,
   T016–T017) — adding a language and re-importing fills it in.
+
+- **S4 IMPLEMENT — US-4 (#72, T016–T017), Implementer.** `craft-tdd` and `craft-increments` loaded
+  by name, receipts verified against the brief before any task started. Baseline confirmed green
+  (758 tests, HEAD `1cbf596`) before touching anything.
+  - **T016** — `TestReimportAfterAddingALanguageStoresItsValues`, driving the whole path from
+    `rocks.ttl` on disk through `import_skos` twice, `override_settings(LANGUAGES=...)` between
+    the runs, per the brief's acceptance text: first under `LANGUAGES=[en]` alone, then under
+    `LANGUAGES=[en, fr]`. Two tests: the concepts already present (`igneous`, `granite`,
+    `sedimentary`) carry their exact `fr` preferred labels after the second run, having carried
+    none after the first (SC-014); and the second run's `report.language_account()` no longer
+    counts `fr` (three occurrences, one per concept, counted by hand against the fixture) as left
+    behind, while the first run's did (SC-016). Both passed on first run — no production code
+    changed, recorded as D30, the same shape D26/D29 recorded for T011/T012 and T015.
