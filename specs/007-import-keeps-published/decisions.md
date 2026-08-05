@@ -1260,6 +1260,17 @@ report.
 model refuses, applied to a whole record's own write for a reason the published file did not
 cause.
 
+**Correction (CORR-407, 2026-08-05, fix cycle 5):** the description above of the scheme's call
+site is stale within this same fix cycle — T050/ARCH-304 (D55, below) replaced
+`row.set_slug(row.slug)` with the two statements it performed directly, so `resolve_scheme` has
+never called `set_slug()`; see D55. The "no fatal finding" outcome this entry describes for the
+scheme is also superseded, by T052/D57 (fix cycle 5): a matched scheme that cannot be written now
+adds `FatalReason.VOCABULARY_RECORD_INVALID` alongside `STORED_SLUG_INVALID`, because nothing else
+in the file has a resolved vocabulary to import into once the scheme itself is not written. The
+underlying diagnosis and the choice to use `SetAsideReason` for the slug specifically remain
+correct; only these two details are corrected here rather than rewritten in place, per this file's
+own append-only convention.
+
 ## D51 — T046 (fix cycle 4): a collision suffix as long as the field slices the base away
 
 SEC-303: `unique_slug_for_identifier`'s collision retry computed `base[: max_length -
@@ -1282,6 +1293,12 @@ exceeds the field.
 
 **Revisit if:** never — a one-line unit test on the helper (`TestUniqueSlugForIdentifierTruncationNeverSlicesNegative`)
 covers it directly; no call site needs to change.
+
+**Correction (SEC-405, 2026-08-05, fix cycle 5):** the "does not guarantee" caveat above is
+resolved, not merely documented — see D63, below. The docstring's own claim that the candidate
+"never exceeds `max_length`" was left false for the case this entry already named as unreachable
+in practice; D63 makes it true by construction instead of leaving the gap between the code and its
+own documented contract open.
 
 ## D52 — T047 (fix cycle 4): the any-language name fallback now names its own language, not the
 target it fell back from
@@ -1417,3 +1434,285 @@ guard.
 
 **Revisit if:** never — all four are legibility/consistency cleanups with no behaviour change;
 verified by the unchanged 847-test suite, `mypy`, and `makemigrations --check --dry-run`.
+
+## D56 — T051 (fix cycle 5): the any-language name fallback picks a storable literal, not
+merely the lexicographically first one
+
+SEC-401 (round 4, high): T047's `SkosGraph.first_literal_with_language` selects the
+lexicographically first literal of a predicate, full stop — it has no idea whether the caller can
+store it. `resolve_scheme` and `import_collections` both use it as their any-language fallback
+only when the effective default language carries no `skos:prefLabel` at all. When a publisher's
+file carries, say, a 300-character `@de` name and a 16-character `@fr` one, and the site's default
+language is neither, the fallback sorts on the raw string and can pick the 300-character value —
+which T044 then measures against `name_max_length` and treats as "no name this application can
+store," fatal for a created scheme, whole-record set-aside for a created collection — even though
+the file plainly carries a storable name one triple away.
+
+Reproduced against `540648a`: exactly that file (300-char `@de` scheme name plus a storable `@fr`
+one, one concept) raised `SkosImportFailed` with zero rows written; the collection counterpart
+dropped the whole collection. Removing either the `@de` triple or renaming it to sort after `@fr`
+made the import succeed, which is the sort-order dependency by itself.
+
+**Fixed at the one place the fallback is computed**, not at each of its two callers separately:
+`first_literal_with_language` takes an optional `max_length` and, when given, restricts its
+candidate pool to literals that fit before sorting. Both callers now compute their field's
+`max_length` before the name/description block (previously computed after, since nothing earlier
+needed it) and pass it to the fallback call. When nothing published fits — the genuine "no name
+this application can store" case — the filtered call returns `None` and the caller falls through
+to the original unfiltered call, purely to have a representative value for the fatal/set-aside
+message; the length check immediately below still catches it and refuses (scheme) or drops
+(collection) exactly as T044 already does when every candidate is unusable.
+
+Deliberately narrow: this only fixes the fallback branch (`name_match is None` — no candidate in
+the effective default language at all). CORR-402 (round 4, medium) names a related but distinct
+shape — the effective-default-language match itself being over-long while another language has a
+storable name — which fix cycle 5 addresses separately (T054, this file's own next entry) because
+it is a different branch of the same function and the review scoped it as its own finding.
+
+**Revisit if:** never — a caller wanting "the best value I can actually store" from an RDF literal
+set is exactly what `max_length` on this one shared accessor gives both callers, without a second
+copy of the filtering logic.
+
+## D57 — T052 (fix cycle 5): a scheme's write failure is only a slug problem when it names the
+slug, and either way the vocabulary is unresolved
+
+CORR-401/SEC-402/SEC-403 (round 4, two high, one medium): T045's `except ValidationError` around
+`resolve_scheme`'s `row.save()` converted *every* `ValidationError` `ConceptScheme.save()` can
+raise into `SetAsideReason.STORED_SLUG_INVALID`, and its own `return None, None` was the one exit
+from this method never preceded by `add_fatal` — unlike `VOCABULARY_UNDETERMINED`,
+`VOCABULARY_TARGET_MISMATCH`, `VOCABULARY_SLUG_UNUSABLE` and `VOCABULARY_NAME_UNUSABLE`, all four
+of which stop the run.
+
+Two faults, reproduced separately against `540648a`. **Mislabelling:** `ConceptScheme.save()`
+raises `ValidationError` for four reasons — the frozen-default-language check, the
+configured-language check, `_validate_manual_slug()`, and the slug-collision check — and only the
+last two are slug problems. A matched row's `default_language` is never reassigned by
+`resolve_scheme` (D46), so a value that was a configured language when the row was written but has
+since been dropped from `settings.LANGUAGES` reaches `save()` unchanged on every later import and
+raises for `default_language`, not `slug`. The old handler reported `STORED_SLUG_INVALID` anyway —
+false, since the stored slug is untouched and perfectly valid. **Success-shaped no-op:** whichever
+field failed, `resolve_scheme` returned `(None, None)` with no fatal, `SkosImporter.run` gates the
+whole concept/relation/collection phase on `target_scheme is not None`, and `report.fatal == []`
+is what the module's own docstring defines as a successful run — so a file whose scheme could not
+be written completed "successfully" having imported nothing, with only the one set-aside entry to
+show for it.
+
+**Fixed with two changes to the one `except` clause, not two separate try/except blocks.** The
+caught `exc.message_dict` is checked for the key `"slug"`: only then does `STORED_SLUG_INVALID`
+still fire, naming the actual cause `_validate_manual_slug()`/the collision check raises for.
+Separately, a new `FatalReason.VOCABULARY_RECORD_INVALID` is always added alongside whatever
+set-aside did or did not fire — the same precedent `VOCABULARY_SLUG_UNUSABLE` already sets for "no
+resolvable vocabulary, nothing for the rest of the file to import into," generalised from "the
+slug could never be minted" to "the write itself failed for any reason." `import_skos` now raises
+`SkosImportFailed` for both scenarios instead of returning a report that looks like nothing was
+wrong.
+
+**Concept's and Collection's own `except ValidationError` wrappers are untouched.** `Concept.save()`
+and `Collection.save()` under `slug_is_manual` raise only for slug reasons (empty, malformed, the
+in-scheme collision), and a matched *record's* failure to write does not gate anything else in the
+file the way an unresolved *vocabulary* does — the scheme is the one call site where both faults
+apply.
+
+**A pre-existing test is strengthened, not weakened.** T045's
+`test_a_scheme_s_out_of_band_slug_failing_validation_does_not_escape_import_skos` asserted
+`report.fatal == []`, which was exactly D50's now-corrected premise ("there is nothing else in the
+file to salvage or protect by rolling the whole run back") — untrue, since nothing in the file
+gets a chance to import once the scheme cannot be resolved. The test now asserts `import_skos`
+raises `SkosImportFailed` with one `VOCABULARY_RECORD_INVALID` fatal, keeping its original
+`STORED_SLUG_INVALID` set-aside assertion unweakened alongside it.
+
+**Revisit if:** never — the same "unwritable vocabulary is fatal" rule `VOCABULARY_SLUG_UNUSABLE`
+already gives an identifier that cannot be minted, applied to a write that fails after the
+identifier was fine.
+
+## D58 — T054 (fix cycle 5): a created record's over-long default-language name also gets a
+second-chance storable fallback, not only the any-language branch
+
+CORR-402 (round 4, medium): D56/T051 fixed the any-language fallback (`name_match is None` —
+nothing published in the effective default language at all) to prefer a storable literal. It left
+one branch untouched: when the default-language `skos:prefLabel` *does* exist but is itself
+over-long, `_localized_literal` returns it directly, `name_match` is not `None`, and the
+any-language fallback never runs at all — so a created scheme was still fatal
+(`VOCABULARY_NAME_UNUSABLE`), and a created collection still dropped whole, even when a different
+configured language published a storable name in the same file.
+
+Reproduced against the D56 fix (before this entry): a scheme publishing `skos:prefLabel
+"AAA…(300)"@en, "Roches"@fr` under a site whose default language is `en` still raised
+`SkosImportFailed`, and the collection counterpart still dropped the whole record — the `@fr`
+value was never considered because the `@en` one satisfied `_localized_literal` first.
+
+**Fixed at the length check itself, not by restructuring the name-resolution branch.** Immediately
+before a *created* record's name is declared unusable — the fatal for a scheme, the whole-record
+`continue` for a collection — the same `first_literal_with_language(..., max_length=...)` call D56
+already added is tried once more. Finding a storable value there reports the lost default-language
+name as `VALUE_TOO_LONG` (the same reason a matched record's over-long name already gets) and uses
+the storable value in its place; finding nothing storable falls through to the original fatal/
+whole-record outcome exactly as before. A matched record's branch is untouched — it already keeps
+its stored name regardless.
+
+Deliberately no `NormalizedReason.LANGUAGE_SUBSTITUTION` for the value that wins here, matching
+D52's own precedent: that reason names a matcher-resolved variant of the *target* language, not an
+unrelated language stepped in for one that failed outright. The `VALUE_TOO_LONG` entry alone
+already tells a curator which value was lost and why.
+
+**Revisit if:** never — the same storable-first-literal fallback D56 introduced, reached from a
+second call site the review named as the branch it does not yet cover.
+
+## D59 — T054 (fix cycle 5): the blank-name guard also closes for a node with no
+skos:prefLabel published at all
+
+SEC-404 (round 4, medium): D49/T044 closed the blank-name shape only for the trigger it was
+written against — an over-long name. The other way `name` stays unusable is a node publishing no
+`skos:prefLabel` at all: `_localized_literal` returns `None`, the any-language fallback (T051's
+`first_literal_with_language`) also returns `None` because there is nothing to select from, and
+`name` itself is `None`. The over-long branch is skipped for falsiness (`if name and len(name) >
+max_length`) and so is the assignment (`elif name:`), so a created scheme or collection reaches
+`row.save()` with `name` still at the field default `''` — the identical `full_clean()` failure
+D49 already declares impossible for a created record, reached by a route the length check does
+not see.
+
+Reproduced against the D58 fix (before this entry): a scheme node carrying only
+`dcterms:description`, no `skos:prefLabel`, imported with `report.fatal == []` and
+`ConceptScheme(name='', slug='...')` persisted; the collection counterpart persisted the same way.
+
+**Fixed with one `elif created:` clause added after the existing name-assignment branch, at both
+call sites**, taking the same created-record outcome the over-long branch already takes — fatal
+(`VOCABULARY_NAME_UNUSABLE`) for a scheme, whole-record set-aside for a collection — rather than a
+fourth `SetAsideReason`/`FatalReason` variant naming "no name published" specifically. The
+collection's reused `VALUE_TOO_LONG` message is imprecise for this trigger (there is no over-long
+value to name), a trade-off accepted deliberately: the record-level outcome a curator needs to
+notice — this collection was not created — is identical to the sibling trigger's, and a query
+against the language account (`report.set_aside`, grouped by reason) is unaffected either way,
+since `VALUE_TOO_LONG` was never part of `_LANGUAGE_ACCOUNT_REASONS` in the first place.
+
+**Revisit if:** the reused-message imprecision becomes a real curator complaint — at that point a
+dedicated `RECORD_NAME_UNPUBLISHED`-shaped reason is worth minting for both the scheme and the
+collection side together, rather than patched piecemeal.
+
+## D60 — T054 (fix cycle 5): a dropped collection gets its own reason, distinct from a value
+lost off a record that still exists
+
+CORR-404 (round 4, medium): a matched collection whose re-published name is unusable keeps its
+stored name and stays exactly as it was — `SetAsideReason.VALUE_TOO_LONG`, whose message ("it was
+not stored") accurately describes one field lost off a record that still exists. A *created*
+collection in the same situation is dropped in full: no row, no membership, no `add_created`. Both
+reported `VALUE_TOO_LONG` and nothing else, so the two outcomes — "this collection exists minus
+its name" and "this collection does not exist" — were distinguishable only by querying the
+database the report exists to describe. D59's own fix for SEC-404 (no `skos:prefLabel` published
+at all) made this worse by reusing `VALUE_TOO_LONG` a third way, for a trigger with no over-long
+value to name at all.
+
+**Fixed with a new `SetAsideReason.COLLECTION_NOT_CREATED`**, added alongside (not instead of)
+`VALUE_TOO_LONG` at the "over-long, created, nothing storable to fall back to" site — a curator
+still learns which value was too long *and* that the record was dropped — and used alone at the
+"no name published at all" site D59 introduced, since there is no over-long value to name there.
+Neither site's existing `VALUE_TOO_LONG` assertions needed to change: the pre-existing T044 test
+(`test_a_collection_name_longer_than_the_field_sets_aside_the_whole_collection_on_first_import`)
+filters its own entries by `VALUE_TOO_LONG` specifically, so an additional `COLLECTION_NOT_CREATED`
+entry alongside it is invisible to that assertion. D59's own new test, which had reused
+`VALUE_TOO_LONG` for the no-name-at-all trigger, is updated in place to check the new reason —
+authored in this same fix cycle, not a pre-existing test from an earlier one.
+
+A scheme has no equivalent gap: an unusable created-scheme name is always fatal
+(`VOCABULARY_NAME_UNUSABLE`), never a set-aside, so there is no "record exists minus its name"
+sibling state to confuse it with.
+
+**Revisit if:** never — the same "name the record-level outcome separately from the value-level
+one" rule the report's other reasons already follow (e.g. `ALREADY_IN_ANOTHER_VOCABULARY` naming a
+record decision, not a value), applied to the one place a collection's own creation is silently
+implied by a value-level reason's absence of a record.
+
+## D61 — T054 (fix cycle 5): assert the manual-slug refusal message, not only its type
+
+CORR-405 (round 4, low): T048's `test_explicit_slug_that_is_empty_or_malformed_is_refused`
+asserted only `pytest.raises(ValidationError)` for `set_slug("")`. `_validate_manual_slug`
+(models.py) raises an empty-specific message for that case, but Django's own
+`validate_unicode_slug` (`^[-\w]+\Z`) also rejects the empty string, so deleting the
+empty-specific raise and falling through to the generic validator's own `ValidationError` left
+the test green — confirmed by temporarily replacing the raise with `pass` and re-running
+`TestCollectionOverridableSlug`: unchanged, 5 passed.
+
+**Fixed by asserting `message_dict["slug"]` against the exact string each raise produces** rather
+than only the exception's type — the empty-specific message for `set_slug("")`, and the
+malformed-specific one (shared by `validate_unicode_slug`'s rejection) for `"foo/bar"` and `"has
+spaces"`. Re-running the same mutation against the strengthened test now fails it for the right
+reason (`AssertionError` on the message, not a swallowed `ValidationError`), confirmed and
+reverted in the worktree before committing — the production code is unchanged.
+
+Scoped to the one test CORR-405 named. `Concept`'s own manual-slug test
+(`TestReviewHardening.test_explicit_slug_with_invalid_characters_is_refused`) has no empty-slug
+case at all — a gap that predates this feature entirely and is out of this cycle's scope, since
+CORR-405 named only the test T048 itself introduced.
+
+**Revisit if:** never — the shared `_validate_manual_slug` means this one strengthened test
+already proves both raises for all three models; there is nothing left to weaken again.
+
+## D62 — T054 (fix cycle 5): two documentation casualties from T049's extraction, restored
+
+CORR-406/CORR-407 (round 4, both low): T049's extraction of `slug_is_manual` onto
+`StaticUriModel` (D54) dropped the `No db_index: ...` comment both concrete field declarations
+carried, with no replacement — `grep -rn db_index controlled_vocabularies/` returned nothing.
+Separately, `StaticUriModel.set_slug()`'s shared docstring (also written by T049) claims "only
+`SchemeResolver.resolve_scheme` routes an import through it," which T050 — later in the very same
+fix cycle — made false: ARCH-304 replaced `resolve_scheme`'s `row.set_slug(row.slug)` with the two
+statements it performed directly, so no production code calls `set_slug()` at all (D55 says so in
+so many words). D50's own prose, describing the pre-ARCH-304 shape, went stale in the same cycle
+that wrote D55 correcting it, and was never itself annotated.
+
+**Both restored where the code now lives, not by reverting the extraction.** The `db_index`
+rationale is added to `_slug_is_manual_field`'s own docstring — the one place the field is
+declared now, covering all three models at once rather than three copies drifting again.
+`set_slug()`'s docstring is corrected to state the actual routing (all three importers assign
+`slug`/`slug_is_manual` directly and save once) instead of naming a call site that no longer
+exists. D50 is corrected in place with an appended, dated note pointing at D55 and at this cycle's
+own D57, rather than rewritten — this file's entries are a record of what was decided and why, not
+a living description of the current call graph, so the correction is additive.
+
+**Revisit if:** never — both are wording-only; `poetry run pytest tests/test_models.py
+tests/test_standards.py`, `ruff`, and `mypy` are unchanged.
+
+## D63 — T054 (fix cycle 5): unique_slug_for_identifier's candidate is clamped to max_length,
+matching its own documented contract
+
+SEC-405 (round 4, low): T046/D51 truncated the *base* to leave room for the suffix
+(`base[: max(max_length - len(suffix_text), 1)]`), but the function's own docstring claimed the
+returned candidate "never exceeds `max_length` however many collisions it resolves" — false once
+`max_length` is smaller than `len(suffix_text) + 1`: keeping one base character plus the whole
+suffix still overruns the field. Reproduced: `unique_slug_for_identifier('http://e.org/#ab',
+{'ab': 'other', 'b-2': 'other2'}, 2)` returns `'a-2'`, three characters against a `max_length` of
+two. D51 already named this gap and judged it unreachable at any of the three current call sites
+(`SlugField(max_length=255)` everywhere; a suffix long enough to reach it needs on the order of
+10^250 colliding records sharing one base) — correct as a risk assessment, but the docstring still
+asserted a guarantee the code did not keep.
+
+**Fixed by clamping the assembled candidate, not only the base:** `(base[: max(max_length -
+len(suffix_text), 1)] + suffix_text)[:max_length]`. A new test,
+`test_a_collision_suffix_longer_than_max_length_still_fits_within_max_length`, reproduced the gap
+RED (`len('a-2') == 3 > 2`) before the fix and is green after it, alongside the existing
+`TestUniqueSlugForIdentifierTruncationNeverSlicesNegative` cases, both unaffected since 255 never
+reaches this branch either way.
+
+**Revisit if:** never — the docstring's contract and the code now agree unconditionally, so there
+is nothing left to reconcile if a future call site ever does pass a small `max_length`.
+
+## D64 — T054 (fix cycle 5): an empty language tag renders as a phrase, not empty quotes,
+fixed at the one boundary every entry's message passes through
+
+SEC-406 (round 4, low): `SkosGraph.first_literal_with_language` reports `""` for an untagged
+literal (D52), deliberately — the two accessors must never disagree about *which* literal, and an
+untagged one simply has no tag to report. When that value is over-long, `winning_tag` carries `""`
+into `SetAsideReason.VALUE_TOO_LONG` (from either the scheme or the collection path) or
+`FatalReason.VOCABULARY_NAME_UNUSABLE`, and the rendered message reads "...its published name in
+'' is longer than..." — nothing unsafe or leaked (`craft-security`'s own review confirmed only the
+URI and a grammar-constrained language tag ever reach a template), just uninformative.
+
+**Fixed once, at `SetAsideEntry.render()`/`FatalFinding.render()`'s shared parameter-building
+step**, not at each of the two call sites that can produce an empty tag: a new module-level
+`_render_params(subject, params)` substitutes a translatable `"no language tag"` phrase for an
+empty `"language"` value before formatting. Both `render()` methods (and `NormalizedEntry.render()`,
+for symmetry, though `LANGUAGE_SUBSTITUTION` cannot currently receive an empty tag) call it instead
+of building the `%`-format dict inline. A future reason carrying `language` gets the same
+treatment automatically rather than needing its own guard.
+
+**Revisit if:** never — one substitution point for every entry type, matching the "one computation,
+one shape" rule the report module's other shared logic already follows.

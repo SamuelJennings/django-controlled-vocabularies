@@ -23,6 +23,22 @@ from django.db.models import TextChoices
 from django.utils.functional import Promise
 from django.utils.translation import gettext_lazy as _
 
+#: SEC-406, decisions.md D64 (fix cycle 5): SkosGraph.first_literal_with_language reports "" for
+#: an untagged literal (D52) — a caller naming that value in a %(language)s placeholder would
+#: otherwise render "...in ''...", which leaks nothing but tells a curator nothing either. Every
+#: render() below substitutes this phrase for an empty language, at the one boundary all of a
+#: report's messages pass through, rather than each call site guarding its own params.
+_NO_LANGUAGE_TAG = _("no language tag")
+
+
+def _render_params(subject: str, params: dict[str, str]) -> dict[str, str]:
+    """``params`` merged with ``subject``, substituting :data:`_NO_LANGUAGE_TAG` for an empty
+    ``language`` value (SEC-406, decisions.md D64) — shared by every entry's own ``render()``."""
+    merged = {"subject": subject, **params}
+    if merged.get("language") == "":
+        merged["language"] = str(_NO_LANGUAGE_TAG)
+    return merged
+
 
 class SetAsideReason(TextChoices):
     """The closed vocabulary of reasons an import cannot store something (FR-014).
@@ -92,6 +108,14 @@ class SetAsideReason(TextChoices):
     T041's read-back means that value now reaches the write path unchanged,
     and the record is set aside rather than letting ``ValidationError``
     escape ``import_skos`` outside its own exception hierarchy.
+    ``COLLECTION_NOT_CREATED`` (fix cycle 5, CORR-404, decisions.md D60) names
+    the record-level outcome when a *created* collection's name is unusable —
+    over-long with nothing storable to fall back to, or absent altogether —
+    distinct from ``VALUE_TOO_LONG``, which names a value lost from a record
+    that still exists. Without this, both a matched collection keeping its old
+    name and a created collection dropped in full rendered the identical
+    ``VALUE_TOO_LONG`` entry, distinguishable only by querying the database
+    the report exists to describe.
     """
 
     UNCONFIGURED_LANGUAGE = "unconfigured_language", _("language not configured")
@@ -112,6 +136,7 @@ class SetAsideReason(TextChoices):
     VARIANT_NOT_KEPT = "variant_not_kept", _("language variant not kept")
     VALUE_TOO_LONG = "value_too_long", _("value exceeds the maximum length this application can store")
     STORED_SLUG_INVALID = "stored_slug_invalid", _("stored slug no longer passes validation")
+    COLLECTION_NOT_CREATED = "collection_not_created", _("collection was not created for want of a usable name")
 
     @property
     def template(self) -> Promise:
@@ -194,6 +219,9 @@ _REASON_TEMPLATES: dict[SetAsideReason, Promise] = {
         "'%(subject)s' has a stored slug that no longer passes this application's own validation; "
         "it was left exactly as stored, and nothing else about it was imported this run."
     ),
+    SetAsideReason.COLLECTION_NOT_CREATED: _(
+        "'%(subject)s' was not created because it has no name this application can store."
+    ),
 }
 
 
@@ -215,7 +243,7 @@ class SetAsideEntry:
 
     def render(self) -> str:
         """This entry's message in the caller's active language (Article XII)."""
-        return str(self.reason.template) % {"subject": self.subject, **self.params}
+        return str(self.reason.template) % _render_params(self.subject, self.params)
 
 
 class FatalReason(TextChoices):
@@ -251,7 +279,16 @@ class FatalReason(TextChoices):
     ``full_clean()`` immediately refuses — the same reasoning
     ``VOCABULARY_SLUG_UNUSABLE`` already gives for an unusable identifier,
     applied to the other field nothing else in the file can supply on the
-    vocabulary's behalf.
+    vocabulary's behalf. ``VOCABULARY_RECORD_INVALID`` (fix cycle 5, CORR-401/
+    SEC-402, decisions.md D57) names a *matched* scheme whose write itself
+    fails the model's own validation for a reason the published file did not
+    cause — a stored value written out of band, or a configured language later
+    dropped from ``settings.LANGUAGES``. Without a resolved vocabulary the rest
+    of the file has nothing to import into, the same reasoning
+    ``VOCABULARY_SLUG_UNUSABLE`` gives when a slug cannot even be minted;
+    unlike that reason, the specific field named — a slug or something else —
+    is reported separately, as a :class:`SetAsideReason` where one exists
+    (``STORED_SLUG_INVALID``) rather than folded into this fatal's own message.
     """
 
     MISSING_IDENTITY = "missing_identity", _("identifier missing or blank")
@@ -264,6 +301,10 @@ class FatalReason(TextChoices):
     VOCABULARY_NAME_UNUSABLE = (
         "vocabulary_name_unusable",
         _("vocabulary's name is longer than this application can store"),
+    )
+    VOCABULARY_RECORD_INVALID = (
+        "vocabulary_record_invalid",
+        _("vocabulary's stored record fails its own validation and could not be written"),
     )
 
     @property
@@ -303,6 +344,10 @@ _FATAL_TEMPLATES: dict[FatalReason, Promise] = {
         "'%(language)s' is longer than this application can store, and there is no earlier "
         "name to keep; the run was refused."
     ),
+    FatalReason.VOCABULARY_RECORD_INVALID: _(
+        "'%(subject)s' has a stored record that fails this application's own validation and "
+        "could not be written; the run was refused."
+    ),
 }
 
 
@@ -324,7 +369,7 @@ class FatalFinding:
 
     def render(self) -> str:
         """This entry's message in the caller's active language (Article XII)."""
-        return str(self.reason.template) % {"subject": self.subject, **self.params}
+        return str(self.reason.template) % _render_params(self.subject, self.params)
 
 
 class NormalizedReason(TextChoices):
@@ -387,7 +432,7 @@ class NormalizedEntry:
 
     def render(self) -> str:
         """This entry's message in the caller's active language (Article XII)."""
-        return str(self.reason.template) % {"subject": self.subject, **self.params}
+        return str(self.reason.template) % _render_params(self.subject, self.params)
 
 
 @dataclass

@@ -1486,6 +1486,16 @@ class TestUniqueSlugForIdentifierTruncationNeverSlicesNegative:
         assert result != "-2"
         assert result.startswith("a")
 
+    def test_a_collision_suffix_longer_than_max_length_still_fits_within_max_length(self):
+        """SEC-405, decisions.md D63 (fix cycle 5): the docstring's own contract is "the returned
+        candidate never exceeds max_length however many collisions it resolves" — true only once
+        the fix below clamps the whole candidate, not only the base. Before it, ``max_length=2``
+        with a two-character suffix returned ``'a-2'`` (length 3): ``base[: max(2 - 2, 1)]`` keeps
+        one base character, but nothing then trims the assembled ``base + suffix`` back down.
+        """
+        result = unique_slug_for_identifier("http://e.org/#ab", {"ab": "other", "b-2": "other2"}, 2)
+        assert len(result) <= 2
+
     def test_a_normal_collision_is_unaffected_by_the_fix(self):
         """max_length comfortably larger than any suffix (the shape every real field is in,
         SlugField(max_length=255)) must keep resolving collisions exactly as before.
@@ -1725,6 +1735,197 @@ class TestOverLongNameSetAsideReportsThePublishedLanguage:
         assert collection.name == "Existing Group"
 
 
+class TestAnyLanguageFallbackPrefersAStorableName:
+    """T051 — SEC-401, decisions.md D56: T047's any-language fallback
+    (``SkosGraph.first_literal_with_language``) selected the lexicographically first literal
+    regardless of length, so a single over-long ``skos:prefLabel`` in one language could refuse
+    an entire first import even though the same file also published a perfectly storable name in
+    another language. The fallback now selects the first *storable* literal; only when nothing
+    published fits the field does the vocabulary become fatal (a scheme) or the whole collection
+    get set aside (a collection).
+    """
+
+    def test_a_created_scheme_with_one_over_long_and_one_storable_name_imports_using_the_storable_one(
+        self, db, tmp_path
+    ):
+        long_name = "A" * 300
+        path = tmp_path / "sec401_scheme.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            f"<http://pub.example/sec401scheme> a skos:ConceptScheme ; "
+            f'skos:prefLabel "{long_name}"@de, "Zebra Vocabulary"@fr .\n'
+            "<http://pub.example/sec401scheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec401scheme> ; skos:prefLabel "One"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        scheme = ConceptScheme.objects.get(static_uri="http://pub.example/sec401scheme")
+        assert scheme.name == "Zebra Vocabulary"
+        assert Concept.objects.filter(static_uri="http://pub.example/sec401scheme#c1").exists()
+
+    def test_a_created_collection_with_one_over_long_and_one_storable_name_imports_using_the_storable_one(
+        self, db, tmp_path
+    ):
+        long_name = "A" * 300
+        path = tmp_path / "sec401_collection.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec401collscheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/sec401collscheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec401collscheme> ; skos:prefLabel "One"@en .\n'
+            f"<http://pub.example/sec401collscheme#grp> a skos:Collection ; "
+            f'skos:prefLabel "{long_name}"@de, "Zebra Group"@fr .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        collection = Collection.objects.get(static_uri="http://pub.example/sec401collscheme#grp")
+        assert collection.name == "Zebra Group"
+
+
+class TestADroppedCollectionIsDistinguishableFromAMatchedOneThatKeptItsName:
+    """T054 — CORR-404, decisions.md D60 (fix cycle 5): a created collection whose name is
+    unusable is dropped whole (``continue``, no row ever written); a matched collection whose
+    re-published name is unusable keeps its stored one and stays exactly as it was. Both reported
+    only ``VALUE_TOO_LONG``, whose message ("it was not stored") describes a field-level omission
+    on a record that exists — the two outcomes were distinguishable only by querying the database
+    the report exists to describe. A created collection now also gets ``COLLECTION_NOT_CREATED``,
+    naming the record-level outcome.
+    """
+
+    def test_a_created_collection_dropped_for_an_unusable_name_also_gets_its_own_record_level_reason(
+        self, db, tmp_path
+    ):
+        long_name = "N" * 300
+        path = tmp_path / "corr404_collection.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/corr404collscheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            f'<http://pub.example/corr404collscheme#grp> a skos:Collection ; skos:prefLabel "{long_name}"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        assert not Collection.objects.filter(static_uri="http://pub.example/corr404collscheme#grp").exists()
+        value_too_long = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(value_too_long) == 1
+        not_created = [entry for entry in report.set_aside if entry.reason is SetAsideReason.COLLECTION_NOT_CREATED]
+        assert len(not_created) == 1
+        assert not_created[0].subject == "http://pub.example/corr404collscheme#grp"
+
+    def test_a_matched_collection_kept_name_reports_only_value_too_long_not_not_created(self, db, tmp_path):
+        scheme = ConceptSchemeFactory(name="Vocab", static_uri="http://pub.example/corr404collscheme2")
+        collection = CollectionFactory(
+            scheme=scheme, name="Existing Group", static_uri="http://pub.example/corr404collscheme2#grp"
+        )
+        long_name = "N" * 300
+        path = tmp_path / "corr404_collection_matched.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/corr404collscheme2> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            f'<http://pub.example/corr404collscheme2#grp> a skos:Collection ; skos:prefLabel "{long_name}"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        collection.refresh_from_db()
+        assert collection.name == "Existing Group"
+        not_created = [entry for entry in report.set_aside if entry.reason is SetAsideReason.COLLECTION_NOT_CREATED]
+        assert not_created == []
+
+
+class TestOverLongDefaultLanguageNameFallsBackToAnotherStorableLanguage:
+    """T054 — CORR-402, decisions.md D56 (fix cycle 5): T051 only fixed the any-language
+    fallback branch (nothing published in the effective default language at all). When the
+    default-language ``skos:prefLabel`` exists but is itself over-long, ``resolve_scheme`` and
+    ``import_collections`` never ran that fallback — ``name_match`` was not ``None`` — so a
+    created record was fatal (a scheme) or dropped whole (a collection) even when another
+    configured language published a storable name in the same file.
+    """
+
+    def test_a_created_scheme_whose_default_language_name_is_over_long_falls_back_to_another_language(
+        self, db, tmp_path
+    ):
+        long_name = "A" * 300
+        path = tmp_path / "corr402_scheme.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            f'<http://pub.example/corr402scheme> a skos:ConceptScheme ; skos:prefLabel "{long_name}"@en, "Roches"@fr .\n'
+            "<http://pub.example/corr402scheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/corr402scheme> ; skos:prefLabel "One"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        scheme = ConceptScheme.objects.get(static_uri="http://pub.example/corr402scheme")
+        assert scheme.name == "Roches"
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(entries) == 1
+        assert entries[0].params["language"] == "en"
+
+    def test_a_created_collection_whose_default_language_name_is_over_long_falls_back_to_another_language(
+        self, db, tmp_path
+    ):
+        long_name = "A" * 300
+        path = tmp_path / "corr402_collection.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/corr402collscheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/corr402collscheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/corr402collscheme> ; skos:prefLabel "One"@en .\n'
+            f"<http://pub.example/corr402collscheme#grp> a skos:Collection ; "
+            f'skos:prefLabel "{long_name}"@en, "Roches"@fr .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        collection = Collection.objects.get(static_uri="http://pub.example/corr402collscheme#grp")
+        assert collection.name == "Roches"
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(entries) == 1
+        assert entries[0].params["language"] == "en"
+
+
+class TestNoPublishedNameAtAllIsUnusableTheSameAsOverLong:
+    """T054 — SEC-404, decisions.md D56 (fix cycle 5): D49/T044 closed the blank-name shape only
+    for the over-long trigger. A created scheme or collection with no ``skos:prefLabel`` at all
+    never enters that guard — ``name`` stays ``None`` all the way through, the ``elif name:``
+    assignment is skipped for falsiness, and the row would otherwise persist with the field
+    default ``''``, which fails its own ``full_clean()`` forever after — the exact state D49
+    already declares impossible for a created record, reached by a different route.
+    """
+
+    def test_a_created_scheme_with_no_preflabel_at_all_is_fatal_not_persisted_blank(self, db, tmp_path):
+        path = tmp_path / "sec404_scheme.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            "@prefix dcterms: <http://purl.org/dc/terms/> .\n"
+            '<http://pub.example/sec404scheme> a skos:ConceptScheme ; dcterms:description "no name"@en .\n'
+            "<http://pub.example/sec404scheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec404scheme> ; skos:prefLabel "One"@en .\n'
+        )
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(path)
+        report = exc_info.value.report
+        assert len(report.fatal) == 1
+        assert report.fatal[0].reason is FatalReason.VOCABULARY_NAME_UNUSABLE
+        assert not ConceptScheme.objects.filter(static_uri="http://pub.example/sec404scheme").exists()
+
+    def test_a_created_collection_with_no_preflabel_at_all_is_set_aside_not_persisted_blank(self, db, tmp_path):
+        path = tmp_path / "sec404_collection.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec404collscheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/sec404collscheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec404collscheme> ; skos:prefLabel "One"@en .\n'
+            "<http://pub.example/sec404collscheme#grp> a skos:Collection ; "
+            "skos:member <http://pub.example/sec404collscheme#c1> .\n"
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        assert not Collection.objects.filter(static_uri="http://pub.example/sec404collscheme#grp").exists()
+        # CORR-404, decisions.md D60 (fix cycle 5): COLLECTION_NOT_CREATED, not a reused
+        # VALUE_TOO_LONG — there is no over-long value to name for this trigger.
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.COLLECTION_NOT_CREATED]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://pub.example/sec404collscheme#grp"
+
+
 class TestAStoredSlugThatFailsValidationIsSetAsideNotEscaped:
     """T045 — SEC-301, decisions.md D50 (fix cycle 4): T041's read-back means a matched record's
     already-stored slug reaches the model's manual-slug validation unchanged. A slug written out
@@ -1736,6 +1937,13 @@ class TestAStoredSlugThatFailsValidationIsSetAsideNotEscaped:
     """
 
     def test_a_scheme_s_out_of_band_slug_failing_validation_does_not_escape_import_skos(self, db, tmp_path):
+        """T052, CORR-401/SEC-402, decisions.md D57 (fix cycle 5): overturns the version of this
+        test fix cycle 4 shipped, which asserted ``report.fatal == []`` — the scheme could not be
+        resolved, so nothing else in the file has a target to import into, and a run that imports
+        nothing must not report ``fatal == []`` (every other ``return None, None`` in
+        ``resolve_scheme`` is preceded by ``add_fatal``; this one was not). The set-aside naming
+        the bad slug is unchanged; a fatal is now added alongside it.
+        """
         scheme = ConceptSchemeFactory(name="Sec Three O One Scheme", static_uri="http://pub.example/sec301scheme")
         ConceptScheme.objects.filter(pk=scheme.pk).update(slug="has spaces/and-slash")
         path = tmp_path / "sec301_scheme.ttl"
@@ -1744,14 +1952,56 @@ class TestAStoredSlugThatFailsValidationIsSetAsideNotEscaped:
             '<http://pub.example/sec301scheme> a skos:ConceptScheme ; skos:prefLabel "Sec Three O One Scheme"@en .\n'
         )
 
-        report = import_skos(path)
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(path)
 
-        assert report.fatal == []
+        report = exc_info.value.report
+        assert len(report.fatal) == 1
+        assert report.fatal[0].reason is FatalReason.VOCABULARY_RECORD_INVALID
         entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.STORED_SLUG_INVALID]
         assert len(entries) == 1
         assert entries[0].subject == "http://pub.example/sec301scheme"
         scheme.refresh_from_db()
         assert scheme.slug == "has spaces/and-slash"
+
+    def test_a_matched_scheme_s_unconfigured_stored_default_language_is_fatal_not_a_mislabeled_bad_slug(
+        self, db, tmp_path
+    ):
+        """T052, CORR-401/SEC-403, decisions.md D57 (fix cycle 5): ``ConceptScheme.save()`` raises
+        ``ValidationError`` for its configured-language check exactly as it does for a bad manual
+        slug, and a matched row's stored ``default_language`` is never reassigned by
+        ``resolve_scheme`` (D46) — so a language later dropped from ``settings.LANGUAGES`` reaches
+        this path with the slug untouched and perfectly valid. The bare ``except ValidationError``
+        T045 added could not tell the two apart and reported this as ``STORED_SLUG_INVALID``,
+        which is false: the stored slug never changes in this scenario.
+        """
+        scheme = ConceptSchemeFactory(
+            name="Corr Four O One Scheme",
+            static_uri="http://pub.example/corr401scheme",
+            default_language="de",
+        )
+        path = tmp_path / "corr401_scheme.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/corr401scheme> a skos:ConceptScheme ; skos:prefLabel "Corr Four O One Scheme"@en .\n'
+            "<http://pub.example/corr401scheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/corr401scheme> ; skos:prefLabel "One"@en .\n'
+        )
+
+        with (
+            override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]),
+            pytest.raises(SkosImportFailed) as exc_info,
+        ):
+            import_skos(path)
+
+        report = exc_info.value.report
+        assert len(report.fatal) == 1
+        assert report.fatal[0].reason is FatalReason.VOCABULARY_RECORD_INVALID
+        slug_entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.STORED_SLUG_INVALID]
+        assert slug_entries == []
+        assert not Concept.objects.filter(static_uri="http://pub.example/corr401scheme#c1").exists()
+        scheme.refresh_from_db()
+        assert scheme.default_language == "de"
 
     def test_a_concept_s_out_of_band_slug_failing_validation_does_not_escape_import_skos(self, db, tmp_path):
         path = tmp_path / "sec301_concept.ttl"

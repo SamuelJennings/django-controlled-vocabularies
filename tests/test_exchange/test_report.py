@@ -45,6 +45,7 @@ _EXAMPLE_PARAMS = {
     SetAsideReason.VARIANT_NOT_KEPT: {"language": "en-us", "kept_as": "en-gb"},
     SetAsideReason.VALUE_TOO_LONG: {"language": "en-gb"},
     SetAsideReason.STORED_SLUG_INVALID: {},
+    SetAsideReason.COLLECTION_NOT_CREATED: {},
 }
 
 # One example params dict per fatal reason (T007), the same shape as _EXAMPLE_PARAMS.
@@ -57,6 +58,7 @@ _EXAMPLE_FATAL_PARAMS = {
     FatalReason.DEFAULT_LANGUAGE_UNCONFIGURED: {"language": "en-us"},
     FatalReason.VOCABULARY_SLUG_UNUSABLE: {},
     FatalReason.VOCABULARY_NAME_UNUSABLE: {"language": "en"},
+    FatalReason.VOCABULARY_RECORD_INVALID: {},
 }
 
 # One example params dict per normalized reason (T021), the same shape as _EXAMPLE_PARAMS.
@@ -194,6 +196,34 @@ class TestSetAsideEntry:
         entry = SetAsideEntry(reason=SetAsideReason.NOTATION, subject="https://example.org/vocab/x")
         with pytest.raises((AttributeError, TypeError)):
             entry.subject = "changed"
+
+
+class TestAnEmptyLanguageTagRendersAsAPhraseNotAnEmptyQuote:
+    """SEC-406, decisions.md D64 (fix cycle 5): ``SkosGraph.first_literal_with_language`` reports
+    ``""`` (D52) for an untagged literal. When that value is over-long, ``winning_tag`` carries
+    ``""`` straight into ``VALUE_TOO_LONG``'s or ``VOCABULARY_NAME_UNUSABLE``'s ``%(language)s``
+    placeholder, rendering "...in ''..." — nothing unsafe or leaked, just uninformative.
+    """
+
+    def test_value_too_long_with_an_untagged_literal_names_no_language_tag_not_empty_quotes(self):
+        entry = SetAsideEntry(
+            reason=SetAsideReason.VALUE_TOO_LONG,
+            subject="https://example.org/vocab/rocks",
+            params={"language": ""},
+        )
+        rendered = entry.render()
+        assert "''" not in rendered
+        assert "no language tag" in rendered
+
+    def test_vocabulary_name_unusable_with_an_untagged_literal_names_no_language_tag_not_empty_quotes(self):
+        finding = FatalFinding(
+            reason=FatalReason.VOCABULARY_NAME_UNUSABLE,
+            subject="https://example.org/vocab/rocks",
+            params={"language": ""},
+        )
+        rendered = finding.render()
+        assert "''" not in rendered
+        assert "no language tag" in rendered
 
 
 class TestSetAsideReasonVocabulary:
