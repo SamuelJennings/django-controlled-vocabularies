@@ -243,3 +243,29 @@ Append-only log of stage transitions and gate outcomes.
   .`, `ruff format --check .`, `mypy controlled_vocabularies`, `deptry .`. Worktree clean. Two
   non-obvious choices recorded as D27–D28, one characterization choice as D29. Next: US-4 (#72,
   T016–T017) — adding a language and re-importing fills it in.
+
+- **S4 IMPLEMENT — US-4 (#72, T016–T017), Implementer.** `craft-tdd` and `craft-increments` loaded
+  by name, receipts verified against the brief before any task started. Baseline confirmed green
+  (758 tests, HEAD `1cbf596`) before touching anything.
+  - **T016** — `TestReimportAfterAddingALanguageStoresItsValues`, driving the whole path from
+    `rocks.ttl` on disk through `import_skos` twice, `override_settings(LANGUAGES=...)` between
+    the runs, per the brief's acceptance text: first under `LANGUAGES=[en]` alone, then under
+    `LANGUAGES=[en, fr]`. Two tests: the concepts already present (`igneous`, `granite`,
+    `sedimentary`) carry their exact `fr` preferred labels after the second run, having carried
+    none after the first (SC-014); and the second run's `report.language_account()` no longer
+    counts `fr` (three occurrences, one per concept, counted by hand against the fixture) as left
+    behind, while the first run's did (SC-016). Both passed on first run — no production code
+    changed, recorded as D30, the same shape D26/D29 recorded for T011/T012 and T015.
+  - **T017** — `TestReimportAfterAddingALanguageKeepsEveryOtherRecordUnchanged`, scoped exactly as
+    D16 and the task text require: the identity test snapshots `(pk, uri, static_uri, slug,
+    local_url)` for the scheme, all five `rocks.ttl` concepts and both collections before the
+    second run and compares after, over every record the fixture defines rather than a sample
+    (SC-015); the content test checks `granite`'s alternative label, hidden label and scope note
+    alongside `granite`'s and `igneous`'s preferred label and definition are unchanged in `en`,
+    the language already held before the re-import. `ConceptLabel`/`ConceptNote` pks are
+    deliberately not asserted (#50 deletes and recreates them every run). Both passed on first
+    run — no production change, recorded as D31, the same shape as D30.
+  Full verify green throughout: `poetry run pytest -q` (758 → 760 → 762 passed), `ruff check .`,
+  `ruff format --check .`, `mypy controlled_vocabularies`, `deptry .`. Worktree clean. Two
+  characterization choices recorded as D30–D31. Next: US-5 (#73, T018–T022) — translatable
+  messages, deliberate indexing, and reusable test material.

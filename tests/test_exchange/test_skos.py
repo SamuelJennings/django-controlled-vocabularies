@@ -1779,6 +1779,96 @@ class TestAlternativeLabelsHiddenLabelsAndNotesHaveNoPerLanguageContest:
         ]
 
 
+class TestReimportAfterAddingALanguageStoresItsValues:
+    """T016 — FR-009/SC-014/SC-016: a file imported into a site configured for one language, then
+    re-imported after the site is reconfigured for a second language the file also carries, stores
+    that language's values for the concepts already present, and the report no longer counts them
+    as left behind. ``rocks.ttl`` already carries ``en``/``de``/``fr`` preferred labels for exactly
+    this population (decisions.md D16's own reference fixture)."""
+
+    def test_the_added_language_s_preferred_labels_are_stored_for_existing_concepts(self, db):
+        with override_settings(LANGUAGES=[("en", "English")]):
+            import_skos(FIXTURES / "rocks.ttl")
+        igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
+        assert igneous.preferred_label("fr") is None
+
+        with override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]):
+            import_skos(FIXTURES / "rocks.ttl")
+
+        igneous.refresh_from_db()
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        sedimentary = Concept.objects.get(static_uri="http://example.org/rocks/sedimentary")
+        assert igneous.preferred_label("fr") == "Roche ignée"
+        assert granite.preferred_label("fr") == "Granite"
+        assert sedimentary.preferred_label("fr") == "Roche sédimentaire"
+
+    def test_the_second_run_s_report_no_longer_counts_the_newly_stored_language_as_left_behind(self, db):
+        with override_settings(LANGUAGES=[("en", "English")]):
+            first_report = import_skos(FIXTURES / "rocks.ttl")
+        assert first_report.language_account().get("fr") == 3
+
+        with override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]):
+            second_report = import_skos(FIXTURES / "rocks.ttl")
+        assert "fr" not in second_report.language_account()
+
+
+class TestReimportAfterAddingALanguageKeepsEveryOtherRecordUnchanged:
+    """T017 — FR-009/SC-015: the same re-import leaves every ``Concept``'s, ``ConceptScheme``'s and
+    ``Collection``'s URI, ``static_uri``, slug, local URL and pk unchanged, and the content already
+    stored in a language the site held before the re-import is unchanged. Scoped per decisions.md
+    D16: ``ConceptLabel``/``ConceptNote`` rows are deleted and recreated on every run by design
+    (#50, ``skos.py``'s ``labels.all().delete()``), so their pks legitimately change and are not
+    asserted here — what is asserted about them is their values."""
+
+    @staticmethod
+    def _identity(obj) -> tuple[int, str, str | None, str, str]:
+        return (obj.pk, obj.uri, obj.static_uri, obj.slug, obj.local_url)
+
+    def test_every_concept_scheme_and_collection_keeps_its_identity_across_the_reimport(self, db):
+        with override_settings(LANGUAGES=[("en", "English")]):
+            import_skos(FIXTURES / "rocks.ttl")
+
+        scheme_before = self._identity(ConceptScheme.objects.get(static_uri=ROCKS_URI))
+        concept_uris = [
+            "http://example.org/rocks/igneous",
+            "http://example.org/rocks/granite",
+            "http://example.org/rocks/basalt",
+            "http://example.org/rocks/sedimentary",
+            "http://example.org/rocks/quartz",
+        ]
+        collection_uris = [
+            "http://example.org/rocks/collection/silica-bearing",
+            "http://example.org/rocks/collection/example-sequence",
+        ]
+        concepts_before = {uri: self._identity(Concept.objects.get(static_uri=uri)) for uri in concept_uris}
+        collections_before = {uri: self._identity(Collection.objects.get(static_uri=uri)) for uri in collection_uris}
+
+        with override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]):
+            import_skos(FIXTURES / "rocks.ttl")
+
+        assert self._identity(ConceptScheme.objects.get(static_uri=ROCKS_URI)) == scheme_before
+        for uri in concept_uris:
+            assert self._identity(Concept.objects.get(static_uri=uri)) == concepts_before[uri]
+        for uri in collection_uris:
+            assert self._identity(Collection.objects.get(static_uri=uri)) == collections_before[uri]
+
+    def test_content_already_held_in_english_is_unchanged_by_the_reimport(self, db):
+        with override_settings(LANGUAGES=[("en", "English")]):
+            import_skos(FIXTURES / "rocks.ttl")
+
+        with override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]):
+            import_skos(FIXTURES / "rocks.ttl")
+
+        igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        assert igneous.label == "Igneous rock"
+        assert igneous.definition("en") == "Rock formed by the cooling and solidification of magma or lava."
+        assert granite.label == "Granite"
+        assert granite.alt_labels("en") == ["Magma rock"]
+        assert granite.hidden_labels("en") == ["Granit rock"]
+        assert granite.notes("en", ConceptNote.Kind.SCOPE) == ["Used here for coarse-grained intrusive igneous rock."]
+
+
 class TestUnconfiguredLanguageValuesAreSetAside:
     """T020 — FR-014: a label or note in a language the site is not configured
     for is stored nowhere and is named in the report with its language, and
