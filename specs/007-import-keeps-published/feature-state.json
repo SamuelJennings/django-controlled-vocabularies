@@ -1013,6 +1013,135 @@
           }
         }
       ]
+    },
+    {
+      "id": "US9",
+      "priority": "P1",
+      "issue": null,
+      "worktree": "/home/sam/projects/samueljennings/dcv-fs007-fix4",
+      "status": "done",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T044",
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py",
+              "tests/test_models.py",
+              "tests/test_exchange/test_report.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 847 passed",
+              "forge verify  # lint/typecheck/test/build pass; conformance red on pre-existing pyproject line-length",
+              "makemigrations --check  # no changes detected (T049 is migration-neutral)"
+            ]
+          }
+        },
+        {
+          "id": "T045",
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py",
+              "tests/test_models.py",
+              "tests/test_exchange/test_report.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 847 passed",
+              "forge verify  # lint/typecheck/test/build pass; conformance red on pre-existing pyproject line-length",
+              "makemigrations --check  # no changes detected (T049 is migration-neutral)"
+            ]
+          }
+        },
+        {
+          "id": "T046",
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py",
+              "tests/test_models.py",
+              "tests/test_exchange/test_report.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 847 passed",
+              "forge verify  # lint/typecheck/test/build pass; conformance red on pre-existing pyproject line-length",
+              "makemigrations --check  # no changes detected (T049 is migration-neutral)"
+            ]
+          }
+        },
+        {
+          "id": "T047",
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py",
+              "tests/test_models.py",
+              "tests/test_exchange/test_report.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 847 passed",
+              "forge verify  # lint/typecheck/test/build pass; conformance red on pre-existing pyproject line-length",
+              "makemigrations --check  # no changes detected (T049 is migration-neutral)"
+            ]
+          }
+        },
+        {
+          "id": "T048",
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py",
+              "tests/test_models.py",
+              "tests/test_exchange/test_report.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 847 passed",
+              "forge verify  # lint/typecheck/test/build pass; conformance red on pre-existing pyproject line-length",
+              "makemigrations --check  # no changes detected (T049 is migration-neutral)"
+            ]
+          }
+        },
+        {
+          "id": "T049",
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py",
+              "tests/test_models.py",
+              "tests/test_exchange/test_report.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 847 passed",
+              "forge verify  # lint/typecheck/test/build pass; conformance red on pre-existing pyproject line-length",
+              "makemigrations --check  # no changes detected (T049 is migration-neutral)"
+            ]
+          }
+        },
+        {
+          "id": "T050",
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py",
+              "tests/test_models.py",
+              "tests/test_exchange/test_report.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 847 passed",
+              "forge verify  # lint/typecheck/test/build pass; conformance red on pre-existing pyproject line-length",
+              "makemigrations --check  # no changes detected (T049 is migration-neutral)"
+            ]
+          }
+        }
+      ]
     }
   ],
   "budgets": {
@@ -1021,8 +1150,8 @@
       "max": 2
     },
     "review_cycles": {
-      "used": 2,
-      "max": 2
+      "used": 3,
+      "max": 3
     },
     "design_review_cycles": {
       "used": 1,
