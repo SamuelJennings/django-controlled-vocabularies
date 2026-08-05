@@ -1466,6 +1466,172 @@ class TestSurplusPreferredLabelInTheDefaultLanguage:
         assert entries[0].params["language"] == "en"
 
 
+class TestPreferredLabelWinnerIsReKeyedOnTheResolvedLanguage:
+    """T013 — FR-002/FR-003, call site 3: ``import_labels``'s own preferred-label contest keys on
+    the *resolved* configured language rather than the raw published tag, and the winner comes from
+    :meth:`~controlled_vocabularies.exchange.languages.LanguageMatcher.resolve_winner` (T021) — the
+    identical computation ``import_concepts`` already runs for ``Concept.label`` over the identical
+    ``preferred_label_in`` candidates, so the two agree by construction rather than the coincidence
+    ``decisions.md`` D13 named. Grouping by raw tag let two *different* tags resolving to one
+    non-default configured language both reach ``add_label()`` — a raw-tag group can never see that
+    contest, because each tag was its own singleton group — crashing the run on the model's own
+    one-``PREFERRED``-row-per-(concept, language) constraint."""
+
+    def _predominant_variant_contest(self, tmp_path):
+        # de-at is predominant (3 occurrences across the file) over de-ch (1); neither is an exact
+        # "de" match, so the winner can only come from real predominance, not tag alphabetising.
+        path = tmp_path / "predominant_de.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/predominant/> a skos:ConceptScheme ;
+                skos:prefLabel "Predominant"@en .
+
+            <http://example.org/predominant/filler1> a skos:Concept ;
+                skos:inScheme <http://example.org/predominant/> ;
+                skos:prefLabel "Filler one"@en, "Eins"@de-at .
+
+            <http://example.org/predominant/filler2> a skos:Concept ;
+                skos:inScheme <http://example.org/predominant/> ;
+                skos:prefLabel "Filler two"@en, "Zwei"@de-at .
+
+            <http://example.org/predominant/target> a skos:Concept ;
+                skos:inScheme <http://example.org/predominant/> ;
+                skos:prefLabel "Target"@en, "Ziel-AT"@de-at, "Ziel-CH"@de-ch .
+            """
+        )
+        return path
+
+    def test_two_different_tags_resolving_to_one_non_default_language_no_longer_crash_the_run(self, db, tmp_path):
+        path = self._predominant_variant_contest(tmp_path)
+        with override_settings(LANGUAGES=[("en", "English"), ("de", "German")]):
+            report = import_skos(path)
+        assert report.fatal == []
+
+    def test_the_predominant_variant_is_stored_not_the_alphabetically_first_tag_or_value(self, db, tmp_path):
+        path = self._predominant_variant_contest(tmp_path)
+        with override_settings(LANGUAGES=[("en", "English"), ("de", "German")]):
+            import_skos(path)
+        target = Concept.objects.get(static_uri="http://example.org/predominant/target")
+        assert target.preferred_label("de") == "Ziel-AT"
+        assert ConceptLabel.objects.filter(concept=target, language="de", kind=ConceptLabel.Kind.PREFERRED).count() == 1
+
+    def test_importing_the_same_file_twice_stores_the_same_value_both_times(self, db, tmp_path):
+        # SC-006's second clause.
+        path = self._predominant_variant_contest(tmp_path)
+        with override_settings(LANGUAGES=[("en", "English"), ("de", "German")]):
+            import_skos(path)
+            import_skos(path)
+        target = Concept.objects.get(static_uri="http://example.org/predominant/target")
+        assert target.preferred_label("de") == "Ziel-AT"
+
+    def test_an_exact_match_in_a_non_default_language_wins_over_a_more_predominant_variant(self, db, tmp_path):
+        # SC-005, applied to call site 3's own contest rather than Concept.label's.
+        path = tmp_path / "exact_over_predominant_de.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/exactnondefault/> a skos:ConceptScheme ;
+                skos:prefLabel "Exact non-default"@en .
+
+            <http://example.org/exactnondefault/filler1> a skos:Concept ;
+                skos:inScheme <http://example.org/exactnondefault/> ;
+                skos:prefLabel "Filler one"@en, "Eins"@de-at .
+
+            <http://example.org/exactnondefault/filler2> a skos:Concept ;
+                skos:inScheme <http://example.org/exactnondefault/> ;
+                skos:prefLabel "Filler two"@en, "Zwei"@de-at .
+
+            <http://example.org/exactnondefault/target> a skos:Concept ;
+                skos:inScheme <http://example.org/exactnondefault/> ;
+                skos:prefLabel "Target"@en, "Ziel-AT"@de-at, "Ziel"@de .
+            """
+        )
+        with override_settings(LANGUAGES=[("en", "English"), ("de", "German")]):
+            report = import_skos(path)
+        assert report.fatal == []
+        target = Concept.objects.get(static_uri="http://example.org/exactnondefault/target")
+        assert target.preferred_label("de") == "Ziel"
+
+    def test_the_winner_reported_by_import_labels_agrees_with_concept_label_for_the_default_language(
+        self, db, tmp_path
+    ):
+        # A predominance-driven winner that differs from both an alphabetical-value pick and an
+        # alphabetical-tag pick — the case decisions.md D13 says the two computations agreed on
+        # only by coincidence before both read T021's rule from one place. If import_labels's own
+        # winner disagreed with Concept.label, the "loser" it names would be the very value stored.
+        path = tmp_path / "predominant_default.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/predominantdefault/> a skos:ConceptScheme ;
+                skos:prefLabel "Predominant default"@en-us .
+
+            <http://example.org/predominantdefault/filler1> a skos:Concept ;
+                skos:inScheme <http://example.org/predominantdefault/> ;
+                skos:prefLabel "Filler one"@en-us .
+
+            <http://example.org/predominantdefault/filler2> a skos:Concept ;
+                skos:inScheme <http://example.org/predominantdefault/> ;
+                skos:prefLabel "Filler two"@en-us .
+
+            <http://example.org/predominantdefault/target> a skos:Concept ;
+                skos:inScheme <http://example.org/predominantdefault/> ;
+                skos:prefLabel "Alpha"@en-gb, "Zed"@en-us .
+            """
+        )
+        with override_settings(LANGUAGES=[("en", "English")]):
+            report = import_skos(path)
+        target = Concept.objects.get(static_uri="http://example.org/predominantdefault/target")
+        assert target.label == "Zed"
+        losers = [
+            entry
+            for entry in report.set_aside
+            if entry.subject == target.static_uri
+            and entry.reason in (SetAsideReason.SURPLUS_PREFERRED_LABEL, SetAsideReason.VARIANT_NOT_KEPT)
+        ]
+        assert len(losers) == 1
+        assert losers[0].params["language"] != "en-us"
+
+
+class TestExactMatchPreferredLabelFailingOnItsOwnMeritsIsNotBackfilledByAVariant:
+    """T013 — spec Edge Cases: "A file carrying both an exact match and a variant for the same
+    value, where the exact match is empty or unusable. The exact match wins the contest and then
+    fails on its own merits, and the variant does not silently take its place." FR-002's exact-match
+    priority (``resolve_winner``, T021) and ``import_concepts``'s own pre-write ``EMPTY_SLUG`` check
+    (FIX 5, decisions.md D39) already combine to produce this: ``resolve_winner`` is called once and
+    its winner is never displaced by a fallback to the next candidate. Pinned here as an explicit
+    regression, because backfilling from the variant is what an implementer chasing "don't lose
+    content" would naturally reach for, and is exactly what the spec forbids."""
+
+    def test_the_concept_is_set_aside_under_empty_slug_and_the_variants_value_is_not_promoted(self, db, tmp_path):
+        path = tmp_path / "exact_fails_variant_available.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/emptyexact/> a skos:ConceptScheme ;
+                skos:prefLabel "Empty exact"@en .
+
+            <http://example.org/emptyexact/target> a skos:Concept ;
+                skos:inScheme <http://example.org/emptyexact/> ;
+                skos:prefLabel "±"@en, "Usable"@en-gb .
+            """
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        entries = [
+            entry
+            for entry in report.set_aside
+            if entry.reason is SetAsideReason.EMPTY_SLUG and entry.subject == "http://example.org/emptyexact/target"
+        ]
+        assert len(entries) == 1
+        assert not Concept.objects.filter(static_uri="http://example.org/emptyexact/target").exists()
+
+
 class TestConceptNotes:
     """T019 — FR-009/research.md R5: the definition and each of the six SKOS
     documentary note kinds are stored against their concept, each in its own
