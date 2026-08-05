@@ -258,9 +258,17 @@ class NormalizedReason(TextChoices):
     "never applied silently" reaches both — a value that made it in under a
     different name still needs to be visible as a normalisation, not only a
     value that did not make it in at all.
+
+    ``LANGUAGE_SUBSTITUTION`` (T003, FR-006, decisions.md D8/research.md R4)
+    names a value stored under a configured language other than the tag it
+    was published under — a variant match one axis over from
+    ``FOREIGN_DEFINITION``'s predicate substitution: ``%(language)s`` carries
+    the published tag, identically to :attr:`SetAsideReason.UNCONFIGURED_LANGUAGE`,
+    and ``%(kept_as)s`` the configured language it was stored under.
     """
 
     FOREIGN_DEFINITION = "foreign_definition", _("definition read from a foreign predicate")
+    LANGUAGE_SUBSTITUTION = "language_substitution", _("value stored under a different language than published")
 
     @property
     def template(self) -> Promise:
@@ -276,6 +284,10 @@ _NORMALIZED_TEMPLATES: dict[NormalizedReason, Promise] = {
     NormalizedReason.FOREIGN_DEFINITION: _(
         "'%(subject)s' has no '%(language)s' definition of its own; its '%(predicate)s' value in "
         "that language was stored as its definition instead."
+    ),
+    NormalizedReason.LANGUAGE_SUBSTITUTION: _(
+        "'%(subject)s' was published in the language '%(language)s' and was stored under "
+        "'%(kept_as)s', the site's matching configured language."
     ),
 }
 

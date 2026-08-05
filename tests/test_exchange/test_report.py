@@ -56,6 +56,7 @@ _EXAMPLE_FATAL_PARAMS = {
 # One example params dict per normalized reason (T021), the same shape as _EXAMPLE_PARAMS.
 _EXAMPLE_NORMALIZED_PARAMS = {
     NormalizedReason.FOREIGN_DEFINITION: {"predicate": "dcterms:description", "language": "en"},
+    NormalizedReason.LANGUAGE_SUBSTITUTION: {"language": "en-gb", "kept_as": "en"},
 }
 
 
@@ -264,6 +265,49 @@ class TestNormalizedReasonVocabulary:
         assert "https://example.org/vocab/x" in rendered
         for value in _EXAMPLE_NORMALIZED_PARAMS[reason].values():
             assert value in rendered
+
+
+class TestLanguageSubstitutionReason:
+    """T003 — a value stored under a configured language other than its
+    published tag carries a translatable, named-placeholder entry naming
+    both (FR-006), inspectable as data and distinct from a value that was
+    not stored at all (research.md R4)."""
+
+    def test_the_entry_is_inspectable_as_data(self):
+        report = ImportReport()
+        report.add_normalized(
+            NormalizedReason.LANGUAGE_SUBSTITUTION,
+            "https://example.org/vocab/rocks/granite",
+            language="en-gb",
+            kept_as="en",
+        )
+        entry = report.normalized[0]
+        assert entry.reason is NormalizedReason.LANGUAGE_SUBSTITUTION
+        assert entry.subject == "https://example.org/vocab/rocks/granite"
+        assert entry.params == {"language": "en-gb", "kept_as": "en"}
+
+    def test_it_renders_naming_both_the_published_tag_and_the_language_stored_under(self):
+        entry = NormalizedEntry(
+            reason=NormalizedReason.LANGUAGE_SUBSTITUTION,
+            subject="https://example.org/vocab/rocks/granite",
+            params={"language": "en-gb", "kept_as": "en"},
+        )
+        rendered = entry.render()
+        assert "en-gb" in rendered
+        assert "en" in rendered
+
+    def test_it_sits_in_the_normalized_bucket_not_the_set_aside_one(self):
+        # A caller filtering for "things that did not make it in" (research.md
+        # R4) must still get a truthful answer: the value *was* stored.
+        report = ImportReport()
+        report.add_normalized(
+            NormalizedReason.LANGUAGE_SUBSTITUTION,
+            "https://example.org/vocab/rocks/granite",
+            language="en-gb",
+            kept_as="en",
+        )
+        assert len(report.normalized) == 1
+        assert report.set_aside == []
 
 
 class TestNormalizedReasonIsDisjointFromSetAsideAndFatal:
