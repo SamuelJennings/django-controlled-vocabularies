@@ -17,9 +17,12 @@ from django.test.utils import CaptureQueriesContext
 from django.utils.functional import Promise
 
 import controlled_vocabularies.exchange as exchange
+from controlled_vocabularies.exchange.languages import LanguageMatcher
 from controlled_vocabularies.exchange.report import FatalReason, NormalizedReason, SetAsideReason
 from controlled_vocabularies.exchange.safety import UnsafeJsonLdError, UnsafeRdfXmlError
 from controlled_vocabularies.exchange.skos import (
+    ConceptImporter,
+    SchemeResolver,
     SkosGraph,
     SkosImportError,
     SkosImportFailed,
@@ -148,6 +151,93 @@ class TestReadGraph:
         assert not ConceptScheme.objects.filter(
             static_uri__startswith="http://example.org/SECRET-FROM-LOCAL-FILE/"
         ).exists()
+
+
+class TestPreferredLabelTagCounts:
+    """T002 — the predominance count a variant contest is decided over
+    (research.md R2, decisions.md D4/D5): how often each published tag appears
+    across the concept nodes' own ``skos:prefLabel`` values, that population
+    and no other."""
+
+    def test_counts_reflect_the_whole_file_not_any_one_concept(self, tmp_path):
+        path = tmp_path / "counts.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/v/> a skos:ConceptScheme ;
+                skos:prefLabel "V"@en .
+
+            <http://example.org/v/a> a skos:Concept ;
+                skos:inScheme <http://example.org/v/> ;
+                skos:prefLabel "A"@en-gb .
+
+            <http://example.org/v/b> a skos:Concept ;
+                skos:inScheme <http://example.org/v/> ;
+                skos:prefLabel "B"@en-gb, "B2"@en-us .
+            """
+        )
+        skos_graph = SkosGraph.from_file(path)
+        concept_nodes = sorted(skos_graph.graph.subjects(rdflib.RDF.type, SKOS.Concept), key=str)
+        counts = skos_graph.preferred_label_tag_counts(concept_nodes)
+        assert counts == {"en-gb": 2, "en-us": 1}
+
+    def test_counts_exclude_the_scheme_and_collection_nodes_own_labels(self, tmp_path):
+        # Counted graph-wide, this would additionally sweep the scheme's and the
+        # collection's own de-tagged skos:prefLabel — silently changing the
+        # already-shipped determine_default_language rule (T002, D4/D5).
+        path = tmp_path / "scope.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/v/> a skos:ConceptScheme ;
+                skos:prefLabel "V"@de .
+
+            <http://example.org/v/collection/x> a skos:Collection ;
+                skos:prefLabel "X"@de ;
+                skos:member <http://example.org/v/a> .
+
+            <http://example.org/v/a> a skos:Concept ;
+                skos:inScheme <http://example.org/v/> ;
+                skos:prefLabel "A"@en-gb .
+            """
+        )
+        skos_graph = SkosGraph.from_file(path)
+        concept_nodes = sorted(skos_graph.graph.subjects(rdflib.RDF.type, SKOS.Concept), key=str)
+        counts = skos_graph.preferred_label_tag_counts(concept_nodes)
+        assert counts == {"en-gb": 1}
+
+
+class TestSkosImporterWiresOneMatcherToBothResolvers:
+    """T002 — ``SkosImporter.run`` builds one ``LanguageMatcher`` per run from
+    the concept nodes' predominance counts and passes it to ``SchemeResolver``
+    and ``ConceptImporter`` as a constructor argument, rather than either
+    building its own (research.md R2, plan.md "One winner, one computation")."""
+
+    def test_scheme_resolver_and_concept_importer_share_the_same_matcher_instance(self, db, monkeypatch):
+        captured = {}
+        original_scheme_resolver_init = SchemeResolver.__init__
+        original_concept_importer_init = ConceptImporter.__init__
+
+        def spy_scheme_resolver_init(self, *args, **kwargs):
+            captured["scheme_resolver"] = kwargs["matcher"]
+            original_scheme_resolver_init(self, *args, **kwargs)
+
+        def spy_concept_importer_init(self, *args, **kwargs):
+            captured["concept_importer"] = kwargs["matcher"]
+            original_concept_importer_init(self, *args, **kwargs)
+
+        monkeypatch.setattr(SchemeResolver, "__init__", spy_scheme_resolver_init)
+        monkeypatch.setattr(ConceptImporter, "__init__", spy_concept_importer_init)
+
+        report = import_skos(FIXTURES / "rocks.ttl")
+
+        assert report.fatal == []
+        assert isinstance(captured["scheme_resolver"], LanguageMatcher)
+        assert captured["scheme_resolver"] is captured["concept_importer"]
 
 
 class TestImportSkosVocabulary:

@@ -16,6 +16,7 @@ not only the first.
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Iterable
 from pathlib import Path
 
 import rdflib
@@ -33,6 +34,7 @@ from controlled_vocabularies.exchange.exceptions import (
     UnsafeJsonLdError,
     UnsafeRdfXmlError,
 )
+from controlled_vocabularies.exchange.languages import LanguageMatcher
 from controlled_vocabularies.exchange.mapping import (
     DCTERMS,
     LABEL_PREDICATES,
@@ -196,6 +198,23 @@ class SkosGraph:
         )
         return values[0] if values else None
 
+    def preferred_label_tag_counts(self, concept_nodes: Iterable[rdflib.term.Node]) -> dict[str, int]:
+        """How often each published language tag appears across ``concept_nodes``'
+        own ``skos:prefLabel`` values (T002, research.md R2, decisions.md D4/D5).
+
+        That predicate and that node set, and no other: the vocabulary's own
+        ``skos:prefLabel`` and every collection's are excluded, because
+        :meth:`SchemeResolver.determine_default_language` already counts exactly
+        this population (``skos.py:327``) and a contest can only ever turn on it
+        (D4). A caller passing a wider node set would silently change that
+        already-shipped rule.
+        """
+        counts: dict[str, int] = {}
+        for node in concept_nodes:
+            for language in self.label_languages(node, SKOS.prefLabel):
+                counts[language] = counts.get(language, 0) + 1
+        return counts
+
     def scheme_refs(self, concept_node: rdflib.term.Node) -> set[str]:
         """Every vocabulary URI this concept declares membership of, by any of the three predicates."""
         refs = {str(obj) for obj in self.graph.objects(concept_node, SKOS.inScheme)}
@@ -291,11 +310,13 @@ class SchemeResolver:
         *,
         target: ConceptScheme | None,
         source_label: str,
+        matcher: LanguageMatcher,
     ) -> None:
         self.skos_graph = skos_graph
         self.report = report
         self.target = target
         self.source_label = source_label
+        self.matcher = matcher
 
     @staticmethod
     def _get_or_create_scheme(uri: str) -> ConceptScheme:
@@ -489,11 +510,14 @@ class ConceptImporter:
         report: ImportReport,
         target_scheme: ConceptScheme,
         target_scheme_uri: str,
+        *,
+        matcher: LanguageMatcher,
     ) -> None:
         self.skos_graph = skos_graph
         self.report = report
         self.target_scheme = target_scheme
         self.target_scheme_uri = target_scheme_uri
+        self.matcher = matcher
         self._mentioned_uris: set[str] = set()
 
     def import_labels(self, node: rdflib.term.Node, concept: Concept, default_language: str, uri: str) -> None:
@@ -1230,15 +1254,25 @@ class SkosImporter:
                 set(skos_graph.graph.subjects(rdflib.RDF.type, SKOS.Concept)) | skos_graph.implied_concept_nodes(),
                 key=str,
             )
+            # The matcher is built once per run, before any concept is written, from
+            # the whole file's predominance counts (research.md R2) — settling a
+            # variant contest needs the whole file counted first. Passed as a
+            # constructor argument rather than let each collaborator build its own
+            # (plan.md "One winner, one computation").
+            matcher = LanguageMatcher.from_settings(skos_graph.preferred_label_tag_counts(concept_nodes))
 
-            resolver = SchemeResolver(skos_graph, self.report, target=self.target, source_label=source_label)
+            resolver = SchemeResolver(
+                skos_graph, self.report, target=self.target, source_label=source_label, matcher=matcher
+            )
             declared_node = resolver.choose_declared_scheme(declared_nodes, concept_nodes)
             target_scheme, declared_uri = (
                 (None, None) if self.report.fatal else resolver.resolve_scheme(declared_node, concept_nodes)
             )
 
             if target_scheme is not None and declared_uri is not None:
-                concept_importer = ConceptImporter(skos_graph, self.report, target_scheme, declared_uri)
+                concept_importer = ConceptImporter(
+                    skos_graph, self.report, target_scheme, declared_uri, matcher=matcher
+                )
                 successful_concepts = concept_importer.import_concepts(concept_nodes)
                 RelationImporter(skos_graph, self.report, target_scheme).import_relations(successful_concepts)
                 CollectionImporter(skos_graph, self.report, target_scheme).import_collections(successful_concepts)
