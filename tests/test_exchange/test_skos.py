@@ -2122,6 +2122,114 @@ class TestAnEmptyPublishedLiteralIsNeverTreatedAsAUsableName:
         assert not ConceptScheme.objects.filter(static_uri="http://pub.example/sec501schemenone").exists()
 
 
+class TestAnEmptyPublishedLiteralIsNeverAUsableNameForAnyRecordKind:
+    """T059 — SEC-601/CORR-602, decisions.md D69 (fix cycle 7): D65 (T055, fix cycle 6) filtered
+    an empty-or-whitespace-only literal out of ``SkosGraph.first_literal`` and
+    ``first_literal_with_language`` — the two accessors a vocabulary's and a collection's own
+    name are selected through. A concept's label is selected through a third accessor,
+    ``SkosGraph.preferred_label_in``, which D65 never touched, so a concept published as
+    ``skos:prefLabel ""@en, "Real Name"@en`` stored ``Concept.label == ''`` and reported "Real
+    Name" as a surplus preferred label discarded, not merely passed over.
+
+    Fixed structurally rather than by copying the same inline check to a third place:
+    ``SkosGraph.is_usable_literal`` is now the one predicate every literal-to-name-candidate read
+    shares (``first_literal``, ``first_literal_with_language``, ``preferred_label_in`` and
+    ``label_languages`` all call it), so a fourth record kind or a fifth call site inherits the
+    rule by construction rather than needing its own copy minted for it.
+    """
+
+    @pytest.mark.parametrize("record_kind", ["scheme", "concept", "collection"])
+    def test_an_empty_literal_never_beats_a_real_one_regardless_of_record_kind(self, db, tmp_path, record_kind):
+        """One parametrized test drives all three record kinds through the identical fixture
+        shape — an empty literal published alongside a real one, in the record's own name
+        predicate — so a regression in any single kind's selection path fails this one test,
+        not a kind-specific test nobody thought to write.
+        """
+        path = tmp_path / f"t059_{record_kind}.ttl"
+        if record_kind == "scheme":
+            path.write_text(
+                "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+                "<http://pub.example/t059scheme> a skos:ConceptScheme ; "
+                'skos:prefLabel ""@en, "Real Name"@en .\n'
+                "<http://pub.example/t059scheme#c1> a skos:Concept ; "
+                'skos:inScheme <http://pub.example/t059scheme> ; skos:prefLabel "One"@en .\n'
+            )
+        elif record_kind == "concept":
+            path.write_text(
+                "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+                '<http://pub.example/t059concept> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+                "<http://pub.example/t059concept#c1> a skos:Concept ; "
+                'skos:inScheme <http://pub.example/t059concept> ; skos:prefLabel ""@en, "Real Name"@en .\n'
+            )
+        else:
+            path.write_text(
+                "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+                '<http://pub.example/t059collection> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+                "<http://pub.example/t059collection#c1> a skos:Concept ; "
+                'skos:inScheme <http://pub.example/t059collection> ; skos:prefLabel "One"@en .\n'
+                "<http://pub.example/t059collection#grp> a skos:Collection ; "
+                'skos:prefLabel ""@en, "Real Name"@en .\n'
+            )
+
+        report = import_skos(path)
+        assert report.fatal == []
+
+        if record_kind == "scheme":
+            stored_name = ConceptScheme.objects.get(static_uri="http://pub.example/t059scheme").name
+        elif record_kind == "concept":
+            stored_name = Concept.objects.get(static_uri="http://pub.example/t059concept#c1").label
+        else:
+            stored_name = Collection.objects.get(static_uri="http://pub.example/t059collection#grp").name
+
+        assert stored_name == "Real Name"
+        assert not any(entry.reason is SetAsideReason.SURPLUS_PREFERRED_LABEL for entry in report.set_aside)
+
+    def test_a_whitespace_only_alternative_label_is_not_stored(self, db, tmp_path):
+        """Audit finding, T059 brief: ``ConceptImporter.import_labels`` reads ``skos:altLabel``/
+        ``skos:hiddenLabel`` (and a non-default-language ``skos:prefLabel``) straight off the
+        graph rather than through any of the four filtered accessors — the "fifth call site" the
+        structural fix exists to catch. A true empty string is already refused by
+        ``ConceptLabel.text``'s own ``blank=False`` (``full_clean()`` raises before the row is
+        written), but Django's blank check does not treat a whitespace-only string as blank, so
+        ``"   "`` used to pass straight through and get stored as a visible-nothing alternative
+        label. Routing this loop through the same ``is_usable_literal`` predicate closes it.
+        """
+        path = tmp_path / "t059_altlabel_whitespace.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/t059altlabel> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/t059altlabel#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/t059altlabel> ; skos:prefLabel "One"@en ; '
+            'skos:altLabel "   "@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        concept = Concept.objects.get(static_uri="http://pub.example/t059altlabel#c1")
+        assert list(concept.labels.all()) == []
+
+    def test_an_empty_only_non_default_language_preferred_label_is_silently_absent_not_a_crash(self, db, tmp_path):
+        """Audit finding, T059 brief: before the raw ``import_labels`` loop was routed through
+        ``is_usable_literal``, closing ``preferred_label_in``'s own gap alone would have made
+        this scenario raise ``KeyError`` instead of importing cleanly — a concept whose *only*
+        ``fr`` (a configured, non-default) preferred label is empty has no ``fr`` winner in
+        ``preferred_winner_by_language`` once empty candidates are excluded from it, but the raw
+        loop would still try to look one up for this literal without the same exclusion.
+        """
+        path = tmp_path / "t059_empty_only_variant.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/t059variantonly> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/t059variantonly#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/t059variantonly> ; skos:prefLabel "One"@en, ""@fr .\n'
+        )
+        with override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]):
+            report = import_skos(path)
+        assert report.fatal == []
+        concept = Concept.objects.get(static_uri="http://pub.example/t059variantonly#c1")
+        assert concept.label == "One"
+        assert list(concept.labels.all()) == []
+
+
 class TestAStoredSlugThatFailsValidationIsSetAsideNotEscaped:
     """T045 — SEC-301, decisions.md D50 (fix cycle 4): T041's read-back means a matched record's
     already-stored slug reaches the model's manual-slug validation unchanged. A slug written out

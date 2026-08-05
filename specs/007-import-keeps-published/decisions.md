@@ -1872,3 +1872,52 @@ list, per this file's own append-only numbering — nothing renumbered, nothing 
 already applied to the collection side, extended to the one place it had not yet reached; the two
 new success criteria describe behaviour already proven by an existing test, so there is nothing
 further to reconcile.
+
+## D69 — T059 (fix cycle 7): the empty-literal-is-never-a-name rule reaches a concept's own
+label, structurally rather than as a third copy of the check
+
+SEC-601/CORR-602 (round 6, high and medium): D65 (T055, fix cycle 6) applied "an empty or
+whitespace-only literal is never a usable name" inline in exactly two places —
+`SkosGraph.first_literal` and `SkosGraph.first_literal_with_language`. A vocabulary's name and a
+collection's name are both selected through one of those two accessors, so both were fixed. A
+concept's label is selected through a third accessor, `SkosGraph.preferred_label_in`, which D65
+never touched — reproduced end to end: a concept published as `skos:prefLabel ""@en, "Real
+Name"@en` stored `Concept.label == ''` and reported `"Real Name"` as `SURPLUS_PREFERRED_LABEL`,
+discarded rather than merely passed over. This is the fourth time this feature's review has found
+a rule reaching some record kinds and not all (round 2's FR-017 reaching `Concept`/
+`ConceptScheme` but not `Collection`; round 5's SEC-501/SEC-504 scoped to the scheme/collection
+name paths; this round's own SEC-602 finding the identical gap in the predominance vote).
+
+**Fixed by naming the check once and routing every literal-to-name-candidate read through it**,
+rather than adding a third inline copy. `SkosGraph.is_usable_literal` is a static predicate —
+`isinstance(literal, rdflib.Literal) and bool(str(literal).strip())` — and `first_literal`,
+`first_literal_with_language`, `label_languages` and `preferred_label_in` all call it. A fourth
+record kind's own accessor, or a fifth call site reading the graph directly, now has to actively
+avoid this predicate to reintroduce the defect, rather than simply being written without knowing
+the rule exists.
+
+**Audited for other paths reaching a stored name field without going through the predicate, per
+the brief's own instruction, and found one:** `ConceptImporter.import_labels` reads
+`skos:altLabel`/`skos:hiddenLabel` (and a non-default-language `skos:prefLabel`) directly off the
+graph, not through `preferred_label_in` — the fifth call site the structural fix exists to catch.
+A true empty string was already refused before this task (`ConceptLabel.text` is `blank=False`,
+and `add_label` calls `full_clean()`), but Django's blank check does not treat a whitespace-only
+string as blank, so `"   "` passed straight through and was stored as a visible-nothing
+alternative label. Routing this loop through `is_usable_literal` too closes it, and is not
+optional: without it, closing `preferred_label_in`'s own gap makes a concept whose *only*
+candidate for a configured non-default language is empty raise `KeyError` in this same loop —
+`preferred_winner_by_language` would no longer have an entry for that language once its one
+candidate is excluded, and the raw loop's own lookup for a `PREFERRED`-kind literal in that
+language has to find one. Both fixed by the same one-line change: an unusable literal is skipped
+before this loop asks the matcher anything about it, silently, exactly as `SkosGraph`'s own
+accessors already treat one.
+
+No other path was found. `_import_notes` and the `dcterms:description` alias are documentary
+text, not a name a curator identifies a record by, and are out of the predicate's scope on that
+basis (`is_usable_literal` is a *name* rule, not a general emptiness rule — an empty note is
+already storable content, just an unhelpful one, and changing that is no part of this task).
+
+**Revisit if:** a fifth name-selection path is added anywhere in this module and does not read
+through one of the four `SkosGraph` accessors above or `ConceptImporter.import_labels`'s own now-
+guarded loop — at that point the predicate needs a fifth caller taught about it explicitly, the
+one shape this decision exists to make rare.
