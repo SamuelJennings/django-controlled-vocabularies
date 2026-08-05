@@ -623,3 +623,43 @@ test would catch if introduced later.
 
 **Revisit if:** never, for the same reason D30 gives — this is what a coverage task looks like when
 the guarantee is already true by construction.
+
+## D32 — T018's coverage lives in `test_standards.py` alongside `test_report.py`'s existing sweep, deliberately overlapping it
+
+`tests/test_exchange/test_report.py` already parametrizes `TestSetAsideReasonVocabulary`,
+`TestNormalizedReasonVocabulary`, and `TestReasonTemplatesUseOnlyNamedPlaceholders` over
+`list(SetAsideReason)` and `list(NormalizedReason)`. Both closed vocabularies already contain
+`VARIANT_NOT_KEPT` (T022) and `LANGUAGE_SUBSTITUTION` (T003), added in the foundational phase, so
+those three sweeps already assert every claim T018's own text asks for — translatable, named
+`%(subject)s`, no positional placeholder anywhere — for both reasons, without any new code. A
+`TestSetAsideReasonVocabulary`-shaped test for either would be redundant with what already runs.
+
+T018's own text names a different target: "the standards suite," not "the reason vocabulary's own
+test module," and its acceptance says to follow the form of `test_standards.py`'s existing
+translatable-message tests specifically. That module (Article XII home for validation-message
+translatability) had no coverage of either reason at all — its own walk is over model field
+metadata and `ValidationError` messages, not over `report.py`'s closed vocabularies. Two tests were
+added there, `test_language_substitution_reason_message_uses_named_placeholders` and
+`test_variant_not_kept_reason_message_uses_named_placeholders`, each following the file's own
+form: a `Promise` check, a named-placeholder check against the raw template, and a rendered-message
+check with real values substituted in — the same shape as
+`test_static_uri_unsafe_scheme_message_uses_named_placeholders` two sections up.
+
+The overlap with `test_report.py` is real and intentional, not an oversight to collapse. The two
+suites hold two different things to the same standard from two different angles: `test_report.py`'s
+sweep proves the *whole vocabulary* — present and future members alike — never regresses to a
+positional placeholder; `test_standards.py`'s two new tests are this feature's own, targeted
+evidence that its two specific additions meet Article XII, living where `tasks.md` and the brief
+both said to put it. Neither makes the other redundant enough to delete.
+
+**How RED was proven**, since neither test's assertion had ever failed before this task: `report.py`
+was edited locally, twice in turn — once to make `LANGUAGE_SUBSTITUTION`'s template a bare,
+non-lazy string with a positional `%s`, once to make `VARIANT_NOT_KEPT`'s template keep its
+`gettext_lazy` wrapper but swap both its named placeholders for positional ones — running the two
+new tests after each edit to observe the correct test fail for the reported reason, then reverting
+with `git checkout` before the next edit. Neither edit was committed; `report.py` is byte-identical
+to `HEAD~3` in this story's final diff.
+
+**Revisit if:** never — this is the shape T018's own acceptance text specifies, and the redundancy
+with `test_report.py` is documented here precisely so a later reader does not "simplify" one suite
+away believing it duplicates the other for no reason.
