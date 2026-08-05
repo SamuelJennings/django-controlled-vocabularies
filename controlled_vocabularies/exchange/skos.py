@@ -565,39 +565,39 @@ class ConceptImporter:
         own refusal raise (T020, FR-014, D25) — that exception protects a direct, out-of-band write,
         not this importer's control flow.
 
-        A second ``skos:prefLabel`` resolving to one non-default configured language (FIX 3, D38) is
-        the same shape of problem for a cardinality reason: the model allows only one ``PREFERRED``
-        row per (concept, language), so only the lexicographically-first value under each raw
-        published tag is ever attempted; every other value under that *same* tag is set aside and
-        reported. Inside the default-language slot, a loser is discriminated by its own published
-        tag against the tag T007's winner rule actually chose (``default_language_winner_tag``): the
-        same tag is a same-language duplicate and keeps ``SURPLUS_PREFERRED_LABEL`` (FIX 4, D38); a
-        different tag is a losing variant and takes ``VARIANT_NOT_KEPT`` (T022, decisions.md D14) —
-        the discriminator T014 applies to every other configured language, stated here so US-1 does
-        not land an assertion US-3 has to undo.
+        A second ``skos:prefLabel`` resolving to one configured language — default or not — is the
+        same shape of problem for a cardinality reason: the model allows only one ``PREFERRED`` row
+        per (concept, language), so the contest is keyed on the *resolved* language and settled once
+        per language by :meth:`~controlled_vocabularies.exchange.languages.LanguageMatcher.resolve_winner`
+        (T013/T021) — not by grouping on the raw published tag, which let two *different* tags
+        resolving to one non-default language both reach ``add_label()`` and crash the run on the
+        model's own refusal, because each tag was its own singleton group and neither ever saw the
+        other. This is the identical computation ``import_concepts`` already runs for
+        ``Concept.label`` over the identical ``preferred_label_in`` candidates, so the two agree by
+        construction rather than by coincidence (decisions.md D13). In every configured language's
+        slot, default or not, a loser is discriminated by its own published tag against the tag the
+        winner computation chose (T014): the same tag is a same-language duplicate and keeps
+        ``SURPLUS_PREFERRED_LABEL`` (FIX 4, D38); a different tag is a losing variant and takes
+        ``VARIANT_NOT_KEPT`` (T022, decisions.md D14) — the two populations have different remedies,
+        which is what :meth:`~controlled_vocabularies.exchange.report.ImportReport.language_account`
+        exists to tell apart.
         """
         concept.labels.all().delete()
 
-        # One deterministic winner per raw published tag this concept carries a skos:prefLabel
-        # under (including any tag resolving to default_language).
-        preferred_by_language: dict[str, list[str]] = {}
-        for literal in self.skos_graph.graph.objects(node, SKOS.prefLabel):
-            if isinstance(literal, rdflib.Literal) and literal.language:
-                preferred_by_language.setdefault(literal.language, []).append(str(literal))
-        preferred_kept = {language: sorted(values)[0] for language, values in preferred_by_language.items()}
-
-        # The tag T007's winner rule chose for the default-language slot — the SAME LanguageMatcher
-        # computation over the SAME candidates preferred_label_in/import_concepts already read
-        # (T021's "one winner, one computation"), read again here rather than threaded through
-        # _import_concept_content's parameters.
-        default_language_candidates = [
-            (tag, value)
-            for tag, value in self.skos_graph.preferred_label_in(node)
-            if self.matcher.resolve(tag).configured_language == default_language
-        ]
+        # One winner per resolved configured language this concept carries a skos:prefLabel
+        # candidate for (T013/T021), read once here rather than grouped by raw published tag.
+        preferred_candidates_by_language: dict[str, list[tuple[str, str]]] = {}
+        for tag, value in self.skos_graph.preferred_label_in(node):
+            resolved = self.matcher.resolve(tag).configured_language
+            if resolved is not None:
+                preferred_candidates_by_language.setdefault(resolved, []).append((tag, value))
+        preferred_winner_by_language: dict[str, tuple[str, str]] = {
+            language: self.matcher.resolve_winner(language, candidates)[0]
+            for language, candidates in preferred_candidates_by_language.items()
+        }
         default_language_winner_tag = (
-            self.matcher.resolve_winner(default_language, default_language_candidates)[0][0]
-            if default_language_candidates
+            preferred_winner_by_language[default_language][0]
+            if default_language in preferred_winner_by_language
             else None
         )
 
@@ -624,7 +624,7 @@ class ConceptImporter:
                             language=published_tag,
                             kept_as=default_language,
                         )
-                    elif str(literal) != preferred_kept[published_tag]:
+                    elif str(literal) != preferred_winner_by_language[default_language][1]:
                         # FIX 4 (D38): the winner already lives as concept.label; a same-tag loser
                         # in this language must still be named, not merely skipped.
                         self.report.add_set_aside(
@@ -634,11 +634,24 @@ class ConceptImporter:
                 if resolved_language is None:
                     self.report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, subject=uri, language=published_tag)
                     continue
-                if kind == ConceptLabel.Kind.PREFERRED and str(literal) != preferred_kept[published_tag]:
-                    self.report.add_set_aside(
-                        SetAsideReason.SURPLUS_PREFERRED_LABEL, subject=uri, language=resolved_language
-                    )
-                    continue
+                if kind == ConceptLabel.Kind.PREFERRED:
+                    winner_tag, winner_value = preferred_winner_by_language[resolved_language]
+                    if published_tag.lower() != winner_tag.lower() or str(literal) != winner_value:
+                        # T014: the same discriminator the default-language branch already applies
+                        # (D24) — a same-tag loser is a same-language duplicate, a different-tag
+                        # loser is a contest loser recoverable by configuring its published tag.
+                        if published_tag.lower() == winner_tag.lower():
+                            self.report.add_set_aside(
+                                SetAsideReason.SURPLUS_PREFERRED_LABEL, subject=uri, language=resolved_language
+                            )
+                        else:
+                            self.report.add_set_aside(
+                                SetAsideReason.VARIANT_NOT_KEPT,
+                                subject=uri,
+                                language=published_tag,
+                                kept_as=resolved_language,
+                            )
+                        continue
                 concept.add_label(language=resolved_language, kind=kind, text=str(literal))
                 if resolved_language.lower() != published_tag.lower():
                     # T009, FR-006: a value stored under a resolved language other than its

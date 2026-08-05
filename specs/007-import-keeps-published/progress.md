@@ -202,3 +202,44 @@ Append-only log of stage transitions and gate outcomes.
   Full verify green throughout: `poetry run pytest -q` (747 passed), `ruff check .`, `ruff format
   --check .`, `mypy controlled_vocabularies`, `deptry .`. Worktree clean. Next: US-3 (#71,
   T013–T015) — competing variants resolve the same way every time.
+
+- **S4 IMPLEMENT — US-3 (#71, T013–T015), Implementer.** `craft-tdd` and `craft-increments`
+  loaded by name, receipts verified against the brief before any task started. Baseline confirmed
+  green (747 tests, HEAD `f22ede7`) before touching anything. Three commits, one per task, tree
+  green and clean after each:
+  - **T013** — `import_labels`'s preferred-label contest (call site 3) re-keyed on the *resolved*
+    configured language rather than the raw published tag, with the winner read once from
+    `LanguageMatcher.resolve_winner` (T021) per resolved language — the identical computation
+    `import_concepts` already runs for `Concept.label` over the identical `preferred_label_in`
+    candidates (D27). Grouping by raw tag was a live crash: two *different* tags resolving to one
+    non-default configured language were each their own singleton "winner" under the old grouping,
+    so both reached `add_label()` and the second raised the model's own uniqueness
+    `ValidationError`, uncaught — no fixture before this task exercised a two-*different*-tag
+    contest outside the default language, so nothing had caught it. Six new tests: the crash no
+    longer happens, the predominant (not alphabetically-first) variant is stored, the same file
+    imports the same value twice (SC-006), an exact match in a non-default language still wins over
+    a more predominant variant (SC-005), `import_labels`'s own winner agrees with `Concept.label`
+    for a predominance-driven default-language case, and the spec's own Edge Case — an exact match
+    that fails on its own merits (`EMPTY_SLUG`) is never backfilled by its variant sibling, already
+    true via `import_concepts`'s existing pre-write check and pinned here as a regression.
+  - **T014** — the general (non-default-language) branch's contest losers now get the same
+    discriminator the default-language branch has carried since T008 (D24): a loser sharing the
+    winner's published tag (case-insensitively) is a same-language duplicate
+    (`SURPLUS_PREFERRED_LABEL`); a loser under a different tag is a genuine contest loser
+    (`VARIANT_NOT_KEPT`, T022, D14), recoverable by configuring its published tag and reaching
+    `language_account()`, unlike the duplicate (D28: the two branches' post-comparison paths differ
+    enough that copying the two-line comparison reads simpler than a shared helper). Test: a group
+    of three preferred labels for one non-default language — two under one tag, one under a
+    variant — yields exactly one entry of each reason, only the variant one in the account, and the
+    run succeeds (SC-008).
+  - **T015** — the asymmetry (FR-004, SC-007): alternative labels, hidden labels and notes carry no
+    per-language cardinality limit, so T013/T014's contest — scoped to
+    `kind == ConceptLabel.Kind.PREFERRED` — never touches them; every other kind already fell
+    through to the unconditional store, before and after T013/T014. Test-only, reusing
+    `variants.ttl` (T005, built and reserved for exactly this population): both an `en-gb` and an
+    `en-us` alternative label land on the `en` site, and both variants of a note do too, with no
+    production change (D29, the same shape D26 recorded for T011/T012).
+  Full verify green throughout: `poetry run pytest -q` (747 → 753 → 755 → 758 passed), `ruff check
+  .`, `ruff format --check .`, `mypy controlled_vocabularies`, `deptry .`. Worktree clean. Two
+  non-obvious choices recorded as D27–D28, one characterization choice as D29. Next: US-4 (#72,
+  T016–T017) — adding a language and re-importing fills it in.

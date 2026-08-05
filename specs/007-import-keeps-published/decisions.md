@@ -504,3 +504,78 @@ missing, the same shape D23 recorded for T006.
 
 **Revisit if:** never — this is simply what a coverage task looks like when the feature it covers
 was implemented in an earlier phase.
+
+## D27 — T013 unifies the default-language and general-language winner computations into one dict, closing the gap D24 flagged
+
+D24 (US-1) resolved a discriminator question for the default-language branch and named exactly what
+it was leaving open: "T013/T014 (US-3) re-key `preferred_by_language` onto the resolved language for
+every configured slot, not only the default one — at that point this same discriminator should read
+identically for both, and worth checking that `import_labels`'s two now-separate computations (this
+one, and T013's) still agree by construction rather than by coincidence."
+
+Before T013, `import_labels` ran two independent computations: `default_language_candidates` /
+`default_language_winner_tag`, built via `preferred_label_in` and `resolve_winner` (T008, correct);
+and `preferred_by_language` / `preferred_kept`, grouped by the *raw published tag* and reduced with
+`sorted(values)[0]` — the same shape D13 named as the pre-T021 defect, never actually removed from
+this call site because T008's own scope was the default-language branch alone. The second
+computation is what the general (non-default) branch read, and grouping by raw tag meant two
+*different* tags resolving to the same non-default configured language were invisible to each other
+— each was its own singleton "winner" — so both reached `concept.add_label()` and the second call
+raised `ConceptLabel.clean()`'s own uniqueness `ValidationError`, uncaught. This was a live, minimal
+crash: `surplus_preferred_label.ttl` doesn't reach it (its two `de`-tagged values are the same raw
+tag), so no test in the suite before T013 exercised a two-*different*-tag contest in a non-default
+language.
+
+**Chosen:** one dict, `preferred_winner_by_language: dict[str, tuple[str, str]]`, built once from
+`preferred_label_in(node)` grouped by *resolved* language and reduced with `resolve_winner` per
+group — literally the same call `import_concepts` makes for `Concept.label`, over the identical
+candidate source. `default_language_winner_tag` is now a read of this dict's `default_language`
+entry rather than a second traversal. This is what makes D24's "agree by construction, not by
+coincidence" checkable at all: before T013 there were two independently-derived winners that
+happened to answer the same question the same way; after, there is one.
+
+**Rejected:** leaving the two computations separate and only patching the general branch's grouping
+key. That would still let the default and general branches drift independently if a later change
+touched one and not the other — the exact failure mode D13 and D24 both named, just deferred rather
+than closed.
+
+## D28 — T014's discriminator is copied logic, not a shared helper
+
+The default-language branch's own tag comparison (`published_tag.lower() != winner_tag.lower()`)
+and T014's general-branch version are the identical two lines, not factored into a shared method.
+Considered and rejected: the two branches differ in what happens *after* the comparison — the
+default branch's winner path is a bare `continue` (the value already lives on `concept.label`), the
+general branch's winner path falls through to `concept.add_label(...)` and a possible
+`LANGUAGE_SUBSTITUTION` normalisation — so a shared helper would need to either return a tri-state
+the caller re-branches on (no simpler than the two lines it replaces) or grow a callback parameter
+for "what to do with the winner", which is exactly the kind of hook `craft-increments`' simplicity
+rule warns off building for two call sites. Two identical comparisons reading the same
+`preferred_winner_by_language` dict is the smaller diff.
+
+**Revisit if:** a third call site ever needs this same discriminator — at that point a named helper
+earns its complexity.
+
+## D29 — T015 needed no production change, and its own test proves why
+
+FR-004's asymmetry — alternative labels, hidden labels and notes carry no per-language cardinality
+limit — was never something T013/T014 touched: both changes are scoped to
+`if kind == ConceptLabel.Kind.PREFERRED:` branches, and every other kind already fell straight
+through to the unconditional `concept.add_label(...)` at the bottom of the loop, both before and
+after T013/T014. `variants.ttl` (T005) already carries `en-gb`/`en-us` variants of an alternative
+label and a note for exactly this population, built and reserved for this purpose since the
+foundational phase (its own comment: "the contest population US-3 needs is exercised"). T015's tests
+run this fixture and assert both variants land — SC-007 — with no code change, the same shape D26
+recorded for T011/T012: a coverage task for behaviour a design decision (D4) already delivered.
+
+The one thing worth naming: `colour`'s *preferred* label also carries an `en-gb`/`en-us` contest
+(the concept's default-language slot), and it correctly produces exactly one loser entry. A test
+asserting "no set-aside entry for this subject" would have been wrong — it would pass today and
+break the moment someone (correctly) added a second preferred-label fixture value — so the test
+asserts `len(losses) == 1` (the expected preferred-label loser, and nothing more), not `== 0`. A
+`SetAsideEntry` carries no predicate or kind, only `language`, so a loss can't be attributed to "the
+alternative label" versus "the preferred label" by inspecting the entry itself; count is the
+distinguishing signal here, not membership.
+
+**Revisit if:** never — the asymmetry's underlying rule is a `craft-simplify` case for staying
+where it is: no cardinality contest is not an omission needing a control-flow branch, it is the
+model's own constraint (or its absence) already deciding whether one is needed.
