@@ -1259,3 +1259,26 @@ report.
 **Revisit if:** never — the same discipline `EMPTY_SLUG`/`VALUE_TOO_LONG` already give a value the
 model refuses, applied to a whole record's own write for a reason the published file did not
 cause.
+
+## D51 — T046 (fix cycle 4): a collision suffix as long as the field slices the base away
+
+SEC-303: `unique_slug_for_identifier`'s collision retry computed `base[: max_length -
+len(suffix_text)] + suffix_text`. Once `len(suffix_text) >= max_length` that slice bound is zero
+or negative, and Python slices from the *end* of the string rather than raising — at
+`max_length == len(suffix_text)` the candidate is the bare suffix, with no relationship to the
+base at all (`unique_slug_for_identifier('http://e.org/#ab', {'ab': 'other', 'b-2': 'other2'},
+2)` returns `'-2'`).
+
+Unreachable at any of the three current call sites — `Concept`, `ConceptScheme` and `Collection`
+all pass their own `SlugField(max_length=255)`, and a suffix would need roughly 250 decimal
+digits (≈10^250 colliding records sharing one base) to reach it. Fixed by construction anyway,
+the same reasoning D47 already gives a helper this cycle keeps handing a new caller: `base[:
+max(max_length - len(suffix_text), 1)]` always keeps at least one base character, so the
+candidate is never merely the disambiguator. This does not guarantee `len(candidate) <=
+max_length` in the (equally unreachable) case where `max_length` is smaller than `len(suffix_text)
++ 1` — there is no value that both fits the field and still carries any of the base at
+`max_length < 2` — but it never again discards the base to make room for a suffix that alone
+exceeds the field.
+
+**Revisit if:** never — a one-line unit test on the helper (`TestUniqueSlugForIdentifierTruncationNeverSlicesNegative`)
+covers it directly; no call site needs to change.

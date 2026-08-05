@@ -31,6 +31,7 @@ from controlled_vocabularies.exchange.skos import (
     SkosImportError,
     SkosImportFailed,
     import_skos,
+    unique_slug_for_identifier,
 )
 from controlled_vocabularies.models import (
     Collection,
@@ -1395,6 +1396,35 @@ class TestASlugAlreadyStoredIsReadBackNeverRecomputed:
         concept.refresh_from_db()
         assert scheme.slug == "rocks"
         assert concept.slug == "granite"
+
+
+class TestUniqueSlugForIdentifierTruncationNeverSlicesNegative:
+    """T046 — SEC-303: ``base[: max_length - len(suffix_text)]`` goes negative once a collision
+    suffix is as long as (or longer than) ``max_length``, and Python silently slices from the
+    *end* of the string instead of raising — at ``max_length == len(suffix_text)`` the slice
+    bound is exactly ``0``, and the returned candidate is the bare suffix, with no relationship
+    to the base at all. Unreachable from the three current call sites (all pass 255), fixed by
+    construction anyway with ``max(max_length - len(suffix_text), 1)``, which always keeps at
+    least one character of the base.
+    """
+
+    def test_a_collision_suffix_as_long_as_max_length_does_not_discard_the_base(self):
+        """Reproduces SEC-303's own evidence: with max_length=2, the base 'ab' collides, and the
+        retry appends suffix '-2' (also length 2). The unfixed slice, base[:2 - 2] + '-2', is
+        base[:0] + '-2' == '-2' — the base is gone entirely, and the result is indistinguishable
+        from another record's own base 'b-2'. Would fail (return '-2') without the fix.
+        """
+        result = unique_slug_for_identifier("http://e.org/#ab", {"ab": "other", "b-2": "other2"}, 2)
+        assert result != "-2"
+        assert result.startswith("a")
+
+    def test_a_normal_collision_is_unaffected_by_the_fix(self):
+        """max_length comfortably larger than any suffix (the shape every real field is in,
+        SlugField(max_length=255)) must keep resolving collisions exactly as before.
+        """
+        taken = {"granite": "other"}
+        result = unique_slug_for_identifier("http://e.org/#granite", taken, 255)
+        assert result == "granite-2"
 
 
 class TestSlugAndNameLengthAreBoundedToTheField:

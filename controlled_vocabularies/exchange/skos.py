@@ -114,7 +114,13 @@ def unique_slug_for_identifier(static_uri: str, taken_slugs: dict[str, str | Non
     while taken_slugs.get(candidate, static_uri) != static_uri:
         suffix += 1
         suffix_text = f"-{suffix}"
-        candidate = base[: max_length - len(suffix_text)] + suffix_text
+        # T046, SEC-303 (fix cycle 4): a bare `max_length - len(suffix_text)` goes to zero or
+        # negative once the suffix is as long as (or longer than) max_length, and Python slices
+        # from the *end* of the string instead of raising — the candidate then loses its
+        # relationship to the base entirely (at equality, the bare suffix). Unreachable at any
+        # of the three current call sites (all pass 255), fixed by construction anyway: always
+        # keep at least one base character.
+        candidate = base[: max(max_length - len(suffix_text), 1)] + suffix_text
     taken_slugs[candidate] = static_uri
     return candidate
 
