@@ -57,6 +57,7 @@ _EXAMPLE_FATAL_PARAMS = {
     FatalReason.DEFAULT_LANGUAGE_UNCONFIGURED: {"language": "en-us"},
     FatalReason.VOCABULARY_SLUG_UNUSABLE: {},
     FatalReason.VOCABULARY_NAME_UNUSABLE: {"language": "en"},
+    FatalReason.VOCABULARY_RECORD_INVALID: {},
 }
 
 # One example params dict per normalized reason (T021), the same shape as _EXAMPLE_PARAMS.

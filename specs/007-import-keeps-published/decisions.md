@@ -1455,3 +1455,55 @@ it is a different branch of the same function and the review scoped it as its ow
 **Revisit if:** never — a caller wanting "the best value I can actually store" from an RDF literal
 set is exactly what `max_length` on this one shared accessor gives both callers, without a second
 copy of the filtering logic.
+
+## D57 — T052 (fix cycle 5): a scheme's write failure is only a slug problem when it names the
+slug, and either way the vocabulary is unresolved
+
+CORR-401/SEC-402/SEC-403 (round 4, two high, one medium): T045's `except ValidationError` around
+`resolve_scheme`'s `row.save()` converted *every* `ValidationError` `ConceptScheme.save()` can
+raise into `SetAsideReason.STORED_SLUG_INVALID`, and its own `return None, None` was the one exit
+from this method never preceded by `add_fatal` — unlike `VOCABULARY_UNDETERMINED`,
+`VOCABULARY_TARGET_MISMATCH`, `VOCABULARY_SLUG_UNUSABLE` and `VOCABULARY_NAME_UNUSABLE`, all four
+of which stop the run.
+
+Two faults, reproduced separately against `540648a`. **Mislabelling:** `ConceptScheme.save()`
+raises `ValidationError` for four reasons — the frozen-default-language check, the
+configured-language check, `_validate_manual_slug()`, and the slug-collision check — and only the
+last two are slug problems. A matched row's `default_language` is never reassigned by
+`resolve_scheme` (D46), so a value that was a configured language when the row was written but has
+since been dropped from `settings.LANGUAGES` reaches `save()` unchanged on every later import and
+raises for `default_language`, not `slug`. The old handler reported `STORED_SLUG_INVALID` anyway —
+false, since the stored slug is untouched and perfectly valid. **Success-shaped no-op:** whichever
+field failed, `resolve_scheme` returned `(None, None)` with no fatal, `SkosImporter.run` gates the
+whole concept/relation/collection phase on `target_scheme is not None`, and `report.fatal == []`
+is what the module's own docstring defines as a successful run — so a file whose scheme could not
+be written completed "successfully" having imported nothing, with only the one set-aside entry to
+show for it.
+
+**Fixed with two changes to the one `except` clause, not two separate try/except blocks.** The
+caught `exc.message_dict` is checked for the key `"slug"`: only then does `STORED_SLUG_INVALID`
+still fire, naming the actual cause `_validate_manual_slug()`/the collision check raises for.
+Separately, a new `FatalReason.VOCABULARY_RECORD_INVALID` is always added alongside whatever
+set-aside did or did not fire — the same precedent `VOCABULARY_SLUG_UNUSABLE` already sets for "no
+resolvable vocabulary, nothing for the rest of the file to import into," generalised from "the
+slug could never be minted" to "the write itself failed for any reason." `import_skos` now raises
+`SkosImportFailed` for both scenarios instead of returning a report that looks like nothing was
+wrong.
+
+**Concept's and Collection's own `except ValidationError` wrappers are untouched.** `Concept.save()`
+and `Collection.save()` under `slug_is_manual` raise only for slug reasons (empty, malformed, the
+in-scheme collision), and a matched *record's* failure to write does not gate anything else in the
+file the way an unresolved *vocabulary* does — the scheme is the one call site where both faults
+apply.
+
+**A pre-existing test is strengthened, not weakened.** T045's
+`test_a_scheme_s_out_of_band_slug_failing_validation_does_not_escape_import_skos` asserted
+`report.fatal == []`, which was exactly D50's now-corrected premise ("there is nothing else in the
+file to salvage or protect by rolling the whole run back") — untrue, since nothing in the file
+gets a chance to import once the scheme cannot be resolved. The test now asserts `import_skos`
+raises `SkosImportFailed` with one `VOCABULARY_RECORD_INVALID` fatal, keeping its original
+`STORED_SLUG_INVALID` set-aside assertion unweakened alongside it.
+
+**Revisit if:** never — the same "unwritable vocabulary is fatal" rule `VOCABULARY_SLUG_UNUSABLE`
+already gives an identifier that cannot be minted, applied to a write that fails after the
+identifier was fine.

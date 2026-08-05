@@ -715,14 +715,30 @@ class SchemeResolver:
         row.slug_is_manual = True
         try:
             row.save()
-        except ValidationError:
+        except ValidationError as exc:
             # T045, SEC-301, decisions.md D50 (fix cycle 4): a matched row's slug is now read
             # back unchanged (T041) rather than recomputed, so a value written out of band
             # (.update(), loaddata, bulk_create, a data migration) reaches this validation
             # exactly as stored. Set aside rather than letting ValidationError escape
             # import_skos outside its own exception hierarchy — the same discipline
             # import_labels/_import_notes already apply to a value's own save().
-            self.report.add_set_aside(SetAsideReason.STORED_SLUG_INVALID, subject=declared_uri)
+            #
+            # T052, CORR-401/SEC-403, decisions.md D57 (fix cycle 5): ConceptScheme.save() also
+            # raises ValidationError for its frozen- and configured-default-language checks
+            # (models.py), neither of which is a slug problem — a matched row's default_language
+            # is never reassigned here (D46), so a language later dropped from
+            # settings.LANGUAGES reaches this exact path with the slug untouched. Only report
+            # STORED_SLUG_INVALID when the exception actually names the slug; anything else keeps
+            # its own field name out of a message that would otherwise misdiagnose it.
+            if "slug" in exc.message_dict:
+                self.report.add_set_aside(SetAsideReason.STORED_SLUG_INVALID, subject=declared_uri)
+            # T052, CORR-401/SEC-402, decisions.md D57 (fix cycle 5): whichever field failed, the
+            # scheme was not written, so nothing else in the file has a resolved vocabulary to
+            # import into — every other `return None, None` in this method is preceded by
+            # add_fatal; this one was not, and a run that imports nothing must never report
+            # `fatal == []` (the precedent VOCABULARY_SLUG_UNUSABLE already sets for a vocabulary
+            # that cannot be written at all).
+            self.report.add_fatal(FatalReason.VOCABULARY_RECORD_INVALID, subject=declared_uri)
             return None, None
         if created:
             self.report.add_created(row.uri)

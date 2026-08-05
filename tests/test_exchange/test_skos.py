@@ -1783,6 +1783,13 @@ class TestAStoredSlugThatFailsValidationIsSetAsideNotEscaped:
     """
 
     def test_a_scheme_s_out_of_band_slug_failing_validation_does_not_escape_import_skos(self, db, tmp_path):
+        """T052, CORR-401/SEC-402, decisions.md D57 (fix cycle 5): overturns the version of this
+        test fix cycle 4 shipped, which asserted ``report.fatal == []`` — the scheme could not be
+        resolved, so nothing else in the file has a target to import into, and a run that imports
+        nothing must not report ``fatal == []`` (every other ``return None, None`` in
+        ``resolve_scheme`` is preceded by ``add_fatal``; this one was not). The set-aside naming
+        the bad slug is unchanged; a fatal is now added alongside it.
+        """
         scheme = ConceptSchemeFactory(name="Sec Three O One Scheme", static_uri="http://pub.example/sec301scheme")
         ConceptScheme.objects.filter(pk=scheme.pk).update(slug="has spaces/and-slash")
         path = tmp_path / "sec301_scheme.ttl"
@@ -1791,14 +1798,56 @@ class TestAStoredSlugThatFailsValidationIsSetAsideNotEscaped:
             '<http://pub.example/sec301scheme> a skos:ConceptScheme ; skos:prefLabel "Sec Three O One Scheme"@en .\n'
         )
 
-        report = import_skos(path)
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(path)
 
-        assert report.fatal == []
+        report = exc_info.value.report
+        assert len(report.fatal) == 1
+        assert report.fatal[0].reason is FatalReason.VOCABULARY_RECORD_INVALID
         entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.STORED_SLUG_INVALID]
         assert len(entries) == 1
         assert entries[0].subject == "http://pub.example/sec301scheme"
         scheme.refresh_from_db()
         assert scheme.slug == "has spaces/and-slash"
+
+    def test_a_matched_scheme_s_unconfigured_stored_default_language_is_fatal_not_a_mislabeled_bad_slug(
+        self, db, tmp_path
+    ):
+        """T052, CORR-401/SEC-403, decisions.md D57 (fix cycle 5): ``ConceptScheme.save()`` raises
+        ``ValidationError`` for its configured-language check exactly as it does for a bad manual
+        slug, and a matched row's stored ``default_language`` is never reassigned by
+        ``resolve_scheme`` (D46) — so a language later dropped from ``settings.LANGUAGES`` reaches
+        this path with the slug untouched and perfectly valid. The bare ``except ValidationError``
+        T045 added could not tell the two apart and reported this as ``STORED_SLUG_INVALID``,
+        which is false: the stored slug never changes in this scenario.
+        """
+        scheme = ConceptSchemeFactory(
+            name="Corr Four O One Scheme",
+            static_uri="http://pub.example/corr401scheme",
+            default_language="de",
+        )
+        path = tmp_path / "corr401_scheme.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/corr401scheme> a skos:ConceptScheme ; skos:prefLabel "Corr Four O One Scheme"@en .\n'
+            "<http://pub.example/corr401scheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/corr401scheme> ; skos:prefLabel "One"@en .\n'
+        )
+
+        with (
+            override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]),
+            pytest.raises(SkosImportFailed) as exc_info,
+        ):
+            import_skos(path)
+
+        report = exc_info.value.report
+        assert len(report.fatal) == 1
+        assert report.fatal[0].reason is FatalReason.VOCABULARY_RECORD_INVALID
+        slug_entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.STORED_SLUG_INVALID]
+        assert slug_entries == []
+        assert not Concept.objects.filter(static_uri="http://pub.example/corr401scheme#c1").exists()
+        scheme.refresh_from_db()
+        assert scheme.default_language == "de"
 
     def test_a_concept_s_out_of_band_slug_failing_validation_does_not_escape_import_skos(self, db, tmp_path):
         path = tmp_path / "sec301_concept.ttl"

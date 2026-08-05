@@ -251,7 +251,16 @@ class FatalReason(TextChoices):
     ``full_clean()`` immediately refuses — the same reasoning
     ``VOCABULARY_SLUG_UNUSABLE`` already gives for an unusable identifier,
     applied to the other field nothing else in the file can supply on the
-    vocabulary's behalf.
+    vocabulary's behalf. ``VOCABULARY_RECORD_INVALID`` (fix cycle 5, CORR-401/
+    SEC-402, decisions.md D57) names a *matched* scheme whose write itself
+    fails the model's own validation for a reason the published file did not
+    cause — a stored value written out of band, or a configured language later
+    dropped from ``settings.LANGUAGES``. Without a resolved vocabulary the rest
+    of the file has nothing to import into, the same reasoning
+    ``VOCABULARY_SLUG_UNUSABLE`` gives when a slug cannot even be minted;
+    unlike that reason, the specific field named — a slug or something else —
+    is reported separately, as a :class:`SetAsideReason` where one exists
+    (``STORED_SLUG_INVALID``) rather than folded into this fatal's own message.
     """
 
     MISSING_IDENTITY = "missing_identity", _("identifier missing or blank")
@@ -264,6 +273,10 @@ class FatalReason(TextChoices):
     VOCABULARY_NAME_UNUSABLE = (
         "vocabulary_name_unusable",
         _("vocabulary's name is longer than this application can store"),
+    )
+    VOCABULARY_RECORD_INVALID = (
+        "vocabulary_record_invalid",
+        _("vocabulary's stored record fails its own validation and could not be written"),
     )
 
     @property
@@ -302,6 +315,10 @@ _FATAL_TEMPLATES: dict[FatalReason, Promise] = {
         "'%(subject)s' has no name this application can store — its published name in "
         "'%(language)s' is longer than this application can store, and there is no earlier "
         "name to keep; the run was refused."
+    ),
+    FatalReason.VOCABULARY_RECORD_INVALID: _(
+        "'%(subject)s' has a stored record that fails this application's own validation and "
+        "could not be written; the run was refused."
     ),
 }
 
