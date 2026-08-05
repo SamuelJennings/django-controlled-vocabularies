@@ -805,3 +805,41 @@ become opaque — `/vocabularies/v-113/00123` where today they read `/soil-types
 out and it remains true. It is accepted because the addresses are correct and permanent, which is
 what a vocabulary's consumers need from them, and because a readable-but-unstable address is worse
 than an opaque stable one for every use a URL is put to.
+
+## D36 — Fix cycle 1 landed the withdrawn FR-016, and removing it is booked rather than reverted now
+
+The fix-cycle implementer was dispatched before FR-016 was withdrawn, so T023 built
+`LanguageMatcher.resolve_identity_winner()` and three tests around it. A subagent's brief is fixed
+at dispatch, so the withdrawal could not reach a child already running. The code is on the branch
+and it is green.
+
+It is not reverted in place. `git revert` on T023 conflicts against T024–T027, which touch the same
+region of `skos.py`, and hand-resolving a revert is exactly the kind of edit that lands untested.
+Removal is instead a task in the FR-017–FR-020 dispatch: delete `resolve_identity_winner` and its
+call sites, restore the FR-002 rule the carve-out displaced, and replace T023's three tests with
+slug-level stability assertions — which is where the guarantee belongs once a local address is
+derived from the published identifier rather than from a label.
+
+Until that task lands, the branch carries an implementation of a withdrawn requirement. Named here
+so it cannot be mistaken for an intended behaviour by a later reader of the diff.
+
+## D37 — The craft-skill receipt gate red-blocked a clean report, and the cause is a mid-flight registry bump
+
+`forge check-receipts` failed the fix-cycle report: it echoed `craft-tdd/2026-08-04/c95488d8` where
+the registry now holds `craft-tdd/2026-08-05/eae3b6c7`.
+
+The child was honest. Its transcript shows it loaded the skill and that the body it was given —
+staged under `/tmp/openclaw/openclaw-claude-skills-*` at dispatch — ended with the 2026-08-04
+receipt. A concurrent run on another repo edited `craft-tdd` and bumped its receipt in both the file
+and the registry *while this child was running*. The dispatch brief, written at dispatch, recorded
+the receipt that was then current; `forge check-skills` passed for the same reason.
+
+So the gate compares a value fixed at dispatch against a registry that moves, and any skill edit
+during a long child run retroactively fails a report that did nothing wrong. Overridden here on the
+evidence above, which is a human judgement over a red gate and is recorded as such. The delta the
+child missed is the per-task test-scope narrowing of 2026-08-05 — a cost rule, not a correctness
+rule, and its only effect was that the child ran the full suite more often than it needed to.
+
+**The deeper defect the diagnosis exposed.** The brief hands the child the receipt it is supposed to
+echo, so echoing it has never proved a read. That is a kit fix, not a feature fix, and it is booked
+as a retro proposal with the two gaps already recorded there.

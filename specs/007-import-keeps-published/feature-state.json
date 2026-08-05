@@ -635,41 +635,6 @@
       ]
     },
     {
-      "id": "US6",
-      "priority": "P1",
-      "issue": null,
-      "worktree": null,
-      "status": "todo",
-      "replans": 0,
-      "tasks": [
-        {
-          "id": "T024",
-          "status": "todo",
-          "attempts": 0
-        },
-        {
-          "id": "T025",
-          "status": "todo",
-          "attempts": 0
-        },
-        {
-          "id": "T026",
-          "status": "todo",
-          "attempts": 0
-        },
-        {
-          "id": "T027",
-          "status": "todo",
-          "attempts": 0
-        },
-        {
-          "id": "T028",
-          "status": "todo",
-          "attempts": 0
-        }
-      ]
-    },
-    {
       "id": "US7",
       "priority": "P1",
       "issue": null,
@@ -706,6 +671,133 @@
           "id": "T034",
           "status": "todo",
           "attempts": 0
+        }
+      ]
+    },
+    {
+      "id": "US6",
+      "priority": "P0",
+      "issue": null,
+      "worktree": "/home/sam/projects/samueljennings/dcv-fs007-fix1",
+      "status": "done",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T023",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py::TestReimportAfterAddingABaseSharingLanguageKeepsIdentityStill::test_the_concepts_label_slug_and_local_url_are_unchanged_by_adding_a_base_sharing_language",
+              "tests/test_exchange/test_skos.py::TestReimportAfterAddingABaseSharingLanguageKeepsIdentityStill::test_the_en_gb_value_is_now_also_stored_under_its_own_newly_configured_slot",
+              "tests/test_exchange/test_skos.py::TestReimportAfterAddingABaseSharingLanguageKeepsIdentityStill::test_the_en_us_spelling_remains_a_reported_contest_loser_not_stored"
+            ],
+            "commands": [
+              "poetry run python /tmp/arch001_repro_keep.py  # RED before fix: Colour/colour -> Color/color, URL moves",
+              "poetry run pytest tests/test_exchange/test_skos.py::TestReimportAfterAddingABaseSharingLanguageKeepsIdentityStill -v  # RED: 3 failed (label 'Color' != 'Colour', 0 VARIANT_NOT_KEPT losers found)",
+              "poetry run pytest tests/test_exchange/test_skos.py::TestReimportAfterAddingABaseSharingLanguageKeepsIdentityStill tests/test_exchange/test_skos.py::TestReimportAfterAddingALanguageKeepsEveryOtherRecordUnchanged tests/test_exchange/test_languages.py -v  # GREEN: 29 passed",
+              "poetry run python /tmp/arch001_repro_keep.py  # GREEN after fix: label/slug/local_url all 'stable' across the reimport",
+              "poetry run pytest -q  # 767 passed",
+              "poetry run ruff check controlled_vocabularies/exchange/languages.py controlled_vocabularies/exchange/skos.py tests/test_exchange/test_skos.py"
+            ]
+          }
+        },
+        {
+          "id": "T024",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py::TestVocabularyDefaultLanguageMustItselfBeConfigured::test_an_unconfigured_default_language_fails_the_run_with_one_fatal_finding",
+              "tests/test_exchange/test_skos.py::TestVocabularyDefaultLanguageMustItselfBeConfigured::test_djangos_own_shipped_defaults_are_refused_cleanly_not_silently_emptied",
+              "tests/test_exchange/test_skos.py::TestVocabularyDefaultLanguageMustItselfBeConfigured::test_the_sites_own_configured_default_never_trips_this"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_exchange/test_skos.py::TestVocabularyDefaultLanguageMustItselfBeConfigured -v  # RED: 2 failed, 'Failed: DID NOT RAISE SkosImportFailed' (both LANGUAGE_CODE-outside-LANGUAGES scenarios silently succeeded)",
+              "poetry run pytest tests/test_exchange/test_skos.py::TestVocabularyDefaultLanguageMustItselfBeConfigured -v  # GREEN: 3 passed",
+              "poetry run pytest -q  # 774 passed (includes required _EXAMPLE_FATAL_PARAMS registration for the new FatalReason member)",
+              "poetry run ruff check . && poetry run ruff format --check . && poetry run mypy"
+            ]
+          }
+        },
+        {
+          "id": "T025",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py::TestOverlongValueIsSetAsideNotCrashed::test_an_overlong_alt_label_is_set_aside_and_named_not_raised",
+              "tests/test_exchange/test_skos.py::TestOverlongValueIsSetAsideNotCrashed::test_the_concept_carrying_the_overlong_value_still_imports_on_its_other_content",
+              "tests/test_exchange/test_skos.py::TestOverlongValueIsSetAsideNotCrashed::test_the_rest_of_the_file_still_imports"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_exchange/test_skos.py::TestOverlongValueIsSetAsideNotCrashed -v  # RED: 3 failed, django.core.exceptions.ValidationError: {'text': ['Ensure this value has at most 255 characters (it has 300).']} propagating uncaught out of import_skos",
+              "poetry run pytest tests/test_exchange/test_skos.py::TestOverlongValueIsSetAsideNotCrashed -v  # GREEN: 3 passed",
+              "poetry run pytest -q  # 783 passed (includes required _EXAMPLE_PARAMS registration and coverage-gate recognition for the new SetAsideReason member)",
+              "poetry run mypy  # 1 error found (Concept._meta.get_field('label').max_length is int|None) then fixed with an explicit None-check; second run: Success",
+              "DJANGO_SETTINGS_MODULE=tests.settings poetry run python -c \"...makemigrations check=True dry_run=True...\"  # No changes detected"
+            ]
+          }
+        },
+        {
+          "id": "T026",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py::TestNoPreferredLabelConceptStillAccountsItsOwnLanguages::test_the_skipped_concepts_own_published_language_is_visible_in_the_account",
+              "tests/test_exchange/test_skos.py::TestNoPreferredLabelConceptStillAccountsItsOwnLanguages::test_the_configured_default_language_itself_never_appears_in_the_account",
+              "tests/test_exchange/test_skos.py::TestNoPreferredLabelConceptStillAccountsItsOwnLanguages::test_the_no_preferred_label_entry_itself_is_still_reported_unchanged"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_exchange/test_skos.py::TestNoPreferredLabelConceptStillAccountsItsOwnLanguages -v  # RED: 1 failed, AssertionError: assert 'fr' in {} (language_account() empty for a concept whose only content is @fr on an en-only site)",
+              "poetry run pytest tests/test_exchange/test_skos.py::TestNoPreferredLabelConceptStillAccountsItsOwnLanguages tests/test_exchange/test_skos.py::TestNoPreferredLabelFinishedByUS3 -v  # GREEN: 5 passed",
+              "poetry run pytest -q  # 786 passed",
+              "poetry run ruff check . && poetry run ruff format --check . && poetry run mypy"
+            ]
+          }
+        },
+        {
+          "id": "T027",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_languages.py::TestLanguageMatcherResolveWinner::test_tag_counts_lookup_is_case_folded_so_a_recased_candidate_tag_still_finds_its_count",
+              "tests/test_exchange/test_skos.py::TestPreferredLabelTagCounts::test_case_varying_tags_for_one_language_fold_into_one_count",
+              "tests/test_exchange/test_report.py::TestLanguageAccount::test_mixed_case_spellings_of_one_language_fold_into_one_entry",
+              "tests/test_exchange/test_skos.py::TestVocabularyAndCollectionNameSubstitutionIsReported::test_the_vocabularys_name_and_description_are_each_reported_as_a_substitution",
+              "tests/test_exchange/test_skos.py::TestVocabularyAndCollectionNameSubstitutionIsReported::test_a_collections_name_is_reported_as_a_substitution",
+              "tests/test_exchange/test_skos.py::TestVocabularyAndCollectionNameSubstitutionIsReported::test_an_exact_match_scheme_name_is_not_reported_as_a_substitution",
+              "tests/test_standards.py::TestImportLanguageMessagesUseNamedPlaceholders::test_the_kept_as_placeholder_actually_interpolates_its_own_value"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_exchange/test_languages.py -k case_folded -v  # RED: assert ('en-us','Color') == ('EN-GB','Colour')",
+              "poetry run pytest tests/test_exchange/test_skos.py::TestPreferredLabelTagCounts -v  # RED: assert {'en-GB': 1, 'en-gb': 1} == {'en-gb': 2}",
+              "poetry run pytest tests/test_exchange/test_report.py -k mixed_case_spellings -v  # RED: assert 2 == 1 (PT-br/pt-BR counted as two languages)",
+              "poetry run pytest tests/test_exchange/test_skos.py::TestVocabularyAndCollectionNameSubstitutionIsReported -v  # RED: 2 failed, assert 0 == 2 / assert 0 == 1 (no LANGUAGE_SUBSTITUTION reported for scheme name/description or collection name)",
+              "poetry run pytest tests/test_exchange/test_languages.py tests/test_exchange/test_skos.py tests/test_exchange/test_report.py tests/test_standards.py -q  # GREEN: all passing after each fix",
+              "poetry run pytest -q  # 793 passed",
+              "poetry run ruff check . && poetry run ruff format --check . && poetry run mypy"
+            ]
+          }
+        },
+        {
+          "id": "T028",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [],
+            "commands": [
+              "poetry run pytest -q  # 793 passed (baseline was 764; +29 net new tests across T023-T027)",
+              "poetry run ruff check .  # All checks passed!",
+              "poetry run ruff format --check .  # 25 files already formatted",
+              "poetry run mypy  # Success: no issues found in 11 source files",
+              "poetry run deptry .  # Success! No dependency issues found.",
+              "migrate-from-zero against a fresh sqlite file via tests.settings with DATABASES overridden to /tmp/migrate_zero_test.sqlite3  # all 19 migrations applied cleanly",
+              "makemigrations controlled_vocabularies --check --dry-run  # No changes detected in app 'controlled_vocabularies'"
+            ]
+          }
         }
       ]
     }
