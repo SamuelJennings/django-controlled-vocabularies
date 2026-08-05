@@ -99,6 +99,11 @@
       "state": "IMPLEMENT",
       "at": "2026-08-05T16:05:00Z",
       "note": "Spec re-gate APPROVED by Sam. US6 (T024-T028) verified independently: 790 tests, verify 5/5 green, receipts RED on a stale registry receipt (craft-tdd bumped mid-run by workspace commit 50e348e at 15:28 \u2014 gate defect, not a child failure). One tamper flag was a real weakening: a pre-existing assertion broadened without need, proven unnecessary by re-running the suite with it restored, and reverted as 16eaeb0. Merged as db2517c. US7 next."
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-05T18:15:00Z",
+      "note": "S6 review cycle 2 of 2: all three lenses request_changes, risk high, receipts green on all three. Seven verified high findings, dominated by one gap three lenses found independently \u2014 the identifier-derived address rule reached Concept and ConceptScheme but not Collection. Reproduced independently: a collection with identifier segment 'fines' imported as 'fine-fractions' and moved to 'small-particles' on a publisher rename. US8 (T038-T042) dispatched. Review budget now exhausted; a third red round is Sam's call."
     }
   ],
   "gates": {
@@ -908,6 +913,41 @@
           }
         }
       ]
+    },
+    {
+      "id": "US8",
+      "priority": "P1",
+      "issue": null,
+      "worktree": "/home/sam/projects/samueljennings/dcv-fs007-fix3",
+      "status": "todo",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T038",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T039",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T040",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T041",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T042",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
     }
   ],
   "budgets": {
@@ -916,7 +956,7 @@
       "max": 2
     },
     "review_cycles": {
-      "used": 1,
+      "used": 2,
       "max": 2
     },
     "design_review_cycles": {
