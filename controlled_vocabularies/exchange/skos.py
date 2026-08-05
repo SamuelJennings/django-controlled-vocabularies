@@ -189,14 +189,19 @@ class SkosGraph:
             if isinstance(literal, rdflib.Literal) and literal.language
         ]
 
-    def preferred_label_in(self, node: rdflib.term.Node, language: str) -> str | None:
-        """The lexicographically-first ``skos:prefLabel`` value on ``node`` in ``language``, or ``None``."""
-        values = sorted(
-            str(literal)
+    def preferred_label_in(self, node: rdflib.term.Node) -> list[tuple[str, str]]:
+        """Every ``(published tag, value)`` pair ``node`` carries a ``skos:prefLabel`` in (T007).
+
+        Unfiltered by language: which pair fills a configured language's slot is decided by
+        :meth:`~controlled_vocabularies.exchange.languages.LanguageMatcher.resolve_winner`, and that
+        policy does not belong on this RDF boundary (Article XV) — the caller, which already holds
+        the matcher, resolves and picks a winner from what this returns.
+        """
+        return sorted(
+            (str(literal.language), str(literal))
             for literal in self.graph.objects(node, SKOS.prefLabel)
-            if isinstance(literal, rdflib.Literal) and literal.language == language
+            if isinstance(literal, rdflib.Literal) and literal.language
         )
-        return values[0] if values else None
 
     def preferred_label_tag_counts(self, concept_nodes: Iterable[rdflib.term.Node]) -> dict[str, int]:
         """How often each published language tag appears across ``concept_nodes``'
@@ -702,14 +707,16 @@ class ConceptImporter:
                 self.report.add_set_aside(SetAsideReason.VOCABULARY_MISMATCH, subject=uri, other=other)
                 continue
 
-            label = self.skos_graph.preferred_label_in(node, self.target_scheme.effective_default_language)
-            if label is None:
-                self.report.add_set_aside(
-                    SetAsideReason.NO_PREFERRED_LABEL,
-                    subject=uri,
-                    language=self.target_scheme.effective_default_language,
-                )
+            default_language = self.target_scheme.effective_default_language
+            candidates = [
+                (tag, value)
+                for tag, value in self.skos_graph.preferred_label_in(node)
+                if self.matcher.resolve(tag).configured_language == default_language
+            ]
+            if not candidates:
+                self.report.add_set_aside(SetAsideReason.NO_PREFERRED_LABEL, subject=uri, language=default_language)
                 continue
+            (_winning_tag, label), _losers = self.matcher.resolve_winner(default_language, candidates)
 
             if not slugify(label, allow_unicode=True):
                 # FIX 5 (D39): a label made up only of characters slugify() strips derives an empty

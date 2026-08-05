@@ -477,6 +477,50 @@ class TestImportConcepts:
         assert "http://example.org/rocks/granite" not in report.created
 
 
+class TestConceptLabelIsSelectedByTheWinnerRule:
+    """T007 — FR-002/FR-003: ``Concept.label`` is chosen by ``LanguageMatcher.resolve_winner``
+    (T021), the same rule ``import_labels``'s own surplus report reads, rather than exact tag
+    equality — so a concept whose only preferred label is a variant of the default language still
+    names the concept, and an exact match is never displaced by a more predominant variant."""
+
+    def test_a_concept_whose_only_preferred_label_is_a_variant_of_the_default_language_still_names_it(self, db):
+        import_skos(FIXTURES / "declares-de-at.ttl")
+        rot = Concept.objects.get(static_uri="http://example.org/farben/rot")
+        assert rot.label == "Rot"
+        assert rot.slug == "rot"
+
+    def test_an_exact_match_is_not_displaced_by_a_more_predominant_variant(self, db, tmp_path):
+        # "en-gb" is the predominant tag across the file (three occurrences),
+        # but the target concept also carries an exact "en" match, which
+        # FR-002 says always wins regardless of predominance.
+        path = tmp_path / "exact_wins.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/exactwins/> a skos:ConceptScheme ;
+                skos:prefLabel "Exact wins"@en .
+
+            <http://example.org/exactwins/other1> a skos:Concept ;
+                skos:inScheme <http://example.org/exactwins/> ;
+                skos:prefLabel "Other"@en-gb .
+
+            <http://example.org/exactwins/other2> a skos:Concept ;
+                skos:inScheme <http://example.org/exactwins/> ;
+                skos:prefLabel "Other"@en-gb .
+
+            <http://example.org/exactwins/target> a skos:Concept ;
+                skos:inScheme <http://example.org/exactwins/> ;
+                skos:prefLabel "Alpha"@en, "Beta"@en-gb .
+            """
+        )
+        import_skos(path)
+        target = Concept.objects.get(static_uri="http://example.org/exactwins/target")
+        assert target.label == "Alpha"
+        assert target.slug == "alpha"
+
+
 class TestConceptsImpliedByMembershipButNeverGivenAnRdfType:
     """FIX 17 (review, decisions.md D50) — ``concept_nodes`` used to come only
     from ``graph.subjects(rdf.RDF.type, SKOS.Concept)``. A node the file
