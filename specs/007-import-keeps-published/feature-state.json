@@ -1216,6 +1216,76 @@
           }
         }
       ]
+    },
+    {
+      "id": "US11",
+      "priority": "P1",
+      "issue": null,
+      "worktree": "/home/sam/projects/samueljennings/dcv-fs007-fix6",
+      "status": "done",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T055",
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py",
+              "tests/test_exchange/test_report.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 882 passed",
+              "forge verify  # lint/typecheck/test/build pass; conformance red on pre-existing pyproject line-length"
+            ]
+          }
+        },
+        {
+          "id": "T056",
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py",
+              "tests/test_exchange/test_report.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 882 passed",
+              "forge verify  # lint/typecheck/test/build pass; conformance red on pre-existing pyproject line-length"
+            ]
+          }
+        },
+        {
+          "id": "T057",
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py",
+              "tests/test_exchange/test_report.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 882 passed",
+              "forge verify  # lint/typecheck/test/build pass; conformance red on pre-existing pyproject line-length"
+            ]
+          }
+        },
+        {
+          "id": "T058",
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py",
+              "tests/test_exchange/test_report.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 882 passed",
+              "forge verify  # lint/typecheck/test/build pass; conformance red on pre-existing pyproject line-length"
+            ]
+          }
+        }
+      ]
     }
   ],
   "budgets": {
@@ -1224,8 +1294,8 @@
       "max": 2
     },
     "review_cycles": {
-      "used": 4,
-      "max": 4
+      "used": 5,
+      "max": 5
     },
     "design_review_cycles": {
       "used": 1,
