@@ -62,6 +62,13 @@ All notable changes to this project are documented in this file. The format foll
   `Collection.objects` too, resolving a stored identifier first and falling back to the site's own
   composition. `validate_static_uri` is exported for reuse: it requires an absolute identifier with
   an accepted scheme and caps length at 500 characters.
+- An imported concept's slug, and a vocabulary's own, is now derived from its own published
+  identifier rather than from a translated label — the identifier's fragment where it has one,
+  otherwise the last segment of its path. Assigned once, on first import, and never recomputed by a
+  later one, so a publisher renaming a record, or a vocabulary's name arriving in a different
+  language, no longer moves that record's local address. A record authored on this site rather than
+  imported is unaffected and keeps deriving its slug from its label. The cost: a vocabulary
+  published under opaque codes now gets an opaque local address.
 - `CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES` setting: the schemes an externally assigned
   `static_uri` may use — `http`, `https`, `urn`, `doi`, `info`, `ark`, `tag`, `hdl`, and `oai` by
   default (see the README).

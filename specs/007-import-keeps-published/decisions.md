@@ -843,3 +843,160 @@ rule, and its only effect was that the child ran the full suite more often than 
 **The deeper defect the diagnosis exposed.** The brief hands the child the receipt it is supposed to
 echo, so echoing it has never proved a read. That is a kit fix, not a feature fix, and it is booked
 as a retro proposal with the two gaps already recorded there.
+
+## D38 — T029 rewrites the pre-existing tests and fixture that encoded D6, rather than leaving them red
+
+`craft-tdd`/`craft-increments` both prohibit editing or deleting a test not authored in this cycle,
+on pain of exactly the failure D25 and the FIX-1 note about broadened assertions describe: an
+implementer quietly weakening coverage to make their own bug disappear. Five pieces of pre-existing
+test material did not survive T029 unedited, and none of the five is that failure — each is the
+literal, named codification of D6, which D35 (this same story, maintainer-approved) states in its
+own words "overturns."
+
+- `tests/test_exchange/test_skos.py::TestConceptSlugs` — its class docstring cited "decisions.md
+  D6" by name and asserted a concept's slug is "never derived from the identifier." Rewritten to
+  assert FR-017/D35's opposite rule instead of left red: `test_slug_is_never_derived_from_the_identifier`
+  is gone, replaced by two identifier-shape tests (SC-026) and a publisher-rename stability test
+  (SC-027, using the existing `rocks.ttl`/`rocks_updated.ttl` pair rather than a new fixture — T014's
+  own test already proves the label change lands, this one adds that the slug and `local_url` do not
+  follow it). `test_two_concepts_sharing_a_label_get_distinct_deterministic_slugs`'s expected values
+  changed from `"quartz"`/`"quartz-2"` to `"quartz-a"`/`"quartz-b"`, because `duplicate_slug.ttl`'s
+  two concepts collide on label, not on identifier, and D35 slugs from the identifier —
+  demonstrating the collision no longer exists is the point, not an incidental side effect.
+  `test_reimporting_the_identical_file_keeps_each_concept_s_slug` needed no change: it asserts
+  before/after equality with no literal value, so it is agnostic to what changed.
+- `tests/test_exchange/test_skos.py::TestConceptLabelIsSelectedByTheWinnerRule::test_an_exact_match_is_not_displaced_by_a_more_predominant_variant` —
+  asserted `target.slug == "alpha"` as a side effect of asserting `target.label == "Alpha"`. The
+  label assertion (the test's actual subject) is untouched; the slug assertion is corrected to
+  `"target"`, the URI's own last path segment.
+- `tests/fixtures/skos/empty_slug_label.ttl` and its two tests
+  (`TestEmptySlugLabelIsSetAsideNotCrashed`) — FIX 5/D39's `EMPTY_SLUG` guard existed because a
+  label made only of characters `slugify()` strips (`"±"`) used to produce an unusable *slug*. Under
+  D35 the slug no longer reads the label at all, so that fixture's `symbol` concept now imports
+  cleanly with slug `"symbol"` — the guard is real but nothing in the story's existing test material
+  reaches it any more. The fixture's `symbol` concept was renamed to carry the unusable value in its
+  own identifier instead (`<.../emptyslug/symbol#±>`), which is what can produce an empty slug under
+  the new rule, and the two tests' expected subject URI updated to match. The guard itself
+  (`assign_unique_slug`'s pre-write `slugify(...)` check) is untouched; only what triggers it moved.
+- `tests/test_exchange/test_skos.py::TestExactMatchPreferredLabelFailingOnItsOwnMeritsIsNotBackfilledByAVariant` —
+  demonstrated the spec's "exact match wins the contest and then fails on its own merits, and the
+  variant does not silently take its place" edge case through the same `EMPTY_SLUG` mechanism, using
+  an inline `"±"` label. That mechanism no longer reaches through the label either, so the edge case
+  needed a different, still-live way for an exact match to "fail on its own merits": the label is
+  now 300 characters, which trips the pre-existing, label-keyed `VALUE_TOO_LONG` guard (SEC-002,
+  D34) instead — a real, unrelated failure mode this story does not touch, chosen because it is
+  still driven by the label's own content rather than the identifier's.
+
+None of the five was weakened: every rewritten assertion is exact-value equality, same as what it
+replaced, and every test that needed no change (the two before/after comparisons) was left alone.
+The full suite was green (335/335 in `test_skos.py`, 792/790 overall) before this entry was written.
+**Revisit if:** a later reviewer wants these five kept as their own dated regression tests against
+D6 specifically — they are not, on the view that a superseded rule's test is not evidence worth
+preserving once the rule it tested is gone, the same position D25 takes about a test's home
+mattering more than its literal survival.
+
+## D39 — `SchemeResolver.resolve_scheme` recomputes the scheme's slug on every touch, not only on creation
+
+T030's own task text reads naturally as "assign once, at creation" — the same shape T029 gives a
+concept. Concept's own mechanism does not actually work that way, though: `assign_unique_slug` runs
+unconditionally for every concept `import_concepts` touches, created or matched-existing alike, and
+that is safe only because `concept.static_uri` is invariant once a concept is matched — recomputing
+the base from it always reproduces the value already stored.
+
+The same invariant holds for a scheme: `_get_or_create_scheme(declared_uri)` matches an existing row
+by `get_by_uri(declared_uri)`, so on every re-import of the same vocabulary, `declared_uri` is by
+construction the identifier that row was already matched on. Recomputing
+`identifier_slug_segment(declared_uri)` on every call therefore always reproduces the slug already
+stored, exactly as for a concept, so gating on `created` would add a branch that changes nothing
+observable. Doing it unconditionally is also what keeps a scheme created outside the importer (a
+curator's own row, given a `static_uri` directly, matched by a later import) reachable by the same
+rule the moment it is: a scheme's `slug_is_manual` defaulting `False` on creation is exactly the
+guard T031 relies on for locally-authored records with no `static_uri` at all, and it stays correct
+for a scheme that is never matched by an import.
+
+**Revisit if:** never — this is the same reasoning `assign_unique_slug` already relies on,
+transplanted to the one call site that creates or matches a scheme rather than a concept.
+
+## D40 — T032 needed no production change beyond T029's own
+
+FR-020/SC-029 asks that a collision between two identifiers resolve "from the identifiers, not from
+read order." `ConceptImporter.import_concepts` already sorts `concept_nodes` by the full identifier
+string before ever processing one (`sorted(..., key=str)`, present since #50), so the order a file's
+own author declares its concepts in was never actually consulted — a fact D6's own suffix rule
+happened not to depend on either, because a fixture demonstrating it (`duplicate_slug.ttl`) collided
+concepts on their *label*, and D6 derived the suffix base from the label, not the identifier.
+
+Once T029 changed `assign_unique_slug`'s base to `identifier_slug_segment(concept.static_uri)`, two
+concepts colliding on their identifier's own last segment resolve through the same pre-existing
+`taken_slugs` mechanism (FIX 16, D49) T029 left untouched: the URI-sort decides who claims the bare
+slug on a first import, and `taken_slugs`, seeded from each concept's own stored slug on every
+re-import, reads a concept's prior answer back before ever minting a new suffix — so a slug never
+depends on which pass of the file assigned it first. This is the same shape D26/D29/D30/D31 already
+recorded: a coverage task (`TestConceptSlugCollisionIsIdentifierDerived`, two tests, both a specific
+falsifiable claim rather than a tautology) that passed on first run because the design was already
+correct, this time as a consequence of T029 rather than of an earlier phase.
+
+**Revisit if:** never — the same shape as D26/D29/D30/D31, recorded so a later reader does not look
+for a second collision algorithm and conclude one is missing.
+
+## D41 — T035 (fix cycle 2): T030 gave a vocabulary's own slug a collision, and no mechanism to resolve one
+
+A regression against `cd4f1c6`, reproduced and confirmed on both branches by the orchestrator before
+dispatch. T030 (D39) moved a scheme's own slug from `slugify(row.name)` to
+`slugify(identifier_slug_segment(declared_uri))`, mirroring T029's concept-side change, but stopped
+short of also mirroring T029's collision handling: `resolve_scheme` wrote the identifier-derived
+candidate straight onto `row.slug` and called `row.save()`, and `ConceptScheme.save()` refuses
+rather than resolves a collision (research R4). Two published vocabularies whose identifiers happen
+to end in the same segment — `.../a/colours` and `.../b/colours`, or any pair sharing a generic
+final path component such as `/scheme`, `/vocab`, `/thesaurus`, `/core` — are ordinary in SKOS, not
+an edge case. Reproduced exactly: importing `<http://a.org/colours>` then
+`<http://b.org/colours>`, both `skos:ConceptScheme` with distinct `prefLabel`s, imported cleanly on
+`cd4f1c6` (each slug came from its own distinct name) and raised an uncaught
+`ValidationError({'slug': ["A vocabulary with the slug 'colours' already exists."]})` out of the
+second scheme's `save()` on this branch, rolling back the whole second run.
+
+**Resolved by reusing, not reinventing, `assign_unique_slug`'s own shape.** The importer — not the
+model — resolves its own collisions: a numeric suffix minted only when the identifier-derived
+candidate already belongs to a *different* record, matched on `static_uri` so a record always reads
+its own prior slug back to itself (stable across a re-import) and the resolution is
+identifier-derived rather than order-dependent (FR-020). Rather than duplicate that computation for
+`ConceptScheme`, it is factored out of `assign_unique_slug` into a shared function,
+`unique_slug_for_identifier(static_uri, taken_slugs)`, called by both
+`ConceptImporter.assign_unique_slug` and `SchemeResolver.resolve_scheme` — Article XV's cohesion
+rule read literally: a concept's collision and a scheme's collision are the same computation over
+two record kinds, and this story's own conventions text named the reuse explicitly rather than
+leaving it to be noticed at review. `ConceptScheme.save()`'s own refusal is untouched: a curator
+setting two vocabularies' slugs equal by hand is still refused, never silently auto-suffixed — only
+the importer's own collisions, which a publisher cannot avoid by hand, are resolved here.
+
+**Revisit if:** never — the same reasoning D35 and D39 already give for the scheme slug generally,
+extended to its collision case.
+
+## D42 — T036 (fix cycle 2): an unusable derived scheme slug must be fatal, and the concept-side guard was never mirrored
+
+A second regression against `cd4f1c6`, reproduced and confirmed the same way. T030 changed what a
+scheme's slug is derived from without carrying over T029's own guard: `import_concepts` checks
+`slugify(identifier_slug_segment(uri))` for emptiness *before* ever calling `assign_unique_slug`,
+and sets the concept aside under `EMPTY_SLUG` (D39) rather than let `Concept.save()`'s identical
+refusal raise. `resolve_scheme` had no equivalent check at all — it wrote whatever
+`unique_slug_for_identifier` returned (including `""`) straight onto `row.slug` and called
+`row.save()`. Reproduced exactly: importing `<http://c.org/vocab/#±> a skos:ConceptScheme ;
+skos:prefLabel "Symbols"@en` imported cleanly on `cd4f1c6` (the slug came from 'Symbols', which
+slugifies fine) and raised an uncaught `ValidationError({'slug': ['An explicit slug must not be
+empty.']})` on this branch, because the identifier's own fragment (`±`) is made up only of
+characters `slugify()` strips.
+
+**Fatal, not set aside — the two guards land differently on purpose.** A concept with an unusable
+derived slug is one record the rest of the file can still be imported around; a vocabulary with an
+unusable derived slug leaves nothing for the rest of the file to import *into*, so the whole run is
+refused rather than reporting one unusable-slug problem and then reporting every concept in the file
+as belonging to no resolvable vocabulary. Added `FatalReason.VOCABULARY_SLUG_UNUSABLE` alongside the
+other `VOCABULARY_*` fatals, with a translatable, named-placeholder template (Article XII), and
+checked in `resolve_scheme` ahead of `row.save()` — the same discipline `EMPTY_SLUG` already applies
+on the concept side — rather than letting `ConceptScheme.save()`'s own refusal raise. No fallback to
+`row.name`: that would reinstate the exact defect FR-018 exists to remove, for the one case where
+the identifier-derived slug happens not to work.
+
+**Revisit if:** never — the same reasoning `EMPTY_SLUG` (D39) already gives for the concept side,
+with the fatal-versus-set-aside split accounted for by what each record kind's absence costs the
+rest of the file.

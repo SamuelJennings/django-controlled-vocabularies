@@ -15,6 +15,7 @@ not only the first.
 
 from __future__ import annotations
 
+import urllib.parse
 from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
@@ -59,6 +60,54 @@ from controlled_vocabularies.models import (
 #: run rather than being handed to rdflib on the chance it understands it:
 #: FR-002 names exactly these three, not "whatever rdflib happens to parse".
 _SUPPORTED_FORMATS = frozenset({"turtle", "xml", "json-ld"})
+
+
+def identifier_slug_segment(uri: str) -> str:
+    """The part of a published identifier that anchors a local address (FR-017/FR-018,
+    decisions.md D35): the fragment, where the identifier has one, otherwise the last
+    segment of its path. Shared by :class:`ConceptImporter` and :class:`SchemeResolver`,
+    the two callers that turn a ``static_uri`` into a slug — both segments of a local
+    address are identifier-derived by the same rule.
+
+    Not itself guaranteed to be a valid slug (an identifier's segment can carry
+    characters a :class:`~django.db.models.SlugField` refuses); every caller runs the
+    result through ``slugify()`` before storing or comparing it.
+    """
+    parsed = urllib.parse.urlsplit(uri)
+    if parsed.fragment:
+        return parsed.fragment
+    return parsed.path.rstrip("/").rsplit("/", 1)[-1]
+
+
+def unique_slug_for_identifier(static_uri: str, taken_slugs: dict[str, str | None]) -> str:
+    """The deterministic, collision-resolved slug for ``static_uri`` (FR-017/FR-018/FR-020,
+    decisions.md D35): the same identifier-derived base (:func:`identifier_slug_segment`), with a
+    numeric suffix appended only when the candidate already belongs to a *different* record. An
+    unusable base (an identifier segment made up only of characters ``slugify()`` strips) is
+    returned as ``""`` rather than suffixed — a caller decides what that means for its own record
+    kind (a concept is set aside, decisions.md D39; a vocabulary is fatal, decisions.md D35 fix
+    cycle 2, since nothing else in the file has anywhere to import into).
+
+    Shared by :meth:`ConceptImporter.assign_unique_slug` and :meth:`SchemeResolver.resolve_scheme`
+    — a concept's collision and a scheme's collision are the same computation over two record
+    kinds (Article XV), so the shape is not duplicated.
+
+    ``taken_slugs`` maps every claimed slug to its claimant's ``static_uri``, mutated in place so a
+    caller resolving more than one record in the same run sees each prior assignment as taken.
+    Because ``static_uri`` never changes once assigned, a record's own previously-stored slug is
+    always read back to itself rather than suffixed (FR-020's "same file yields the same slugs
+    however it is traversed").
+    """
+    base = slugify(identifier_slug_segment(static_uri), allow_unicode=True)
+    if not base:
+        return ""
+    candidate = base
+    suffix = 1
+    while taken_slugs.get(candidate, static_uri) != static_uri:
+        suffix += 1
+        candidate = f"{base}-{suffix}"
+    taken_slugs[candidate] = static_uri
+    return candidate
 
 
 class _FatalIdentity(Exception):
@@ -533,6 +582,30 @@ class SchemeResolver:
                 )
         row.description = description or ""
         row.static_uri = declared_uri
+        # T030, FR-018, decisions.md D35: the vocabulary's own slug is identifier-derived,
+        # exactly like a concept's (T029, assign_unique_slug) — recomputed from declared_uri
+        # on every touch rather than gated on `created`, which is safe rather than merely
+        # convenient: `declared_uri` is what `_get_or_create_scheme` matched this row on, so
+        # it is invariant across a re-import and the recomputed value always agrees with what
+        # is already stored.
+        # T035, FR-020, decisions.md D35 (fix cycle 2): two published vocabularies can end in the
+        # same identifier segment, so the importer resolves that collision itself, the same shape
+        # assign_unique_slug already resolves a concept's — ConceptScheme.save() keeps refusing
+        # (never auto-suffixing) a colliding slug (research R4), which is a different case: a
+        # curator setting two vocabularies' slugs equal by hand.
+        taken_slugs: dict[str, str | None] = dict(ConceptScheme.objects.values_list("slug", "static_uri"))
+        slug = unique_slug_for_identifier(declared_uri, taken_slugs)
+        if not slug:
+            # T036, decisions.md D35 (fix cycle 2): an identifier segment made up only of
+            # characters slugify() strips is fatal, not set aside like a concept's EMPTY_SLUG —
+            # without a resolvable vocabulary there is nothing for the rest of the file to import
+            # into. Checked ahead of row.save() (the same discipline EMPTY_SLUG already applies)
+            # rather than letting ConceptScheme.save()'s own refusal raise. Falling back to
+            # row.name here would reinstate the exact defect FR-018 exists to remove.
+            self.report.add_fatal(FatalReason.VOCABULARY_SLUG_UNUSABLE, subject=declared_uri)
+            return None, None
+        row.slug = slug
+        row.slug_is_manual = True
         row.save()
         if created:
             self.report.add_created(row.uri)
@@ -892,11 +965,12 @@ class ConceptImporter:
                 self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=uri, language=winning_tag)
                 continue
 
-            if not slugify(label, allow_unicode=True):
-                # FIX 5 (D39): a label made up only of characters slugify() strips derives an empty
-                # slug, which Concept.save() refuses — checked ahead of the write (D25) rather than
-                # letting that guard's own ValidationError escape. The reported reason names the
-                # slug, not the label, since the label itself is fine.
+            if not slugify(identifier_slug_segment(uri), allow_unicode=True):
+                # T029, decisions.md D35: the slug now derives from the identifier's own
+                # segment, not the label, so this is what can slugify to nothing — a
+                # publisher-assigned fragment or path segment made up only of characters
+                # slugify() strips. Checked ahead of the write (D25, FIX 5/D39) rather than
+                # letting Concept.save()'s own refusal raise. The label itself is unaffected.
                 self.report.add_set_aside(SetAsideReason.EMPTY_SLUG, subject=uri)
                 continue
 
@@ -968,33 +1042,37 @@ class ConceptImporter:
 
     @staticmethod
     def assign_unique_slug(concept: Concept, taken_slugs: dict[str, str | None]) -> None:
-        """Give ``concept`` a deterministic, scheme-unique slug derived from its label (T010, FR-007).
+        """Give ``concept`` a deterministic, scheme-unique slug derived from its published
+        identifier (T029, FR-017, decisions.md D35).
 
-        Nothing is derived from ``concept.static_uri`` — identity and slug are deliberately
-        independent. ``Concept.save()`` only *refuses* a collision rather than resolving one
-        (research R4, written for curator-authored content where a shared label is rare); a
-        published file is not so well-behaved (two source concepts commonly share one, D6), so the
-        importer resolves it itself: the same base derivation, with a deterministic numeric suffix
-        appended only when that value already belongs to a *different* concept in the same scheme.
+        Nothing is derived from ``concept.label`` — identity's slug and the label a curator reads
+        are deliberately independent, so a publisher renaming a concept never moves its address.
+        ``Concept.save()`` only *refuses* a collision rather than resolving one (research R4,
+        written for curator-authored content where two identifiers colliding on their own final
+        segment is rare); a published file is not so well-behaved (D35), so the importer resolves
+        it itself via :func:`unique_slug_for_identifier` — the same computation
+        :meth:`SchemeResolver.resolve_scheme` reuses for a vocabulary's own collision (Article XV).
 
         ``taken_slugs`` (FIX 16, D49) maps every claimed slug to its claimant's ``static_uri`` —
-        fetched once by :meth:`import_concepts`, mutated in place here so the next concept in the
-        run sees it as taken. Keyed by ``static_uri`` rather than ``pk``, since a newly created
-        concept has no pk yet at the point its slug is decided.
+        fetched once by :meth:`import_concepts`, mutated in place by
+        :func:`unique_slug_for_identifier` so the next concept in the run sees it as taken. Keyed
+        by ``static_uri`` rather than ``pk``, since a newly created concept has no pk yet at the
+        point its slug is decided. Because ``concept_nodes`` is always processed in URI-sorted
+        order (never the order a file happens to declare them in), and each concept's own prior
+        slug is read back via ``taken_slugs`` before ever minting a suffix, a collision between two
+        identifiers resolves identically whichever order the file is read in (FR-020, D35's "same
+        file yields the same slugs however it is traversed").
 
         ``slug_is_manual`` stops ``Concept.save()`` from re-deriving this value on a later,
-        unrelated save; it does not pin the slug the way a curator's own manual slug is pinned —
-        every re-import recomputes it fresh from the (possibly since-renamed) label, per D6.
+        unrelated save. Recomputing it here on every re-import is safe rather than merely
+        convenient: the base is a pure function of ``concept.static_uri``, which never changes once
+        assigned, so a re-import always derives the identical candidate a previously-stored concept
+        already holds and the ``taken_slugs`` seed confirms it back to itself. The caller
+        (:meth:`import_concepts`) already sets aside a concept whose identifier segment slugifies
+        to nothing (``EMPTY_SLUG``) before this method ever runs, so the base is never empty here.
         """
-        base = slugify(concept.label, allow_unicode=True)
-        candidate = base
-        suffix = 1
-        while taken_slugs.get(candidate, concept.static_uri) != concept.static_uri:
-            suffix += 1
-            candidate = f"{base}-{suffix}"
-        concept.slug = candidate
+        concept.slug = unique_slug_for_identifier(concept.static_uri, taken_slugs)
         concept.slug_is_manual = True
-        taken_slugs[candidate] = concept.static_uri
 
 
 class _ConceptReferenceResolverMixin:
