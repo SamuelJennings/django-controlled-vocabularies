@@ -1540,3 +1540,34 @@ already tells a curator which value was lost and why.
 
 **Revisit if:** never — the same storable-first-literal fallback D56 introduced, reached from a
 second call site the review named as the branch it does not yet cover.
+
+## D59 — T054 (fix cycle 5): the blank-name guard also closes for a node with no
+skos:prefLabel published at all
+
+SEC-404 (round 4, medium): D49/T044 closed the blank-name shape only for the trigger it was
+written against — an over-long name. The other way `name` stays unusable is a node publishing no
+`skos:prefLabel` at all: `_localized_literal` returns `None`, the any-language fallback (T051's
+`first_literal_with_language`) also returns `None` because there is nothing to select from, and
+`name` itself is `None`. The over-long branch is skipped for falsiness (`if name and len(name) >
+max_length`) and so is the assignment (`elif name:`), so a created scheme or collection reaches
+`row.save()` with `name` still at the field default `''` — the identical `full_clean()` failure
+D49 already declares impossible for a created record, reached by a route the length check does
+not see.
+
+Reproduced against the D58 fix (before this entry): a scheme node carrying only
+`dcterms:description`, no `skos:prefLabel`, imported with `report.fatal == []` and
+`ConceptScheme(name='', slug='...')` persisted; the collection counterpart persisted the same way.
+
+**Fixed with one `elif created:` clause added after the existing name-assignment branch, at both
+call sites**, taking the same created-record outcome the over-long branch already takes — fatal
+(`VOCABULARY_NAME_UNUSABLE`) for a scheme, whole-record set-aside for a collection — rather than a
+fourth `SetAsideReason`/`FatalReason` variant naming "no name published" specifically. The
+collection's reused `VALUE_TOO_LONG` message is imprecise for this trigger (there is no over-long
+value to name), a trade-off accepted deliberately: the record-level outcome a curator needs to
+notice — this collection was not created — is identical to the sibling trigger's, and a query
+against the language account (`report.set_aside`, grouped by reason) is unaffected either way,
+since `VALUE_TOO_LONG` was never part of `_LANGUAGE_ACCOUNT_REASONS` in the first place.
+
+**Revisit if:** the reused-message imprecision becomes a real curator complaint — at that point a
+dedicated `RECORD_NAME_UNPUBLISHED`-shaped reason is worth minting for both the scheme and the
+collection side together, rather than patched piecemeal.

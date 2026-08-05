@@ -1822,6 +1822,49 @@ class TestOverLongDefaultLanguageNameFallsBackToAnotherStorableLanguage:
         assert entries[0].params["language"] == "en"
 
 
+class TestNoPublishedNameAtAllIsUnusableTheSameAsOverLong:
+    """T054 — SEC-404, decisions.md D56 (fix cycle 5): D49/T044 closed the blank-name shape only
+    for the over-long trigger. A created scheme or collection with no ``skos:prefLabel`` at all
+    never enters that guard — ``name`` stays ``None`` all the way through, the ``elif name:``
+    assignment is skipped for falsiness, and the row would otherwise persist with the field
+    default ``''``, which fails its own ``full_clean()`` forever after — the exact state D49
+    already declares impossible for a created record, reached by a different route.
+    """
+
+    def test_a_created_scheme_with_no_preflabel_at_all_is_fatal_not_persisted_blank(self, db, tmp_path):
+        path = tmp_path / "sec404_scheme.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            "@prefix dcterms: <http://purl.org/dc/terms/> .\n"
+            '<http://pub.example/sec404scheme> a skos:ConceptScheme ; dcterms:description "no name"@en .\n'
+            "<http://pub.example/sec404scheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec404scheme> ; skos:prefLabel "One"@en .\n'
+        )
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(path)
+        report = exc_info.value.report
+        assert len(report.fatal) == 1
+        assert report.fatal[0].reason is FatalReason.VOCABULARY_NAME_UNUSABLE
+        assert not ConceptScheme.objects.filter(static_uri="http://pub.example/sec404scheme").exists()
+
+    def test_a_created_collection_with_no_preflabel_at_all_is_set_aside_not_persisted_blank(self, db, tmp_path):
+        path = tmp_path / "sec404_collection.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec404collscheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/sec404collscheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec404collscheme> ; skos:prefLabel "One"@en .\n'
+            "<http://pub.example/sec404collscheme#grp> a skos:Collection ; "
+            "skos:member <http://pub.example/sec404collscheme#c1> .\n"
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        assert not Collection.objects.filter(static_uri="http://pub.example/sec404collscheme#grp").exists()
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://pub.example/sec404collscheme#grp"
+
+
 class TestAStoredSlugThatFailsValidationIsSetAsideNotEscaped:
     """T045 — SEC-301, decisions.md D50 (fix cycle 4): T041's read-back means a matched record's
     already-stored slug reaches the model's manual-slug validation unchanged. A slug written out

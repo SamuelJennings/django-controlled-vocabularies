@@ -675,6 +675,14 @@ class SchemeResolver:
                 self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=declared_uri, language=winning_tag)
         elif name:
             row.name = name
+        elif created:
+            # SEC-404, decisions.md D56 (fix cycle 5): the guard above only fires for an
+            # over-long name; a scheme with no skos:prefLabel published at all reaches here with
+            # name still None, which would otherwise leave row.name at the field default '' — the
+            # exact state D49 already declares impossible for a created record, reached by a
+            # different route.
+            self.report.add_fatal(FatalReason.VOCABULARY_NAME_UNUSABLE, subject=declared_uri, language=winning_tag)
+            return None, None
         # SKOS defines no description predicate for a skos:ConceptScheme; dcterms:description is
         # the source (D21), the same alias CONTEXT.md establishes for a concept's own definition.
         # Unlike name, description is written unconditionally, including to empty when the file no
@@ -1636,6 +1644,17 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
                     self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=uri, language=winning_tag)
             elif name:
                 row.name = name
+            elif created:
+                # SEC-404, decisions.md D56 (fix cycle 5): the guard above only fires for an
+                # over-long name; a collection with no skos:prefLabel published at all reaches
+                # here with name still None, which would otherwise leave row.name at the field
+                # default '' — the exact state D49 already declares impossible for a created
+                # record, reached by a different route. Reuses VALUE_TOO_LONG rather than minting
+                # a fourth reason for "no name published at all" — its message is imprecise here
+                # (there is no over-long value to name) but the record-level outcome (not
+                # created) is what matters and is identical to the sibling trigger's.
+                self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=uri, language=winning_tag)
+                continue
             row.ordered = ordered
             # T038, FR-017, decisions.md D35: a collection's own slug is identifier-derived,
             # exactly like a concept's (assign_unique_slug) and a scheme's (resolve_scheme) —
