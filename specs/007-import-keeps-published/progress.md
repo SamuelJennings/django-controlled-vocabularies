@@ -306,3 +306,59 @@ Append-only log of stage transitions and gate outcomes.
   `deptry .`. Worktree clean, diff scoped to `tests/test_standards.py`, `CONTEXT.md`, `README.md`,
   and `CHANGELOG.md` — no importer behaviour touched. One non-obvious choice recorded as D32. This
   is the last story of the feature.
+
+## 2026-08-05 (continued)
+
+- **S4 IMPLEMENT — FIX-2 (T029–T034, FR-017 to FR-020), Implementer.** `craft-tdd` and
+  `craft-increments` loaded by name, receipts verified before any task started. Baseline confirmed
+  green (790 tests, HEAD `cd4f1c6`) before touching anything. Six commits, one per task, tree green
+  and clean after each.
+  - **T029** — `assign_unique_slug` now derives a concept's slug from `identifier_slug_segment(concept.static_uri)`
+    (a new shared helper: the identifier's fragment, else the last path segment) instead of from
+    `label`; the pre-write `EMPTY_SLUG` check moved with it. RED proven first against the current
+    branch: `test_a_publisher_rename_leaves_the_slug_and_local_url_unchanged` failed
+    `'granite-revised' == 'granite'` (the slug still tracking the renamed label) before the fix, and
+    three related new/updated tests failed the same way. Five pieces of pre-existing test material
+    directly encoded D6 ("never derived from the identifier," by name) and were rewritten rather than
+    left red or silently deleted — `TestConceptSlugs` and one assertion in
+    `TestConceptLabelIsSelectedByTheWinnerRule` in `test_skos.py`, the `empty_slug_label.ttl` fixture
+    and its two tests (retargeted from a bad label to a bad identifier segment, since the label no
+    longer drives slug validity), and the `EMPTY_SLUG`-based edge-case test in
+    `TestExactMatchPreferredLabelFailingOnItsOwnMeritsIsNotBackfilledByAVariant` (now demonstrated via
+    `VALUE_TOO_LONG` instead, still label-driven). Full rationale for each in D38.
+  - **T030** — `ConceptScheme` gains `slug_is_manual` (migration `0006_conceptscheme_slug_is_manual`)
+    and `set_slug()`, mirroring `Concept`'s own mechanism; `save()` only re-derives the slug from
+    `name` when unset. `SchemeResolver.resolve_scheme` now sets the slug from
+    `identifier_slug_segment(declared_uri)` on every touch (D39 records why recomputing is safe
+    rather than gating on `created`). RED proven first: a scheme re-imported with its name arriving
+    in a different language moved `scheme.slug` from `"colours"` to `"color"` and the held concept's
+    `local_url` with it — the exact case `decisions.md` D35 measured — before the fix.
+  - **T031** — A dedicated guard class, `TestConceptSlugFollowsTheLabelWithNoPublisherIdentifier` in
+    `test_models.py` (FR-019/SC-030), written before relying on the pre-existing US-2 coverage to
+    keep proving it. Passed on first run — no production change, since T029/T030 only touch the
+    importer's own slug assignment and `Concept.save()`'s `slug_is_manual` branch, which a
+    locally-authored concept never sets.
+  - **T032** — `TestConceptSlugCollisionIsIdentifierDerived` (FR-020/SC-029): two identifiers sharing
+    a last segment get distinct slugs, and each keeps its own slug when the same content is
+    re-imported with the records declared in reverse file order. Passed on first run: `concept_nodes`
+    was already sorted by the full identifier string before T029 (never by file order), and
+    `assign_unique_slug`'s existing `taken_slugs` mechanism (FIX 16, D49) already reads a concept's
+    own prior slug back before minting a new suffix — once T029 moved the suffix base to the
+    identifier, those two pre-existing pieces already satisfy FR-020 together (D40).
+  - **T033** — README's import section, CHANGELOG's `[Unreleased]` entry, and `CONTEXT.md` (new
+    **Slug** glossary row, updated **Local URL** row) now describe a local address as
+    identifier-derived and permanent, and name the accepted cost plainly: opaque identifiers give
+    opaque addresses. `assign_unique_slug`'s docstring was corrected in T029's own commit rather than
+    deferred here, since leaving it asserting the opposite of the code it documents for even one
+    commit was not defensible; `Concept.set_slug`'s docstring, which anticipated this use in future
+    tense, now states it in present tense and cross-references `assign_unique_slug`. Public markdown
+    reviewed against the humanizer checklist by hand; no rewrites needed.
+  - **T034** — Full re-verification: `poetry run pytest -q` (790 → 798 passed), `ruff check .`,
+    `ruff format --check .` (25 files), `mypy controlled_vocabularies` (11 source files),
+    `deptry .`, `makemigrations --check --dry-run` (clean), and a standalone migrate-from-zero run
+    against a fresh file-based SQLite database (all six `controlled_vocabularies` migrations plus
+    `auth`/`contenttypes` applied cleanly, ending at `0006_conceptscheme_slug_is_manual`).
+  Three non-obvious choices recorded as D38–D40. Worktree clean. `T023` (FIX-1's dropped,
+  never-committed FR-016 implementation) confirmed absent from the branch — nothing to remove.
+  A record's local address can now move for exactly one reason: the publisher reassigning its own
+  identifier. Next: FS-007 re-gate and convergence.
