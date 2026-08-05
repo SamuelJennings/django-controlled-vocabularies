@@ -100,3 +100,34 @@ Append-only log of stage transitions and gate outcomes.
     run. Carried into #52's and R6's specification.
 - **Plan notification (veto window, not a gate)** — sent to Sam carrying the panel's verdict.
   Silence is consent; the run proceeds to S4 IMPLEMENT.
+- **S4 IMPLEMENT — US0 (foundational phase, T001/T002/T021/T003/T022/T004/T005), Implementer.**
+  `craft-tdd` and `craft-increments` loaded by name, receipts verified against the brief before
+  any task started. Baseline confirmed green (668 tests, HEAD `06a7760`) before touching anything.
+  Seven commits, one per task, tree green and clean after each:
+  - **T001** — `exchange/languages.py`: `LanguageResolution` and `LanguageMatcher.resolve`. Exact
+    match wins; otherwise the least specific configured language sharing the base, computed over a
+    deterministically ordered sequence (D15); case-insensitive; returns the code exactly as
+    declared. `sga` regression pins the rejection of Django's own resolver (research.md R1).
+  - **T002** — `SkosGraph.preferred_label_tag_counts` (concept nodes' `skos:prefLabel` only, per
+    D4/D5); `SkosImporter.run` builds one matcher per run and passes it to `SchemeResolver` and
+    `ConceptImporter` as a keyword-only constructor argument. Neither collaborator's body reads
+    `self.matcher` yet — the five raw-tag comparisons are out of this phase's scope by the brief's
+    own prohibition.
+  - **T021** — `LanguageMatcher.resolve_winner`: one cascading sort key implements exact-match-first,
+    then predominance, then a lexicographic tag tie-break, so `preferred_label_in` and
+    `import_labels` will read the identical rule once their stories wire it in (S3R SPEC-001).
+  - **T003** — `NormalizedReason.LANGUAGE_SUBSTITUTION`, in the normalised bucket (a substitution
+    *was* stored).
+  - **T022** — `SetAsideReason.VARIANT_NOT_KEPT`, a dedicated reason for a contest loser —
+    `SURPLUS_PREFERRED_LABEL`'s message is false for this case (S3R SPEC-002, D14). Regression test
+    pins `SURPLUS_PREFERRED_LABEL`'s own message unchanged.
+  - **T004** — `ImportReport.language_account()`: a fold over `{UNCONFIGURED_LANGUAGE,
+    VARIANT_NOT_KEPT}`, explicit membership rather than "carries a `language` param" (D14's own
+    failure mode, guarded against directly).
+  - **T005** — three fixtures (`variants.ttl`, `en-gb-only.ttl`, `declares-de-at.ttl`); no `en`-only
+    fixture (51 already exist). Pass the existing predicate-coverage sweep unmodified — every
+    variant tag is still `UNCONFIGURED_LANGUAGE` under this phase's untouched call sites.
+  Full verify green throughout: `poetry run pytest -q` (724 passed), `ruff check .`, `ruff format
+  --check .`, `mypy controlled_vocabularies`, `deptry .`, `pre-commit run --all-files`. Worktree
+  clean. Three naming/shape choices not dictated by the brief are recorded as D19–D21. Next:
+  US-1 (T006–T010) wires the matcher into the five call sites.

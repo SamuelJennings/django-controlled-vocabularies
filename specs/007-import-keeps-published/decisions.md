@@ -303,3 +303,63 @@ let two concepts in one file resolve the same base language differently. So the 
 cheap ones: README says a local URL derived from a variant-matched label can move when the published
 vocabulary's predominant variant changes, and this entry carries the constraint into #52's and R6's
 specification rather than leaving it to be discovered by a broken bookmark.
+
+## D19 — Three names T005–T022's task text described but did not spell, chosen at implementation
+
+`tasks.md` names the shape of three pieces of API surface without dictating their identifiers.
+Recorded so a later story doesn't reinvent them differently.
+
+- **`SetAsideReason.VARIANT_NOT_KEPT`** (T022) — the task text calls it "a contest loser" and "a
+  second `SetAsideReason` member"; `VARIANT_NOT_KEPT` was chosen to read correctly in
+  `set_aside_by_reason()` output and its own docstring without repeating "contest", which names the
+  *mechanism* (T021's winner rule) rather than the *outcome* the report describes.
+- **`ImportReport.language_account()`** (T004) — the spec's Key Entities name "Language account" as
+  a noun; the method is the verb form of the same term, consistent with `set_aside_by_reason()`'s
+  own naming (a plain description of what it returns, not "get_" or "compute_").
+- **`NormalizedReason.LANGUAGE_SUBSTITUTION`'s params** — T022 states explicitly that a contest
+  loser's published tag goes under `language` and its configured destination under `kept_as`.
+  T003's own task text names only "the published tag and the language it was stored under" without
+  naming params. `kept_as` was reused for T003 too, for the same reason T022 gives: a caller reading
+  both a substitution and a contest-loser entry should not have to remember two different names for
+  "the configured language something ended up under."
+
+**Revisit if:** #52 (the rendering feature) finds any of the three read awkwardly from a curator-
+facing surface — none of the three is exercised by a call site yet, so nothing downstream depends on
+the exact spelling.
+
+## D20 — `LanguageMatcher.resolve_winner`'s tie-break is one cascading sort key, not nested branches
+
+T021 states three tiers — exact match, then predominance, then a lexicographic tie-break "within one
+tag." Implemented as a single sort key `(tag != configured_language, -count, tag, value)` over the
+candidate list, rather than three sequential `if`/`elif` branches testing each tier in turn.
+
+The fourth element (`value`) is not named by T021's three tiers at all; it exists so two candidates
+sharing an identical published tag (a literal duplicate, not a variant) still resolve
+deterministically rather than by whichever the caller happened to list first. No call site
+constructs such a candidate set yet — `import_labels`'s own raw-tag grouping (`skos.py:530`) already
+reduces to one value per tag before this method would ever see it — so this tier is currently
+unreachable in practice and is recorded rather than tested against a real call site.
+
+**Revisit if:** a future story's candidate construction stops pre-reducing same-tag duplicates
+before calling `resolve_winner`, at which point this tier becomes reachable and worth a dedicated
+test.
+
+## D21 — The three T005 fixtures share no scheme URI with any existing fixture, and are not `@en`
+
+`variants.ttl`, `en-gb-only.ttl`, and `declares-de-at.ttl` each mint a fresh `http://example.org/...`
+namespace (`colours`, `colours-gb`, `farben`) rather than extending `rocks.ttl`'s. `rocks.ttl` is the
+base vocabulary a dozen other tests already assert exact content against; adding variant-tagged
+values to it would risk an unrelated test's assumption about what languages it carries. None of the
+three fixtures uses a bare `en` tag anywhere — deliberately, so each imports, under this phase's
+unmodified call sites, as either an ordinary `UNCONFIGURED_LANGUAGE` set-aside (`variants.ttl`,
+`en-gb-only.ttl`) or a `NO_PREFERRED_LABEL` set-aside excluding the whole concept from the predicate-
+coverage sweep's evidence requirement (`declares-de-at.ttl`, whose only concept carries no `en`
+label at all). Both outcomes are already-covered branches of the existing sweep, so no fixture here
+needed its own exclusion entry.
+
+**Revisit if:** US-1/US-3 wire the matcher into the five call sites and these fixtures start
+resolving differently — their own dedicated tests (`test_variants_fixture_...`,
+`test_en_gb_only_fixture_...`, `test_declares_de_at_fixture_...`) assert only raw RDF content, not
+import behaviour, so they should keep passing unchanged; the predicate-coverage sweep's behaviour
+for these three files, however, will change once real values start landing instead of being set
+aside, and is worth re-checking at that point.
