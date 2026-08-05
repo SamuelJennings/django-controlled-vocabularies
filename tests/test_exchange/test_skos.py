@@ -1571,6 +1571,76 @@ def _write_shared_label_file(tmp_path: Path, n: int) -> Path:
     return path
 
 
+class TestAStoredSlugThatFailsValidationIsSetAsideNotEscaped:
+    """T045 — SEC-301, decisions.md D50 (fix cycle 4): T041's read-back means a matched record's
+    already-stored slug reaches the model's manual-slug validation unchanged. A slug written out
+    of band (``.update()``, ``loaddata``, ``bulk_create``, a data migration) never runs through
+    ``save()``'s own validation when it is written, so it can be malformed by the time an import
+    later matches that row and calls ``set_slug()``/``save()`` again — which, before this fix,
+    let ``django.core.exceptions.ValidationError`` escape ``import_skos`` entirely, outside its
+    own (``SkosImportError``/``SkosImportFailed``) exception hierarchy.
+    """
+
+    def test_a_scheme_s_out_of_band_slug_failing_validation_does_not_escape_import_skos(self, db, tmp_path):
+        scheme = ConceptSchemeFactory(name="Sec Three O One Scheme", static_uri="http://pub.example/sec301scheme")
+        ConceptScheme.objects.filter(pk=scheme.pk).update(slug="has spaces/and-slash")
+        path = tmp_path / "sec301_scheme.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec301scheme> a skos:ConceptScheme ; skos:prefLabel "Sec Three O One Scheme"@en .\n'
+        )
+
+        report = import_skos(path)
+
+        assert report.fatal == []
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.STORED_SLUG_INVALID]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://pub.example/sec301scheme"
+        scheme.refresh_from_db()
+        assert scheme.slug == "has spaces/and-slash"
+
+    def test_a_concept_s_out_of_band_slug_failing_validation_does_not_escape_import_skos(self, db, tmp_path):
+        path = tmp_path / "sec301_concept.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec301concept> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            '<http://pub.example/sec301concept#one> a skos:Concept ; skos:inScheme <http://pub.example/sec301concept> ; '
+            'skos:prefLabel "One"@en .\n'
+        )
+        import_skos(path)
+        concept = Concept.objects.get(static_uri="http://pub.example/sec301concept#one")
+        Concept.objects.filter(pk=concept.pk).update(slug="has spaces/and-slash")
+
+        report = import_skos(path)
+
+        assert report.fatal == []
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.STORED_SLUG_INVALID]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://pub.example/sec301concept#one"
+        concept.refresh_from_db()
+        assert concept.slug == "has spaces/and-slash"
+
+    def test_a_collection_s_out_of_band_slug_failing_validation_does_not_escape_import_skos(self, db, tmp_path):
+        path = tmp_path / "sec301_collection.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec301collection> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            '<http://pub.example/sec301collection#grp> a skos:Collection ; skos:prefLabel "Group"@en .\n'
+        )
+        import_skos(path)
+        collection = Collection.objects.get(static_uri="http://pub.example/sec301collection#grp")
+        Collection.objects.filter(pk=collection.pk).update(slug="has spaces/and-slash")
+
+        report = import_skos(path)
+
+        assert report.fatal == []
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.STORED_SLUG_INVALID]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://pub.example/sec301collection#grp"
+        collection.refresh_from_db()
+        assert collection.slug == "has spaces/and-slash"
+
+
 class TestSlugAssignmentQueryCountIsLinearInASharedLabelGroup:
     """FIX 16 (review, decisions.md D49) — ``_assign_unique_slug``'s
     ``while Concept.objects.filter(...).exclude(pk=...).exists()`` loop issued

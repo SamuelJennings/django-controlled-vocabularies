@@ -85,7 +85,13 @@ class SetAsideReason(TextChoices):
     label in a hostile or merely careless file must not abort an entire
     import; the value is set aside rather than crashing the run on
     ``ValidationError`` (the same discipline ``EMPTY_SLUG`` already applies
-    to the slug).
+    to the slug). ``STORED_SLUG_INVALID`` (fix cycle 4, S6 SEC-301,
+    decisions.md D50) names a matched record whose already-stored slug was
+    written out of band (``.update()``, ``loaddata``, ``bulk_create``, a data
+    migration) and no longer passes the model's own manual-slug validation —
+    T041's read-back means that value now reaches the write path unchanged,
+    and the record is set aside rather than letting ``ValidationError``
+    escape ``import_skos`` outside its own exception hierarchy.
     """
 
     UNCONFIGURED_LANGUAGE = "unconfigured_language", _("language not configured")
@@ -105,6 +111,7 @@ class SetAsideReason(TextChoices):
     NO_LANGUAGE_TAG = "no_language_tag", _("no language tag")
     VARIANT_NOT_KEPT = "variant_not_kept", _("language variant not kept")
     VALUE_TOO_LONG = "value_too_long", _("value exceeds the maximum length this application can store")
+    STORED_SLUG_INVALID = "stored_slug_invalid", _("stored slug no longer passes validation")
 
     @property
     def template(self) -> Promise:
@@ -182,6 +189,10 @@ _REASON_TEMPLATES: dict[SetAsideReason, Promise] = {
     SetAsideReason.VALUE_TOO_LONG: _(
         "'%(subject)s' carries a value in the language '%(language)s' longer than this application "
         "can store; it was not stored."
+    ),
+    SetAsideReason.STORED_SLUG_INVALID: _(
+        "'%(subject)s' has a stored slug that no longer passes this application's own validation; "
+        "it was left exactly as stored, and nothing else about it was imported this run."
     ),
 }
 

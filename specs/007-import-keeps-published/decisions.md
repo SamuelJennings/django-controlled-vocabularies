@@ -1224,3 +1224,38 @@ proven.
 
 **Revisit if:** never — the same fatal-versus-set-aside split D42 already gives an unusable slug,
 applied to the one other field a first import can leave unusably empty.
+
+## D50 — T045 (fix cycle 4): a matched record's stored slug is now on the write path, so it must
+be caught, not merely trusted
+
+Round-three security review (SEC-301) reproduced: after T041, a matched record's slug is read
+back and given straight to `set_slug()`/`save()` rather than recomputed. That is correct for a
+slug that was always written through a model's own `save()` — it already passed the manual-slug
+validation once. It is not correct for a slug written out of band: `.update()`, `loaddata`,
+`bulk_create()`, or a data migration all bypass `save()` entirely, so a malformed value can sit in
+the database untouched by validation until an import later matches that row and calls
+`set_slug()`/`save()` again — at which point the model's own refusal (`ValidationError`) escaped
+`import_skos` entirely, outside its own (`SkosImportError`/`SkosImportFailed`) exception
+hierarchy, aborting the whole run for a hostility the imported *file* had no part in.
+
+Reproduced against `10c069a` for all three kinds: create the row normally, plant an invalid slug
+with `.filter(pk=...).update(slug="has spaces/and-slash")`, then import a file that matches the
+row by its published identifier. All three raised the bare `ValidationError` out of `import_skos`.
+
+**Fixed by wrapping the write, not by re-validating before it.** `ConceptScheme.set_slug()`
+(inside `resolve_scheme`), `Concept.save()` (inside `import_concepts`) and `Collection.save()`
+(inside `import_collections`) are each wrapped in `except ValidationError`, converting the escape
+into `SetAsideReason.STORED_SLUG_INVALID` — the same discipline `import_labels`/`_import_notes`
+already apply to a value's own `add_label`/`add_note` call. The record is left exactly as stored
+(nothing about it is touched or removed) and the rest of the file still imports around it. For a
+scheme specifically, this means `resolve_scheme` returns `(None, None)` without adding a fatal
+finding — the run completes normally with nothing created or updated for that vocabulary, named by
+the one set-aside entry, rather than refusing a file that is not itself at fault. Chosen over
+treating it as `FatalReason` (the shape a broken *identifier* takes, D42): the file publishing the
+scheme is fine, and there is nothing else in the file to salvage or protect by rolling the whole
+run back — a corrupted database row, once named, is exactly the shape `SetAsideReason` exists to
+report.
+
+**Revisit if:** never — the same discipline `EMPTY_SLUG`/`VALUE_TOO_LONG` already give a value the
+model refuses, applied to a whole record's own write for a reason the published file did not
+cause.

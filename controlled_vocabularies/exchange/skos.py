@@ -645,7 +645,17 @@ class SchemeResolver:
         # anchor its address the same way") — routed through here rather than left uncalled,
         # for both a freshly minted slug and a matched row's own unchanged one, so a
         # locally-authored scheme the importer is matching for the first time also gets pinned.
-        row.set_slug(row.slug)
+        try:
+            row.set_slug(row.slug)
+        except ValidationError:
+            # T045, SEC-301, decisions.md D50 (fix cycle 4): a matched row's slug is now read
+            # back unchanged (T041) rather than recomputed, so a value written out of band
+            # (.update(), loaddata, bulk_create, a data migration) reaches this validation
+            # exactly as stored. Set aside rather than letting ValidationError escape
+            # import_skos outside its own exception hierarchy — the same discipline
+            # import_labels/_import_notes already apply to a value's own save().
+            self.report.add_set_aside(SetAsideReason.STORED_SLUG_INVALID, subject=declared_uri)
+            return None, None
         if created:
             self.report.add_created(row.uri)
         else:
@@ -1045,7 +1055,15 @@ class ConceptImporter:
             concept.static_uri = uri
             concept.label = label
             self.assign_unique_slug(concept, taken_slugs, created=created)
-            concept.save()
+            try:
+                concept.save()
+            except ValidationError:
+                # T045, SEC-301, decisions.md D50 (fix cycle 4): the same escape as
+                # SchemeResolver's own set_slug() call, one record kind over — a matched
+                # concept's slug is read back unchanged (T041), so a value written out of band
+                # reaches Concept.save()'s manual-slug validation exactly as stored.
+                self.report.add_set_aside(SetAsideReason.STORED_SLUG_INVALID, subject=uri)
+                continue
             if winning_tag.lower() != default_language.lower():
                 # T009, FR-006: concept.label is stored content too — a value that made it in
                 # under a different language than published is a normalisation, not a silent
@@ -1501,7 +1519,16 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
                 max_length = cast(int, Collection._meta.get_field("slug").max_length)
                 row.slug = unique_slug_for_identifier(uri, taken_slugs, max_length)
             row.slug_is_manual = True
-            row.save()
+            try:
+                row.save()
+            except ValidationError:
+                # T045, SEC-301, decisions.md D50 (fix cycle 4): the same escape as
+                # ConceptImporter.import_concepts and SchemeResolver.resolve_scheme, the third
+                # record kind — a matched collection's slug is read back unchanged (T041), so a
+                # value written out of band reaches Collection.save()'s manual-slug validation
+                # exactly as stored.
+                self.report.add_set_aside(SetAsideReason.STORED_SLUG_INVALID, subject=uri)
+                continue
             if created:
                 self.report.add_created(uri)
             else:
