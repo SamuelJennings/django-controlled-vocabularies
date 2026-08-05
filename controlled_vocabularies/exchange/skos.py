@@ -436,10 +436,10 @@ class SchemeResolver:
             if resolved:
                 return resolved
 
-        counts: dict[str, int] = {}
-        for node in concept_nodes:
-            for language in self.skos_graph.label_languages(node, SKOS.prefLabel):
-                counts[language] = counts.get(language, 0) + 1
+        # T040, decisions.md D34/D35 (fix cycle 3): reuses SkosGraph.preferred_label_tag_counts
+        # (Article XV) rather than keeping its own unfolded copy of the identical walk — that
+        # copy counted 'EN-GB' and 'en-gb' as two tags instead of the one FR-001 says they are.
+        counts = self.skos_graph.preferred_label_tag_counts(concept_nodes)
         if counts:
             commonest = sorted(counts.items(), key=lambda item: (-item[1], item[0]))[0][0]
             resolved = self.matcher.resolve(commonest).configured_language

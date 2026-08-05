@@ -450,6 +450,78 @@ class TestDefaultLanguageResolvesThroughTheMatcher:
         assert scheme.effective_default_language == "en"
 
 
+class TestDefaultLanguageCommonestFallbackFoldsCaseLikeThePreferredLabelTally:
+    """T040 — FR-001/FR-007, decisions.md D34: ``SkosGraph.preferred_label_tag_counts`` folds
+    its keys case-insensitively (``key = language.lower()``), but
+    ``SchemeResolver.determine_default_language`` held a character-for-character copy of the
+    same walk over the same concept nodes and the same predicate *without* the fold — so
+    ``EN-GB`` and ``en-gb`` split one population's vote across two tally keys instead of
+    counting as the one published tag FR-001 says they are. A vocabulary published 60%
+    ``en-gb`` (mixed-case) and 40% ``fr`` therefore resolved its default language to ``fr``,
+    setting aside six of its ten concepts as ``NO_PREFERRED_LABEL``. The fix is a deletion, not
+    an edit (Article XV): ``determine_default_language`` calls ``preferred_label_tag_counts``
+    instead of keeping its own copy.
+    """
+
+    def _write(self, tmp_path: Path) -> Path:
+        lines = [
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .",
+            # Two languages on the scheme's own prefLabel so declared_languages has len != 1
+            # and determine_default_language falls through to the commonest-concept branch.
+            '<http://example.org/casetally/> a skos:ConceptScheme ; skos:prefLabel "Hues"@en-gb, "Farben"@de .',
+        ]
+        for i in range(4):
+            lines.append(
+                f"<http://example.org/casetally/fr{i}> a skos:Concept ; "
+                f'skos:inScheme <http://example.org/casetally/> ; skos:prefLabel "Rouge {i}"@fr .'
+            )
+        for i in range(3):
+            lines.append(
+                f"<http://example.org/casetally/upper{i}> a skos:Concept ; "
+                f'skos:inScheme <http://example.org/casetally/> ; skos:prefLabel "Red {i}"@EN-GB .'
+            )
+        for i in range(3):
+            lines.append(
+                f"<http://example.org/casetally/lower{i}> a skos:Concept ; "
+                f'skos:inScheme <http://example.org/casetally/> ; skos:prefLabel "Red {i}"@en-gb .'
+            )
+        path = tmp_path / "case_tally.ttl"
+        path.write_text("\n".join(lines))
+        return path
+
+    def test_a_published_tag_split_across_two_cases_is_counted_as_one_population(self, db, tmp_path):
+        path = self._write(tmp_path)
+        with override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]):
+            report = import_skos(path)
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/casetally/")
+        # en-gb (3 + 3 = 6, folded) outnumbers fr (4); en-gb shares its base with the
+        # configured "en", so the vocabulary's default language resolves to "en" — not "fr",
+        # which is where the unfolded tally's 4-vs-3-vs-3 split would send it.
+        assert scheme.effective_default_language == "en"
+        assert report.fatal == []
+
+    def test_the_predominant_en_gb_population_is_not_wrongly_set_aside(self, db, tmp_path):
+        # The vocabulary's default language resolves to "en" (the fix): every en-gb-labelled
+        # concept has a preferred label in it (via the matcher's base-language match) and
+        # imports. Under the bug, default_language resolved to "fr" instead, and these six
+        # concepts — having no French label at all — were wrongly set aside as
+        # NO_PREFERRED_LABEL. The four fr-only concepts have no English label either way, so
+        # their own exclusion is correct and not asserted against here.
+        path = self._write(tmp_path)
+        with override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]):
+            report = import_skos(path)
+        en_gb_uris = {f"http://example.org/casetally/upper{i}" for i in range(3)} | {
+            f"http://example.org/casetally/lower{i}" for i in range(3)
+        }
+        assert set(Concept.objects.filter(static_uri__in=en_gb_uris).values_list("static_uri", flat=True)) == en_gb_uris
+        wrongly_set_aside = {
+            entry.subject
+            for entry in report.set_aside
+            if entry.reason is SetAsideReason.NO_PREFERRED_LABEL and entry.subject in en_gb_uris
+        }
+        assert wrongly_set_aside == set()
+
+
 class TestImportConcepts:
     """T009 — concepts land inside the vocabulary being imported, each
     holding its published identifier and its default-language preferred
