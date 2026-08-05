@@ -549,7 +549,9 @@ class TestConceptLabelIsSelectedByTheWinnerRule:
         import_skos(path)
         target = Concept.objects.get(static_uri="http://example.org/exactwins/target")
         assert target.label == "Alpha"
-        assert target.slug == "alpha"
+        # T029/decisions.md D35: the slug is derived from the published
+        # identifier's own last segment, not from the winning label.
+        assert target.slug == "target"
 
 
 class TestLabelsNotesAndNamesResolveThroughTheMatcher:
@@ -962,17 +964,67 @@ class TestConceptsImpliedByMembershipButNeverGivenAnRdfType:
 
 
 class TestConceptSlugs:
-    """T010 — FR-007/decisions.md D6: an imported concept's slug is derived
-    from its label by the model's own rule, disambiguated by a deterministic
-    numeric suffix when two concepts in one vocabulary derive the same
-    value; never derived from the identifier."""
+    """T029 — FR-017/decisions.md D35: an imported concept's slug is the
+    fragment of its published identifier where it has one, otherwise the
+    last segment of its path — assigned once and never recomputed from a
+    later import, even when the publisher renames the record (SC-026,
+    SC-027). Supersedes D6, which derived the slug from the label: two
+    concepts that happen to share a label no longer collide at all, because
+    the slug no longer reads the label, and a publisher rename that used to
+    move the slug (D6's own deliberate choice) now leaves it alone.
+    """
 
-    def test_two_concepts_sharing_a_label_get_distinct_deterministic_slugs(self, db):
+    def test_a_fragment_identifier_slugs_from_the_fragment(self, db, tmp_path):
+        path = tmp_path / "fragment_identifier.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <https://example.org/v/colours> a skos:ConceptScheme ; skos:prefLabel "Colours"@en .
+
+            <https://example.org/v/colours#colour> a skos:Concept ;
+                skos:inScheme <https://example.org/v/colours> ;
+                skos:prefLabel "Colour"@en .
+            """
+        )
+        import_skos(path)
+        colour = Concept.objects.get(static_uri="https://example.org/v/colours#colour")
+        assert colour.slug == "colour"
+
+    def test_a_path_only_identifier_slugs_from_the_last_path_segment(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
+        # The URI's own last path segment is "igneous"; the label is "Igneous
+        # rock". Under D6 the slug tracked the label ("igneous-rock"); under
+        # D35 it tracks the identifier instead.
+        assert igneous.slug == "igneous"
+
+    def test_a_publisher_rename_leaves_the_slug_and_local_url_unchanged(self, db):
+        # SC-027 — the case D6 deliberately let move, and D35 stops moving.
+        import_skos(FIXTURES / "rocks.ttl")
+        granite_before = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        slug_before = granite_before.slug
+        local_url_before = granite_before.local_url
+        assert granite_before.label == "Granite"
+
+        report = import_skos(FIXTURES / "rocks_updated.ttl")
+
+        granite_after = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        assert "http://example.org/rocks/granite" in report.updated
+        assert granite_after.label == "Granite (revised)"
+        assert granite_after.slug == slug_before
+        assert granite_after.local_url == local_url_before
+
+    def test_two_concepts_sharing_a_label_no_longer_collide_on_slug(self, db):
+        # duplicate_slug.ttl's two concepts share one preferred label
+        # ("Quartz") but have distinct identifiers; D35 slugs from the
+        # identifier, so there is no collision left for this fixture to
+        # exercise (T032 covers identifiers that actually collide).
         import_skos(FIXTURES / "duplicate_slug.ttl")
         first = Concept.objects.get(static_uri="http://example.org/quarry2/quartz-a")
         second = Concept.objects.get(static_uri="http://example.org/quarry2/quartz-b")
-        assert first.slug == "quartz"
-        assert second.slug == "quartz-2"
+        assert first.slug == "quartz-a"
+        assert second.slug == "quartz-b"
         assert first.static_uri != second.static_uri
 
     def test_reimporting_the_identical_file_keeps_each_concept_s_slug(self, db):
@@ -985,14 +1037,6 @@ class TestConceptSlugs:
         assert Concept.objects.get(static_uri="http://example.org/quarry2/quartz-a").slug == first_slug_before
         assert Concept.objects.get(static_uri="http://example.org/quarry2/quartz-b").slug == second_slug_before
         assert Concept.objects.filter(scheme__static_uri="http://example.org/quarry2/").count() == 2
-
-    def test_slug_is_never_derived_from_the_identifier(self, db):
-        import_skos(FIXTURES / "rocks.ttl")
-        igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
-        # The URI's own last path segment is "igneous"; the label is "Igneous
-        # rock". If the slug tracked the identifier it would read "igneous",
-        # not "igneous-rock".
-        assert igneous.slug == "igneous-rock"
 
 
 def _write_shared_label_file(tmp_path: Path, n: int) -> Path:
@@ -1759,16 +1803,22 @@ class TestExactMatchPreferredLabelFailingOnItsOwnMeritsIsNotBackfilledByAVariant
     """T013 — spec Edge Cases: "A file carrying both an exact match and a variant for the same
     value, where the exact match is empty or unusable. The exact match wins the contest and then
     fails on its own merits, and the variant does not silently take its place." FR-002's exact-match
-    priority (``resolve_winner``, T021) and ``import_concepts``'s own pre-write ``EMPTY_SLUG`` check
-    (FIX 5, decisions.md D39) already combine to produce this: ``resolve_winner`` is called once and
-    its winner is never displaced by a fallback to the next candidate. Pinned here as an explicit
+    priority (``resolve_winner``, T021) and ``import_concepts``'s own pre-write length check
+    (SEC-002, decisions.md D34) already combine to produce this: ``resolve_winner`` is called once
+    and its winner is never displaced by a fallback to the next candidate. Pinned here as an explicit
     regression, because backfilling from the variant is what an implementer chasing "don't lose
-    content" would naturally reach for, and is exactly what the spec forbids."""
+    content" would naturally reach for, and is exactly what the spec forbids.
 
-    def test_the_concept_is_set_aside_under_empty_slug_and_the_variants_value_is_not_promoted(self, db, tmp_path):
+    Demonstrated through ``VALUE_TOO_LONG`` rather than ``EMPTY_SLUG``: T029/decisions.md D35 moved
+    slug derivation from the label to the identifier, so a label's own content (here, its length) no
+    longer decides whether the *slug* is usable — but it still decides whether the *label* is, which
+    is the failure this test needs.
+    """
+
+    def test_the_concept_is_set_aside_under_value_too_long_and_the_variants_value_is_not_promoted(self, db, tmp_path):
         path = tmp_path / "exact_fails_variant_available.ttl"
         path.write_text(
-            """
+            f"""
             @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
 
             <http://example.org/emptyexact/> a skos:ConceptScheme ;
@@ -1776,7 +1826,7 @@ class TestExactMatchPreferredLabelFailingOnItsOwnMeritsIsNotBackfilledByAVariant
 
             <http://example.org/emptyexact/target> a skos:Concept ;
                 skos:inScheme <http://example.org/emptyexact/> ;
-                skos:prefLabel "±"@en, "Usable"@en-gb .
+                skos:prefLabel "{"x" * 300}"@en, "Usable"@en-gb .
             """
         )
         report = import_skos(path)
@@ -1784,7 +1834,7 @@ class TestExactMatchPreferredLabelFailingOnItsOwnMeritsIsNotBackfilledByAVariant
         entries = [
             entry
             for entry in report.set_aside
-            if entry.reason is SetAsideReason.EMPTY_SLUG and entry.subject == "http://example.org/emptyexact/target"
+            if entry.reason is SetAsideReason.VALUE_TOO_LONG and entry.subject == "http://example.org/emptyexact/target"
         ]
         assert len(entries) == 1
         assert not Concept.objects.filter(static_uri="http://example.org/emptyexact/target").exists()
@@ -2297,24 +2347,26 @@ class TestNoPreferredLabelConceptStillAccountsItsOwnLanguages:
 
 
 class TestEmptySlugLabelIsSetAsideNotCrashed:
-    """FIX 5 (review, decisions.md D39) — ``_assign_unique_slug`` derives a
-    concept's slug from its preferred label with ``slugify()``, then sets
+    """FIX 5 (review, decisions.md D39), updated by T029/decisions.md D35 —
+    ``assign_unique_slug`` derives a concept's slug from its published
+    identifier's own segment with ``slugify()``, then sets
     ``slug_is_manual = True`` and lets ``Concept.save()`` write it.
-    ``save()`` refuses an *explicit* (manual) slug that is empty — a label
-    made up only of characters ``slugify()`` strips (e.g. ``"±"``) produces
-    exactly that. The label itself is perfectly fine; it is the *derived
-    slug* that is unusable, so the concept must be set aside and reported —
-    under a reason that names the real problem, not the model's own
-    slug-shaped message — rather than crashing the run on an uncaught
+    ``save()`` refuses an *explicit* (manual) slug that is empty — an
+    identifier segment made up only of characters ``slugify()`` strips
+    (e.g. a ``"±"`` fragment) produces exactly that. The identifier and the
+    label are both perfectly fine; it is the *derived slug* that is
+    unusable, so the concept must be set aside and reported — under a
+    reason that names the real problem, not the model's own slug-shaped
+    message — rather than crashing the run on an uncaught
     ``ValidationError``."""
 
-    def test_a_label_that_slugifies_to_empty_is_set_aside_and_named(self, db):
+    def test_an_identifier_segment_that_slugifies_to_empty_is_set_aside_and_named(self, db):
         report = import_skos(FIXTURES / "empty_slug_label.ttl")
         assert report.fatal == []
         entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.EMPTY_SLUG]
         assert len(entries) == 1
-        assert entries[0].subject == "http://example.org/emptyslug/symbol"
-        assert not Concept.objects.filter(static_uri="http://example.org/emptyslug/symbol").exists()
+        assert entries[0].subject == "http://example.org/emptyslug/symbol#±"
+        assert not Concept.objects.filter(static_uri="http://example.org/emptyslug/symbol#±").exists()
 
     def test_the_rest_of_the_vocabulary_imports_with_its_own_content_intact(self, db):
         import_skos(FIXTURES / "empty_slug_label.ttl")

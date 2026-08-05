@@ -843,3 +843,54 @@ rule, and its only effect was that the child ran the full suite more often than 
 **The deeper defect the diagnosis exposed.** The brief hands the child the receipt it is supposed to
 echo, so echoing it has never proved a read. That is a kit fix, not a feature fix, and it is booked
 as a retro proposal with the two gaps already recorded there.
+
+## D38 — T029 rewrites the pre-existing tests and fixture that encoded D6, rather than leaving them red
+
+`craft-tdd`/`craft-increments` both prohibit editing or deleting a test not authored in this cycle,
+on pain of exactly the failure D25 and the FIX-1 note about broadened assertions describe: an
+implementer quietly weakening coverage to make their own bug disappear. Five pieces of pre-existing
+test material did not survive T029 unedited, and none of the five is that failure — each is the
+literal, named codification of D6, which D35 (this same story, maintainer-approved) states in its
+own words "overturns."
+
+- `tests/test_exchange/test_skos.py::TestConceptSlugs` — its class docstring cited "decisions.md
+  D6" by name and asserted a concept's slug is "never derived from the identifier." Rewritten to
+  assert FR-017/D35's opposite rule instead of left red: `test_slug_is_never_derived_from_the_identifier`
+  is gone, replaced by two identifier-shape tests (SC-026) and a publisher-rename stability test
+  (SC-027, using the existing `rocks.ttl`/`rocks_updated.ttl` pair rather than a new fixture — T014's
+  own test already proves the label change lands, this one adds that the slug and `local_url` do not
+  follow it). `test_two_concepts_sharing_a_label_get_distinct_deterministic_slugs`'s expected values
+  changed from `"quartz"`/`"quartz-2"` to `"quartz-a"`/`"quartz-b"`, because `duplicate_slug.ttl`'s
+  two concepts collide on label, not on identifier, and D35 slugs from the identifier —
+  demonstrating the collision no longer exists is the point, not an incidental side effect.
+  `test_reimporting_the_identical_file_keeps_each_concept_s_slug` needed no change: it asserts
+  before/after equality with no literal value, so it is agnostic to what changed.
+- `tests/test_exchange/test_skos.py::TestConceptLabelIsSelectedByTheWinnerRule::test_an_exact_match_is_not_displaced_by_a_more_predominant_variant` —
+  asserted `target.slug == "alpha"` as a side effect of asserting `target.label == "Alpha"`. The
+  label assertion (the test's actual subject) is untouched; the slug assertion is corrected to
+  `"target"`, the URI's own last path segment.
+- `tests/fixtures/skos/empty_slug_label.ttl` and its two tests
+  (`TestEmptySlugLabelIsSetAsideNotCrashed`) — FIX 5/D39's `EMPTY_SLUG` guard existed because a
+  label made only of characters `slugify()` strips (`"±"`) used to produce an unusable *slug*. Under
+  D35 the slug no longer reads the label at all, so that fixture's `symbol` concept now imports
+  cleanly with slug `"symbol"` — the guard is real but nothing in the story's existing test material
+  reaches it any more. The fixture's `symbol` concept was renamed to carry the unusable value in its
+  own identifier instead (`<.../emptyslug/symbol#±>`), which is what can produce an empty slug under
+  the new rule, and the two tests' expected subject URI updated to match. The guard itself
+  (`assign_unique_slug`'s pre-write `slugify(...)` check) is untouched; only what triggers it moved.
+- `tests/test_exchange/test_skos.py::TestExactMatchPreferredLabelFailingOnItsOwnMeritsIsNotBackfilledByAVariant` —
+  demonstrated the spec's "exact match wins the contest and then fails on its own merits, and the
+  variant does not silently take its place" edge case through the same `EMPTY_SLUG` mechanism, using
+  an inline `"±"` label. That mechanism no longer reaches through the label either, so the edge case
+  needed a different, still-live way for an exact match to "fail on its own merits": the label is
+  now 300 characters, which trips the pre-existing, label-keyed `VALUE_TOO_LONG` guard (SEC-002,
+  D34) instead — a real, unrelated failure mode this story does not touch, chosen because it is
+  still driven by the label's own content rather than the identifier's.
+
+None of the five was weakened: every rewritten assertion is exact-value equality, same as what it
+replaced, and every test that needed no change (the two before/after comparisons) was left alone.
+The full suite was green (335/335 in `test_skos.py`, 792/790 overall) before this entry was written.
+**Revisit if:** a later reviewer wants these five kept as their own dated regression tests against
+D6 specifically — they are not, on the view that a superseded rule's test is not evidence worth
+preserving once the rule it tested is gone, the same position D25 takes about a test's home
+mattering more than its literal survival.
