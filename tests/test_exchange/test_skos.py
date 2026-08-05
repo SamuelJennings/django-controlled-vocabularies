@@ -1740,6 +1740,45 @@ class TestConceptNotes:
         assert basalt.pk == basalt_pk
 
 
+class TestAlternativeLabelsHiddenLabelsAndNotesHaveNoPerLanguageContest:
+    """T015 — FR-004, SC-007: unlike the preferred-label slot, the models hold as many alternative
+    labels, hidden labels and notes per language as the file offers (``ConceptLabel``'s uniqueness
+    constraint is conditional on the preferred kind alone, and ``ConceptNote`` carries none at all,
+    decisions.md D4), so several variants resolving to one configured language are all stored and
+    none is set aside. T013/T014's contest applies only where storing more than one would collide —
+    the preferred slot — so ``variants.ttl`` (T005), carrying ``en-gb``/``en-us`` variants of an
+    alternative label and a note alongside its preferred label, should reach this branch's plain
+    resolve-and-store path unchanged, with no production code of its own."""
+
+    def test_alternative_labels_in_two_variants_of_one_configured_language_are_both_kept(self, db):
+        report = import_skos(FIXTURES / "variants.ttl")
+        assert report.fatal == []
+        colour = Concept.objects.get(static_uri="http://example.org/colours/colour")
+        assert set(colour.alt_labels("en")) == {"Colour", "Color"}
+
+    def test_neither_alternative_label_is_set_aside_as_a_duplicate_or_a_contest_loser(self, db):
+        # The concept's *preferred* label does have a contest (en-gb vs en-us for the default "en"
+        # slot, T008) and legitimately contributes exactly one loser entry; if the alternative label
+        # were wrongly run through the same contest, a second entry would appear alongside it.
+        report = import_skos(FIXTURES / "variants.ttl")
+        colour_uri = "http://example.org/colours/colour"
+        losses = [
+            entry
+            for entry in report.set_aside
+            if entry.subject == colour_uri
+            and entry.reason in (SetAsideReason.SURPLUS_PREFERRED_LABEL, SetAsideReason.VARIANT_NOT_KEPT)
+        ]
+        assert len(losses) == 1
+
+    def test_notes_in_two_variants_of_one_configured_language_are_both_kept(self, db):
+        import_skos(FIXTURES / "variants.ttl")
+        colour = Concept.objects.get(static_uri="http://example.org/colours/colour")
+        assert colour.notes("en") == [
+            "Spelling follows regional convention.",
+            "Spelling follows regional convention.",
+        ]
+
+
 class TestUnconfiguredLanguageValuesAreSetAside:
     """T020 — FR-014: a label or note in a language the site is not configured
     for is stored nowhere and is named in the report with its language, and
