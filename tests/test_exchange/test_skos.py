@@ -367,6 +367,58 @@ class TestImportedVocabularyDefaultLanguage:
         assert scheme.default_language == ""
 
 
+class TestDefaultLanguageResolvesThroughTheMatcher:
+    """T006 — FR-007/decisions.md D9: the vocabulary's default language is
+    resolved by the same base-language matching rule as everything else, so a
+    vocabulary declaring itself in a variant of a configured language
+    resolves to that configured language rather than falling back to the
+    site's own default (the failure D9 describes)."""
+
+    def test_a_vocabulary_declaring_itself_in_a_variant_of_a_configured_language_resolves_to_it(self, db):
+        import_skos(FIXTURES / "declares-de-at.ttl")
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/farben/")
+        assert scheme.default_language == "de"
+        assert scheme.effective_default_language == "de"
+
+    def test_the_commonest_concept_language_fallback_also_resolves_through_the_matcher(self, db, tmp_path):
+        # The scheme itself declares no single language (two tags on its own
+        # prefLabel), so determine_default_language falls back to the
+        # commonest language among the concepts' own preferred labels — that
+        # fallback must resolve through the matcher too, not just the
+        # declared-language branch.
+        path = tmp_path / "commonest.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/hues/> a skos:ConceptScheme ;
+                skos:prefLabel "Hues"@en-gb, "Farben"@de .
+
+            <http://example.org/hues/a> a skos:Concept ;
+                skos:inScheme <http://example.org/hues/> ;
+                skos:prefLabel "Red"@en-gb .
+
+            <http://example.org/hues/b> a skos:Concept ;
+                skos:inScheme <http://example.org/hues/> ;
+                skos:prefLabel "Blue"@en-gb .
+            """
+        )
+        import_skos(path)
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/hues/")
+        assert scheme.default_language == "en"
+        assert scheme.effective_default_language == "en"
+
+    def test_a_vocabulary_whose_declared_language_shares_no_base_with_any_configured_language_still_falls_back(
+        self, db
+    ):
+        # Regression: unchanged from #50 — a declared language with no
+        # configured base at all still falls back to the site default.
+        import_skos(FIXTURES / "unconfigured_language_vocabulary.ttl")
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/geology2/")
+        assert scheme.effective_default_language == "en"
+
+
 class TestImportConcepts:
     """T009 — concepts land inside the vocabulary being imported, each
     holding its published identifier and its default-language preferred

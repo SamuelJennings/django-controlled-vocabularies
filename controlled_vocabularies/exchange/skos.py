@@ -332,17 +332,20 @@ class SchemeResolver:
         Taken from the file where the file says: the vocabulary's own ``skos:prefLabel``, when
         tagged with exactly one language, else the language most of ``concept_nodes``' own
         preferred labels use, tied deterministically by language code. Either way the resolved
-        language must be one the site is configured for; when neither is, this returns ``""``,
-        which :attr:`ConceptScheme.default_language` already treats as "fall back to the site's
-        own default" (``effective_default_language``) — the mechanism R1 built, reused rather than
-        duplicated.
+        language is found through :attr:`matcher` (T006, FR-007, decisions.md D9) rather than
+        exact set membership — a vocabulary declaring itself in a variant of a configured language
+        (``de-at`` on a ``de`` site) resolves to that configured language rather than falling
+        through to the site's own default. When no configured language shares a base with either
+        candidate, this returns ``""``, which :attr:`ConceptScheme.default_language` already
+        treats as "fall back to the site's own default" (``effective_default_language``) — the
+        mechanism R1 built, reused rather than duplicated.
         """
-        configured = configured_language_codes()
         declared_languages = set(self.skos_graph.label_languages(declared_node, SKOS.prefLabel))
         if len(declared_languages) == 1:
             (declared_language,) = declared_languages
-            if declared_language in configured:
-                return declared_language
+            resolved = self.matcher.resolve(declared_language).configured_language
+            if resolved:
+                return resolved
 
         counts: dict[str, int] = {}
         for node in concept_nodes:
@@ -350,8 +353,9 @@ class SchemeResolver:
                 counts[language] = counts.get(language, 0) + 1
         if counts:
             commonest = sorted(counts.items(), key=lambda item: (-item[1], item[0]))[0][0]
-            if commonest in configured:
-                return commonest
+            resolved = self.matcher.resolve(commonest).configured_language
+            if resolved:
+                return resolved
 
         return ""
 
