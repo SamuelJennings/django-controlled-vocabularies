@@ -1260,6 +1260,17 @@ report.
 model refuses, applied to a whole record's own write for a reason the published file did not
 cause.
 
+**Correction (CORR-407, 2026-08-05, fix cycle 5):** the description above of the scheme's call
+site is stale within this same fix cycle — T050/ARCH-304 (D55, below) replaced
+`row.set_slug(row.slug)` with the two statements it performed directly, so `resolve_scheme` has
+never called `set_slug()`; see D55. The "no fatal finding" outcome this entry describes for the
+scheme is also superseded, by T052/D57 (fix cycle 5): a matched scheme that cannot be written now
+adds `FatalReason.VOCABULARY_RECORD_INVALID` alongside `STORED_SLUG_INVALID`, because nothing else
+in the file has a resolved vocabulary to import into once the scheme itself is not written. The
+underlying diagnosis and the choice to use `SetAsideReason` for the slug specifically remain
+correct; only these two details are corrected here rather than rewritten in place, per this file's
+own append-only convention.
+
 ## D51 — T046 (fix cycle 4): a collision suffix as long as the field slices the base away
 
 SEC-303: `unique_slug_for_identifier`'s collision retry computed `base[: max_length -
@@ -1629,3 +1640,27 @@ CORR-405 named only the test T048 itself introduced.
 
 **Revisit if:** never — the shared `_validate_manual_slug` means this one strengthened test
 already proves both raises for all three models; there is nothing left to weaken again.
+
+## D62 — T054 (fix cycle 5): two documentation casualties from T049's extraction, restored
+
+CORR-406/CORR-407 (round 4, both low): T049's extraction of `slug_is_manual` onto
+`StaticUriModel` (D54) dropped the `No db_index: ...` comment both concrete field declarations
+carried, with no replacement — `grep -rn db_index controlled_vocabularies/` returned nothing.
+Separately, `StaticUriModel.set_slug()`'s shared docstring (also written by T049) claims "only
+`SchemeResolver.resolve_scheme` routes an import through it," which T050 — later in the very same
+fix cycle — made false: ARCH-304 replaced `resolve_scheme`'s `row.set_slug(row.slug)` with the two
+statements it performed directly, so no production code calls `set_slug()` at all (D55 says so in
+so many words). D50's own prose, describing the pre-ARCH-304 shape, went stale in the same cycle
+that wrote D55 correcting it, and was never itself annotated.
+
+**Both restored where the code now lives, not by reverting the extraction.** The `db_index`
+rationale is added to `_slug_is_manual_field`'s own docstring — the one place the field is
+declared now, covering all three models at once rather than three copies drifting again.
+`set_slug()`'s docstring is corrected to state the actual routing (all three importers assign
+`slug`/`slug_is_manual` directly and save once) instead of naming a call site that no longer
+exists. D50 is corrected in place with an appended, dated note pointing at D55 and at this cycle's
+own D57, rather than rewritten — this file's entries are a record of what was decided and why, not
+a living description of the current call graph, so the correction is additive.
+
+**Revisit if:** never — both are wording-only; `poetry run pytest tests/test_models.py
+tests/test_standards.py`, `ruff`, and `mypy` are unchanged.

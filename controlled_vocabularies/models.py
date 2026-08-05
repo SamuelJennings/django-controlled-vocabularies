@@ -249,6 +249,12 @@ def _slug_is_manual_field(help_text: "str | _StrPromise") -> models.BooleanField
     legitimately differing per model (a concept's slug tracks its *label*, a scheme's or a
     collection's tracks its *name*). Called once per concrete model — and once for the abstract
     base itself, below — with only that model's own ``help_text``.
+
+    No ``db_index`` (CORR-406, decisions.md D62, fix cycle 5): this is a low-cardinality flag read
+    only inside a record's own ``save()``, never filtered or ordered on, so an index would cost
+    writes for a lookup nothing ever performs. Both concrete field declarations this factory
+    replaced carried the identical comment; it is recorded once here, on the one place the field
+    is now declared, rather than lost when the byte-identical declarations were extracted.
     """
     return models.BooleanField(
         default=False,
@@ -341,11 +347,12 @@ class StaticUriModel(models.Model):
         model, so the check itself stays there). Shared by all three concrete subclasses: the
         body was byte-identical on each before this cycle.
 
-        :meth:`ConceptImporter.assign_unique_slug` and :meth:`CollectionImporter.import_collections`
-        assign :attr:`slug`/:attr:`slug_is_manual` directly rather than calling this method, to
-        avoid a second write per imported record (decisions.md D46); only
-        :meth:`SchemeResolver.resolve_scheme` routes an import through it, because a scheme's
-        own write already happens exactly once per run regardless.
+        Not called from the import path at all (CORR-407, decisions.md D62, fix cycle 5):
+        :meth:`ConceptImporter.assign_unique_slug`, :meth:`CollectionImporter.import_collections`
+        and :meth:`SchemeResolver.resolve_scheme` all assign :attr:`slug`/:attr:`slug_is_manual`
+        directly and save once, to avoid a second write per imported record (decisions.md D46,
+        D55). This method is curator/API surface only, exercised directly by each model's own
+        test class.
         """
         self.slug = slug
         self.slug_is_manual = True
