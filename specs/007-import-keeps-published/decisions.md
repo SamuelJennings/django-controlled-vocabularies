@@ -1282,3 +1282,28 @@ exceeds the field.
 
 **Revisit if:** never — a one-line unit test on the helper (`TestUniqueSlugForIdentifierTruncationNeverSlicesNegative`)
 covers it directly; no call site needs to change.
+
+## D52 — T047 (fix cycle 4): the any-language name fallback now names its own language, not the
+target it fell back from
+
+CORR-305: `resolve_scheme` and `import_collections` both initialise `winning_tag` to the
+scheme's effective default language before checking whether `_localized_literal` found a
+matching-language name. When it does not — the scheme or collection publishes no name in the
+default language at all — `name` falls back to `SkosGraph.first_literal` (any language), but
+`winning_tag` was never reassigned, so a later `VALUE_TOO_LONG` set-aside on that name reported
+the *default* language even when the value it names was never published in it.
+
+Reproduced: a scheme whose only `skos:prefLabel` is a 300-character `fr` value, matched into a
+scheme whose effective default language is `en` (frozen, since the file's own declared default is
+never applied to a matched row per D46), set-aside `language=en` — the curator is told the
+over-long value was published in a language it never carried.
+
+**Fixed with one new query on the RDF boundary, not a second copy of the fallback.**
+`SkosGraph.first_literal_with_language` pairs the identical value `first_literal` (any language)
+already selects with the language tag it was actually published under (`""` for an untagged
+literal) — same sort key, so the two can never pick different literals. `resolve_scheme`'s and
+`import_collections`' own any-language branches now unpack `(name, winning_tag)` from it instead
+of discarding the tag.
+
+**Revisit if:** never — the same shape `_localized_literal` already gives its own matched branch
+(pairing a value with the tag that won it), extended to the branch where nothing won.

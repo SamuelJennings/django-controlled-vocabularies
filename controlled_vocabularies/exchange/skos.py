@@ -244,6 +244,21 @@ class SkosGraph:
         )
         return values[0] if values else None
 
+    def first_literal_with_language(self, node: rdflib.term.Node, predicate: rdflib.URIRef) -> tuple[str, str] | None:
+        """The lexicographically-first literal value of ``predicate`` on ``node``, paired with the
+        published language tag it actually carried (``""`` for an untagged literal), or ``None``.
+
+        The any-language counterpart of :meth:`first_literal` (T047, decisions.md D52, fix cycle
+        4): a caller reporting a value this fallback selected needs to name the language that
+        value was published in, not the target language the fallback exists because nothing
+        resolved to. Selects the identical value :meth:`first_literal` (called with no
+        ``language``) would — same sort key — so the two never disagree about *which* literal.
+        """
+        pairs = sorted(
+            (str(literal), getattr(literal, "language", None) or "") for literal in self.graph.objects(node, predicate)
+        )
+        return pairs[0] if pairs else None
+
     def label_languages(self, node: rdflib.term.Node, predicate: rdflib.URIRef) -> list[str]:
         """The language tags of ``predicate``'s literal values on ``node`` (empty-tag values excluded)."""
         return [
@@ -559,11 +574,14 @@ class SchemeResolver:
         name_match = _localized_literal(
             self.skos_graph, self.matcher, declared_node, SKOS.prefLabel, row.effective_default_language
         )
-        winning_tag = row.effective_default_language
         if name_match is None:
             # The declared default language (or the site's, on fallback) carries no prefLabel on
             # the scheme itself — fall back to any language rather than leaving name unset.
-            name = self.skos_graph.first_literal(declared_node, SKOS.prefLabel)
+            # T047, CORR-305, decisions.md D52 (fix cycle 4): the tag reported alongside this
+            # fallback value is the one it was actually published in, not the target language
+            # the fallback exists because nothing matched — the two can differ.
+            any_literal = self.skos_graph.first_literal_with_language(declared_node, SKOS.prefLabel)
+            name, winning_tag = any_literal if any_literal is not None else (None, row.effective_default_language)
         else:
             name, winning_tag = name_match
             if winning_tag.lower() != row.effective_default_language.lower():
@@ -1482,9 +1500,12 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
             row.static_uri = uri
             default_language = self.target_scheme.effective_default_language
             name_match = _localized_literal(self.skos_graph, self.matcher, node, SKOS.prefLabel, default_language)
-            winning_tag = default_language
             if name_match is None:
-                name = self.skos_graph.first_literal(node, SKOS.prefLabel)
+                # T047, CORR-305, decisions.md D52 (fix cycle 4): report the language this
+                # any-language fallback actually found the value in, not the default it fell
+                # back from — resolve_scheme's own name fallback has the identical fix.
+                any_literal = self.skos_graph.first_literal_with_language(node, SKOS.prefLabel)
+                name, winning_tag = any_literal if any_literal is not None else (None, default_language)
             else:
                 name, winning_tag = name_match
                 if winning_tag.lower() != default_language.lower():

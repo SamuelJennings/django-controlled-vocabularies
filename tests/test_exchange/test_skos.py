@@ -1601,6 +1601,66 @@ def _write_shared_label_file(tmp_path: Path, n: int) -> Path:
     return path
 
 
+class TestOverLongNameSetAsideReportsThePublishedLanguage:
+    """T047 — CORR-305, decisions.md D52 (fix cycle 4): when a scheme's or collection's own
+    default-language ``skos:prefLabel`` is absent, the over-long name comes from the
+    any-language fallback (``SkosGraph.first_literal``) — the ``VALUE_TOO_LONG`` set-aside must
+    name the language that value was actually published in, not the target language the
+    fallback exists because nothing resolved to it.
+    """
+
+    def test_a_matched_scheme_s_over_long_fallback_name_reports_its_own_language_not_the_default(
+        self, db, tmp_path
+    ):
+        """The scheme's effective default language is frozen at 'en' (a matched row, D46/D50 —
+        resolve_scheme never assigns default_language to a matched row). Its own prefLabel is
+        published only in 'fr', so the VALUE_TOO_LONG set-aside must say 'fr'. Would fail
+        (reporting 'en') if winning_tag stayed at its pre-fallback default.
+        """
+        scheme = ConceptSchemeFactory(name="Existing", static_uri="http://pub.example/corr305scheme")
+        long_name = "N" * 300
+        path = tmp_path / "corr305_scheme.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            f'<http://pub.example/corr305scheme> a skos:ConceptScheme ; skos:prefLabel "{long_name}"@fr .\n'
+        )
+        with override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]):
+            report = import_skos(path)
+
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(entries) == 1
+        assert entries[0].params["language"] == "fr"
+        scheme.refresh_from_db()
+        assert scheme.name == "Existing"
+
+    def test_a_matched_collection_s_over_long_fallback_name_reports_its_own_language_not_the_default(
+        self, db, tmp_path
+    ):
+        """The same shape one record kind over: an existing collection's own scheme has effective
+        default language 'en', the collection's re-published name is 'fr'-only and over-long.
+        Would fail (reporting 'en') without the fix.
+        """
+        scheme = ConceptSchemeFactory(name="Vocab", static_uri="http://pub.example/corr305collscheme")
+        collection = CollectionFactory(
+            scheme=scheme, name="Existing Group", static_uri="http://pub.example/corr305collscheme#grp"
+        )
+        long_name = "N" * 300
+        path = tmp_path / "corr305_collection.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/corr305collscheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            f'<http://pub.example/corr305collscheme#grp> a skos:Collection ; skos:prefLabel "{long_name}"@fr .\n'
+        )
+        with override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]):
+            report = import_skos(path)
+
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(entries) == 1
+        assert entries[0].params["language"] == "fr"
+        collection.refresh_from_db()
+        assert collection.name == "Existing Group"
+
+
 class TestAStoredSlugThatFailsValidationIsSetAsideNotEscaped:
     """T045 — SEC-301, decisions.md D50 (fix cycle 4): T041's read-back means a matched record's
     already-stored slug reaches the model's manual-slug validation unchanged. A slug written out
