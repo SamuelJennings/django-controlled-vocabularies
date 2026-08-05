@@ -1571,3 +1571,36 @@ since `VALUE_TOO_LONG` was never part of `_LANGUAGE_ACCOUNT_REASONS` in the firs
 **Revisit if:** the reused-message imprecision becomes a real curator complaint — at that point a
 dedicated `RECORD_NAME_UNPUBLISHED`-shaped reason is worth minting for both the scheme and the
 collection side together, rather than patched piecemeal.
+
+## D60 — T054 (fix cycle 5): a dropped collection gets its own reason, distinct from a value
+lost off a record that still exists
+
+CORR-404 (round 4, medium): a matched collection whose re-published name is unusable keeps its
+stored name and stays exactly as it was — `SetAsideReason.VALUE_TOO_LONG`, whose message ("it was
+not stored") accurately describes one field lost off a record that still exists. A *created*
+collection in the same situation is dropped in full: no row, no membership, no `add_created`. Both
+reported `VALUE_TOO_LONG` and nothing else, so the two outcomes — "this collection exists minus
+its name" and "this collection does not exist" — were distinguishable only by querying the
+database the report exists to describe. D59's own fix for SEC-404 (no `skos:prefLabel` published
+at all) made this worse by reusing `VALUE_TOO_LONG` a third way, for a trigger with no over-long
+value to name at all.
+
+**Fixed with a new `SetAsideReason.COLLECTION_NOT_CREATED`**, added alongside (not instead of)
+`VALUE_TOO_LONG` at the "over-long, created, nothing storable to fall back to" site — a curator
+still learns which value was too long *and* that the record was dropped — and used alone at the
+"no name published at all" site D59 introduced, since there is no over-long value to name there.
+Neither site's existing `VALUE_TOO_LONG` assertions needed to change: the pre-existing T044 test
+(`test_a_collection_name_longer_than_the_field_sets_aside_the_whole_collection_on_first_import`)
+filters its own entries by `VALUE_TOO_LONG` specifically, so an additional `COLLECTION_NOT_CREATED`
+entry alongside it is invisible to that assertion. D59's own new test, which had reused
+`VALUE_TOO_LONG` for the no-name-at-all trigger, is updated in place to check the new reason —
+authored in this same fix cycle, not a pre-existing test from an earlier one.
+
+A scheme has no equivalent gap: an unusable created-scheme name is always fatal
+(`VOCABULARY_NAME_UNUSABLE`), never a set-aside, so there is no "record exists minus its name"
+sibling state to confuse it with.
+
+**Revisit if:** never — the same "name the record-level outcome separately from the value-level
+one" rule the report's other reasons already follow (e.g. `ALREADY_IN_ANOTHER_VOCABULARY` naming a
+record decision, not a value), applied to the one place a collection's own creation is silently
+implied by a value-level reason's absence of a record.

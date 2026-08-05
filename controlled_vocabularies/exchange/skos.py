@@ -1636,6 +1636,11 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
                     )
                     if fallback is None:
                         self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=uri, language=winning_tag)
+                        # CORR-404, decisions.md D60 (fix cycle 5): VALUE_TOO_LONG alone leaves
+                        # this indistinguishable, from the report, from a *matched* collection's
+                        # identical set-aside two lines below — one keeps its old name, the other
+                        # is dropped whole. This second entry names the record-level outcome.
+                        self.report.add_set_aside(SetAsideReason.COLLECTION_NOT_CREATED, subject=uri)
                         continue
                     self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=uri, language=winning_tag)
                     name, winning_tag = fallback
@@ -1649,11 +1654,10 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
                 # over-long name; a collection with no skos:prefLabel published at all reaches
                 # here with name still None, which would otherwise leave row.name at the field
                 # default '' — the exact state D49 already declares impossible for a created
-                # record, reached by a different route. Reuses VALUE_TOO_LONG rather than minting
-                # a fourth reason for "no name published at all" — its message is imprecise here
-                # (there is no over-long value to name) but the record-level outcome (not
-                # created) is what matters and is identical to the sibling trigger's.
-                self.report.add_set_aside(SetAsideReason.VALUE_TOO_LONG, subject=uri, language=winning_tag)
+                # record, reached by a different route. CORR-404, decisions.md D60: reports
+                # COLLECTION_NOT_CREATED rather than reusing VALUE_TOO_LONG — there is no
+                # over-long value to name here, only the record-level outcome.
+                self.report.add_set_aside(SetAsideReason.COLLECTION_NOT_CREATED, subject=uri)
                 continue
             row.ordered = ordered
             # T038, FR-017, decisions.md D35: a collection's own slug is identifier-derived,

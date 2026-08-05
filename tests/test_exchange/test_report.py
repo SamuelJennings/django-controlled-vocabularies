@@ -45,6 +45,7 @@ _EXAMPLE_PARAMS = {
     SetAsideReason.VARIANT_NOT_KEPT: {"language": "en-us", "kept_as": "en-gb"},
     SetAsideReason.VALUE_TOO_LONG: {"language": "en-gb"},
     SetAsideReason.STORED_SLUG_INVALID: {},
+    SetAsideReason.COLLECTION_NOT_CREATED: {},
 }
 
 # One example params dict per fatal reason (T007), the same shape as _EXAMPLE_PARAMS.

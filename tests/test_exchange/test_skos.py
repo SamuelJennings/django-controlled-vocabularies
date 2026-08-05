@@ -1772,6 +1772,55 @@ class TestAnyLanguageFallbackPrefersAStorableName:
         assert collection.name == "Zebra Group"
 
 
+class TestADroppedCollectionIsDistinguishableFromAMatchedOneThatKeptItsName:
+    """T054 — CORR-404, decisions.md D60 (fix cycle 5): a created collection whose name is
+    unusable is dropped whole (``continue``, no row ever written); a matched collection whose
+    re-published name is unusable keeps its stored one and stays exactly as it was. Both reported
+    only ``VALUE_TOO_LONG``, whose message ("it was not stored") describes a field-level omission
+    on a record that exists — the two outcomes were distinguishable only by querying the database
+    the report exists to describe. A created collection now also gets ``COLLECTION_NOT_CREATED``,
+    naming the record-level outcome.
+    """
+
+    def test_a_created_collection_dropped_for_an_unusable_name_also_gets_its_own_record_level_reason(
+        self, db, tmp_path
+    ):
+        long_name = "N" * 300
+        path = tmp_path / "corr404_collection.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/corr404collscheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            f'<http://pub.example/corr404collscheme#grp> a skos:Collection ; skos:prefLabel "{long_name}"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        assert not Collection.objects.filter(static_uri="http://pub.example/corr404collscheme#grp").exists()
+        value_too_long = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(value_too_long) == 1
+        not_created = [entry for entry in report.set_aside if entry.reason is SetAsideReason.COLLECTION_NOT_CREATED]
+        assert len(not_created) == 1
+        assert not_created[0].subject == "http://pub.example/corr404collscheme#grp"
+
+    def test_a_matched_collection_kept_name_reports_only_value_too_long_not_not_created(self, db, tmp_path):
+        scheme = ConceptSchemeFactory(name="Vocab", static_uri="http://pub.example/corr404collscheme2")
+        collection = CollectionFactory(
+            scheme=scheme, name="Existing Group", static_uri="http://pub.example/corr404collscheme2#grp"
+        )
+        long_name = "N" * 300
+        path = tmp_path / "corr404_collection_matched.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/corr404collscheme2> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            f'<http://pub.example/corr404collscheme2#grp> a skos:Collection ; skos:prefLabel "{long_name}"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        collection.refresh_from_db()
+        assert collection.name == "Existing Group"
+        not_created = [entry for entry in report.set_aside if entry.reason is SetAsideReason.COLLECTION_NOT_CREATED]
+        assert not_created == []
+
+
 class TestOverLongDefaultLanguageNameFallsBackToAnotherStorableLanguage:
     """T054 — CORR-402, decisions.md D56 (fix cycle 5): T051 only fixed the any-language
     fallback branch (nothing published in the effective default language at all). When the
@@ -1860,7 +1909,9 @@ class TestNoPublishedNameAtAllIsUnusableTheSameAsOverLong:
         report = import_skos(path)
         assert report.fatal == []
         assert not Collection.objects.filter(static_uri="http://pub.example/sec404collscheme#grp").exists()
-        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        # CORR-404, decisions.md D60 (fix cycle 5): COLLECTION_NOT_CREATED, not a reused
+        # VALUE_TOO_LONG — there is no over-long value to name for this trigger.
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.COLLECTION_NOT_CREATED]
         assert len(entries) == 1
         assert entries[0].subject == "http://pub.example/sec404collscheme#grp"
 

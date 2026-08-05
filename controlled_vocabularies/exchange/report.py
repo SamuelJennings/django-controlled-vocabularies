@@ -92,6 +92,14 @@ class SetAsideReason(TextChoices):
     T041's read-back means that value now reaches the write path unchanged,
     and the record is set aside rather than letting ``ValidationError``
     escape ``import_skos`` outside its own exception hierarchy.
+    ``COLLECTION_NOT_CREATED`` (fix cycle 5, CORR-404, decisions.md D60) names
+    the record-level outcome when a *created* collection's name is unusable —
+    over-long with nothing storable to fall back to, or absent altogether —
+    distinct from ``VALUE_TOO_LONG``, which names a value lost from a record
+    that still exists. Without this, both a matched collection keeping its old
+    name and a created collection dropped in full rendered the identical
+    ``VALUE_TOO_LONG`` entry, distinguishable only by querying the database
+    the report exists to describe.
     """
 
     UNCONFIGURED_LANGUAGE = "unconfigured_language", _("language not configured")
@@ -112,6 +120,7 @@ class SetAsideReason(TextChoices):
     VARIANT_NOT_KEPT = "variant_not_kept", _("language variant not kept")
     VALUE_TOO_LONG = "value_too_long", _("value exceeds the maximum length this application can store")
     STORED_SLUG_INVALID = "stored_slug_invalid", _("stored slug no longer passes validation")
+    COLLECTION_NOT_CREATED = "collection_not_created", _("collection was not created for want of a usable name")
 
     @property
     def template(self) -> Promise:
@@ -193,6 +202,9 @@ _REASON_TEMPLATES: dict[SetAsideReason, Promise] = {
     SetAsideReason.STORED_SLUG_INVALID: _(
         "'%(subject)s' has a stored slug that no longer passes this application's own validation; "
         "it was left exactly as stored, and nothing else about it was imported this run."
+    ),
+    SetAsideReason.COLLECTION_NOT_CREATED: _(
+        "'%(subject)s' was not created because it has no name this application can store."
     ),
 }
 
