@@ -916,3 +916,25 @@ for a scheme that is never matched by an import.
 
 **Revisit if:** never — this is the same reasoning `assign_unique_slug` already relies on,
 transplanted to the one call site that creates or matches a scheme rather than a concept.
+
+## D40 — T032 needed no production change beyond T029's own
+
+FR-020/SC-029 asks that a collision between two identifiers resolve "from the identifiers, not from
+read order." `ConceptImporter.import_concepts` already sorts `concept_nodes` by the full identifier
+string before ever processing one (`sorted(..., key=str)`, present since #50), so the order a file's
+own author declares its concepts in was never actually consulted — a fact D6's own suffix rule
+happened not to depend on either, because a fixture demonstrating it (`duplicate_slug.ttl`) collided
+concepts on their *label*, and D6 derived the suffix base from the label, not the identifier.
+
+Once T029 changed `assign_unique_slug`'s base to `identifier_slug_segment(concept.static_uri)`, two
+concepts colliding on their identifier's own last segment resolve through the same pre-existing
+`taken_slugs` mechanism (FIX 16, D49) T029 left untouched: the URI-sort decides who claims the bare
+slug on a first import, and `taken_slugs`, seeded from each concept's own stored slug on every
+re-import, reads a concept's prior answer back before ever minting a new suffix — so a slug never
+depends on which pass of the file assigned it first. This is the same shape D26/D29/D30/D31 already
+recorded: a coverage task (`TestConceptSlugCollisionIsIdentifierDerived`, two tests, both a specific
+falsifiable claim rather than a tautology) that passed on first run because the design was already
+correct, this time as a consequence of T029 rather than of an earlier phase.
+
+**Revisit if:** never — the same shape as D26/D29/D30/D31, recorded so a later reader does not look
+for a second collision algorithm and conclude one is missing.

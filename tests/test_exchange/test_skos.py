@@ -1039,6 +1039,71 @@ class TestConceptSlugs:
         assert Concept.objects.filter(scheme__static_uri="http://example.org/quarry2/").count() == 2
 
 
+class TestConceptSlugCollisionIsIdentifierDerived:
+    """T032 — FR-020/SC-029: two concepts whose identifiers end in the same segment (e.g.
+    ``.../a/clay`` and ``.../b/clay``) both import with distinct slugs, and each keeps the slug it
+    had regardless of the order the file declares them in. ``import_concepts`` already processes
+    ``concept_nodes`` in a stable order sorted on the full identifier string (never the order a file
+    happens to declare them in), and ``assign_unique_slug``'s ``taken_slugs`` (FIX 16, D49) reads
+    each concept's own previously-stored slug back before minting a suffix — so once T029 changed the
+    base derivation to the identifier, the existing collision machinery already resolves this the
+    way FR-020 requires, with no separate order-tracking rule needed.
+    """
+
+    def _write(self, tmp_path: Path, name: str, first: str, second: str) -> Path:
+        path = tmp_path / name
+        path.write_text(
+            f"""
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/collision/> a skos:ConceptScheme ; skos:prefLabel "Collision"@en .
+
+            {first}
+            {second}
+            """
+        )
+        return path
+
+    def test_two_identifiers_sharing_a_last_segment_get_distinct_slugs(self, db, tmp_path):
+        a_clay = (
+            "<http://example.org/collision/a/clay> a skos:Concept ; "
+            'skos:inScheme <http://example.org/collision/> ; skos:prefLabel "Clay A"@en .'
+        )
+        b_clay = (
+            "<http://example.org/collision/b/clay> a skos:Concept ; "
+            'skos:inScheme <http://example.org/collision/> ; skos:prefLabel "Clay B"@en .'
+        )
+        path = self._write(tmp_path, "collision.ttl", a_clay, b_clay)
+        import_skos(path)
+
+        a = Concept.objects.get(static_uri="http://example.org/collision/a/clay")
+        b = Concept.objects.get(static_uri="http://example.org/collision/b/clay")
+        assert {a.slug, b.slug} == {"clay", "clay-2"}
+        assert a.slug != b.slug
+
+    def test_each_keeps_its_slug_when_the_file_is_reimported_with_the_records_declared_in_reverse_order(
+        self, db, tmp_path
+    ):
+        a_clay = (
+            "<http://example.org/collision/a/clay> a skos:Concept ; "
+            'skos:inScheme <http://example.org/collision/> ; skos:prefLabel "Clay A"@en .'
+        )
+        b_clay = (
+            "<http://example.org/collision/b/clay> a skos:Concept ; "
+            'skos:inScheme <http://example.org/collision/> ; skos:prefLabel "Clay B"@en .'
+        )
+        first_path = self._write(tmp_path, "collision_first.ttl", a_clay, b_clay)
+        import_skos(first_path)
+        a_slug_before = Concept.objects.get(static_uri="http://example.org/collision/a/clay").slug
+        b_slug_before = Concept.objects.get(static_uri="http://example.org/collision/b/clay").slug
+
+        second_path = self._write(tmp_path, "collision_second.ttl", b_clay, a_clay)
+        import_skos(second_path)
+
+        assert Concept.objects.get(static_uri="http://example.org/collision/a/clay").slug == a_slug_before
+        assert Concept.objects.get(static_uri="http://example.org/collision/b/clay").slug == b_slug_before
+
+
 class TestConceptSchemeSlugFollowsThePublishedIdentifier:
     """T030 — FR-018/decisions.md D35: a vocabulary's own slug is the fragment of its published
     identifier where it has one, otherwise the last segment of its path — assigned once and never
