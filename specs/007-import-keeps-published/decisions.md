@@ -363,3 +363,124 @@ resolving differently — their own dedicated tests (`test_variants_fixture_...`
 import behaviour, so they should keep passing unchanged; the predicate-coverage sweep's behaviour
 for these three files, however, will change once real values start landing instead of being set
 aside, and is worth re-checking at that point.
+
+## D22 — The predicate-coverage sweep's own evidence rules predate base-language matching, and T008 is where that catches up
+
+D21 named this exactly: once `variants.ttl`, `en-gb-only.ttl` and `declares-de-at.ttl` stop being
+wholly set aside and start landing real content, `TestEverySkosPredicateIsReadOrReported` needed a
+second look. T008 is that point, and the sweep's own helpers — `_coverage_label_covered` and
+`_coverage_note_covered` in `test_skos.py` — carried two assumptions this feature breaks by design,
+not by accident.
+
+The first: their landed-row query filtered on `language=language`, where `language` is the
+literal's own **published** tag read straight from the graph. FR-001/FR-006 now store a value under
+a *resolved* configured language that can differ from what was published — that is the entire
+feature — so a value landing correctly under `de` for a `de-at`-published literal is invisible to a
+query still asking for `language="de-at"`. The fix drops the language filter from both helpers'
+landed-row checks (kind/text/concept — or kind/value/concept for notes — is specific enough for
+this sweep's own purpose, which its docstring states as "read into a record or named in the
+report," not "read into a record under this exact tag"; *which* language it landed under is what
+T008's own dedicated tests verify).
+
+The second: `_coverage_label_covered`'s recognised-reason list — `UNCONFIGURED_LANGUAGE`,
+`SURPLUS_PREFERRED_LABEL` — predates `VARIANT_NOT_KEPT` (T022) ever actually firing. T022's reason
+was added in the foundational phase but no call site wrote it until T008's default-language-branch
+discriminator. `VARIANT_NOT_KEPT` joins the list, keyed by `language` exactly as
+`UNCONFIGURED_LANGUAGE` already is (both carry the *published* tag under that param name).
+
+Both gaps are unavoidable for any correct T008: storing under a resolved language and reporting a
+losing variant under `VARIANT_NOT_KEPT` are what FR-001/FR-005/FR-006 require, not implementation
+choices this story could have made differently. The sweep's own test function and its assertion —
+"every predicate is read into a record or named in the report" — are unchanged; only the helpers'
+stale assumption about *how* to find that evidence is corrected, which is the maintenance D21
+already flagged as expected here.
+
+## D23 — T006's own test is scoped to `determine_default_language`, not to a concept actually importing
+
+`tasks.md`'s T006 entry names two things to test: the default-language resolution itself, and "every
+concept is named rather than set aside." Both are true of US-1 once it is complete, but not both are
+true after T006's own commit alone. `declares-de-at.ttl`'s one concept carries no exact-tag
+preferred label anywhere — its only `skos:prefLabel` is `"Rot"@de-at` — so naming it needs T007's
+winner rule (`preferred_label_in` returning candidates, `import_concepts` reading
+`resolve_winner`), not just a corrected default language. Tested as written, T006's commit would be
+red until T007 landed, which `craft-increments` treats as a stall condition, not a valid slice
+boundary.
+
+T006's own tests therefore assert directly against `SchemeResolver.determine_default_language`'s
+observable effect — the scheme's own `default_language`/`effective_default_language` fields via
+`resolve_scheme`, which runs and settles regardless of whether any concept later imports — covering
+both the declared-language branch and the commonest-fallback branch resolving through the matcher,
+plus the unconfigured-language regression. "Every concept is named" for exactly this fixture is
+T007's own stated acceptance test ("a concept whose only preferred label is a variant of the default
+language still names the concept and derives its slug the way an exact match would") — the same
+claim, proven where it is actually achievable.
+
+**Revisit if:** never — this is how the two tasks' test coverage was always going to divide once
+`declares-de-at.ttl`'s exact content (no exact-tag label anywhere) is accounted for; it is recorded
+so a later reader does not look for "every concept is named" inside T006's own commit and conclude
+it is missing.
+
+## D24 — A default-language-branch loser's reason is decided against the tag T007 actually chose, not against `default_language` itself
+
+T008's task text says a loser's published tag is compared "against the winner's" to choose between
+`SURPLUS_PREFERRED_LABEL` and `VARIANT_NOT_KEPT` — the same discriminator T014 (US-3) states for
+every other configured language. Two readings were available for what "the winner" means inside
+`import_labels`, and they disagree on one reachable case.
+
+*Reading A* — compare the loser's tag against `default_language` itself (the configured code). A
+raw-tag-group duplicate under a *variant* (two `de-at`-tagged preferred labels, no exact `de` tag
+anywhere) would then read as `VARIANT_NOT_KEPT`, because `"de-at" != "de"`. But its message —
+"another variant was kept for the site's `de` instead" — is false: the value that *was* kept is
+tagged `de-at` too, the exact same variant, not another one. Article XI's "surfaced to the user,
+never silent" is not met by surfacing something wrongly (the same argument D14 already made against
+reusing `SURPLUS_PREFERRED_LABEL` for a true contest loser, run in reverse here).
+
+*Reading B (chosen)* — compare the loser's tag against the tag `import_concepts`' own
+`resolve_winner` call actually chose for the default-language slot (`default_language_winner_tag`,
+recomputed in `import_labels` from the identical `preferred_label_in`/`resolve_winner` call —
+T021's "one winner, one computation" guarantees it agrees with `import_concepts`' own answer without
+threading the value through `_import_concept_content`'s parameters). A same-tag duplicate — the
+loser's tag equals whichever tag actually won — keeps `SURPLUS_PREFERRED_LABEL`, true regardless of
+whether that shared tag happens to equal `default_language` exactly or is itself a variant. A
+different-tag loser takes `VARIANT_NOT_KEPT`. This is the literal reading of T014's own words ("a
+loser whose published tag equals the winner's *tag*") and the only one that keeps
+`SURPLUS_PREFERRED_LABEL`'s message true in every case T008 can reach.
+
+Reported under `SURPLUS_PREFERRED_LABEL`, the `language` param is always the *resolved* configured
+code (`default_language`), never the raw tag that happens to be shared — consistent with T004's own
+invariant that this reason's `language` names a configured code the site already holds, not a
+published tag configuring something would recover.
+
+**Revisit if:** T013/T014 (US-3) re-key `preferred_by_language` onto the resolved language for every
+configured slot, not only the default one — at that point this same discriminator should read
+identically for both, and worth checking that `import_labels`'s two now-separate computations (this
+one, and T013's) still agree by construction rather than by coincidence.
+
+## D25 — A pre-existing test class lost its `class` statement during US-1's insertions, and is reinstated
+
+**Decided at:** US-1 convergence review (orchestrator), after `tamper-check` flagged
+`tests/test_exchange/test_skos.py` and the flag was triaged line by line.
+
+T007–T009 inserted three new test classes immediately above
+`TestConceptsImpliedByMembershipButNeverGivenAnRdfType`. The insertion landed *between* that class's
+`class` statement and its docstring: the `class` line was removed and the docstring left behind as a
+bare string expression, so its five node-typing tests were silently re-parented onto
+`TestLanguageSubstitutionIsReported` — a class about language substitution, which has nothing to do
+with them.
+
+Nothing failed. The methods still ran, the count was unchanged at 745, and every gate was green,
+because pytest neither knows nor cares which class a test method hangs off. That is what makes this
+worth a decision record rather than a silent fix: the defect is invisible to every machine check the
+loop runs, and only the tamper-check flag plus a by-hand read of the deleted lines surfaced it.
+
+**Chosen:** reinstate the `class` statement verbatim above its own docstring. No test body, name or
+assertion is touched, and the count stays at 745.
+
+**Rejected:** leaving it. Article X's testing structure requires class grouping to carry meaning, and
+a class whose name says "language substitution" holding tests about `rdf:type` inference defeats
+that. It would also have made the next reader of a failure in those five tests look in the wrong
+place entirely.
+
+**Revisit if:** a later story again inserts classes adjacent to an existing one — the same shape can
+recur, and the only thing that caught it was reading the diff's deletions rather than trusting a
+green suite.

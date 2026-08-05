@@ -131,3 +131,51 @@ Append-only log of stage transitions and gate outcomes.
   --check .`, `mypy controlled_vocabularies`, `deptry .`, `pre-commit run --all-files`. Worktree
   clean. Three naming/shape choices not dictated by the brief are recorded as D19–D21. Next:
   US-1 (T006–T010) wires the matcher into the five call sites.
+
+- **S4 IMPLEMENT — US-1 (#69, T006–T010), Implementer.** `craft-tdd` and `craft-increments`
+  loaded by name, receipts verified against the brief before any task started. Baseline confirmed
+  green (724 tests, HEAD `5c31ce2`) before touching anything. Five commits, one per task, tree
+  green and clean after each:
+  - **T006** — `SchemeResolver.determine_default_language` resolves both its declared-language and
+    commonest-fallback branches through `LanguageMatcher.resolve()` instead of raw set membership,
+    so a vocabulary declaring itself `de-at` on a `de` site resolves its default language to `de`
+    (D9). Tested directly against the scheme's own `default_language`/`effective_default_language`
+    fields rather than end-to-end concept import — a concept whose only preferred label is a
+    variant still needed T007 to actually import, so "every concept is named" is T007's own test.
+  - **T007** — `SkosGraph.preferred_label_in` returns every `(published tag, value)` candidate a
+    node's `skos:prefLabel` carries, unfiltered by language (configured-language policy stays off
+    the RDF boundary, Article XV); `ConceptImporter.import_concepts`, its one caller, filters for
+    candidates resolving to the target default language and reads `LanguageMatcher.resolve_winner`
+    (T021) for `Concept.label`. An exact match is proven not displaced by a more predominant
+    variant.
+  - **T008** — `import_labels` and `_import_notes` resolve every published tag through the matcher
+    before comparing against the default language or storing, fixing both raw-tag comparisons the
+    plan named — the crash on the feature's own headline scenario needed both, not just one.
+    Inside the default-language branch, a loser is discriminated against the tag T007's winner rule
+    actually chose (re-derived from the same `preferred_label_in`/`resolve_winner` computation,
+    never threaded as a parameter): a same-tag duplicate keeps `SURPLUS_PREFERRED_LABEL`, a losing
+    variant takes `VARIANT_NOT_KEPT` (D14). A new module-level `_localized_literal()` resolves a
+    vocabulary's name/description and a collection's name through the matcher from outside
+    `SkosGraph` (call sites 6/7/8); `CollectionImporter` gained the `matcher` constructor argument
+    this needs. `configured_language_codes()` deleted, its three callers now reading through the
+    matcher. `TestEverySkosPredicateIsReadOrReported`'s own evidence helpers
+    (`_coverage_label_covered`/`_coverage_note_covered`) carried two assumptions this feature
+    breaks by design — a landed value's language can now differ from its published tag, and
+    `VARIANT_NOT_KEPT` can now actually fire — corrected per D22, which D21 had already
+    anticipated; the sweep's own test function and assertion are unchanged.
+  - **T009** — every value stored under a language other than its published tag — `Concept.label`
+    (in `import_concepts`, when the default-language slot is filled by a variant), a `ConceptLabel`
+    row, or a `ConceptNote` row (including the `dcterms:description` alias, as a second,
+    independent normalisation axis alongside `FOREIGN_DEFINITION`) — reports
+    `NormalizedReason.LANGUAGE_SUBSTITUTION`, distinguishable from `language_account()`'s
+    not-stored bucket and never fired for a pure case-only match (D8).
+  - **T010** — the FR-010 invariant: no `ConceptLabel`, `ConceptNote`, or scheme
+    `effective_default_language` ever holds a language outside `settings.LANGUAGES`, checked after
+    each of the feature's own fixtures, plus one case run explicitly under Django's own
+    99-language default (`@override_settings(LANGUAGES=global_settings.LANGUAGES)`) rather than
+    relying on "no override," which would silently mean `tests/settings.py`'s own three-language
+    list instead (D12/D17).
+  Full verify green throughout: `poetry run pytest -q` (745 passed), `ruff check .`, `ruff format
+  --check .`, `mypy controlled_vocabularies`, `deptry .`, `pre-commit run --all-files`. Worktree
+  clean. One non-obvious choice recorded as D22. Next: US-2 (#70, T011–T012) — the account
+  populated from a real import.

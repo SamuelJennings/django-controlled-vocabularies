@@ -12,7 +12,10 @@ from pathlib import Path
 
 import pytest
 import rdflib
+from django.conf import global_settings
+from django.conf import settings as django_settings
 from django.db import connection
+from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils.functional import Promise
 
@@ -367,6 +370,58 @@ class TestImportedVocabularyDefaultLanguage:
         assert scheme.default_language == ""
 
 
+class TestDefaultLanguageResolvesThroughTheMatcher:
+    """T006 — FR-007/decisions.md D9: the vocabulary's default language is
+    resolved by the same base-language matching rule as everything else, so a
+    vocabulary declaring itself in a variant of a configured language
+    resolves to that configured language rather than falling back to the
+    site's own default (the failure D9 describes)."""
+
+    def test_a_vocabulary_declaring_itself_in_a_variant_of_a_configured_language_resolves_to_it(self, db):
+        import_skos(FIXTURES / "declares-de-at.ttl")
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/farben/")
+        assert scheme.default_language == "de"
+        assert scheme.effective_default_language == "de"
+
+    def test_the_commonest_concept_language_fallback_also_resolves_through_the_matcher(self, db, tmp_path):
+        # The scheme itself declares no single language (two tags on its own
+        # prefLabel), so determine_default_language falls back to the
+        # commonest language among the concepts' own preferred labels — that
+        # fallback must resolve through the matcher too, not just the
+        # declared-language branch.
+        path = tmp_path / "commonest.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/hues/> a skos:ConceptScheme ;
+                skos:prefLabel "Hues"@en-gb, "Farben"@de .
+
+            <http://example.org/hues/a> a skos:Concept ;
+                skos:inScheme <http://example.org/hues/> ;
+                skos:prefLabel "Red"@en-gb .
+
+            <http://example.org/hues/b> a skos:Concept ;
+                skos:inScheme <http://example.org/hues/> ;
+                skos:prefLabel "Blue"@en-gb .
+            """
+        )
+        import_skos(path)
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/hues/")
+        assert scheme.default_language == "en"
+        assert scheme.effective_default_language == "en"
+
+    def test_a_vocabulary_whose_declared_language_shares_no_base_with_any_configured_language_still_falls_back(
+        self, db
+    ):
+        # Regression: unchanged from #50 — a declared language with no
+        # configured base at all still falls back to the site default.
+        import_skos(FIXTURES / "unconfigured_language_vocabulary.ttl")
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/geology2/")
+        assert scheme.effective_default_language == "en"
+
+
 class TestImportConcepts:
     """T009 — concepts land inside the vocabulary being imported, each
     holding its published identifier and its default-language preferred
@@ -423,6 +478,274 @@ class TestImportConcepts:
         assert Concept.objects.get(static_uri="http://example.org/rocks/granite").pk == granite_pk
         assert "http://example.org/rocks/granite" in report.updated
         assert "http://example.org/rocks/granite" not in report.created
+
+
+class TestConceptLabelIsSelectedByTheWinnerRule:
+    """T007 — FR-002/FR-003: ``Concept.label`` is chosen by ``LanguageMatcher.resolve_winner``
+    (T021), the same rule ``import_labels``'s own surplus report reads, rather than exact tag
+    equality — so a concept whose only preferred label is a variant of the default language still
+    names the concept, and an exact match is never displaced by a more predominant variant."""
+
+    def test_a_concept_whose_only_preferred_label_is_a_variant_of_the_default_language_still_names_it(self, db):
+        import_skos(FIXTURES / "declares-de-at.ttl")
+        rot = Concept.objects.get(static_uri="http://example.org/farben/rot")
+        assert rot.label == "Rot"
+        assert rot.slug == "rot"
+
+    def test_an_exact_match_is_not_displaced_by_a_more_predominant_variant(self, db, tmp_path):
+        # "en-gb" is the predominant tag across the file (three occurrences),
+        # but the target concept also carries an exact "en" match, which
+        # FR-002 says always wins regardless of predominance.
+        path = tmp_path / "exact_wins.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/exactwins/> a skos:ConceptScheme ;
+                skos:prefLabel "Exact wins"@en .
+
+            <http://example.org/exactwins/other1> a skos:Concept ;
+                skos:inScheme <http://example.org/exactwins/> ;
+                skos:prefLabel "Other"@en-gb .
+
+            <http://example.org/exactwins/other2> a skos:Concept ;
+                skos:inScheme <http://example.org/exactwins/> ;
+                skos:prefLabel "Other"@en-gb .
+
+            <http://example.org/exactwins/target> a skos:Concept ;
+                skos:inScheme <http://example.org/exactwins/> ;
+                skos:prefLabel "Alpha"@en, "Beta"@en-gb .
+            """
+        )
+        import_skos(path)
+        target = Concept.objects.get(static_uri="http://example.org/exactwins/target")
+        assert target.label == "Alpha"
+        assert target.slug == "alpha"
+
+
+class TestLabelsNotesAndNamesResolveThroughTheMatcher:
+    """T008 — FR-001, call sites 3/4/5/6/7/8: ``import_labels`` and ``_import_notes`` store a
+    matched value under its resolved configured language rather than comparing raw published tags,
+    and ``SkosGraph.first_literal``'s ``language=`` filter — read for a vocabulary's own name and
+    description and for a collection's name — resolves through the matcher too."""
+
+    def test_an_en_only_vocabulary_imports_into_an_en_gb_configured_site(self, db):
+        # SC-001: general-to-specific. rocks.ttl's own content is unmodified;
+        # only the site's configured languages narrow to en-gb alone.
+        with override_settings(LANGUAGES=[("en-gb", "British English")]):
+            report = import_skos(FIXTURES / "rocks.ttl")
+            assert report.fatal == []
+            igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
+            assert igneous.label == "Igneous rock"
+            assert igneous.definition("en-gb") == "Rock formed by the cooling and solidification of magma or lava."
+            granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+            assert granite.alt_labels("en-gb") == ["Magma rock"]
+            assert granite.hidden_labels("en-gb") == ["Granit rock"]
+
+    def test_an_en_gb_only_vocabulary_imports_into_an_en_configured_site(self, db):
+        # SC-002: specific-to-general, the direction that stored nothing before this feature.
+        report = import_skos(FIXTURES / "en-gb-only.ttl")
+        assert report.fatal == []
+        colour = Concept.objects.get(static_uri="http://example.org/colours-gb/colour")
+        assert colour.label == "Colour"
+        assert colour.alt_labels("en") == ["Hue"]
+        assert colour.notes("en") == ["The visible spectral quality of light."]
+
+    def test_a_de_at_published_vocabulary_on_a_de_site_imports_its_preferred_labels_without_raising(self, db):
+        # SC-010's write half: T006 and T007 alone still stop short of this — the concept's own
+        # alt label and note are also tagged de-at and must resolve through the matcher too.
+        report = import_skos(FIXTURES / "declares-de-at.ttl")
+        assert report.fatal == []
+        rot = Concept.objects.get(static_uri="http://example.org/farben/rot")
+        assert rot.label == "Rot"
+        assert rot.alt_labels("de") == ["Karmesinrot"]
+        assert rot.notes("de") == ["Eine der Grundfarben."]
+
+    def test_a_tag_differing_only_in_case_is_treated_as_an_exact_match(self, db, tmp_path):
+        # SC-004.
+        path = tmp_path / "case.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/case/> a skos:ConceptScheme ;
+                skos:prefLabel "Case"@en .
+
+            <http://example.org/case/item> a skos:Concept ;
+                skos:inScheme <http://example.org/case/> ;
+                skos:prefLabel "Item"@en, "Artikel"@DE .
+            """
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        item = Concept.objects.get(static_uri="http://example.org/case/item")
+        assert item.preferred_label("de") == "Artikel"
+
+    def test_a_tag_sharing_no_base_language_with_any_configured_language_is_still_set_aside(self, db, tmp_path):
+        # SC-003.
+        path = tmp_path / "nobase.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/nobase/> a skos:ConceptScheme ;
+                skos:prefLabel "No base"@en .
+
+            <http://example.org/nobase/item> a skos:Concept ;
+                skos:inScheme <http://example.org/nobase/> ;
+                skos:prefLabel "Item"@en ;
+                skos:altLabel "アイテム"@ja .
+            """
+        )
+        report = import_skos(path)
+        item = Concept.objects.get(static_uri="http://example.org/nobase/item")
+        assert item.alt_labels("ja") == []
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.UNCONFIGURED_LANGUAGE]
+        assert len(entries) == 1
+        assert entries[0].subject == item.static_uri
+        assert entries[0].params["language"] == "ja"
+
+    def test_the_vocabularys_own_name_and_description_resolve_through_the_matcher_too(self, db, tmp_path):
+        # Call sites 6/7: without this, first_literal's exact filter finds no "de" literal and
+        # falls back to sorted(...)[0] across every language in the file.
+        path = tmp_path / "named.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+            @prefix dcterms: <http://purl.org/dc/terms/> .
+
+            <http://example.org/named/> a skos:ConceptScheme ;
+                skos:prefLabel "Aardvark scheme"@fr, "Named scheme"@de-at ;
+                dcterms:description "Aardvark description"@fr, "Named description"@de-at .
+
+            <http://example.org/named/item> a skos:Concept ;
+                skos:inScheme <http://example.org/named/> ;
+                skos:prefLabel "Item"@de-at .
+            """
+        )
+        import_skos(path)
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/named/")
+        assert scheme.effective_default_language == "de"
+        assert scheme.name == "Named scheme"
+        assert scheme.description == "Named description"
+
+    def test_a_collections_own_name_resolves_through_the_matcher_too(self, db, tmp_path):
+        # Call site 8.
+        path = tmp_path / "named_collection.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/namedcoll/> a skos:ConceptScheme ;
+                skos:prefLabel "Named collection scheme"@de .
+
+            <http://example.org/namedcoll/item> a skos:Concept ;
+                skos:inScheme <http://example.org/namedcoll/> ;
+                skos:prefLabel "Item"@de .
+
+            <http://example.org/namedcoll/coll> a skos:Collection ;
+                skos:prefLabel "Aardvark collection"@fr, "Named collection"@de-at ;
+                skos:member <http://example.org/namedcoll/item> .
+            """
+        )
+        import_skos(path)
+        collection = Collection.objects.get(static_uri="http://example.org/namedcoll/coll")
+        assert collection.name == "Named collection"
+
+
+class TestLanguageSubstitutionIsReported:
+    """T009 — FR-006/SC-009: every value stored under a configured language other than the tag
+    it was published under is reported as a substitution, distinguishable from a value that was
+    not stored at all, and never counted in ``language_account()`` — that account is for what a
+    curator could recover by configuring something, and a substitution already made it in."""
+
+    def test_the_concepts_label_alt_label_and_note_are_each_reported_as_a_substitution(self, db):
+        report = import_skos(FIXTURES / "declares-de-at.ttl")
+        rot_uri = "http://example.org/farben/rot"
+        substitutions = {
+            (entry.params["language"], entry.params["kept_as"])
+            for entry in report.normalized
+            if entry.reason is NormalizedReason.LANGUAGE_SUBSTITUTION and entry.subject == rot_uri
+        }
+        assert substitutions == {("de-at", "de")}
+        assert (
+            len(
+                [
+                    entry
+                    for entry in report.normalized
+                    if entry.reason is NormalizedReason.LANGUAGE_SUBSTITUTION and entry.subject == rot_uri
+                ]
+            )
+            == 3
+        )  # the label, the alternative label, and the note
+
+    def test_a_substitution_is_distinguishable_from_a_value_that_was_not_stored(self, db, tmp_path):
+        path = tmp_path / "mixed.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/mixed/> a skos:ConceptScheme ;
+                skos:prefLabel "Mixed"@en .
+
+            <http://example.org/mixed/item> a skos:Concept ;
+                skos:inScheme <http://example.org/mixed/> ;
+                skos:prefLabel "Item"@en ;
+                skos:altLabel "Article"@en-gb, "記事"@ja .
+            """
+        )
+        report = import_skos(path)
+        item = Concept.objects.get(static_uri="http://example.org/mixed/item")
+        assert item.alt_labels("en") == ["Article"]
+        substitution_subjects = {
+            entry.subject for entry in report.normalized if entry.reason is NormalizedReason.LANGUAGE_SUBSTITUTION
+        }
+        not_stored_subjects = {
+            entry.subject for entry in report.set_aside if entry.reason is SetAsideReason.UNCONFIGURED_LANGUAGE
+        }
+        assert item.static_uri in substitution_subjects
+        assert item.static_uri in not_stored_subjects
+        substitution_languages = {
+            entry.params["language"]
+            for entry in report.normalized
+            if entry.reason is NormalizedReason.LANGUAGE_SUBSTITUTION and entry.subject == item.static_uri
+        }
+        assert substitution_languages == {"en-gb"}
+        not_stored_languages = {
+            entry.params["language"]
+            for entry in report.set_aside
+            if entry.reason is SetAsideReason.UNCONFIGURED_LANGUAGE and entry.subject == item.static_uri
+        }
+        assert not_stored_languages == {"ja"}
+
+    def test_a_substitution_does_not_appear_in_the_language_account(self, db):
+        report = import_skos(FIXTURES / "declares-de-at.ttl")
+        assert "de-at" not in report.language_account()
+
+    def test_an_exact_case_insensitive_match_is_not_reported_as_a_substitution(self, db, tmp_path):
+        # SC-004: a case-only difference is an exact match, not a variant.
+        path = tmp_path / "case_no_substitution.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/casesub/> a skos:ConceptScheme ;
+                skos:prefLabel "Case"@en .
+
+            <http://example.org/casesub/item> a skos:Concept ;
+                skos:inScheme <http://example.org/casesub/> ;
+                skos:prefLabel "Item"@en, "Artikel"@DE .
+            """
+        )
+        report = import_skos(path)
+        assert report.normalized == []
 
 
 class TestConceptsImpliedByMembershipButNeverGivenAnRdfType:
@@ -2426,7 +2749,16 @@ def _coverage_label_covered(
 ) -> bool:
     """Direct evidence that this ``skos:prefLabel``/``altLabel``/``hiddenLabel`` value
     landed — as the scheme's own name, a concept's identity anchor, or a
-    ``ConceptLabel`` row — or was reported set aside (FIX 13)."""
+    ``ConceptLabel`` row — or was reported set aside (FIX 13).
+
+    T008 (FS-007 US-1): a value may now land under a *resolved* configured language
+    other than its own published tag (FR-001/FR-006), so the landed-row check is no
+    longer scoped to ``language`` — decisions.md D21 named this sweep as something to
+    re-check once these fixtures' values start landing instead of being set aside.
+    ``VARIANT_NOT_KEPT`` (T022) joins the recognised set-aside reasons for the same
+    reason: a losing variant is reported under it, keyed by its own published tag,
+    exactly as ``UNCONFIGURED_LANGUAGE`` already is.
+    """
     if subject_uri in excluded_subjects:
         return True
     if kind == ConceptLabel.Kind.PREFERRED:
@@ -2436,12 +2768,17 @@ def _coverage_label_covered(
             return True
         if Collection.objects.filter(static_uri=subject_uri, name=text).exists():
             return True
-    if ConceptLabel.objects.filter(concept__static_uri=subject_uri, language=language, kind=kind, text=text).exists():
+    if ConceptLabel.objects.filter(concept__static_uri=subject_uri, kind=kind, text=text).exists():
         return True
     return any(
         entry.subject == subject_uri
         and entry.params.get("language") == language
-        and entry.reason in (SetAsideReason.UNCONFIGURED_LANGUAGE, SetAsideReason.SURPLUS_PREFERRED_LABEL)
+        and entry.reason
+        in (
+            SetAsideReason.UNCONFIGURED_LANGUAGE,
+            SetAsideReason.SURPLUS_PREFERRED_LABEL,
+            SetAsideReason.VARIANT_NOT_KEPT,
+        )
         for entry in report.set_aside
     )
 
@@ -2450,10 +2787,15 @@ def _coverage_note_covered(
     subject_uri: str, language: str, text: str, kind: str, excluded_subjects: set[str], report
 ) -> bool:
     """Direct evidence that this note value landed as a ``ConceptNote`` row, or was
-    reported set aside (FIX 13)."""
+    reported set aside (FIX 13).
+
+    T008: not scoped to ``language`` on the landed-row check, for the same reason as
+    :func:`_coverage_label_covered` — a note may land under a resolved configured
+    language other than its own published tag.
+    """
     if subject_uri in excluded_subjects:
         return True
-    if ConceptNote.objects.filter(concept__static_uri=subject_uri, language=language, kind=kind, value=text).exists():
+    if ConceptNote.objects.filter(concept__static_uri=subject_uri, kind=kind, value=text).exists():
         return True
     return any(
         entry.subject == subject_uri
@@ -2897,3 +3239,56 @@ class TestFailureMessagesUseOnlyNamedPlaceholders:
         assert isinstance(err.message, Promise)
         assert uses_only_named_placeholders(str(err.message))
         assert err.code == "skos_import_failed"
+
+
+class TestNoContentIsStoredInAnUnconfiguredLanguage:
+    """T010 — FR-010/SC-017: across every matching path this feature introduces — the default
+    language, ``Concept.label``, labels, notes, and the vocabulary/collection name and
+    description — no value is ever stored in a language absent from the site's configuration.
+    This is the test that would fail if a later change made the matcher permissive."""
+
+    @staticmethod
+    def _assert_only_configured_languages_are_stored():
+        configured = {code for code, _label in django_settings.LANGUAGES}
+        stray_labels = ConceptLabel.objects.exclude(language__in=configured)
+        stray_notes = ConceptNote.objects.exclude(language__in=configured)
+        assert list(stray_labels) == []
+        assert list(stray_notes) == []
+        for scheme in ConceptScheme.objects.all():
+            assert scheme.effective_default_language in configured
+
+    @pytest.mark.parametrize("filename", ["rocks.ttl", "variants.ttl", "en-gb-only.ttl", "declares-de-at.ttl"])
+    def test_no_stray_language_lands_across_every_matching_path_this_feature_touches(self, db, filename):
+        report = import_skos(FIXTURES / filename)
+        assert report.fatal == []
+        self._assert_only_configured_languages_are_stored()
+
+    def test_the_invariant_holds_under_djangos_own_99_language_default(self, db, tmp_path):
+        # tests/settings.py declares its own three-language LANGUAGES list, so simply not
+        # overriding it here would silently mean that list rather than Django's own default —
+        # the obvious-looking test that pins nothing (decisions.md D12/D17). The ordinary
+        # consuming project declares no LANGUAGES at all, so this is the behaviour that needs
+        # holding still.
+        path = tmp_path / "many_languages.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/manylang/> a skos:ConceptScheme ;
+                skos:prefLabel "Many languages"@en .
+
+            <http://example.org/manylang/item> a skos:Concept ;
+                skos:inScheme <http://example.org/manylang/> ;
+                skos:prefLabel "Item"@en-us ;
+                skos:altLabel "Artikel"@de-at, "Nothing shares this base"@zzz .
+            """
+        )
+        with override_settings(LANGUAGES=global_settings.LANGUAGES):
+            report = import_skos(path)
+            assert report.fatal == []
+            self._assert_only_configured_languages_are_stored()
+            # A tag sharing no base with any of Django's 99 shipped languages is still refused,
+            # even under the largest configured set the package will ever see.
+            entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.UNCONFIGURED_LANGUAGE]
+            assert any(entry.params["language"] == "zzz" for entry in entries)

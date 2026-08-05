@@ -21,7 +21,6 @@ from pathlib import Path
 
 import rdflib
 import rdflib.util
-from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
@@ -189,14 +188,19 @@ class SkosGraph:
             if isinstance(literal, rdflib.Literal) and literal.language
         ]
 
-    def preferred_label_in(self, node: rdflib.term.Node, language: str) -> str | None:
-        """The lexicographically-first ``skos:prefLabel`` value on ``node`` in ``language``, or ``None``."""
-        values = sorted(
-            str(literal)
+    def preferred_label_in(self, node: rdflib.term.Node) -> list[tuple[str, str]]:
+        """Every ``(published tag, value)`` pair ``node`` carries a ``skos:prefLabel`` in (T007).
+
+        Unfiltered by language: which pair fills a configured language's slot is decided by
+        :meth:`~controlled_vocabularies.exchange.languages.LanguageMatcher.resolve_winner`, and that
+        policy does not belong on this RDF boundary (Article XV) — the caller, which already holds
+        the matcher, resolves and picks a winner from what this returns.
+        """
+        return sorted(
+            (str(literal.language), str(literal))
             for literal in self.graph.objects(node, SKOS.prefLabel)
-            if isinstance(literal, rdflib.Literal) and literal.language == language
+            if isinstance(literal, rdflib.Literal) and literal.language
         )
-        return values[0] if values else None
 
     def preferred_label_tag_counts(self, concept_nodes: Iterable[rdflib.term.Node]) -> dict[str, int]:
         """How often each published language tag appears across ``concept_nodes``'
@@ -251,13 +255,33 @@ class SkosGraph:
         return f"skos:{str(predicate)[len(str(SKOS)) :]}"
 
 
-def configured_language_codes() -> set[str]:
-    """The language codes the application is configured for (``settings.LANGUAGES``).
+def _localized_literal(
+    skos_graph: SkosGraph,
+    matcher: LanguageMatcher,
+    node: rdflib.term.Node,
+    predicate: rdflib.URIRef,
+    target_language: str,
+) -> str | None:
+    """The value of ``predicate`` on ``node`` whose published tag resolves to ``target_language``
+    through ``matcher`` (T008, call sites 6/7/8), or ``None``.
 
-    A small, local duplicate of the identical one-liner in ``models.py`` (Article III: prefer
-    duplication over the wrong abstraction, applied to one set-comprehension).
+    ``SkosGraph.first_literal``'s own ``language=`` filter is an exact match; resolving a variant
+    tag to ``target_language`` is configured-language policy, which stays off ``SkosGraph``
+    (Article XV), so it happens here, reading only the graph's public, read-only queries. Without
+    this, a site importing a vocabulary declared in a variant of its default language names every
+    concept correctly and then falls through to :meth:`SkosGraph.first_literal`'s own any-language
+    fallback — ``sorted(...)[0]`` across every language in the file — for the record's own name.
     """
-    return {code for code, _label in settings.LANGUAGES}
+    candidates = [
+        (tag, value)
+        for tag in sorted(set(skos_graph.label_languages(node, predicate)))
+        if (value := skos_graph.first_literal(node, predicate, language=tag)) is not None
+        if matcher.resolve(tag).configured_language == target_language
+    ]
+    if not candidates:
+        return None
+    (_winning_tag, value), _losers = matcher.resolve_winner(target_language, candidates)
+    return value
 
 
 def report_unmodelled_predicates(
@@ -332,17 +356,20 @@ class SchemeResolver:
         Taken from the file where the file says: the vocabulary's own ``skos:prefLabel``, when
         tagged with exactly one language, else the language most of ``concept_nodes``' own
         preferred labels use, tied deterministically by language code. Either way the resolved
-        language must be one the site is configured for; when neither is, this returns ``""``,
-        which :attr:`ConceptScheme.default_language` already treats as "fall back to the site's
-        own default" (``effective_default_language``) — the mechanism R1 built, reused rather than
-        duplicated.
+        language is found through :attr:`matcher` (T006, FR-007, decisions.md D9) rather than
+        exact set membership — a vocabulary declaring itself in a variant of a configured language
+        (``de-at`` on a ``de`` site) resolves to that configured language rather than falling
+        through to the site's own default. When no configured language shares a base with either
+        candidate, this returns ``""``, which :attr:`ConceptScheme.default_language` already
+        treats as "fall back to the site's own default" (``effective_default_language``) — the
+        mechanism R1 built, reused rather than duplicated.
         """
-        configured = configured_language_codes()
         declared_languages = set(self.skos_graph.label_languages(declared_node, SKOS.prefLabel))
         if len(declared_languages) == 1:
             (declared_language,) = declared_languages
-            if declared_language in configured:
-                return declared_language
+            resolved = self.matcher.resolve(declared_language).configured_language
+            if resolved:
+                return resolved
 
         counts: dict[str, int] = {}
         for node in concept_nodes:
@@ -350,8 +377,9 @@ class SchemeResolver:
                 counts[language] = counts.get(language, 0) + 1
         if counts:
             commonest = sorted(counts.items(), key=lambda item: (-item[1], item[0]))[0][0]
-            if commonest in configured:
-                return commonest
+            resolved = self.matcher.resolve(commonest).configured_language
+            if resolved:
+                return resolved
 
         return ""
 
@@ -448,7 +476,9 @@ class SchemeResolver:
                 declared=declared_default_language,
                 frozen=row.effective_default_language,
             )
-        name = self.skos_graph.first_literal(declared_node, SKOS.prefLabel, language=row.effective_default_language)
+        name = _localized_literal(
+            self.skos_graph, self.matcher, declared_node, SKOS.prefLabel, row.effective_default_language
+        )
         if not name:
             # The declared default language (or the site's, on fallback) carries no prefLabel on
             # the scheme itself — fall back to any language rather than leaving name unset.
@@ -459,8 +489,8 @@ class SchemeResolver:
         # the source (D21), the same alias CONTEXT.md establishes for a concept's own definition.
         # Unlike name, description is written unconditionally, including to empty when the file no
         # longer carries one — nothing anchors identity to it the way default_language is anchored.
-        description = self.skos_graph.first_literal(
-            declared_node, DCTERMS.description, language=row.effective_default_language
+        description = _localized_literal(
+            self.skos_graph, self.matcher, declared_node, DCTERMS.description, row.effective_default_language
         )
         if not description:
             description = self.skos_graph.first_literal(declared_node, DCTERMS.description)
@@ -525,33 +555,51 @@ class ConceptImporter:
 
         Replaces whatever labels this concept already held: a label carries no identifier to upsert
         by, and the file is authoritative for what it contains (FR-013). :data:`LABEL_PREDICATES`
-        covers ``skos:prefLabel``/``altLabel``/``hiddenLabel``; a preferred label in
-        ``default_language`` is skipped — it is already ``concept.label`` (T009), and the model
-        refuses a second preferred row in that language.
+        covers ``skos:prefLabel``/``altLabel``/``hiddenLabel``; a preferred label whose *resolved*
+        language is ``default_language`` (T008: compared through the matcher, not the raw published
+        tag) is skipped — that slot is already ``concept.label`` (T009), and the model refuses a
+        second preferred row in that language.
 
-        A value in an unconfigured language is set aside and reported by its own language, checked
-        ahead of the write rather than letting ``ConceptLabel.clean()``'s own refusal raise (T020,
-        FR-014, D25) — that exception protects a direct, out-of-band write, not this importer's
-        control flow.
+        A value sharing no base language with any configured one is set aside and reported by its
+        own published tag, checked ahead of the write rather than letting ``ConceptLabel.clean()``'s
+        own refusal raise (T020, FR-014, D25) — that exception protects a direct, out-of-band write,
+        not this importer's control flow.
 
-        A second ``skos:prefLabel`` in one non-default configured language (FIX 3, D38) is the same
-        shape of problem for a cardinality reason: the model allows only one ``PREFERRED`` row per
-        (concept, language), so only the lexicographically-first value in each such language — the
-        same rule :meth:`SkosGraph.preferred_label_in` uses for the default language — is ever
-        attempted; every other value is set aside and reported. A surplus ``skos:prefLabel`` in
-        ``default_language`` itself (FIX 4, D38) is the same defect: :meth:`import_concepts` already
-        chose one such value as ``Concept.label``, so every other one is reported here too.
+        A second ``skos:prefLabel`` resolving to one non-default configured language (FIX 3, D38) is
+        the same shape of problem for a cardinality reason: the model allows only one ``PREFERRED``
+        row per (concept, language), so only the lexicographically-first value under each raw
+        published tag is ever attempted; every other value under that *same* tag is set aside and
+        reported. Inside the default-language slot, a loser is discriminated by its own published
+        tag against the tag T007's winner rule actually chose (``default_language_winner_tag``): the
+        same tag is a same-language duplicate and keeps ``SURPLUS_PREFERRED_LABEL`` (FIX 4, D38); a
+        different tag is a losing variant and takes ``VARIANT_NOT_KEPT`` (T022, decisions.md D14) —
+        the discriminator T014 applies to every other configured language, stated here so US-1 does
+        not land an assertion US-3 has to undo.
         """
-        configured = configured_language_codes()
         concept.labels.all().delete()
 
-        # One deterministic winner per language this concept carries a skos:prefLabel in
-        # (including default_language, whose winner already equals concept.label).
+        # One deterministic winner per raw published tag this concept carries a skos:prefLabel
+        # under (including any tag resolving to default_language).
         preferred_by_language: dict[str, list[str]] = {}
         for literal in self.skos_graph.graph.objects(node, SKOS.prefLabel):
             if isinstance(literal, rdflib.Literal) and literal.language:
                 preferred_by_language.setdefault(literal.language, []).append(str(literal))
         preferred_kept = {language: sorted(values)[0] for language, values in preferred_by_language.items()}
+
+        # The tag T007's winner rule chose for the default-language slot — the SAME LanguageMatcher
+        # computation over the SAME candidates preferred_label_in/import_concepts already read
+        # (T021's "one winner, one computation"), read again here rather than threaded through
+        # _import_concept_content's parameters.
+        default_language_candidates = [
+            (tag, value)
+            for tag, value in self.skos_graph.preferred_label_in(node)
+            if self.matcher.resolve(tag).configured_language == default_language
+        ]
+        default_language_winner_tag = (
+            self.matcher.resolve_winner(default_language, default_language_candidates)[0][0]
+            if default_language_candidates
+            else None
+        )
 
         for predicate, kind in LABEL_PREDICATES.items():
             for literal in self.skos_graph.graph.objects(node, predicate):
@@ -563,22 +611,44 @@ class ConceptImporter:
                         SetAsideReason.NO_LANGUAGE_TAG, subject=uri, predicate=self.skos_graph.skos_curie(predicate)
                     )
                     continue
-                language = literal.language
-                if kind == ConceptLabel.Kind.PREFERRED and language == default_language:
-                    if str(literal) != preferred_kept[language]:
-                        # FIX 4 (D38): the winner already lives as concept.label; a loser in this
-                        # language must still be named, not merely skipped.
+                published_tag = literal.language
+                resolved_language = self.matcher.resolve(published_tag).configured_language
+                if kind == ConceptLabel.Kind.PREFERRED and resolved_language == default_language:
+                    if (
+                        default_language_winner_tag is not None
+                        and published_tag.lower() != default_language_winner_tag.lower()
+                    ):
                         self.report.add_set_aside(
-                            SetAsideReason.SURPLUS_PREFERRED_LABEL, subject=uri, language=language
+                            SetAsideReason.VARIANT_NOT_KEPT,
+                            subject=uri,
+                            language=published_tag,
+                            kept_as=default_language,
+                        )
+                    elif str(literal) != preferred_kept[published_tag]:
+                        # FIX 4 (D38): the winner already lives as concept.label; a same-tag loser
+                        # in this language must still be named, not merely skipped.
+                        self.report.add_set_aside(
+                            SetAsideReason.SURPLUS_PREFERRED_LABEL, subject=uri, language=default_language
                         )
                     continue
-                if language not in configured:
-                    self.report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, subject=uri, language=language)
+                if resolved_language is None:
+                    self.report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, subject=uri, language=published_tag)
                     continue
-                if kind == ConceptLabel.Kind.PREFERRED and str(literal) != preferred_kept[language]:
-                    self.report.add_set_aside(SetAsideReason.SURPLUS_PREFERRED_LABEL, subject=uri, language=language)
+                if kind == ConceptLabel.Kind.PREFERRED and str(literal) != preferred_kept[published_tag]:
+                    self.report.add_set_aside(
+                        SetAsideReason.SURPLUS_PREFERRED_LABEL, subject=uri, language=resolved_language
+                    )
                     continue
-                concept.add_label(language=language, kind=kind, text=str(literal))
+                concept.add_label(language=resolved_language, kind=kind, text=str(literal))
+                if resolved_language.lower() != published_tag.lower():
+                    # T009, FR-006: a value stored under a resolved language other than its
+                    # published tag is a normalisation, never applied silently (decisions.md D8).
+                    self.report.add_normalized(
+                        NormalizedReason.LANGUAGE_SUBSTITUTION,
+                        subject=uri,
+                        language=published_tag,
+                        kept_as=resolved_language,
+                    )
 
     def _import_notes(self, node: rdflib.term.Node, concept: Concept, uri: str) -> None:
         """Store ``concept``'s documentary notes — the definition and the six SKOS note kinds
@@ -588,10 +658,12 @@ class ConceptImporter:
         :meth:`import_labels`. :data:`NOTE_PREDICATES` covers the native SKOS predicates only;
         ``dcterms:description`` is a separate, concept-level definition alias (T021, FR-009,
         D24/D21) — read only in a language with no ``skos:definition`` of its own, and reported as a
-        normalisation rather than applied silently. An unconfigured-language value is set aside the
-        same way :meth:`import_labels` filters one (T020, FR-014, D25).
+        normalisation rather than applied silently. A tag sharing no base language with any
+        configured one is set aside the same way :meth:`import_labels` filters one (T020, FR-014,
+        D25). Notes carry no per-language cardinality limit (decisions.md D4), so — unlike
+        :meth:`import_labels` — there is no contest here and no per-tag winner to compute: every
+        variant value resolves and is stored.
         """
-        configured = configured_language_codes()
         concept.concept_notes.all().delete()
         definition_languages: set[str] = set()
         for predicate, kind in NOTE_PREDICATES.items():
@@ -602,30 +674,52 @@ class ConceptImporter:
                         SetAsideReason.NO_LANGUAGE_TAG, subject=uri, predicate=self.skos_graph.skos_curie(predicate)
                     )
                     continue
-                language = literal.language
-                if kind == ConceptNote.Kind.DEFINITION:
-                    definition_languages.add(language)
-                if language not in configured:
-                    self.report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, subject=uri, language=language)
+                published_tag = literal.language
+                resolved_language = self.matcher.resolve(published_tag).configured_language
+                if resolved_language is None:
+                    self.report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, subject=uri, language=published_tag)
                     continue
-                concept.add_note(language=language, kind=kind, value=str(literal))
+                if kind == ConceptNote.Kind.DEFINITION:
+                    definition_languages.add(resolved_language)
+                concept.add_note(language=resolved_language, kind=kind, value=str(literal))
+                if resolved_language.lower() != published_tag.lower():
+                    # T009, FR-006 (decisions.md D8).
+                    self.report.add_normalized(
+                        NormalizedReason.LANGUAGE_SUBSTITUTION,
+                        subject=uri,
+                        language=published_tag,
+                        kept_as=resolved_language,
+                    )
 
         for literal in self.skos_graph.graph.objects(node, DCTERMS.description):
             if not isinstance(literal, rdflib.Literal) or not literal.language:
                 # FIX 15 (D48): the dcterms:description alias carries the identical defect.
                 self.report.add_set_aside(SetAsideReason.NO_LANGUAGE_TAG, subject=uri, predicate="dcterms:description")
                 continue
-            language = literal.language
-            if language in definition_languages:
+            published_tag = literal.language
+            resolved_language = self.matcher.resolve(published_tag).configured_language
+            if resolved_language is not None and resolved_language in definition_languages:
                 # The concept already carries its own skos:definition in this language.
                 continue
-            if language not in configured:
-                self.report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, subject=uri, language=language)
+            if resolved_language is None:
+                self.report.add_set_aside(SetAsideReason.UNCONFIGURED_LANGUAGE, subject=uri, language=published_tag)
                 continue
-            concept.add_note(language=language, kind=ConceptNote.Kind.DEFINITION, value=str(literal))
+            concept.add_note(language=resolved_language, kind=ConceptNote.Kind.DEFINITION, value=str(literal))
             self.report.add_normalized(
-                NormalizedReason.FOREIGN_DEFINITION, subject=uri, predicate="dcterms:description", language=language
+                NormalizedReason.FOREIGN_DEFINITION,
+                subject=uri,
+                predicate="dcterms:description",
+                language=resolved_language,
             )
+            if resolved_language.lower() != published_tag.lower():
+                # T009, FR-006: a second, independent axis of normalisation from the predicate
+                # substitution just reported — the language changed too (decisions.md D8).
+                self.report.add_normalized(
+                    NormalizedReason.LANGUAGE_SUBSTITUTION,
+                    subject=uri,
+                    language=published_tag,
+                    kept_as=resolved_language,
+                )
 
     def _import_unheld_values(self, node: rdflib.term.Node, uri: str) -> None:
         """Set aside and report the values on ``concept`` the models have no place for (T021, FR-014).
@@ -698,14 +792,16 @@ class ConceptImporter:
                 self.report.add_set_aside(SetAsideReason.VOCABULARY_MISMATCH, subject=uri, other=other)
                 continue
 
-            label = self.skos_graph.preferred_label_in(node, self.target_scheme.effective_default_language)
-            if label is None:
-                self.report.add_set_aside(
-                    SetAsideReason.NO_PREFERRED_LABEL,
-                    subject=uri,
-                    language=self.target_scheme.effective_default_language,
-                )
+            default_language = self.target_scheme.effective_default_language
+            candidates = [
+                (tag, value)
+                for tag, value in self.skos_graph.preferred_label_in(node)
+                if self.matcher.resolve(tag).configured_language == default_language
+            ]
+            if not candidates:
+                self.report.add_set_aside(SetAsideReason.NO_PREFERRED_LABEL, subject=uri, language=default_language)
                 continue
+            (winning_tag, label), _losers = self.matcher.resolve_winner(default_language, candidates)
 
             if not slugify(label, allow_unicode=True):
                 # FIX 5 (D39): a label made up only of characters slugify() strips derives an empty
@@ -748,6 +844,13 @@ class ConceptImporter:
             concept.label = label
             self.assign_unique_slug(concept, taken_slugs)
             concept.save()
+            if winning_tag.lower() != default_language.lower():
+                # T009, FR-006: concept.label is stored content too — a value that made it in
+                # under a different language than published is a normalisation, not a silent
+                # substitution (decisions.md D8).
+                self.report.add_normalized(
+                    NormalizedReason.LANGUAGE_SUBSTITUTION, subject=uri, language=winning_tag, kept_as=default_language
+                )
             concepts_by_uri[uri] = concept
             self._import_concept_content(node, concept, uri)
             if created:
@@ -1027,10 +1130,13 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
         }
     )
 
-    def __init__(self, skos_graph: SkosGraph, report: ImportReport, target_scheme: ConceptScheme) -> None:
+    def __init__(
+        self, skos_graph: SkosGraph, report: ImportReport, target_scheme: ConceptScheme, *, matcher: LanguageMatcher
+    ) -> None:
         self.skos_graph = skos_graph
         self.report = report
         self.target_scheme = target_scheme
+        self.matcher = matcher
 
     def import_collections(self, successful_concepts: dict[str, Concept]) -> None:
         """Create or update every ``skos:Collection``/``skos:OrderedCollection`` in the graph inside
@@ -1115,8 +1221,8 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
 
             row.scheme = self.target_scheme
             row.static_uri = uri
-            name = self.skos_graph.first_literal(
-                node, SKOS.prefLabel, language=self.target_scheme.effective_default_language
+            name = _localized_literal(
+                self.skos_graph, self.matcher, node, SKOS.prefLabel, self.target_scheme.effective_default_language
             )
             if not name:
                 name = self.skos_graph.first_literal(node, SKOS.prefLabel)
@@ -1275,7 +1381,9 @@ class SkosImporter:
                 )
                 successful_concepts = concept_importer.import_concepts(concept_nodes)
                 RelationImporter(skos_graph, self.report, target_scheme).import_relations(successful_concepts)
-                CollectionImporter(skos_graph, self.report, target_scheme).import_collections(successful_concepts)
+                CollectionImporter(skos_graph, self.report, target_scheme, matcher=matcher).import_collections(
+                    successful_concepts
+                )
                 concept_importer.report_absent_concepts()
 
             if self.report.fatal:
