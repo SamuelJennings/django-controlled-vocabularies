@@ -111,3 +111,25 @@ class TestImportSkosCommandRefusesABadPath:
         assert "is not readable" in str(unreadable_exc.value)
         assert "is not readable" not in str(missing_exc.value)
         assert ConceptScheme.objects.count() == 0
+
+
+class TestImportSkosCommandFormatOption:
+    """T005 — spec Acceptance Scenario 3: `--format` reaches `from_file` as the `serialization`
+    keyword, the same one the programmatic entry point already accepts. The command does not
+    reimplement format guessing (tasks.md T005) — a fixture built under `tmp_path` rather than
+    committed to `tests/fixtures/skos/`, per decisions.md D11's own precedent, so it is never
+    swept by `TestEverySkosPredicateIsReadOrReported`'s directory walk."""
+
+    def test_a_file_whose_extension_names_no_format_imports_when_format_is_given(self, db, tmp_path):
+        mystery = tmp_path / "vocab.mysteryext"
+        mystery.write_bytes((FIXTURES / "rocks.ttl").read_bytes())
+        call_command("import_skos", str(mystery), format="turtle", stdout=StringIO())
+        assert ConceptScheme.objects.filter(static_uri=ROCKS_URI).exists()
+
+    def test_the_same_file_without_format_is_refused_with_the_existing_message(self, db, tmp_path):
+        mystery = tmp_path / "vocab.mysteryext"
+        mystery.write_bytes((FIXTURES / "rocks.ttl").read_bytes())
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", str(mystery), stdout=StringIO())
+        assert "not in a serialization this application reads" in str(exc_info.value)
+        assert ConceptScheme.objects.count() == 0

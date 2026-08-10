@@ -164,6 +164,25 @@ on the two changed files (clean after one auto-format pass and the `cast` fix).
 Verified: `poetry run pytest tests/test_management/test_commands/test_import_skos.py -q` (8 passed),
 `ruff check` + `ruff format --check` (one auto-format pass) + `mypy` on the two changed files.
 
+- **T005** — `--format` reaching `from_file` as `serialization` needed no new production code: T003's
+  `handle()` already passes `options["format"]` straight through with no guessing of its own. Both
+  new tests passed on first run against the existing `import_skos.py` — not tautological (checked
+  before accepting it per `craft-tdd`): each `call_command` genuinely exercises the Command's own
+  `handle()`, and a fixture built with an extension `guess_format` cannot resolve (`vocab.mysteryext`,
+  real `rocks.ttl` bytes, `tmp_path`-only per decisions.md D11's own precedent — never committed
+  under `tests/fixtures/skos/`) either imports when `--format turtle` is given or is refused with
+  `from_file`'s existing "not in a serialization this application reads" message when it is not,
+  unchanged from #50.
+
+  Tests: the mystery-extension fixture imports with `--format turtle`, asserted on the stored
+  `ConceptScheme`; the same fixture without `--format` raises `CommandError` carrying `from_file`'s
+  own unsupported-serialization wording and leaves the database empty.
+
+Verified: `poetry run pytest tests/test_management/test_commands/test_import_skos.py -q` (10
+passed), `ruff check` + `ruff format --check` + `mypy` on the changed test file (no production file
+touched). Full-repo verify (pytest, ruff, mypy, deptry) still to run once, per protocol, immediately
+before the completion report.
+
 ## Gates
 
 - **Spec gate:** approved 2026-08-10 by SamuelJennings. No conditions.
