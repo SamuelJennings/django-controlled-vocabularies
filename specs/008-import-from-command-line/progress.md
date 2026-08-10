@@ -544,3 +544,34 @@ task's commit; `poetry run pytest -q` (962 passed = 952 baseline + 10 new) once,
 `poetry run pre-commit run --all-files` green after every commit; `makemigrations --check
 --dry-run` clean (no model changes); `poetry run mypy tests/test_management/test_rendering.py`
 clean (the pre-commit mypy hook does not reach `tests/`).
+
+## 2026-08-10 — US-6 implementation (T023-T025)
+
+Worked in `dcv-us6` on top of all five landed stories (baseline 975 passed).
+
+- **T023** — The i18n sweep (Article XII, FR-015). Read all three management-package files
+  (`commands/import_skos.py`, `rendering.py`, `sources.py`) in full: every printed and help
+  string already goes through `gettext_lazy`/`ngettext_lazy` with named placeholders — each
+  story wrapped as it wrote, so this sweep is genuinely a sweep for misses rather than a first
+  pass.
+
+  Rather than trust a manual read alone, added a static AST-based check
+  (`_ManagementI18nVisitor` in `tests/test_standards.py`) so a later addition that misses one is
+  caught by the suite, not by review: no string reaching a known output sink (`CommandError`,
+  `self.stdout`/`self.stderr.write`, `parser.add_argument(help=...)`, or `Command.help = ...`)
+  is a bare literal, and no string passed to a translation call carries a positional
+  `%`-placeholder rather than a named one. A runtime check was rejected — by the time a rendered
+  line reaches `ReportRenderer`'s output the message has already been %-formatted into a plain
+  string, so the placeholder shape can only be checked at the source.
+
+  `TestManagementI18nSweepVisitorCatchesAViolation` proves the checker is a real gate before the
+  sweep trusts it: six synthetic-snippet tests, each feeding the visitor a deliberately bad
+  literal/placeholder and asserting it is caught, plus one proving a properly translated,
+  named-placeholder sink is *not* flagged.
+
+  **Sweep result: none found.** No string was rewrapped; the check was written, run against the
+  three real files, and passed on the first run.
+
+  Verified: `poetry run pytest tests/test_standards.py -q` (55 passed, up from 45) at the commit;
+  `poetry run ruff check tests/test_standards.py` and `poetry run mypy tests/test_standards.py`
+  both clean.
