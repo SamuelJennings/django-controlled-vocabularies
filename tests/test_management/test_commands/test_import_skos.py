@@ -16,6 +16,7 @@ import os
 import socket
 from io import StringIO
 from pathlib import Path
+from unittest import mock
 
 import pytest
 from django.apps import apps
@@ -451,3 +452,22 @@ class TestImportSkosCommandSurfacesAnAmbiguousVocabularyRefusalUnchanged:
         assert "http://example.org/beta/" in message
         assert exc_info.value.returncode != 0
         assert ConceptScheme.objects.count() == 0
+
+
+class TestImportSkosCommandExitsZeroOnACompletedRun:
+    """T022, FR-012, decisions.md D5, spec US-5 Acceptance Scenario 4 — a run that stores the
+    vocabulary exits zero however much it set aside, because that is the bit a deployment
+    script reads. ``call_command`` bypasses ``Command.run_from_argv`` entirely (it calls
+    ``execute()`` directly), so it never exercises the one call site — Django's own, inside
+    ``except CommandError`` — that turns a refusal's ``returncode`` into ``sys.exit``. This
+    test goes through ``run_from_argv`` instead, the real command-line entry point, so the
+    assertion is on whether that call site fires, not merely on whether an exception was
+    raised."""
+
+    def test_a_run_that_sets_values_aside_still_exits_zero(self, db):
+        command = Command(stdout=StringIO())
+        with mock.patch("sys.exit") as mock_exit:
+            command.run_from_argv(["manage.py", "import_skos", str(FIXTURES / "unconfigured_language_values.ttl")])
+        mock_exit.assert_not_called()
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/quarry3/")
+        assert Concept.objects.filter(scheme=scheme, static_uri__endswith="/schist").exists()
