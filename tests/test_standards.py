@@ -667,17 +667,20 @@ class TestManagementI18nSweepVisitorCatchesAViolation:
         assert visitor.bare_literals == []
 
 
-@pytest.mark.parametrize("module", _MANAGEMENT_I18N_MODULES, ids=lambda m: m.__name__)
-def test_management_package_i18n_sweep(module):
+class TestManagementPackageI18nSweep:
     """T023 — the sweep itself. Every printed and help string in the management command
     package (``commands/import_skos.py``, ``rendering.py``, ``sources.py``) is translatable
     with only named placeholders. Earlier tasks wrapped as they wrote; this asserts the whole
     package holds, so a later addition that misses one is caught here rather than by review."""
-    source = Path(inspect.getfile(module)).read_text()
-    visitor = _visit_source(source)
-    assert visitor.positional_placeholders == [], (
-        f"{module.__name__} passes a positional placeholder to a translation call: {visitor.positional_placeholders}"
-    )
-    assert visitor.bare_literals == [], (
-        f"{module.__name__} passes a bare, untranslated literal to an output sink: {visitor.bare_literals}"
-    )
+
+    @pytest.mark.parametrize("module", _MANAGEMENT_I18N_MODULES, ids=lambda m: m.__name__)
+    def test_every_output_string_is_translatable_with_named_placeholders(self, module):
+        source = Path(inspect.getfile(module)).read_text()
+        visitor = _visit_source(source)
+        assert visitor.positional_placeholders == [], (
+            f"{module.__name__} passes a positional placeholder to a translation call: "
+            f"{visitor.positional_placeholders}"
+        )
+        assert visitor.bare_literals == [], (
+            f"{module.__name__} passes a bare, untranslated literal to an output sink: {visitor.bare_literals}"
+        )
