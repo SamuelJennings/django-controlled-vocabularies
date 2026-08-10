@@ -47,7 +47,7 @@ justification.
 | II — Simplicity | The command delegates and renders. No caching, no retry policy, no progress bar, no strictness flag. |
 | III — Anti-Abstraction | The renderer and the source resolver are classes because each has a subject, not because a second implementation is coming. Neither goes in `exchange/`, which would imply a reuse that does not exist. |
 | IV — Integration-First | The acceptance scenarios are the tests: `call_command` against real fixtures and a real HTTP stub, asserting on stored records and printed output. |
-| V — Security & data-safety | Fetched content is untrusted and reaches the existing safety scan unchanged. The scheme check is enforced on the URL actually opened, not only on what the operator typed, because redirect targets are chosen by the remote server (`research.md` R3). |
+| V — Security & data-safety | Fetched content is untrusted and reaches the existing safety scan unchanged. The fetcher is built from an opener carrying only the `http`/`https` handlers, so a redirect onto another protocol fails before a connection is opened rather than after the transfer (`research.md` R3). The copy is bounded by a byte ceiling, since the operator cannot see how much a remote server intends to send (FR-014). |
 | VI — Documentation | README documents the command, both source forms and the rehearsal. CHANGELOG records it. `CONTEXT.md` defines *rehearsal*. |
 | VII — Dependency discipline | No new dependency. `deptry` must stay green. |
 | XII — i18n | Every printed string and every help string is `gettext_lazy` with named placeholders. |
@@ -87,7 +87,7 @@ controlled_vocabularies/
 
 tests/
 ├── conftest.py                          # MODIFIED: http_stub fixture
-├── fixtures/skos/                       # MODIFIED: relative-URI fixture added
+├── fixtures/skos/                       # MODIFIED: relative-URI fixtures added, one per serialization
 └── test_management/                     # NEW
     ├── __init__.py
     ├── test_sources.py
@@ -113,6 +113,12 @@ The safety scan still runs on bytes read from the path, before any parse. The te
 still a real file on disk, so `from_file`'s `is_file()` check, its format guess and its scan are all
 reached exactly as they are today.
 
+The same keyword also settles what a refusal calls the source. Every `SkosImportError` raised in
+`from_file` names `str(path)`, and `SkosImporter.run` sets `source_label` from the same value, so a
+fetched document's refusals would otherwise name a temporary file that no longer exists by the time
+the operator reads the message. Both take `base_uri or file`, which is today's value whenever no
+base URI is given. That is what delivers FR-014's "naming the source" for a URL.
+
 **Test-first proof this is additive:** #50's and #51's suites run unmodified and stay green. A new
 test asserts a relative-URI document parsed with a base URI yields the publisher's identities, and
 the same document parsed without one yields the file's.
@@ -125,10 +131,14 @@ optional base URI. It has two paths and one refusal.
 - **A path** — the value does not begin `http://` or `https://` (case-insensitive), and its parsed
   scheme is at most one character. Returned as-is, no base URI. A single-character scheme is a
   Windows drive letter, per `research.md` R3.
-- **A URL** — fetched with `urllib.request.urlopen` under a timeout, written to a temporary file
-  whose suffix carries the resolved serialization, returned with the URL as base URI. The scheme of
-  the response's final URL is re-checked, so a redirect cannot move the request onto another
-  protocol.
+- **A URL** — fetched under a timeout through an opener built from the `http`/`https` handlers
+  alone, written to a temporary file, returned with the URL as base URI. Because that opener carries
+  no handler for any other protocol, a redirect onto one fails before a connection is opened —
+  Python's default opener would have followed an `ftp://` redirect and only then let a post-hoc
+  check reject the body. The copy stops at a byte ceiling, so an endless response fails instead of
+  filling the disk. The temporary file needs no serialization-carrying suffix: the serialization is
+  always resolved before the import and passed explicitly, so the extension guess is never
+  consulted.
 - **Anything else** — a parsed scheme longer than one character that is not `http`/`https` is
   refused as an unsupported source, naming the scheme.
 
@@ -181,16 +191,25 @@ aside.
 
 | Story | Delivers |
 |---|---|
-| Foundational | package skeleton, `__init__.py` files, the base-URI thread through the exchange layer |
-| US-1 (P1) | `Command` with a path source, delegation to `import_skos`, minimal output, missing-path failure |
-| US-2 (P1) | `SourceResolver` fetch path, scheme rules, serialization resolution, HTTP stub fixture, relative-URI fixture |
+| Foundational | package skeleton, `__init__.py` files, the base-URI thread through the exchange layer, `ReportRenderer` with its bucket counts |
+| US-1 (P1) | `Command` with a path source, delegation to `import_skos`, the rendered output, missing-path failure |
+| US-2 (P1) | `SourceResolver` fetch path, scheme rules, serialization resolution, HTTP stub fixture, relative-URI fixtures |
 | US-3 (P1) | the rehearsal flag, the rollback, the "nothing was kept" line |
-| US-4 (P2) | `ReportRenderer` in full — grouping, counts, the language account, verbosity |
+| US-4 (P2) | the renderer's account in full — grouping by reason, the language account, absent-from-source, verbosity |
 | US-5 (P2) | refusal handling, exit statuses, all-findings printing |
 | US-6 (P3) | i18n sweep, README, CHANGELOG, `CONTEXT.md` glossary, test-structure conformance |
 
-US-1 depends on Foundational. US-2, US-3, US-4 and US-5 each depend on US-1 and are independent of
-one another. US-6 depends on everything.
+US-1 depends on Foundational. US-6 depends on everything.
+
+`ReportRenderer` sits in Foundational rather than in US-4 because US-3's "nothing was kept" line is
+a flag on the renderer, and because a US-1 that printed its own minimal output would have to have
+that output — and the tests asserting it — replaced by US-4. The renderer exists before anything
+prints, US-1 wires it from its first line, and US-4 adds methods to it.
+
+US-2, US-3 and US-5 each depend on US-1 and are **sequenced, not parallel**: all three edit
+`handle()` in `commands/import_skos.py`, and two of them edit its argument parsing, so separate
+worktrees would collide in one function at convergence. Any order, one at a time, each rebasing on
+the last. US-4 touches only `rendering.py` and its own tests, so it runs alongside them.
 
 ## Complexity Tracking
 

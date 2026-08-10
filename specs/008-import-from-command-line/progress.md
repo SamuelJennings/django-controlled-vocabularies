@@ -50,6 +50,30 @@ Spec gate brief posted to #52 as a bot comment and sent to the maintainer.
 Approved by the maintainer in session, without changes to the spec or the story set. Recorded here
 at the moment of approval, ahead of the ledger, so a crash between the gate and S3 cannot lose it.
 
+## 2026-08-10 — S3R DESIGN REVIEW
+
+One reviewer, three lenses, one round. Verdict `request_changes`, risk medium, seven findings, all
+`verified`. Every one accepted and remedied in the artefacts before the plan notification; each was
+re-checked against the code it cites first.
+
+- **ARCH-001 (high) and SPEC-003** — `ReportRenderer` was US-4's, but US-3's rehearsal line is a
+  flag on it and US-1 printed its own output for US-4 to replace, which would have meant editing
+  another story's tests. T015 moved to Foundational, T003 renders through it from its first line,
+  T019 deleted.
+- **SPEC-002 (medium)** — US-2, US-3, US-4 and US-5 were declared independent while four of them
+  edited `handle()`. US-4 no longer touches the command; the other three are now sequenced.
+- **SPEC-001 (medium)** — verified in `skos.py:216-248` and `:1923`: every refusal names
+  `str(path)`, so a fetched document's failures would have named a dead temporary file. Two lines
+  added to T001, recorded in D10.
+- **SEC-001 (medium)** — the redirect check ran on the response, i.e. after an `ftp://` redirect had
+  already been connected and transferred. Replaced with an opener carrying no other handler.
+- **SEC-002 (low)** — `urlopen`'s timeout is per read, not per transfer, and nothing bounded the
+  fetch size. Byte ceiling added to T008.
+- **SPEC-004 (medium)** — FR-003 and SC-002 name no serialization but only Turtle was to be proved.
+  T001 now carries a relative-identifier fixture per serialization.
+- **ARCH-002 (low)** — the temporary file's serialization-carrying suffix was never consulted.
+  Dropped.
+
 ## Gates
 
 - **Spec gate:** approved 2026-08-10 by SamuelJennings. No conditions.

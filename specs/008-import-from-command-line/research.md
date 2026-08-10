@@ -67,8 +67,20 @@ An operator can already read any local file by passing its path, so this is not 
 what they can do. It matters for a different reason: with redirects followed automatically, the
 scheme of the *final* request is chosen by the remote server rather than by the operator. Python's
 own `HTTPRedirectHandler` restricts redirect targets to `http`, `https` and `ftp`, so `file://` is
-already closed, but `ftp://` is not. The fetch therefore validates the scheme of what it is about
-to open rather than only the scheme the operator typed.
+already closed, but `ftp://` is not.
+
+Checking the final URL on the response object does not close that: the response only exists once
+`urlopen` has followed the redirect and completed the transfer, so the FTP connection has already
+been made and the body already pulled. The fetch therefore uses an opener built from the
+`http`/`https` handlers alone — `build_opener(HTTPHandler, HTTPSHandler, HTTPRedirectHandler,
+HTTPErrorProcessor)` — which carries no handler for any other scheme and so raises before a
+connection is attempted. Removing a handler, rather than adding a check.
+
+**`urlopen`'s timeout is per socket operation, not per transfer.** It bounds each individual read,
+so a server that answers slowly but continuously never trips it, and nothing bounds the number of
+bytes written to the temporary file and then read again by the safety scan — whose own module
+docstring names document size as the denial-of-service route it exists for. The copy is therefore
+read in chunks against a byte ceiling and abandoned when it is passed.
 
 **A Windows drive letter parses as a URL scheme.** `urlsplit("C:/vocab/skos.ttl").scheme` is
 `"c"`. A rule of "has a scheme, therefore a URL" would send a Windows path down the network path.
@@ -84,9 +96,11 @@ what keeps `C:\` a path.
 → `json-ld`, and `None` for a name with no recognised extension. It knows nothing about media
 types.
 
-A URL frequently ends in a recognisable extension, and when it does the existing guess works if the
-temporary file is given the same suffix. When it does not, the response's `Content-Type` is the only
-other evidence, and after that the operator has to say.
+A URL frequently ends in a recognisable extension, so `guess_format` can be called on the URL's own
+path. When it cannot answer, the response's `Content-Type` is the only other evidence, and after
+that the operator has to say. The temporary file needs no matching suffix either way: a fetched
+source always reaches `import_skos` with the serialization stated explicitly, or is refused before
+it gets there, so `from_file`'s own guess is never consulted for one.
 
 **Taken into the plan:** resolution order for a fetched source is the explicit `--format` option,
 then the URL path's extension, then the response `Content-Type` mapped to the three supported

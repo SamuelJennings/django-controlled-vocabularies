@@ -182,6 +182,14 @@ This is the one place the feature touches the exchange layer, and the spec's "ad
 behaviour" line survives it: what a source *means* is unchanged, and what is added is the ability
 to tell the reader where a source came from when the reader cannot work it out for itself.
 
+The same keyword also decides what a refusal calls the source, which the design review caught. Every
+`SkosImportError` in `from_file` names `str(path)`, and `SkosImporter.run` builds `source_label` from
+the same value, so without this a fetched document's every refusal — not found, unsupported
+serialization, unparsable, ambiguous scheme, undetermined scheme — would name a temporary file that
+no longer exists by the time the operator reads the message. Both take `base_uri or file`, which is
+today's value whenever no base URI is given. FR-014 asks for a refusal that names the source, and
+this is where that is delivered rather than in the fetch.
+
 SC-002 was amended in the same pass. As gated it required a URL import and a disk import of
 identical bytes to produce identical records, which is precisely false for a relative-URI document
 and false in the direction where the URL form is the correct one. It now requires the publisher's

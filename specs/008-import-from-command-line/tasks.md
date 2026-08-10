@@ -9,6 +9,10 @@ a task that needs to edit one of them has got the change wrong.
 
 **Tasks have no issues** — this file and `feature-state.json` are the whole task record.
 
+**US-2, US-3 and US-5 are sequenced, not parallel.** Each edits `handle()` in
+`commands/import_skos.py` and two edit its argument parsing, so they run one at a time in any order,
+each rebasing on the last. US-4 touches only `rendering.py` and runs alongside them.
+
 ## Phase 0 — Foundational (blocks every story)
 
 - **T001** — The base URI thread through the exchange layer (FR-003, `research.md` R2,
@@ -22,15 +26,29 @@ a task that needs to edit one of them has got the change wrong.
   The parameter changes **only** the base URI. It does not affect the `is_file()` check, the format
   guess, the safety scan, or which bytes are scanned — all of which continue to work from the path.
 
-  Add `tests/fixtures/skos/relative-uris.ttl`: a scheme declared as `<>` and two concepts declared
-  relative (`<concept-a>`, `<concept-b>`), with `skos:prefLabel` in `en` and one `skos:broader`
-  between them, so relative resolution is exercised on a subject, an object, and the scheme.
+  The same keyword also decides what a refusal calls the source, in two places and two lines. In
+  `from_file`, the three `SkosImportError`s built at `skos.py:216-248` take `base_uri or path` for
+  their `file` param instead of `str(path)`. In `SkosImporter.run`, `source_label` (`skos.py:1923`)
+  becomes `str(self.base_uri or self.file)`, which is what `VOCABULARY_AMBIGUOUS` and
+  `VOCABULARY_UNDETERMINED` name. Without this a fetched document's every refusal names a temporary
+  file that no longer exists by the time the operator reads it, and no later task delivers FR-014's
+  "naming the source" for a URL. Both are no-ops when no base URI is given, so this stays additive.
 
-  Tests: the fixture parsed with `base_uri="https://example.org/vocab.ttl"` yields
-  `https://example.org/concept-a`; the same fixture parsed without one yields a `file://` identity
-  derived from the fixture's own path; a document whose identifiers are absolute is unaffected by
-  either. Then run the full existing suite and confirm it is green **without edits** — record that
-  in the task's report.
+  Add relative-identifier fixtures under `tests/fixtures/skos/`, **one per supported serialization**
+  — `relative-uris.ttl`, `relative-uris.rdf`, `relative-uris.jsonld`. Each declares its scheme as an
+  empty relative reference and two concepts declared relative (`concept-a`, `concept-b`), with
+  `skos:prefLabel` in `en` and one `skos:broader` between them, so relative resolution is exercised
+  on a subject, an object, and the scheme. FR-003 and SC-002 name no serialization, and rdflib's
+  three parsers take their base from `publicID` by different routes, so Turtle's result does not
+  carry over by inspection.
+
+  Tests, parameterised over all three fixtures: parsed with
+  `base_uri="https://example.org/vocab.ttl"` each yields `https://example.org/concept-a`; parsed
+  without one each yields a `file://` identity derived from the fixture's own path; a document whose
+  identifiers are absolute is unaffected by either. Add one test per message that a base URI is
+  given and the raised message names the URL rather than the path. If a serialization turns out not
+  to honour the base URI, stop and report it rather than working around it. Then run the full
+  existing suite and confirm it is green **without edits** — record that in the task's report.
 
 - **T002** — The package skeleton. `controlled_vocabularies/management/__init__.py`,
   `management/commands/__init__.py`, and the mirrored test packages
@@ -39,12 +57,29 @@ a task that needs to edit one of them has got the change wrong.
   assertion that `call_command("import_skos", ...)` resolves the command rather than raising
   `CommandError: Unknown command` once T003 lands.
 
+- **T015** — `ReportRenderer` in `management/rendering.py`. Takes an `ImportReport`, a verbosity and
+  the rehearsal flag, and yields translated lines. This task covers the bucket counts: created,
+  updated, set aside, normalized, absent from source.
+
+  **Empty sections still print, saying so** (FR-007 read with #51's own FR-008): an absent section
+  and a section reading zero are the same thing to a reader and different things to a caller.
+
+  It is Foundational rather than US-4's opening task because the command prints through it from its
+  first line. A US-1 that printed its own output would have that output — and the tests asserting
+  it — rewritten by US-4, which is the one thing this task file forbids. US-3's rehearsal line is a
+  flag on this class for the same reason.
+
+  Tests: a report with content renders each count; a report with nothing in it renders every
+  section as zero rather than omitting any. The renderer is exercised against a hand-built
+  `ImportReport`, so none of this needs an import to run.
+
 ## US-1 — A vendored file imports from a terminal (P1)
 
 - **T003** — `Command` in `management/commands/import_skos.py`. One positional `source` argument, a
-  `--format` option, and `handle()` calling `import_skos(path, serialization=...)`. Output at this
-  task is minimal: the counts of created and updated records, and whether anything was set aside.
-  Full rendering is US-4 and this task must not anticipate it.
+  `--format` option, and `handle()` calling `import_skos(path, serialization=...)`. Output goes
+  through T015's `ReportRenderer` from the first line — the command never prints a report itself, at
+  this task or any later one. What the renderer says grows in US-4; where it is called from does
+  not change again.
 
   `Command.help` and every argument's `help` are `gettext_lazy` from the first line written
   (Article XII) — retrofitting translation in US-6 is a sweep for misses, not the first pass.
@@ -91,19 +126,33 @@ a task that needs to edit one of them has got the change wrong.
   refused naming `ftp`, `HTTPS://host/v.ttl` classified as a URL, and a bare relative filename
   classified as a path.
 
-- **T008** — The fetch. `urllib.request.urlopen` under an explicit timeout, the body written to a
-  temporary file whose suffix carries the resolved serialization, returning that path together with
-  the URL as base URI. The temporary file is removed when the command finishes, on both the success
-  and the failure path.
+- **T008** — The fetch. An explicit timeout, the body written to a plain temporary file, returning
+  that path together with the URL as base URI. The temporary file is removed when the command
+  finishes, on both the success and the failure path. It needs no serialization-carrying suffix:
+  T009 either resolves the serialization or refuses the run, and the resolved value is passed to
+  `import_skos` explicitly, so `from_file`'s extension guess (`skos.py:223`) is never consulted for
+  a fetched document.
 
-  **The scheme of the response's final URL is re-checked against the same `http`/`https` rule
-  before the body is used.** Redirect targets are chosen by the remote server rather than by the
-  operator, and `urlopen` will open schemes the operator never typed (`research.md` R3). This is
-  the one check in the feature that is not about operator error.
+  **The fetcher is an opener carrying only the `http`/`https` handlers** —
+  `urllib.request.build_opener(HTTPHandler, HTTPSHandler, HTTPRedirectHandler, HTTPErrorProcessor)`
+  — rather than `urlopen`'s default opener. Redirect targets are chosen by the remote server, and
+  `HTTPRedirectHandler` permits `ftp` as well as `http` and `https` (`research.md` R3), so the
+  default opener would open an FTP connection from the deployment host and only then let a check of
+  the final URL reject the body. An opener with no handler for the scheme fails before the
+  connection is attempted. This is the one check in the feature that is not about operator error,
+  and it is a handler removed rather than a check added.
+
+  **The copy stops at a byte ceiling.** The response is read in chunks and abandoned with a
+  `CommandError` naming the URL once the ceiling is passed. `urlopen`'s timeout bounds each socket
+  read, not the transfer, so a server answering slowly but continuously never trips it, and nothing
+  else in the feature bounds the size of what is written and then read again by the safety scan
+  (FR-014). One constant and one branch — no configuration surface. The operator cannot see how
+  much a remote server intends to send, so this is not a guard against operator error.
 
   Tests: a served fixture is fetched and imported; the temporary file does not survive the call;
   a redirect to another `http` URL is followed and imported; a redirect to a non-`http(s)` scheme
-  is refused.
+  is refused; a response exceeding the ceiling is abandoned with a message naming the URL and
+  writes nothing.
 
 - **T009** — Serialization for a fetched document, resolved in order (`research.md` R4): explicit
   `--format`; then the URL path's extension via `rdflib.util.guess_format`; then the response
@@ -118,6 +167,9 @@ a task that needs to edit one of them has got the change wrong.
   exits non-zero, and writes nothing. An HTML body reaches the parser and fails as unreadable
   content, which is what the operator needs to hear, rather than parsing to an empty graph and
   reporting an empty vocabulary.
+
+  The messages name the URL because T001 made `base_uri or file` the label every refusal carries;
+  this task asserts that end to end rather than implementing it.
 
   Tests: one per failure mode, each asserting the exit status, the message naming the URL, and an
   unchanged database. The timeout case uses the non-responding socket fixture and a short timeout,
@@ -160,15 +212,9 @@ a task that needs to edit one of them has got the change wrong.
 
 ## US-4 — The account of what was set aside is readable at a terminal (P2)
 
-- **T015** — `ReportRenderer` in `management/rendering.py`. Takes an `ImportReport`, a verbosity and
-  the rehearsal flag, and yields translated lines. This task covers the bucket counts: created,
-  updated, set aside, normalized, absent from source.
-
-  **Empty sections still print, saying so** (FR-007 read with #51's own FR-008): an absent section
-  and a section reading zero are the same thing to a reader and different things to a caller.
-
-  Tests: a report with content renders each count; a report with nothing in it renders every
-  section as zero rather than omitting any.
+`ReportRenderer` already exists and is already wired (T015, Foundational). Every task here adds a
+method to it. Nothing in this story touches `commands/import_skos.py`, which is why it is the one
+story that runs alongside the others rather than in sequence with them.
 
 - **T016** — Set-asides grouped by reason with a count each, and the per-language account, both read
   from `report.set_aside_by_reason()` and `report.language_account()`. **No rendered message is
@@ -192,10 +238,9 @@ a task that needs to edit one of them has got the change wrong.
   Tests: an import setting aside several hundred values prints no per-value line at the default and
   one per value at verbosity 2; the count in the summary matches the number of detail lines.
 
-- **T019** — Wire `ReportRenderer` into `Command`, replacing T003's minimal output.
-
-  Tests: the acceptance scenarios of US-1 still pass against the full rendering, so the story that
-  came first is not broken by the story that finishes it.
+*(T019 was the task that wired the renderer into `Command` and replaced US-1's own output. With
+T015 in Foundational there is nothing to replace, so it is deleted rather than renumbered. Task ids
+are never reused.)*
 
 ## US-5 — A refused run is unmistakable (P2)
 

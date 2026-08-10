@@ -3,7 +3,7 @@
  "feature": "008-import-from-command-line",
  "branch": "008-import-from-command-line",
  "repo": "SamuelJennings/django-controlled-vocabularies",
- "state": "PLAN",
+ "state": "DESIGN_REVIEW",
  "state_history": [
   {
    "state": "INTAKE",
@@ -29,6 +29,16 @@
    "state": "PLAN",
    "at": "2026-08-10T11:00:00Z",
    "note": "plan.md, research.md R1-R8, tasks.md T001-T025; research R2 forced an amendment to FR-003/SC-002 (base URI for a fetched document)"
+  },
+  {
+   "state": "DESIGN_REVIEW",
+   "at": "2026-08-10T11:20:00Z",
+   "note": "one reviewer, three lenses, dispatched on opus; craft-skill gate green"
+  },
+  {
+   "state": "DESIGN_REVIEW",
+   "at": "2026-08-10T11:55:00Z",
+   "note": "verdict request_changes, 7 findings all verified, all accepted and remedied in plan/tasks/research/decisions; T015 moved to Foundational, T019 deleted, US-2/3/5 sequenced"
   }
  ],
  "gates": {
@@ -68,6 +78,11 @@
     },
     {
      "id": "T002",
+     "status": "todo",
+     "attempts": 0
+    },
+    {
+     "id": "T015",
      "status": "todo",
      "attempts": 0
     }
@@ -172,11 +187,6 @@
    "replans": 0,
    "tasks": [
     {
-     "id": "T015",
-     "status": "todo",
-     "attempts": 0
-    },
-    {
      "id": "T016",
      "status": "todo",
      "attempts": 0
@@ -188,11 +198,6 @@
     },
     {
      "id": "T018",
-     "status": "todo",
-     "attempts": 0
-    },
-    {
-     "id": "T019",
      "status": "todo",
      "attempts": 0
     }
@@ -260,7 +265,7 @@
   },
   "design_review_cycles": {
    "max": 1,
-   "used": 0
+   "used": 1
   },
   "tokens": {
    "max": 4000000,
