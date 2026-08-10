@@ -1,12 +1,12 @@
 """``controlled_vocabularies.management.rendering`` — an ``ImportReport`` as
-translated lines for a terminal (T015, T016, T017, FR-006, FR-007, FR-008,
-plan.md "Rendering").
+translated lines for a terminal (T015, T016, T017, T018, FR-006, FR-007,
+FR-008, plan.md "Rendering").
 
 The bucket counts (created, updated, set aside, normalized, absent from
 source), the set-aside account (grouped by reason with a count each, and the
-per-language account), and records absent from the source named in their own
-section. Per-entry detail at raised verbosity is US-4's own later task, added
-to this same class next.
+per-language account), records absent from the source named in their own
+section, and per-entry set-aside detail at raised verbosity, carried by
+Django's own ``--verbosity`` rather than a new flag (decisions.md D6).
 
 Exercised mostly against a hand-built :class:`ImportReport` (tasks.md T015);
 ``TestReportRendererAgainstARealRun`` and ``TestReportRendererAbsentFromSource``
@@ -198,3 +198,41 @@ class TestReportRendererAbsentFromSource:
         lines = [str(line) for line in ReportRenderer(report).render()]
         assert any("http://example.org/rocks/quartz" in line for line in lines)
         assert any("1" in line and "absent from the source" in line for line in lines)
+
+
+class TestReportRendererVerbosity:
+    """T018, FR-007, `decisions.md` D6 — set-aside entries print individually only at raised
+    verbosity, carried by Django's own ``--verbosity`` rather than a new flag."""
+
+    def _report_with_several_hundred_set_asides(self):
+        return ImportReport(
+            set_aside=[
+                SetAsideEntry(
+                    reason=SetAsideReason.UNCONFIGURED_LANGUAGE,
+                    subject=f"http://example.org/item-{index}",
+                    params={"language": "es"},
+                )
+                for index in range(300)
+            ]
+        )
+
+    def test_default_verbosity_prints_no_per_value_line(self):
+        report = self._report_with_several_hundred_set_asides()
+        lines = [str(line) for line in ReportRenderer(report).render()]
+        assert not any("item-0" in line for line in lines)
+
+    def test_raised_verbosity_prints_one_line_per_value_matching_the_summary_count(self):
+        report = self._report_with_several_hundred_set_asides()
+        lines = [str(line) for line in ReportRenderer(report, verbosity=2).render()]
+        expected_details = {entry.render() for entry in report.set_aside}
+        detail_lines = [line for line in lines if line in expected_details]
+        assert len(detail_lines) == len(report.set_aside) == 300
+
+    def test_a_detail_line_is_the_entrys_own_render(self):
+        entry = SetAsideEntry(
+            reason=SetAsideReason.NOTATION,
+            subject="http://example.org/only",
+        )
+        report = ImportReport(set_aside=[entry])
+        lines = [str(line) for line in ReportRenderer(report, verbosity=2).render()]
+        assert entry.render() in lines
