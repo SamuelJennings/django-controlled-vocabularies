@@ -1,17 +1,21 @@
 """``controlled_vocabularies.management.rendering`` — an ``ImportReport`` as
-translated lines for a terminal (T015, T016, FR-006, FR-007, plan.md "Rendering").
+translated lines for a terminal (T015, T016, T017, FR-006, FR-007, FR-008,
+plan.md "Rendering").
 
 The bucket counts (created, updated, set aside, normalized, absent from
-source), plus the set-aside account: grouped by reason with a count each,
-and the per-language account. Records absent from the source named in their
-own section and per-entry detail at raised verbosity are US-4's own later
-tasks, added to this same class next.
+source), the set-aside account (grouped by reason with a count each, and the
+per-language account), and records absent from the source named in their own
+section. Per-entry detail at raised verbosity is US-4's own later task, added
+to this same class next.
 
 Exercised mostly against a hand-built :class:`ImportReport` (tasks.md T015);
-``TestReportRendererAgainstARealRun`` exercises the same grouping against a
-report a real ``import_skos`` run produces, so the grouping is proven without
-needing a full import for every scenario (tasks.md T016).
+``TestReportRendererAgainstARealRun`` and ``TestReportRendererAbsentFromSource``
+exercise the same rendering against a report a real ``import_skos`` run
+produces, so it is proven without needing a full import for every scenario
+(tasks.md T016/T017).
 """
+
+from pathlib import Path
 
 from controlled_vocabularies.exchange.report import (
     ImportReport,
@@ -22,6 +26,8 @@ from controlled_vocabularies.exchange.report import (
 )
 from controlled_vocabularies.exchange.skos import import_skos
 from controlled_vocabularies.management.rendering import ReportRenderer
+
+FIXTURES = Path(__file__).parent.parent / "fixtures" / "skos"
 
 
 class TestReportRendererBucketCounts:
@@ -176,3 +182,19 @@ class TestReportRendererAgainstARealRun:
         assert any("3" in line and str(SetAsideReason.UNCONFIGURED_LANGUAGE.label) in line for line in lines)
         assert any("2" in line and "es" in line for line in lines)
         assert any("1" in line and "ja" in line for line in lines)
+
+
+class TestReportRendererAbsentFromSource:
+    """T017, FR-008, `decisions.md` D7 — records absent from the source render as their own
+    section, visibly separate from set-asides and not counted among them."""
+
+    def test_a_reimport_names_the_dropped_concept_as_absent_and_leaves_set_aside_alone(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        report = import_skos(FIXTURES / "rocks_updated.ttl")
+
+        assert "http://example.org/rocks/quartz" in report.absent_from_source
+        assert report.set_aside == []
+
+        lines = [str(line) for line in ReportRenderer(report).render()]
+        assert any("http://example.org/rocks/quartz" in line for line in lines)
+        assert any("1" in line and "absent from the source" in line for line in lines)
