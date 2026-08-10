@@ -384,3 +384,30 @@ reason to ship a value that is wrong in production.
 signal that this should become configurable rather than a larger constant.
 
 **ADR:** no — an internal constant, recorded here.
+
+## D17 — The absent-from-source detail section is not gated by verbosity
+
+**Stage:** S4 implementation, US-4 (T017/T018) · **Status:** accepted
+
+FR-007 restricts verbosity to one specific thing: "Individual entries [of the set-aside account]
+MUST be printed only at raised verbosity, and MUST NOT be printed by default." FR-008, which
+governs `absent_from_source`, states only that it must be reported separately from set-asides; it
+says nothing about volume or verbosity. `plan.md` "Rendering" lists "the records absent from the
+source" as its own pipeline stage, distinct from the sentence naming the verbosity-gated set-aside
+detail.
+
+The distinction FR-007 draws is about volume: a large external vocabulary can set aside several
+hundred *incoming* values, which is what raised verbosity exists to let an operator opt into.
+`absent_from_source` names *existing* records the run left untouched — ordinarily few, since it
+requires records already in the database that a re-import's file stopped mentioning — and D7's own
+point is that this bucket needs to be visible precisely so an operator does not mistake "nothing
+changed here" for "something is wrong". Hiding it behind a flag would work against that.
+
+So `_render_absent_from_source_detail()` is unconditional: every URI in `absent_from_source` is
+named every time the report renders one, regardless of `verbosity`.
+
+**Revisit if:** a re-import of a very large vocabulary against a site that already holds many more
+records than the file mentions produces an absent-from-source section long enough to bury the rest
+of the report — the same problem FR-007 solved for set-asides, arriving late for this bucket.
+
+**ADR:** no — a rendering-only interpretation of FR-007/FR-008, recorded here.

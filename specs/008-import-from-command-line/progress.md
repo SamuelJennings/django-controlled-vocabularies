@@ -427,3 +427,53 @@ ruff, mypy, deptry) still to run once, per protocol, immediately before the comp
 - Implementer's typing note reviewed: `Command.help = cast(str, _(...))` is a django-stubs gap, not a
   design choice — the runtime value is still the lazy proxy, and the test asserts that directly.
   No decision recorded, correctly.
+
+## 2026-08-10 — US-4 implementation (T016-T018)
+
+Worked in `dcv-us4` alongside US-5's parallel worktree, touching only `rendering.py` and
+`test_rendering.py` throughout — `commands/import_skos.py`, `sources.py` and `exchange/` were
+never opened for edit.
+
+- **T016** — `ReportRenderer` gains `_render_set_aside_by_reason()` and `_render_language_account()`,
+  read from `report.set_aside_by_reason()` and `report.language_account()` (FR-007,
+  `decisions.md` D6) — each a plain iteration over the report's own accessor, so an empty grouping
+  yields nothing rather than a conditional print, and the existing "empty report renders exactly 5
+  lines" test (T015's own) stays true unmodified.
+
+  Tests: `TestReportRendererSetAsideByReason` and `TestReportRendererLanguageAccount` against a
+  hand-built `ImportReport` (several reasons, several unconfigured languages);
+  `TestReportRendererAgainstARealRun` against a real `import_skos()` run over an inline fixture
+  carrying a `skos:notation`, an `skos:exactMatch` mapping and two unconfigured-language
+  `altLabel`s, proving the grouping without needing a full import for every scenario (the task's
+  own acceptance wording).
+
+- **T017** — `ReportRenderer` gains `_render_absent_from_source_detail()`, naming each
+  absent-from-source URI in its own section, after the language account (FR-008,
+  `decisions.md` D7). The existing bucket-count line for `absent_from_source` is unchanged; this
+  is an additional, more specific section, not a replacement.
+
+  Tests: `TestReportRendererAbsentFromSource` re-imports `rocks.ttl` then `rocks_updated.ttl`
+  (an existing fixture pair already used by `test_skos.py` for the identical scenario — quartz
+  dropped from the file) and asserts quartz is named in the rendered output while `set_aside`
+  stays empty.
+
+- **T018** — `ReportRenderer.__init__` gains `verbosity: int = 1` (T015's own plan.md wording —
+  "takes an ImportReport, a verbosity and the rehearsal flag" — deferred to this task rather than
+  Foundational). `_render_set_aside_detail()` yields each set-aside entry's own `render()`, called
+  from `render()` only when `verbosity >= 2`. `commands/import_skos.py` is not touched, so nothing
+  in this worktree threads `options["verbosity"]` through to the renderer yet — out of this
+  story's scope per the brief, and not the same file US-5 is editing in parallel.
+
+  Tests: `TestReportRendererVerbosity` — a report with 300 set-aside entries prints no per-value
+  line at the default verbosity, prints exactly 300 (each equal to `entry.render()`) at
+  verbosity 2, and a one-entry report proves a detail line is the entry's own `render()` verbatim.
+
+`decisions.md` D17 records the one judgment call not settled by the brief: whether the
+absent-from-source detail section is itself gated by verbosity. It is not — FR-007's verbosity
+restriction names only set-aside entries.
+
+Verified: `poetry run pytest tests/test_management/test_rendering.py -q` (14 passed) at each
+task's commit; `poetry run pytest -q` (962 passed = 952 baseline + 10 new) once, at the end;
+`poetry run pre-commit run --all-files` green after every commit; `makemigrations --check
+--dry-run` clean (no model changes); `poetry run mypy tests/test_management/test_rendering.py`
+clean (the pre-commit mypy hook does not reach `tests/`).
