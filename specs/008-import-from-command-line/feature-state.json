@@ -3,7 +3,7 @@
  "feature": "008-import-from-command-line",
  "branch": "008-import-from-command-line",
  "repo": "SamuelJennings/django-controlled-vocabularies",
- "state": "DESIGN_REVIEW",
+ "state": "IMPLEMENT",
  "state_history": [
   {
    "state": "INTAKE",
@@ -39,6 +39,16 @@
    "state": "DESIGN_REVIEW",
    "at": "2026-08-10T11:55:00Z",
    "note": "verdict request_changes, 7 findings all verified, all accepted and remedied in plan/tasks/research/decisions; T015 moved to Foundational, T019 deleted, US-2/3/5 sequenced"
+  },
+  {
+   "state": "IMPLEMENT",
+   "at": "2026-08-10T12:30:00Z",
+   "note": "plan veto window closed with an explicit approval from Sam; US0 foundational phase next"
+  },
+  {
+   "state": "IMPLEMENT",
+   "at": "2026-08-10T12:40:00Z",
+   "note": "US0 foundational (T001,T002,T015) dispatched on sonnet; check-skills green"
   }
  ],
  "gates": {
@@ -54,8 +64,8 @@
    ]
   },
   "plan": {
-   "approved_by": "notified",
-   "at": "2026-08-10T12:05:00Z"
+   "approved_by": "SamuelJennings",
+   "at": "2026-08-10T12:30:00Z"
   },
   "merge": {
    "approved_by": null,
@@ -67,8 +77,8 @@
    "id": "US0",
    "priority": "P1",
    "issue": null,
-   "worktree": null,
-   "status": "todo",
+   "worktree": "/home/sam/projects/samueljennings/dcv-us0",
+   "status": "in_progress",
    "replans": 0,
    "tasks": [
     {
