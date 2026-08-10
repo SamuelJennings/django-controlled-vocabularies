@@ -332,3 +332,21 @@ class TestImportSkosCommandRehearsalLine:
         live_out = StringIO()
         call_command("import_skos", str(FIXTURES / "rocks.ttl"), stdout=live_out)
         assert "nothing was kept" not in live_out.getvalue()
+
+
+class TestImportSkosCommandRefusalPrintsEveryFatalFinding:
+    """T020, FR-011, spec US-5 Acceptance Scenario 3 — where the importer collects more than
+    one fatal finding, the command prints all of them, not only the first; the exit status
+    is non-zero; the database is unchanged. ``multiple_fatal_problems.ttl`` already carries
+    two distinct fatal findings at the exchange layer (test_exchange/test_skos.py
+    ``TestFatalFindingsAndAtomicity``) — surfaced here unchanged, not re-detected."""
+
+    def test_every_fatal_finding_prints_not_just_the_first(self, db):
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", str(FIXTURES / "multiple_fatal_problems.ttl"), stdout=StringIO())
+        message = str(exc_info.value)
+        assert "'Nameless' has no identifier that survives re-serialization" in message
+        assert "'ftp://mirror.example.org/mixed/refused' is not an identifier the application accepts" in message
+        assert exc_info.value.returncode != 0
+        assert ConceptScheme.objects.count() == 0
+        assert Concept.objects.count() == 0
