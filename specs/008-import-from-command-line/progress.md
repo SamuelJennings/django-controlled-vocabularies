@@ -186,3 +186,19 @@ before the completion report.
 ## Gates
 
 - **Spec gate:** approved 2026-08-10 by SamuelJennings. No conditions.
+
+### US-1 verification (Forge, independent of the implementer's own run)
+
+- `forge check-receipts --brief dcv-us1-FS008-TASK_BRIEF.json` — green, both receipts verbatim.
+- `forge verify --base 7ca2621` — conformance, lint, typecheck, test, build all passed. Full suite
+  918 passed (910 at the US-1 base, 8 new).
+- `forge tamper-check --base 7ca2621` — two flags, both triaged and approved in decisions.md D14:
+  the test file existed at base because T002 created it (117 insertions, zero deletions, skeleton
+  tests untouched), and the one "weakening pattern" is a uid-0 guard on the permission test, which
+  does not fire where the suite runs (`pytest -rs`: 10 passed, 0 skipped).
+- Deviation D13 accepted: the unreadable-path check belongs in `Command.handle()`. Relying on
+  `from_file`'s generic parse-failure branch to distinguish an unreadable file would depend on which
+  stage the OS happened to raise in.
+- Implementer's typing note reviewed: `Command.help = cast(str, _(...))` is a django-stubs gap, not a
+  design choice — the runtime value is still the lazy proxy, and the test asserts that directly.
+  No decision recorded, correctly.

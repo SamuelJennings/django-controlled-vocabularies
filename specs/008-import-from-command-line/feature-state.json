@@ -1,342 +1,382 @@
 {
- "$schema": "https://openclaw.local/schemas/feature-state.schema.json",
- "feature": "008-import-from-command-line",
- "branch": "008-import-from-command-line",
- "repo": "SamuelJennings/django-controlled-vocabularies",
- "state": "IMPLEMENT",
- "state_history": [
-  {
-   "state": "INTAKE",
-   "at": "2026-08-10T09:00:00Z",
-   "note": "issue #52 grilled; intake widened source to a URL and dropped the target-vocabulary argument"
-  },
-  {
-   "state": "SPECIFY",
-   "at": "2026-08-10T09:40:00Z",
-   "note": "spec.md, 6 stories, FR-001..016, SC-001..006; clarify scan resolved 5 further ambiguities"
-  },
-  {
-   "state": "SETUP",
-   "at": "2026-08-10T10:10:00Z",
-   "note": "epic #52 promoted, stories #78-#83, draft PR #84"
-  },
-  {
-   "state": "GATE_SPEC",
-   "at": "2026-08-10T10:25:00Z",
-   "note": "approved by Sam in session, no conditions"
-  },
-  {
-   "state": "PLAN",
-   "at": "2026-08-10T11:00:00Z",
-   "note": "plan.md, research.md R1-R8, tasks.md T001-T025; research R2 forced an amendment to FR-003/SC-002 (base URI for a fetched document)"
-  },
-  {
-   "state": "DESIGN_REVIEW",
-   "at": "2026-08-10T11:20:00Z",
-   "note": "one reviewer, three lenses, dispatched on opus; craft-skill gate green"
-  },
-  {
-   "state": "DESIGN_REVIEW",
-   "at": "2026-08-10T11:55:00Z",
-   "note": "verdict request_changes, 7 findings all verified, all accepted and remedied in plan/tasks/research/decisions; T015 moved to Foundational, T019 deleted, US-2/3/5 sequenced"
-  },
-  {
-   "state": "IMPLEMENT",
-   "at": "2026-08-10T12:30:00Z",
-   "note": "plan veto window closed with an explicit approval from Sam; US0 foundational phase next"
-  },
-  {
-   "state": "IMPLEMENT",
-   "at": "2026-08-10T12:40:00Z",
-   "note": "US0 foundational (T001,T002,T015) dispatched on sonnet; check-skills green"
-  },
-  {
-   "state": "IMPLEMENT",
-   "at": "2026-08-10T20:15:00Z",
-   "note": "US0 done and merged to the feature branch; receipts green, verify green (910 passed, lint/typecheck/build green), tamper flag triaged as additive-only (D12); one transient conformance finding closes with T003"
-  }
- ],
- "gates": {
-  "spec": {
-   "approved_by": "SamuelJennings",
-   "at": "2026-08-10T10:25:00Z",
-   "self_resolved": [
-    "path vs URL classified by the value, not a flag",
-    "rehearsal is the real import inside an abandoned transaction",
-    "set-asides exit zero, only a refusal exits non-zero",
-    "counts by default, entries at raised --verbosity",
-    "post-gate amendment: a fetched document's relative identifiers resolve against its own address (FR-003, SC-002)"
-   ]
-  },
-  "plan": {
-   "approved_by": "SamuelJennings",
-   "at": "2026-08-10T12:30:00Z"
-  },
-  "merge": {
-   "approved_by": null,
-   "at": null
-  }
- },
- "stories": [
-  {
-   "id": "US0",
-   "priority": "P1",
-   "issue": null,
-   "worktree": "/home/sam/projects/samueljennings/dcv-us0",
-   "status": "done",
-   "replans": 0,
-   "tasks": [
+  "$schema": "https://openclaw.local/schemas/feature-state.schema.json",
+  "feature": "008-import-from-command-line",
+  "branch": "008-import-from-command-line",
+  "repo": "SamuelJennings/django-controlled-vocabularies",
+  "state": "IMPLEMENT",
+  "state_history": [
     {
-     "id": "T001",
-     "status": "done",
-     "attempts": 1,
-     "evidence": {
-      "tests": [
-       "tests/test_exchange/test_skos.py::TestBaseUriThread::test_a_given_base_uri_resolves_relative_identifiers_against_it",
-       "tests/test_exchange/test_skos.py::TestBaseUriThread::test_no_base_uri_resolves_relative_identifiers_against_the_file",
-       "tests/test_exchange/test_skos.py::TestBaseUriThread::test_absolute_identifiers_are_unaffected_by_a_given_base_uri",
-       "tests/test_exchange/test_skos.py::TestBaseUriThread::test_missing_file_refusal_names_the_base_uri_when_given",
-       "tests/test_exchange/test_skos.py::TestBaseUriThread::test_unsupported_serialization_refusal_names_the_base_uri_when_given",
-       "tests/test_exchange/test_skos.py::TestBaseUriThread::test_unparseable_file_refusal_names_the_base_uri_when_given",
-       "tests/test_exchange/test_skos.py::TestImportSkosVocabulary::test_a_refusal_names_the_base_uri_when_given"
-      ],
-      "commands": [
-       "poetry run pytest tests/test_exchange/test_skos.py::TestBaseUriThread tests/test_exchange/test_skos.py::TestImportSkosVocabulary::test_a_refusal_names_the_base_uri_when_given -q  # RED: 8 failed, TypeError: unexpected keyword argument 'base_uri'",
-       "poetry run pytest tests/test_exchange/test_skos.py -q  # GREEN: 416 passed",
-       "poetry run pytest -q  # 906 passed (895 baseline + 11 new, zero pre-existing tests edited)",
-       "poetry run ruff check controlled_vocabularies/exchange/skos.py tests/test_exchange/test_skos.py",
-       "poetry run ruff format controlled_vocabularies/exchange/skos.py tests/test_exchange/test_skos.py",
-       "poetry run mypy controlled_vocabularies/exchange/skos.py"
+      "state": "INTAKE",
+      "at": "2026-08-10T09:00:00Z",
+      "note": "issue #52 grilled; intake widened source to a URL and dropped the target-vocabulary argument"
+    },
+    {
+      "state": "SPECIFY",
+      "at": "2026-08-10T09:40:00Z",
+      "note": "spec.md, 6 stories, FR-001..016, SC-001..006; clarify scan resolved 5 further ambiguities"
+    },
+    {
+      "state": "SETUP",
+      "at": "2026-08-10T10:10:00Z",
+      "note": "epic #52 promoted, stories #78-#83, draft PR #84"
+    },
+    {
+      "state": "GATE_SPEC",
+      "at": "2026-08-10T10:25:00Z",
+      "note": "approved by Sam in session, no conditions"
+    },
+    {
+      "state": "PLAN",
+      "at": "2026-08-10T11:00:00Z",
+      "note": "plan.md, research.md R1-R8, tasks.md T001-T025; research R2 forced an amendment to FR-003/SC-002 (base URI for a fetched document)"
+    },
+    {
+      "state": "DESIGN_REVIEW",
+      "at": "2026-08-10T11:20:00Z",
+      "note": "one reviewer, three lenses, dispatched on opus; craft-skill gate green"
+    },
+    {
+      "state": "DESIGN_REVIEW",
+      "at": "2026-08-10T11:55:00Z",
+      "note": "verdict request_changes, 7 findings all verified, all accepted and remedied in plan/tasks/research/decisions; T015 moved to Foundational, T019 deleted, US-2/3/5 sequenced"
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-10T12:30:00Z",
+      "note": "plan veto window closed with an explicit approval from Sam; US0 foundational phase next"
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-10T12:40:00Z",
+      "note": "US0 foundational (T001,T002,T015) dispatched on sonnet; check-skills green"
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-10T20:15:00Z",
+      "note": "US0 done and merged to the feature branch; receipts green, verify green (910 passed, lint/typecheck/build green), tamper flag triaged as additive-only (D12); one transient conformance finding closes with T003"
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-10T20:35:00Z",
+      "note": "US1 (T003-T005) done and verified; receipts green, forge verify green (918 passed, lint/typecheck/build/conformance green), two tamper flags triaged as additive with the skip guard approved (D14), one deviation accepted (D13)"
+    }
+  ],
+  "gates": {
+    "spec": {
+      "approved_by": "SamuelJennings",
+      "at": "2026-08-10T10:25:00Z",
+      "self_resolved": [
+        "path vs URL classified by the value, not a flag",
+        "rehearsal is the real import inside an abandoned transaction",
+        "set-asides exit zero, only a refusal exits non-zero",
+        "counts by default, entries at raised --verbosity",
+        "post-gate amendment: a fetched document's relative identifiers resolve against its own address (FR-003, SC-002)"
       ]
-     }
     },
+    "plan": {
+      "approved_by": "SamuelJennings",
+      "at": "2026-08-10T12:30:00Z"
+    },
+    "merge": {
+      "approved_by": null,
+      "at": null
+    }
+  },
+  "stories": [
     {
-     "id": "T002",
-     "status": "done",
-     "attempts": 1,
-     "evidence": {
-      "tests": [
-       "tests/test_management/test_commands/test_import_skos.py::TestManagementPackageSkeleton::test_management_package_is_importable",
-       "tests/test_management/test_commands/test_import_skos.py::TestManagementPackageSkeleton::test_management_commands_package_is_importable"
-      ],
-      "commands": [
-       "poetry run pytest tests/test_management/ -q  # RED: 2 failed, ModuleNotFoundError: controlled_vocabularies.management",
-       "poetry run pytest tests/test_management/ tests/test_standards.py -q  # GREEN: 47 passed",
-       "poetry run pytest -q  # 908 passed",
-       "poetry run ruff check controlled_vocabularies/management/ tests/test_management/",
-       "poetry run ruff format --check controlled_vocabularies/management/ tests/test_management/",
-       "poetry run mypy controlled_vocabularies/management/"
+      "id": "US0",
+      "priority": "P1",
+      "issue": null,
+      "worktree": "/home/sam/projects/samueljennings/dcv-us0",
+      "status": "done",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T001",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py::TestBaseUriThread::test_a_given_base_uri_resolves_relative_identifiers_against_it",
+              "tests/test_exchange/test_skos.py::TestBaseUriThread::test_no_base_uri_resolves_relative_identifiers_against_the_file",
+              "tests/test_exchange/test_skos.py::TestBaseUriThread::test_absolute_identifiers_are_unaffected_by_a_given_base_uri",
+              "tests/test_exchange/test_skos.py::TestBaseUriThread::test_missing_file_refusal_names_the_base_uri_when_given",
+              "tests/test_exchange/test_skos.py::TestBaseUriThread::test_unsupported_serialization_refusal_names_the_base_uri_when_given",
+              "tests/test_exchange/test_skos.py::TestBaseUriThread::test_unparseable_file_refusal_names_the_base_uri_when_given",
+              "tests/test_exchange/test_skos.py::TestImportSkosVocabulary::test_a_refusal_names_the_base_uri_when_given"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_exchange/test_skos.py::TestBaseUriThread tests/test_exchange/test_skos.py::TestImportSkosVocabulary::test_a_refusal_names_the_base_uri_when_given -q  # RED: 8 failed, TypeError: unexpected keyword argument 'base_uri'",
+              "poetry run pytest tests/test_exchange/test_skos.py -q  # GREEN: 416 passed",
+              "poetry run pytest -q  # 906 passed (895 baseline + 11 new, zero pre-existing tests edited)",
+              "poetry run ruff check controlled_vocabularies/exchange/skos.py tests/test_exchange/test_skos.py",
+              "poetry run ruff format controlled_vocabularies/exchange/skos.py tests/test_exchange/test_skos.py",
+              "poetry run mypy controlled_vocabularies/exchange/skos.py"
+            ]
+          }
+        },
+        {
+          "id": "T002",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_management/test_commands/test_import_skos.py::TestManagementPackageSkeleton::test_management_package_is_importable",
+              "tests/test_management/test_commands/test_import_skos.py::TestManagementPackageSkeleton::test_management_commands_package_is_importable"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_management/ -q  # RED: 2 failed, ModuleNotFoundError: controlled_vocabularies.management",
+              "poetry run pytest tests/test_management/ tests/test_standards.py -q  # GREEN: 47 passed",
+              "poetry run pytest -q  # 908 passed",
+              "poetry run ruff check controlled_vocabularies/management/ tests/test_management/",
+              "poetry run ruff format --check controlled_vocabularies/management/ tests/test_management/",
+              "poetry run mypy controlled_vocabularies/management/"
+            ]
+          }
+        },
+        {
+          "id": "T015",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_management/test_rendering.py::TestReportRendererBucketCounts::test_a_populated_report_renders_each_bucket_count",
+              "tests/test_management/test_rendering.py::TestReportRendererBucketCounts::test_an_empty_report_still_prints_every_section_reading_zero"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_management/test_rendering.py -q  # RED: ModuleNotFoundError: controlled_vocabularies.management.rendering",
+              "poetry run pytest tests/test_management/ -q  # GREEN: 4 passed",
+              "poetry run pytest -q  # 910 passed",
+              "poetry run ruff check controlled_vocabularies/management/rendering.py tests/test_management/test_rendering.py",
+              "poetry run ruff format controlled_vocabularies/management/rendering.py tests/test_management/test_rendering.py",
+              "poetry run mypy controlled_vocabularies/management/rendering.py",
+              "poetry run deptry ."
+            ]
+          }
+        }
       ]
-     }
     },
     {
-     "id": "T015",
-     "status": "done",
-     "attempts": 1,
-     "evidence": {
-      "tests": [
-       "tests/test_management/test_rendering.py::TestReportRendererBucketCounts::test_a_populated_report_renders_each_bucket_count",
-       "tests/test_management/test_rendering.py::TestReportRendererBucketCounts::test_an_empty_report_still_prints_every_section_reading_zero"
-      ],
-      "commands": [
-       "poetry run pytest tests/test_management/test_rendering.py -q  # RED: ModuleNotFoundError: controlled_vocabularies.management.rendering",
-       "poetry run pytest tests/test_management/ -q  # GREEN: 4 passed",
-       "poetry run pytest -q  # 910 passed",
-       "poetry run ruff check controlled_vocabularies/management/rendering.py tests/test_management/test_rendering.py",
-       "poetry run ruff format controlled_vocabularies/management/rendering.py tests/test_management/test_rendering.py",
-       "poetry run mypy controlled_vocabularies/management/rendering.py",
-       "poetry run deptry ."
+      "id": "US1",
+      "priority": "P1",
+      "issue": 78,
+      "worktree": "/home/sam/projects/samueljennings/dcv-us1",
+      "status": "done",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T003",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_management/test_commands/test_import_skos.py::TestImportSkosCommandCreatesAndUpdates::test_importing_into_an_empty_database_creates_the_vocabulary_and_names_the_count",
+              "tests/test_management/test_commands/test_import_skos.py::TestImportSkosCommandCreatesAndUpdates::test_reimporting_the_same_file_reports_updates_and_creates_no_duplicate_concept",
+              "tests/test_management/test_commands/test_import_skos.py::TestImportSkosCommandHelpIsTranslatable::test_command_help_is_lazily_translatable",
+              "tests/test_management/test_commands/test_import_skos.py::TestImportSkosCommandHelpIsTranslatable::test_every_argument_help_is_lazily_translatable"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_management/test_commands/test_import_skos.py -q",
+              "poetry run ruff check controlled_vocabularies/management/commands/import_skos.py tests/test_management/test_commands/test_import_skos.py",
+              "poetry run mypy controlled_vocabularies/management/commands/import_skos.py"
+            ]
+          }
+        },
+        {
+          "id": "T004",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_management/test_commands/test_import_skos.py::TestImportSkosCommandRefusesABadPath::test_a_missing_path_is_refused_naming_the_path_and_writes_nothing",
+              "tests/test_management/test_commands/test_import_skos.py::TestImportSkosCommandRefusesABadPath::test_an_unreadable_path_is_reported_distinctly_from_a_missing_one"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_management/test_commands/test_import_skos.py -q",
+              "poetry run ruff check controlled_vocabularies/management/commands/import_skos.py tests/test_management/test_commands/test_import_skos.py",
+              "poetry run mypy controlled_vocabularies/management/commands/import_skos.py"
+            ]
+          }
+        },
+        {
+          "id": "T005",
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_management/test_commands/test_import_skos.py::TestImportSkosCommandFormatOption::test_a_file_whose_extension_names_no_format_imports_when_format_is_given",
+              "tests/test_management/test_commands/test_import_skos.py::TestImportSkosCommandFormatOption::test_the_same_file_without_format_is_refused_with_the_existing_message"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_management/test_commands/test_import_skos.py -q  # 10 passed, 0 skipped",
+              "poetry run pytest -q  # 918 passed",
+              "poetry run deptry ."
+            ]
+          }
+        }
       ]
-     }
+    },
+    {
+      "id": "US2",
+      "priority": "P1",
+      "issue": 79,
+      "worktree": null,
+      "status": "todo",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T006",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T007",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T008",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T009",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T010",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T011",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
+    },
+    {
+      "id": "US3",
+      "priority": "P1",
+      "issue": 80,
+      "worktree": null,
+      "status": "todo",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T012",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T013",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T014",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
+    },
+    {
+      "id": "US4",
+      "priority": "P2",
+      "issue": 81,
+      "worktree": null,
+      "status": "todo",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T016",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T017",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T018",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
+    },
+    {
+      "id": "US5",
+      "priority": "P2",
+      "issue": 82,
+      "worktree": null,
+      "status": "todo",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T020",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T021",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T022",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
+    },
+    {
+      "id": "US6",
+      "priority": "P3",
+      "issue": 83,
+      "worktree": null,
+      "status": "todo",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T023",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T024",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T025",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
     }
-   ]
+  ],
+  "budgets": {
+    "converge_cycles": {
+      "max": 2,
+      "used": 0
+    },
+    "review_cycles": {
+      "max": 1,
+      "used": 0
+    },
+    "design_review_cycles": {
+      "max": 1,
+      "used": 1
+    },
+    "tokens": {
+      "max": 4000000,
+      "used": 0
+    }
   },
-  {
-   "id": "US1",
-   "priority": "P1",
-   "issue": 78,
-   "worktree": null,
-   "status": "todo",
-   "replans": 0,
-   "tasks": [
-    {
-     "id": "T003",
-     "status": "todo",
-     "attempts": 0
-    },
-    {
-     "id": "T004",
-     "status": "todo",
-     "attempts": 0
-    },
-    {
-     "id": "T005",
-     "status": "todo",
-     "attempts": 0
-    }
-   ]
-  },
-  {
-   "id": "US2",
-   "priority": "P1",
-   "issue": 79,
-   "worktree": null,
-   "status": "todo",
-   "replans": 0,
-   "tasks": [
-    {
-     "id": "T006",
-     "status": "todo",
-     "attempts": 0
-    },
-    {
-     "id": "T007",
-     "status": "todo",
-     "attempts": 0
-    },
-    {
-     "id": "T008",
-     "status": "todo",
-     "attempts": 0
-    },
-    {
-     "id": "T009",
-     "status": "todo",
-     "attempts": 0
-    },
-    {
-     "id": "T010",
-     "status": "todo",
-     "attempts": 0
-    },
-    {
-     "id": "T011",
-     "status": "todo",
-     "attempts": 0
-    }
-   ]
-  },
-  {
-   "id": "US3",
-   "priority": "P1",
-   "issue": 80,
-   "worktree": null,
-   "status": "todo",
-   "replans": 0,
-   "tasks": [
-    {
-     "id": "T012",
-     "status": "todo",
-     "attempts": 0
-    },
-    {
-     "id": "T013",
-     "status": "todo",
-     "attempts": 0
-    },
-    {
-     "id": "T014",
-     "status": "todo",
-     "attempts": 0
-    }
-   ]
-  },
-  {
-   "id": "US4",
-   "priority": "P2",
-   "issue": 81,
-   "worktree": null,
-   "status": "todo",
-   "replans": 0,
-   "tasks": [
-    {
-     "id": "T016",
-     "status": "todo",
-     "attempts": 0
-    },
-    {
-     "id": "T017",
-     "status": "todo",
-     "attempts": 0
-    },
-    {
-     "id": "T018",
-     "status": "todo",
-     "attempts": 0
-    }
-   ]
-  },
-  {
-   "id": "US5",
-   "priority": "P2",
-   "issue": 82,
-   "worktree": null,
-   "status": "todo",
-   "replans": 0,
-   "tasks": [
-    {
-     "id": "T020",
-     "status": "todo",
-     "attempts": 0
-    },
-    {
-     "id": "T021",
-     "status": "todo",
-     "attempts": 0
-    },
-    {
-     "id": "T022",
-     "status": "todo",
-     "attempts": 0
-    }
-   ]
-  },
-  {
-   "id": "US6",
-   "priority": "P3",
-   "issue": 83,
-   "worktree": null,
-   "status": "todo",
-   "replans": 0,
-   "tasks": [
-    {
-     "id": "T023",
-     "status": "todo",
-     "attempts": 0
-    },
-    {
-     "id": "T024",
-     "status": "todo",
-     "attempts": 0
-    },
-    {
-     "id": "T025",
-     "status": "todo",
-     "attempts": 0
-    }
-   ]
+  "pr": {
+    "number": 84,
+    "draft": true
   }
- ],
- "budgets": {
-  "converge_cycles": {
-   "max": 2,
-   "used": 0
-  },
-  "review_cycles": {
-   "max": 1,
-   "used": 0
-  },
-  "design_review_cycles": {
-   "max": 1,
-   "used": 1
-  },
-  "tokens": {
-   "max": 4000000,
-   "used": 0
-  }
- },
- "pr": {
-  "number": 84,
-  "draft": true
- }
 }

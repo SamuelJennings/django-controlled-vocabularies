@@ -283,3 +283,27 @@ is written by the command itself and should always be readable, but if that ever
 distinct message no longer applies only to a local path.
 
 **ADR:** none — a targeted fix within this task's own file, nothing downstream inherits it.
+
+## D14 — US-1's two tamper flags are triaged as additive, and the permission test's skip guard is approved
+
+`forge tamper-check --base 7ca2621` raised two flags on US-1's diff. Both are approved; neither is a
+weakened test.
+
+**`modified_preexisting_test` on `tests/test_management/test_commands/test_import_skos.py`.** The file
+existed at the story base because T002 created it as the skeleton's own test. The gate classifies on
+git file status alone, so appending classes to a file it did not create always flags — the same
+mechanism as D12. The diff is 117 insertions and zero deletions: the two skeleton tests are untouched,
+their assertions unchanged, and four new classes sit below them. Verified by reading the diff, not
+inferred from the insert/delete ratio.
+
+**`weakening_patterns_added`, one occurrence.** It is
+`@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0)` on
+`test_an_unreadable_path_is_reported_distinctly_from_a_missing_one`. A process running as uid 0
+ignores the file mode entirely, so `os.access(path, os.R_OK)` returns `True` for a 0o000 file and the
+scenario the test describes cannot be constructed — the guard prevents a false failure, it does not
+excuse one. Confirmed it does not fire where the suite actually runs: `pytest -rs` on this file
+reports 10 passed and zero skipped locally, and GitHub Actions' Ubuntu runners execute as `runner`,
+not root. A conditional skip that silently swallowed the case on the machines we test on would not
+have been approved.
+
+**ADR:** none — a guardrail triage, not a design decision.
