@@ -183,6 +183,154 @@ passed), `ruff check` + `ruff format --check` + `mypy` on the changed test file 
 touched). Full-repo verify (pytest, ruff, mypy, deptry) still to run once, per protocol, immediately
 before the completion report.
 
+## 2026-08-10 — S4 IMPLEMENT — US2 (T006-T011), Implementer
+
+`craft-tdd`, `craft-increments` and `craft-security` loaded by name, receipts verified against the
+brief before any task started. Baseline confirmed green (918 tests) before touching anything.
+
+- **T006** — `http_stub` (`ThreadingHTTPServer` on port 0, a background thread, `set_response(path,
+  status=, body=, content_type=, headers=)` per path so one running server answers several scenarios
+  in one test) and `hanging_socket` (a bound, listening socket with nothing accepting or answering,
+  for the timeout case) added to `tests/conftest.py`, additive only. Standard library only.
+
+  Tests: `TestHTTPStubFixture` in the new `tests/test_management/test_sources.py` exercises the stub
+  directly with plain `urllib.request.urlopen` — a configured 200 with body/content-type, a
+  configured 404, an unconfigured path also answering 404, and a second `http_stub` instance getting
+  its own fresh port. `hanging_socket` is proven in T010, where the timeout case needs it.
+
+Verified: `poetry run pytest tests/test_management/test_sources.py -q` (4 passed), `ruff check` +
+`ruff format --check` (one `A002`/`S310` fix pass) + `mypy` on the two changed files.
+
+- **T007** — `SourceResolver.classify()` in the new `controlled_vocabularies/management/sources.py`:
+  a value beginning `http://`/`https://` (case-insensitive) is `"url"`; else `urlsplit(source).scheme`
+  of length ≤ 1 is `"path"` (a Windows drive letter parses as a one-character scheme); anything else
+  raises `CommandError` naming the scheme. `SourceResolver.__init__` takes `serialization`, not
+  `format` — `format` shadows the builtin (`ruff` `A002`), and `serialization` is the name
+  `from_file`/`import_skos` already use for the same value.
+
+  Tests: `TestSourceResolverClassification` — `http://…` and `HTTPS://…` as URLs, a bare relative
+  filename, `C:/vocab/skos.ttl` and an absolute Unix path as paths, `ftp://host/v.ttl` refused naming
+  `ftp`. No fetch, no filesystem access — classification only.
+
+Verified: `poetry run pytest tests/test_management/test_sources.py -q` (10 passed), `ruff check` +
+`ruff format --check` + `mypy` on the two changed files.
+
+- **T008** — `SourceResolver.resolve()`/`_fetch()`: for a URL, fetches to a temporary file
+  (`tempfile.mkstemp`) in chunks under `_TIMEOUT_SECONDS = 2` and `_MAX_RESPONSE_BYTES = 10 MiB`
+  (both plain module constants, no configuration surface), returns a `ResolvedSource(path, base_uri,
+  serialization)` with the URL as `base_uri`. `cleanup()` unlinks the temp file; the caller (T011)
+  calls it once in a `finally` around resolve-and-import, matching plan.md "the temporary file is
+  removed when the command finishes, whether or not the import succeeded" — not tied to `_fetch()`
+  itself, so a fetch failure's partial file is also removed by that same `finally`, never by
+  `_fetch()` catching its own exception.
+
+  **Deviation from the brief's own design doc, found by this task's own test (decisions.md D15):**
+  `research.md` R3 and `plan.md` name
+  `build_opener(HTTPHandler, HTTPSHandler, HTTPRedirectHandler, HTTPErrorProcessor)` as the
+  http/https-only opener. Built exactly as written, `opener.handlers` still carries `FTPHandler`,
+  `FileHandler`, `DataHandler` and `UnknownHandler` — `build_opener` always merges its own defaults
+  for any default class not *subclassed* by an argument, and none of the four named handlers
+  subclass `FTPHandler`. The redirect-to-ftp test caught this directly: against a non-routable
+  target it took 2.0s (this fetch's own timeout) rather than failing immediately, proving
+  `FTPHandler.ftp_open` really opened a connection — the exact real network call this opener exists
+  to prevent. Fixed by building `OpenerDirector()` by hand and adding only `HTTPHandler`,
+  `HTTPSHandler`, `HTTPRedirectHandler`, `HTTPErrorProcessor` and `UnknownHandler` via
+  `add_handler(...)`, which bypasses `build_opener`'s default-merging entirely; `UnknownHandler` is
+  needed too, since without any handler for `unknown_open`, `OpenerDirector.open()` returns `None`
+  for an unhandled scheme rather than raising. Re-run of the same test: `URLError` in under a
+  millisecond, no connection. This is a correction to `research.md`/`plan.md`/`tasks.md`'s own text,
+  not a new design decision — flagged for Forge in `concerns`.
+
+  Tests: `TestSourceResolverFetch` — a served document fetched to a temp file with the URL as
+  `base_uri`; the temp file gone after `cleanup()`; a redirect to another `http` URL followed and its
+  body fetched; a redirect to `ftp://10.255.255.1/…` (deliberately non-routable, so a real attempt
+  would hang rather than fail fast) refused in under a second, proving no connection was opened; a
+  response exceeding the byte ceiling (patched to 16 bytes via `monkeypatch` so the test does not
+  transfer 10 MiB) abandoned with `CommandError` naming the URL, temp file gone after `cleanup()`.
+
+Verified: `poetry run pytest tests/test_management/test_sources.py -q` (15 passed), `ruff check` +
+`ruff format --check` + `mypy` on the two changed files.
+
+- **T009** — `SourceResolver._resolve_serialization()`: explicit `serialization` (from `--format`)
+  first; else `rdflib.util.guess_format(urlsplit(source).path)`, the same function `from_file` uses
+  for a local path, applied to the URL's own path; else the response `Content-Type` (captured before
+  the fetch's temp-file-writing `with response:` block closes it) mapped through a small dict for the
+  three formats this application reads; else `CommandError` naming the source and pointing at
+  `--format`. `resolve()` now calls this for a fetched document instead of passing `self.serialization`
+  straight through unresolved.
+
+  Tests: `TestSourceResolverSerializationLadder` — explicit `--format` wins even when the URL's own
+  extension would guess differently (`.rdf` → `xml`, explicit `turtle` given); the URL extension
+  alone decides when no `Content-Type` is sent at all; `Content-Type` decides for a URL with no
+  recognisable extension, for both `application/rdf+xml` and `application/ld+json`; neither present
+  is refused, message naming `--format`.
+
+Verified: `poetry run pytest tests/test_management/test_sources.py -q` (20 passed), `ruff check` +
+`ruff format --check` + `mypy` + `deptry .` on the two changed files (rdflib is already a runtime
+dependency; no new import surface for deptry to flag).
+
+- **T010** — Fetch failures, tested through `call_command` per FR-014's own wording ("MUST fail...
+  MUST exit non-zero"), which needs `Command.handle()` actually routing through `SourceResolver` to
+  produce a `CommandError`. **Deviation from tasks.md's own ordering (see `concerns`):** the minimal
+  wiring tasks.md assigns to T011 — `handle()` builds a `SourceResolver`, calls `.resolve()`, passes
+  `resolved.path`/`serialization`/`base_uri` to `import_skos()`, and calls `resolver.cleanup()` in a
+  `finally` around both — landed in this commit instead, because T010's own acceptance ("it raises
+  `CommandError`") is unreachable without it: `import_skos()` raises `SkosImportError`/
+  `SkosImportFailed`, and only `Command.handle()`'s existing `except` clause turns those into
+  `CommandError`. T011 is left to add the parity and relative-URI proof the spec actually gates on
+  (SC-002, FR-003) on top of this same wiring, plus updating `Command.help` and the `source`
+  argument's help text to mention a URL (still `gettext_lazy`, Article XII).
+
+  This task's own failing tests caught a second opener gap beyond D15's: without
+  `HTTPDefaultErrorHandler`, a non-2xx response makes `.open()` return `None` rather than raise
+  `HTTPError`, and `_fetch()`'s `with response:` on `None` raised `TypeError` instead of the
+  intended `CommandError`. Added to the opener's handler set and recorded as part of D15 — it opens
+  no connection of its own, so it does not reopen the hole the rest of D15 closes. A regression test
+  for this (`SourceResolver` returning a 500 directly, not through the command) was added to
+  `TestSourceResolverFetch` in `test_sources.py` alongside T010's own command-level tests.
+
+  Tests (`TestImportSkosCommandURLFailureModes`, `test_import_skos.py`): an unreachable host (a
+  bound-then-closed local socket — connection refused locally, no real network call), a non-2xx
+  status, an HTML body served with a `.ttl`-extensioned URL (extension rung of T009's ladder wins,
+  reaches `from_file`'s own parser, which raises `SkosImportError` naming the format and the parse
+  error rather than importing an empty graph — confirmed the raw HTML bytes fail `rdflib`'s Turtle
+  parser directly before writing the test), and a connection that never answers (`hanging_socket`,
+  T006) — each asserts `CommandError` naming the URL and `ConceptScheme.objects.count() == 0`.
+
+Verified: `poetry run pytest tests/test_management/test_commands/test_import_skos.py
+tests/test_management/test_sources.py -q` (34 passed), `ruff check` + `ruff format --check` + `mypy`
++ `deptry .` on all four changed files.
+
+- **T011** — The wiring itself, and the `Command.help`/`source`-argument help text mentioning a
+  URL, both landed with T010 (see that entry's own deviation note) — nothing left to change in
+  production code. This task is the two tests the spec actually gates on. Both passed on first run
+  against the already-wired `handle()` — checked before accepting, per `craft-tdd`: each genuinely
+  exercises `SourceResolver`'s fetch-then-import path through `call_command`, not a tautology, and
+  a manual check that dropping `base_uri` from the flow would resolve `<concept-a>` against a
+  temporary file rather than the stub's own address confirms the second test is not vacuously true.
+
+  Tests (`TestImportSkosCommandURLParity`, `test_import_skos.py`): `rocks.ttl` (absolute
+  identifiers) imported once over the stub and once from disk in the same test — `Concept`
+  `static_uri` set, the scheme's `name`, and the rendered report text are compared equal after
+  deleting the URL import's records before the disk import (SC-002). A document whose every
+  identifier is relative (`<>`, `<concept-a>`, string constants local to this test class — not
+  committed to `tests/fixtures/skos/`, so `TestEverySkosPredicateIsReadOrReported`'s directory walk
+  never sees it; served straight from `http_stub`'s in-memory response, so unlike T001's own
+  `tmp_path` fixtures (decisions.md D11) no file on disk is involved on the served side at all) is
+  imported over the stub and its scheme and concept are found at the stub's own address, with no
+  `file://`-prefixed `static_uri` anywhere (FR-003).
+
+  **"Nothing anywhere records the URL"** (FR-003's closing clause) is satisfied by construction
+  rather than by a dedicated test: `ConceptScheme`/`Concept` carry no field this story adds or
+  writes to (`models.py` untouched — out of scope, per the brief's prohibitions), and the only
+  place a fetched document's address appears in the database is as `static_uri` itself, which is
+  the document's own declared identity, not metadata about the fetch. The two tests above already
+  cover every write path this story adds.
+
+Verified: `poetry run pytest tests/test_management/test_commands/test_import_skos.py
+tests/test_management/test_sources.py -q` (37 passed), `ruff check` + `ruff format --check` + `mypy`
+on the one changed test file (no production file touched).
+
 ## Gates
 
 - **Spec gate:** approved 2026-08-10 by SamuelJennings. No conditions.

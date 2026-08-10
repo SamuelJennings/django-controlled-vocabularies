@@ -13,6 +13,7 @@ rendering the result through :class:`~controlled_vocabularies.management.renderi
 
 import importlib
 import os
+import socket
 from io import StringIO
 from pathlib import Path
 
@@ -20,6 +21,7 @@ import pytest
 from django.core.management import CommandError, call_command
 from django.utils.functional import Promise
 
+from controlled_vocabularies.management import sources
 from controlled_vocabularies.management.commands.import_skos import Command
 from controlled_vocabularies.models import Concept, ConceptScheme
 
@@ -133,3 +135,111 @@ class TestImportSkosCommandFormatOption:
             call_command("import_skos", str(mystery), stdout=StringIO())
         assert "not in a serialization this application reads" in str(exc_info.value)
         assert ConceptScheme.objects.count() == 0
+
+
+class TestImportSkosCommandURLFailureModes:
+    """T010, FR-014, spec Edge Cases — every URL retrieval failure exits non-zero (raises
+    `CommandError`), names the URL, and leaves the database untouched. Uses `http_stub` and
+    `hanging_socket` (tests/conftest.py, T006) — no real network call anywhere in this class."""
+
+    def test_an_unreachable_host_is_refused_naming_the_url(self, db):
+        # A closed local socket: connecting to it fails immediately with "connection refused" —
+        # a local failure, not a real network call.
+        closed = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        closed.bind(("127.0.0.1", 0))
+        port = closed.getsockname()[1]
+        closed.close()
+        url = f"http://127.0.0.1:{port}/vocab.ttl"
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", url, stdout=StringIO())
+        assert url in str(exc_info.value)
+        assert ConceptScheme.objects.count() == 0
+
+    def test_a_non_2xx_status_is_refused_naming_the_url(self, db, http_stub):
+        http_stub.set_response("/vocab.ttl", status=500, body=b"boom")
+        url = http_stub.url + "/vocab.ttl"
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", url, stdout=StringIO())
+        assert url in str(exc_info.value)
+        assert ConceptScheme.objects.count() == 0
+
+    def test_an_html_body_fails_as_unreadable_content_not_an_empty_vocabulary(self, db, http_stub):
+        http_stub.set_response(
+            "/vocab.ttl", status=200, body=b"<html><body>Not a vocabulary</body></html>", content_type="text/html"
+        )
+        url = http_stub.url + "/vocab.ttl"
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", url, stdout=StringIO())
+        assert url in str(exc_info.value)
+        assert "could not be parsed" in str(exc_info.value)
+        assert ConceptScheme.objects.count() == 0
+
+    def test_a_connection_that_never_answers_fails_on_a_timeout_rather_than_hanging(
+        self, db, hanging_socket, monkeypatch
+    ):
+        # The shipped timeout is set for real publishers, which is far longer than a test
+        # should wait to prove the same behaviour.
+        monkeypatch.setattr(sources, "_TIMEOUT_SECONDS", 0.5)
+        url = hanging_socket
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", url, stdout=StringIO())
+        assert url in str(exc_info.value)
+        assert ConceptScheme.objects.count() == 0
+
+
+class TestImportSkosCommandURLParity:
+    """T011, SC-002, FR-003 — `SourceResolver` wired into `Command`: a URL import of a document
+    with absolute identifiers produces the same records and report as the identical bytes from
+    disk, and a document with relative identifiers is stored under the address it was served
+    from, never under a `file://` path (decisions.md D10)."""
+
+    _RELATIVE_URIS_TURTLE = """
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+<>
+    a skos:ConceptScheme ;
+    skos:prefLabel "Relative vocabulary"@en ;
+    skos:hasTopConcept <concept-a> .
+
+<concept-a>
+    a skos:Concept ;
+    skos:inScheme <> ;
+    skos:topConceptOf <> ;
+    skos:prefLabel "Concept A"@en .
+"""
+
+    def test_a_url_import_and_a_disk_import_of_absolute_identifiers_produce_the_same_records_and_report(
+        self, db, http_stub
+    ):
+        rocks_bytes = (FIXTURES / "rocks.ttl").read_bytes()
+        http_stub.set_response("/rocks.ttl", status=200, body=rocks_bytes, content_type="text/turtle")
+
+        url_out = StringIO()
+        call_command("import_skos", http_stub.url + "/rocks.ttl", stdout=url_out)
+        url_records = set(Concept.objects.values_list("static_uri", flat=True))
+        url_scheme_name = ConceptScheme.objects.get(static_uri=ROCKS_URI).name
+        url_report = url_out.getvalue()
+
+        Concept.objects.all().delete()
+        ConceptScheme.objects.all().delete()
+
+        disk_out = StringIO()
+        call_command("import_skos", str(FIXTURES / "rocks.ttl"), stdout=disk_out)
+        disk_records = set(Concept.objects.values_list("static_uri", flat=True))
+        disk_scheme_name = ConceptScheme.objects.get(static_uri=ROCKS_URI).name
+
+        assert url_records == disk_records
+        assert url_scheme_name == disk_scheme_name
+        assert url_report == disk_out.getvalue()
+
+    def test_relative_identifiers_are_stored_under_the_stubs_address_not_a_file_path(self, db, http_stub):
+        http_stub.set_response(
+            "/relative.ttl", status=200, body=self._RELATIVE_URIS_TURTLE.encode(), content_type="text/turtle"
+        )
+        scheme_uri = http_stub.url + "/relative.ttl"
+        concept_uri = http_stub.url + "/concept-a"
+        call_command("import_skos", scheme_uri, stdout=StringIO())
+        assert ConceptScheme.objects.filter(static_uri=scheme_uri).exists()
+        assert Concept.objects.filter(static_uri=concept_uri).exists()
+        assert not ConceptScheme.objects.filter(static_uri__startswith="file://").exists()
+        assert not Concept.objects.filter(static_uri__startswith="file://").exists()

@@ -307,3 +307,80 @@ not root. A conditional skip that silently swallowed the case on the machines we
 have been approved.
 
 **ADR:** none — a guardrail triage, not a design decision.
+
+## D15 — `build_opener` does not give an http/https-only opener; `OpenerDirector` built by hand does
+
+Found implementing T008. `research.md` R3 and `plan.md` "Source resolution" both name
+`urllib.request.build_opener(HTTPHandler, HTTPSHandler, HTTPRedirectHandler, HTTPErrorProcessor)`
+as the opener that carries no handler for any scheme but http/https, so a redirect onto `ftp`
+fails before a connection is attempted. Built exactly as written and inspected
+(`opener.handlers`), it still carries a live `FTPHandler`, `FileHandler`, `DataHandler` and
+`UnknownHandler` — `build_opener`'s own docstring says why: "If any of the handlers passed as
+arguments are subclasses of the default handlers, the default handlers will not be used," and it
+always adds its own defaults for every default class not matched that way. None of the four
+handlers named override `FTPHandler`.
+
+Confirmed the consequence directly, once as a spike and once as this task's own failing test: a
+`SourceResolver` fetch of a stub URL that 302-redirects to `ftp://10.255.255.1/vocab.ttl` (a
+non-routable address, chosen so a real connection attempt would hang rather than fail
+immediately) took 2.0s — the fetch's own socket timeout — meaning `FTPHandler.ftp_open` really
+ran and really opened `ftplib`'s connection. That is the exact real network call this feature's
+one security-motivated check exists to prevent (plan.md "Design", Article V), made worse by
+`build_opener` supplying it silently.
+
+The opener that matches the stated design is `OpenerDirector()` with only
+`HTTPHandler`, `HTTPSHandler`, `HTTPRedirectHandler` and `HTTPErrorProcessor` added via
+`add_handler(...)`, bypassing `build_opener`'s default-class merging entirely. That opener alone
+returns `None` from `.open()` for an unhandled protocol instead of raising (`OpenerDirector._open`
+falls through to an empty `unknown_open` chain and returns nothing), so `UnknownHandler` is added
+too — its `unknown_open` only raises `URLError('unknown url type: ...')`, never opens a socket.
+Confirmed against the same redirect target: `URLError` raised in under a millisecond, not 2s.
+
+**A second, related gap found implementing T010's own failing test.** The same hand-built opener,
+still missing `HTTPDefaultErrorHandler`, turns a non-2xx response into `.open()` returning `None`
+rather than raising `HTTPError`: `HTTPErrorProcessor.http_response` delegates to
+`OpenerDirector.error()`, which calls a chain keyed on `self.handle_error` — empty for both the
+`http` and `default` buckets with no `HTTPDefaultErrorHandler` registered — and returns `None`
+when nothing in the chain handles it. `_fetch()`'s `with response:` on a `None` then raised
+`TypeError`, caught immediately by `call_command("import_skos", <500-status URL>, ...)` in T010's
+own test rather than the intended `CommandError`. `HTTPDefaultErrorHandler` opens no connection
+of its own — it only turns a completed response's non-2xx status into `HTTPError` — so adding it
+does not reopen the hole the rest of this decision closes. Final handler set: `HTTPHandler`,
+`HTTPSHandler`, `HTTPRedirectHandler`, `HTTPErrorProcessor`, `UnknownHandler`,
+`HTTPDefaultErrorHandler`.
+
+**Revisit if:** a later change to this opener re-introduces `build_opener` for convenience —
+`OpenerDirector` + explicit `add_handler` calls has to stay the shape as long as excluding a
+scheme's handler is the control.
+
+**ADR:** pending — assessed at S5 against the ADR bar; corrects a factual claim in `research.md`
+R3, `plan.md` "Source resolution" and `tasks.md` T008, which name `build_opener` for this and
+should be corrected alongside.
+
+## D16 — The fetch timeout and byte ceiling are set against published vocabularies, not fixtures
+
+**Stage:** S4 verification, US-2 · **Status:** accepted
+
+T008 landed `_TIMEOUT_SECONDS = 2` and `_MAX_RESPONSE_BYTES = 10 MiB`. `plan.md` and `tasks.md`
+both say "one constant, no configuration surface" and name no number, so these were the
+implementer's own choice and were flagged for a maintainer decision in its report.
+
+Both were set to what the tests needed rather than to what the feature is for. The command exists
+to vendor a *published* vocabulary, and the published thesauri operators actually point it at fail
+on both values: a large vocabulary is commonly serialized per request, so first-byte latency over
+two seconds is ordinary rather than a fault, and the widely-vendored thesauri run to tens of
+megabytes in RDF/XML. Shipping those numbers would have refused ordinary sources with a message
+about a server that had stopped answering.
+
+Raised to **30 seconds** and **50 MiB**. Both still bound what the remote server chooses — a
+server that has stopped answering, or one that does not intend to stop sending — which is the
+control's stated purpose, and neither is a guard against operator error.
+
+The one test that consumed the real timeout (a non-responding socket) now monkeypatches it to
+0.5s, as the byte-ceiling test already did for its own constant. A test's convenience is not a
+reason to ship a value that is wrong in production.
+
+**Revisit if:** an operator reports a legitimate source refused by either ceiling, which is the
+signal that this should become configurable rather than a larger constant.
+
+**ADR:** no — an internal constant, recorded here.
