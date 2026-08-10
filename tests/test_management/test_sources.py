@@ -94,6 +94,14 @@ class TestSourceResolverFetch:
         finally:
             resolver.cleanup()
 
+    def test_a_non_2xx_status_is_refused_naming_the_url(self, http_stub):
+        http_stub.set_response("/vocab.ttl", status=500, body=b"boom")
+        url = http_stub.url + "/vocab.ttl"
+        resolver = SourceResolver(url, serialization="turtle")
+        with pytest.raises(CommandError) as exc_info:
+            resolver.resolve()
+        assert url in str(exc_info.value)
+
     def test_the_temporary_file_does_not_survive_cleanup(self, http_stub):
         http_stub.set_response("/vocab.ttl", status=200, body=b"stub body")
         resolver = SourceResolver(http_stub.url + "/vocab.ttl", serialization="turtle")

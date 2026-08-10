@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import (
+    HTTPDefaultErrorHandler,
     HTTPErrorProcessor,
     HTTPHandler,
     HTTPRedirectHandler,
@@ -61,9 +62,19 @@ _MAX_RESPONSE_BYTES = 10 * 1024 * 1024  # 10 MiB
 # ftp://10.255.255.1/... actually reaching ftplib's connect and timing out on it, which is
 # the real network call this design exists to prevent (decisions.md D15). UnknownHandler is
 # added so a scheme with no registered handler raises URLError immediately rather than
-# OpenerDirector.open() silently returning None.
+# OpenerDirector.open() silently returning None. HTTPDefaultErrorHandler is added for the
+# same reason: without it, HTTPErrorProcessor's own non-2xx handling has nothing registered
+# to call and OpenerDirector.open() returns None for a 404/500 instead of raising HTTPError
+# (found by this task's own failing test, T010).
 _opener = OpenerDirector()
-for _handler_class in (HTTPHandler, HTTPSHandler, HTTPRedirectHandler, HTTPErrorProcessor, UnknownHandler):
+for _handler_class in (
+    HTTPHandler,
+    HTTPSHandler,
+    HTTPRedirectHandler,
+    HTTPErrorProcessor,
+    UnknownHandler,
+    HTTPDefaultErrorHandler,
+):
     _opener.add_handler(_handler_class())
 
 

@@ -269,6 +269,38 @@ Verified: `poetry run pytest tests/test_management/test_sources.py -q` (20 passe
 `ruff format --check` + `mypy` + `deptry .` on the two changed files (rdflib is already a runtime
 dependency; no new import surface for deptry to flag).
 
+- **T010** — Fetch failures, tested through `call_command` per FR-014's own wording ("MUST fail...
+  MUST exit non-zero"), which needs `Command.handle()` actually routing through `SourceResolver` to
+  produce a `CommandError`. **Deviation from tasks.md's own ordering (see `concerns`):** the minimal
+  wiring tasks.md assigns to T011 — `handle()` builds a `SourceResolver`, calls `.resolve()`, passes
+  `resolved.path`/`serialization`/`base_uri` to `import_skos()`, and calls `resolver.cleanup()` in a
+  `finally` around both — landed in this commit instead, because T010's own acceptance ("it raises
+  `CommandError`") is unreachable without it: `import_skos()` raises `SkosImportError`/
+  `SkosImportFailed`, and only `Command.handle()`'s existing `except` clause turns those into
+  `CommandError`. T011 is left to add the parity and relative-URI proof the spec actually gates on
+  (SC-002, FR-003) on top of this same wiring, plus updating `Command.help` and the `source`
+  argument's help text to mention a URL (still `gettext_lazy`, Article XII).
+
+  This task's own failing tests caught a second opener gap beyond D15's: without
+  `HTTPDefaultErrorHandler`, a non-2xx response makes `.open()` return `None` rather than raise
+  `HTTPError`, and `_fetch()`'s `with response:` on `None` raised `TypeError` instead of the
+  intended `CommandError`. Added to the opener's handler set and recorded as part of D15 — it opens
+  no connection of its own, so it does not reopen the hole the rest of D15 closes. A regression test
+  for this (`SourceResolver` returning a 500 directly, not through the command) was added to
+  `TestSourceResolverFetch` in `test_sources.py` alongside T010's own command-level tests.
+
+  Tests (`TestImportSkosCommandURLFailureModes`, `test_import_skos.py`): an unreachable host (a
+  bound-then-closed local socket — connection refused locally, no real network call), a non-2xx
+  status, an HTML body served with a `.ttl`-extensioned URL (extension rung of T009's ladder wins,
+  reaches `from_file`'s own parser, which raises `SkosImportError` naming the format and the parse
+  error rather than importing an empty graph — confirmed the raw HTML bytes fail `rdflib`'s Turtle
+  parser directly before writing the test), and a connection that never answers (`hanging_socket`,
+  T006) — each asserts `CommandError` naming the URL and `ConceptScheme.objects.count() == 0`.
+
+Verified: `poetry run pytest tests/test_management/test_commands/test_import_skos.py
+tests/test_management/test_sources.py -q` (34 passed), `ruff check` + `ruff format --check` + `mypy`
++ `deptry .` on all four changed files.
+
 ## Gates
 
 - **Spec gate:** approved 2026-08-10 by SamuelJennings. No conditions.

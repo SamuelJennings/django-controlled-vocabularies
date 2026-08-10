@@ -336,6 +336,19 @@ falls through to an empty `unknown_open` chain and returns nothing), so `Unknown
 too — its `unknown_open` only raises `URLError('unknown url type: ...')`, never opens a socket.
 Confirmed against the same redirect target: `URLError` raised in under a millisecond, not 2s.
 
+**A second, related gap found implementing T010's own failing test.** The same hand-built opener,
+still missing `HTTPDefaultErrorHandler`, turns a non-2xx response into `.open()` returning `None`
+rather than raising `HTTPError`: `HTTPErrorProcessor.http_response` delegates to
+`OpenerDirector.error()`, which calls a chain keyed on `self.handle_error` — empty for both the
+`http` and `default` buckets with no `HTTPDefaultErrorHandler` registered — and returns `None`
+when nothing in the chain handles it. `_fetch()`'s `with response:` on a `None` then raised
+`TypeError`, caught immediately by `call_command("import_skos", <500-status URL>, ...)` in T010's
+own test rather than the intended `CommandError`. `HTTPDefaultErrorHandler` opens no connection
+of its own — it only turns a completed response's non-2xx status into `HTTPError` — so adding it
+does not reopen the hole the rest of this decision closes. Final handler set: `HTTPHandler`,
+`HTTPSHandler`, `HTTPRedirectHandler`, `HTTPErrorProcessor`, `UnknownHandler`,
+`HTTPDefaultErrorHandler`.
+
 **Revisit if:** a later change to this opener re-introduces `build_opener` for convenience —
 `OpenerDirector` + explicit `add_handler` calls has to stay the shape as long as excluding a
 scheme's handler is the control.

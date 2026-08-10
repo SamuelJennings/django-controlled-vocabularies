@@ -13,6 +13,7 @@ rendering the result through :class:`~controlled_vocabularies.management.renderi
 
 import importlib
 import os
+import socket
 from io import StringIO
 from pathlib import Path
 
@@ -132,4 +133,49 @@ class TestImportSkosCommandFormatOption:
         with pytest.raises(CommandError) as exc_info:
             call_command("import_skos", str(mystery), stdout=StringIO())
         assert "not in a serialization this application reads" in str(exc_info.value)
+        assert ConceptScheme.objects.count() == 0
+
+
+class TestImportSkosCommandURLFailureModes:
+    """T010, FR-014, spec Edge Cases — every URL retrieval failure exits non-zero (raises
+    `CommandError`), names the URL, and leaves the database untouched. Uses `http_stub` and
+    `hanging_socket` (tests/conftest.py, T006) — no real network call anywhere in this class."""
+
+    def test_an_unreachable_host_is_refused_naming_the_url(self, db):
+        # A closed local socket: connecting to it fails immediately with "connection refused" —
+        # a local failure, not a real network call.
+        closed = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        closed.bind(("127.0.0.1", 0))
+        port = closed.getsockname()[1]
+        closed.close()
+        url = f"http://127.0.0.1:{port}/vocab.ttl"
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", url, stdout=StringIO())
+        assert url in str(exc_info.value)
+        assert ConceptScheme.objects.count() == 0
+
+    def test_a_non_2xx_status_is_refused_naming_the_url(self, db, http_stub):
+        http_stub.set_response("/vocab.ttl", status=500, body=b"boom")
+        url = http_stub.url + "/vocab.ttl"
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", url, stdout=StringIO())
+        assert url in str(exc_info.value)
+        assert ConceptScheme.objects.count() == 0
+
+    def test_an_html_body_fails_as_unreadable_content_not_an_empty_vocabulary(self, db, http_stub):
+        http_stub.set_response(
+            "/vocab.ttl", status=200, body=b"<html><body>Not a vocabulary</body></html>", content_type="text/html"
+        )
+        url = http_stub.url + "/vocab.ttl"
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", url, stdout=StringIO())
+        assert url in str(exc_info.value)
+        assert "could not be parsed" in str(exc_info.value)
+        assert ConceptScheme.objects.count() == 0
+
+    def test_a_connection_that_never_answers_fails_on_a_timeout_rather_than_hanging(self, db, hanging_socket):
+        url = hanging_socket
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", url, stdout=StringIO())
+        assert url in str(exc_info.value)
         assert ConceptScheme.objects.count() == 0
