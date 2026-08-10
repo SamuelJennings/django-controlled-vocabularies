@@ -23,10 +23,21 @@ from urllib.request import (
     UnknownHandler,
 )
 
+import rdflib.util
 from django.core.management.base import CommandError
 from django.utils.translation import gettext_lazy as _
 
 _URL_PREFIXES = ("http://", "https://")
+
+# The three serializations this application reads (matches exchange/skos.py's own
+# _SUPPORTED_FORMATS), mapped from a response's Content-Type for the third rung of the
+# serialization ladder (T009, research.md R4). rdflib.util.guess_format knows nothing about
+# media types, so this mapping is the resolver's own.
+_CONTENT_TYPE_SERIALIZATIONS = {
+    "text/turtle": "turtle",
+    "application/rdf+xml": "xml",
+    "application/ld+json": "json-ld",
+}
 
 # One socket-read timeout and one byte ceiling, neither configurable (plan.md "Source
 # resolution"). The operator cannot see how long a publisher takes to answer or how much
@@ -108,7 +119,8 @@ class SourceResolver:
         if self.classify() == "path":
             return ResolvedSource(path=self.source, base_uri=None, serialization=self.serialization)
         fetched = self._fetch()
-        return ResolvedSource(path=str(fetched.path), base_uri=self.source, serialization=self.serialization)
+        serialization = self._resolve_serialization(fetched)
+        return ResolvedSource(path=str(fetched.path), base_uri=self.source, serialization=serialization)
 
     def _fetch(self) -> _Fetched:
         """Fetch :attr:`source` to a temporary file under a timeout and a byte ceiling
@@ -143,6 +155,31 @@ class SourceResolver:
                         )
                     tmp.write(chunk)
         return _Fetched(path=self._temp_path, content_type=content_type)
+
+    def _resolve_serialization(self, fetched: _Fetched) -> str:
+        """Resolve a fetched document's serialization (T009, research.md R4): explicit
+        ``--format``, then the URL path's extension, then the response ``Content-Type``,
+        then a refusal naming what could not be determined. ``from_file``'s own extension
+        guess is never consulted for a fetched document — the value here is always passed
+        through explicitly, or the run is refused before it gets there.
+        """
+        if self.serialization:
+            return self.serialization
+        guessed = rdflib.util.guess_format(urlsplit(self.source).path)
+        if guessed:
+            return guessed
+        mapped = _CONTENT_TYPE_SERIALIZATIONS.get(fetched.content_type or "")
+        if mapped:
+            return mapped
+        raise CommandError(
+            str(
+                _(
+                    "'%(source)s' does not name a serialization this application recognises "
+                    "(Turtle, RDF/XML, or JSON-LD); pass --format."
+                )
+            )
+            % {"source": self.source}
+        )
 
     def cleanup(self) -> None:
         """Remove the temporary file a fetch wrote, if any (T008). A no-op for a local

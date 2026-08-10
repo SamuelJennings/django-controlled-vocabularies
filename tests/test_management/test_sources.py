@@ -136,3 +136,55 @@ class TestSourceResolverFetch:
         assert temp_path is not None
         resolver.cleanup()
         assert not temp_path.exists()
+
+
+class TestSourceResolverSerializationLadder:
+    """T009, research.md R4 — resolving a fetched document's serialization: explicit
+    ``--format``, then the URL's own extension, then the response ``Content-Type``, then a
+    refusal naming ``--format`` as the way out."""
+
+    def test_explicit_format_wins_over_the_url_extension(self, http_stub):
+        # ".rdf" would guess "xml" (rdflib.util.guess_format) — the explicit value must win.
+        http_stub.set_response("/vocab.rdf", status=200, body=b"stub body", content_type="application/rdf+xml")
+        resolver = SourceResolver(http_stub.url + "/vocab.rdf", serialization="turtle")
+        resolved = resolver.resolve()
+        try:
+            assert resolved.serialization == "turtle"
+        finally:
+            resolver.cleanup()
+
+    def test_the_url_extension_is_used_when_no_format_is_given(self, http_stub):
+        # No Content-Type at all — only the URL's ".ttl" extension can decide this.
+        http_stub.set_response("/vocab.ttl", status=200, body=b"stub body")
+        resolver = SourceResolver(http_stub.url + "/vocab.ttl")
+        resolved = resolver.resolve()
+        try:
+            assert resolved.serialization == "turtle"
+        finally:
+            resolver.cleanup()
+
+    def test_the_content_type_is_used_when_the_url_has_no_recognisable_extension(self, http_stub):
+        http_stub.set_response("/download", status=200, body=b"stub body", content_type="application/rdf+xml")
+        resolver = SourceResolver(http_stub.url + "/download")
+        resolved = resolver.resolve()
+        try:
+            assert resolved.serialization == "xml"
+        finally:
+            resolver.cleanup()
+
+    def test_json_ld_content_type_is_recognised(self, http_stub):
+        http_stub.set_response("/download", status=200, body=b"{}", content_type="application/ld+json")
+        resolver = SourceResolver(http_stub.url + "/download")
+        resolved = resolver.resolve()
+        try:
+            assert resolved.serialization == "json-ld"
+        finally:
+            resolver.cleanup()
+
+    def test_neither_extension_nor_content_type_is_refused_naming_format(self, http_stub):
+        http_stub.set_response("/download", status=200, body=b"stub body", content_type="application/octet-stream")
+        resolver = SourceResolver(http_stub.url + "/download")
+        with pytest.raises(CommandError) as exc_info:
+            resolver.resolve()
+        assert "--format" in str(exc_info.value)
+        resolver.cleanup()

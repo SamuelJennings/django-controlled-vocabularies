@@ -251,6 +251,24 @@ Verified: `poetry run pytest tests/test_management/test_sources.py -q` (10 passe
 Verified: `poetry run pytest tests/test_management/test_sources.py -q` (15 passed), `ruff check` +
 `ruff format --check` + `mypy` on the two changed files.
 
+- **T009** — `SourceResolver._resolve_serialization()`: explicit `serialization` (from `--format`)
+  first; else `rdflib.util.guess_format(urlsplit(source).path)`, the same function `from_file` uses
+  for a local path, applied to the URL's own path; else the response `Content-Type` (captured before
+  the fetch's temp-file-writing `with response:` block closes it) mapped through a small dict for the
+  three formats this application reads; else `CommandError` naming the source and pointing at
+  `--format`. `resolve()` now calls this for a fetched document instead of passing `self.serialization`
+  straight through unresolved.
+
+  Tests: `TestSourceResolverSerializationLadder` — explicit `--format` wins even when the URL's own
+  extension would guess differently (`.rdf` → `xml`, explicit `turtle` given); the URL extension
+  alone decides when no `Content-Type` is sent at all; `Content-Type` decides for a URL with no
+  recognisable extension, for both `application/rdf+xml` and `application/ld+json`; neither present
+  is refused, message naming `--format`.
+
+Verified: `poetry run pytest tests/test_management/test_sources.py -q` (20 passed), `ruff check` +
+`ruff format --check` + `mypy` + `deptry .` on the two changed files (rdflib is already a runtime
+dependency; no new import surface for deptry to flag).
+
 ## Gates
 
 - **Spec gate:** approved 2026-08-10 by SamuelJennings. No conditions.
