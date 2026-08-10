@@ -23,6 +23,12 @@ from django.db.models import Model, UniqueConstraint
 from django.utils.functional import Promise
 from django.utils.text import Truncator
 
+from controlled_vocabularies.exchange.report import (
+    NormalizedEntry,
+    NormalizedReason,
+    SetAsideEntry,
+    SetAsideReason,
+)
 from controlled_vocabularies.models import (
     Collection,
     CollectionMember,
@@ -194,6 +200,74 @@ class TestStaticUriValidationMessages:
         assert "%(uri)s" in str(err.message), "message lacks a named %(uri)s placeholder"
         assert err.params == {"uri": "http://exa℀mple.com/x"}
         assert err.code == "static_uri_unparseable"
+
+
+# --- FS-007: the two new closed-vocabulary import report reasons are translatable, named-placeholder messages ---
+
+
+class TestImportLanguageMessagesUseNamedPlaceholders:
+    """Article XII / SC-018 — this feature adds two entries to the importer's
+    closed reason vocabularies (``report.py``): ``NormalizedReason.LANGUAGE_SUBSTITUTION``
+    and the contest-loser ``SetAsideReason.VARIANT_NOT_KEPT``. Each must be
+    lazily translatable and carry only named placeholders, the same standard
+    the field-metadata and validation-message tests above hold every other
+    curator-facing message to.
+    """
+
+    def test_language_substitution_reason_message_uses_named_placeholders(self):
+        # FR-006/FR-012: a value stored under a configured language other than its
+        # published tag names both the published tag and the language it was stored
+        # under, via named placeholders rather than positional ones.
+        assert isinstance(NormalizedReason.LANGUAGE_SUBSTITUTION.template, Promise), (
+            "LANGUAGE_SUBSTITUTION template is not lazily translatable"
+        )
+        template = str(NormalizedReason.LANGUAGE_SUBSTITUTION.template)
+        assert "%(language)s" in template and "%(kept_as)s" in template, (
+            "LANGUAGE_SUBSTITUTION template lacks named %(language)s/%(kept_as)s placeholders"
+        )
+        entry = NormalizedEntry(
+            reason=NormalizedReason.LANGUAGE_SUBSTITUTION,
+            subject="https://example.org/vocab/rocks/granite",
+            params={"language": "en-gb", "kept_as": "en"},
+        )
+        rendered = entry.render()
+        assert "en-gb" in rendered
+        assert "en" in rendered
+
+    def test_the_kept_as_placeholder_actually_interpolates_its_own_value(self):
+        # T027 — CORR-004/SEC-005: the sibling test above asserts "en" in
+        # rendered, which the "en-gb" it also asserts is a substring of, so it
+        # would still pass even if %(kept_as)s stopped interpolating entirely.
+        # Non-overlapping values (the shape test_variant_not_kept_reason_message
+        # already uses) so this assertion actually depends on the placeholder.
+        entry = NormalizedEntry(
+            reason=NormalizedReason.LANGUAGE_SUBSTITUTION,
+            subject="https://example.org/vocab/rocks/granite",
+            params={"language": "en-gb", "kept_as": "zh-hans"},
+        )
+        rendered = entry.render()
+        assert "en-gb" in rendered
+        assert "zh-hans" in rendered
+
+    def test_variant_not_kept_reason_message_uses_named_placeholders(self):
+        # FR-005/FR-012: a contest loser names the published tag it lost and the
+        # configured language it lost to, via named placeholders rather than positional
+        # ones.
+        assert isinstance(SetAsideReason.VARIANT_NOT_KEPT.template, Promise), (
+            "VARIANT_NOT_KEPT template is not lazily translatable"
+        )
+        template = str(SetAsideReason.VARIANT_NOT_KEPT.template)
+        assert "%(language)s" in template and "%(kept_as)s" in template, (
+            "VARIANT_NOT_KEPT template lacks named %(language)s/%(kept_as)s placeholders"
+        )
+        entry = SetAsideEntry(
+            reason=SetAsideReason.VARIANT_NOT_KEPT,
+            subject="https://example.org/vocab/rocks/granite",
+            params={"language": "en-us", "kept_as": "en-gb"},
+        )
+        rendered = entry.render()
+        assert "en-us" in rendered
+        assert "en-gb" in rendered
 
 
 # --- Article XIII: indexing is deliberate on the two new models ---

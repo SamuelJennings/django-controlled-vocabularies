@@ -1,0 +1,16 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+# T005/SC-010: the vocabulary declares itself in de-at, a variant of the
+# configured "de" — the default-language resolution path (decisions.md D9).
+
+<http://example.org/farben/>
+    a skos:ConceptScheme ;
+    skos:prefLabel "Farben"@de-at .
+
+<http://example.org/farben/rot>
+    a skos:Concept ;
+    skos:inScheme <http://example.org/farben/> ;
+    skos:prefLabel "Rot"@de-at ;
+    skos:altLabel "Karmesinrot"@de-at ;
+    skos:note "Eine der Grundfarben."@de-at .

@@ -8,22 +8,32 @@ before rdflib ever sees it.
 """
 
 import re
+import threading
 from pathlib import Path
 
 import pytest
 import rdflib
+from django.conf import global_settings
+from django.conf import settings as django_settings
+from django.core.exceptions import ValidationError
 from django.db import connection
+from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils.functional import Promise
 
 import controlled_vocabularies.exchange as exchange
+from controlled_vocabularies import conf
+from controlled_vocabularies.exchange.languages import LanguageMatcher
 from controlled_vocabularies.exchange.report import FatalReason, NormalizedReason, SetAsideReason
 from controlled_vocabularies.exchange.safety import UnsafeJsonLdError, UnsafeRdfXmlError
 from controlled_vocabularies.exchange.skos import (
+    ConceptImporter,
+    SchemeResolver,
     SkosGraph,
     SkosImportError,
     SkosImportFailed,
     import_skos,
+    unique_slug_for_identifier,
 )
 from controlled_vocabularies.models import (
     Collection,
@@ -148,6 +158,121 @@ class TestReadGraph:
         assert not ConceptScheme.objects.filter(
             static_uri__startswith="http://example.org/SECRET-FROM-LOCAL-FILE/"
         ).exists()
+
+
+class TestPreferredLabelTagCounts:
+    """T002 — the predominance count a variant contest is decided over
+    (research.md R2, decisions.md D4/D5): how often each published tag appears
+    across the concept nodes' own ``skos:prefLabel`` values, that population
+    and no other."""
+
+    def test_counts_reflect_the_whole_file_not_any_one_concept(self, tmp_path):
+        path = tmp_path / "counts.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/v/> a skos:ConceptScheme ;
+                skos:prefLabel "V"@en .
+
+            <http://example.org/v/a> a skos:Concept ;
+                skos:inScheme <http://example.org/v/> ;
+                skos:prefLabel "A"@en-gb .
+
+            <http://example.org/v/b> a skos:Concept ;
+                skos:inScheme <http://example.org/v/> ;
+                skos:prefLabel "B"@en-gb, "B2"@en-us .
+            """
+        )
+        skos_graph = SkosGraph.from_file(path)
+        concept_nodes = sorted(skos_graph.graph.subjects(rdflib.RDF.type, SKOS.Concept), key=str)
+        counts = skos_graph.preferred_label_tag_counts(concept_nodes)
+        assert counts == {"en-gb": 2, "en-us": 1}
+
+    def test_case_varying_tags_for_one_language_fold_into_one_count(self, tmp_path):
+        # CORR-003/SEC-003: rdflib preserves published case per literal, but a
+        # re-cased tag is not a different language (RFC 5646/RDF 1.1) — two
+        # concepts publishing "en-GB" and "en-gb" respectively must be one
+        # population, not two.
+        path = tmp_path / "case_counts.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/v/> a skos:ConceptScheme ;
+                skos:prefLabel "V"@en .
+
+            <http://example.org/v/a> a skos:Concept ;
+                skos:inScheme <http://example.org/v/> ;
+                skos:prefLabel "A"@en-GB .
+
+            <http://example.org/v/b> a skos:Concept ;
+                skos:inScheme <http://example.org/v/> ;
+                skos:prefLabel "B"@en-gb .
+            """
+        )
+        skos_graph = SkosGraph.from_file(path)
+        concept_nodes = sorted(skos_graph.graph.subjects(rdflib.RDF.type, SKOS.Concept), key=str)
+        counts = skos_graph.preferred_label_tag_counts(concept_nodes)
+        assert counts == {"en-gb": 2}
+
+    def test_counts_exclude_the_scheme_and_collection_nodes_own_labels(self, tmp_path):
+        # Counted graph-wide, this would additionally sweep the scheme's and the
+        # collection's own de-tagged skos:prefLabel — silently changing the
+        # already-shipped determine_default_language rule (T002, D4/D5).
+        path = tmp_path / "scope.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/v/> a skos:ConceptScheme ;
+                skos:prefLabel "V"@de .
+
+            <http://example.org/v/collection/x> a skos:Collection ;
+                skos:prefLabel "X"@de ;
+                skos:member <http://example.org/v/a> .
+
+            <http://example.org/v/a> a skos:Concept ;
+                skos:inScheme <http://example.org/v/> ;
+                skos:prefLabel "A"@en-gb .
+            """
+        )
+        skos_graph = SkosGraph.from_file(path)
+        concept_nodes = sorted(skos_graph.graph.subjects(rdflib.RDF.type, SKOS.Concept), key=str)
+        counts = skos_graph.preferred_label_tag_counts(concept_nodes)
+        assert counts == {"en-gb": 1}
+
+
+class TestSkosImporterWiresOneMatcherToBothResolvers:
+    """T002 — ``SkosImporter.run`` builds one ``LanguageMatcher`` per run from
+    the concept nodes' predominance counts and passes it to ``SchemeResolver``
+    and ``ConceptImporter`` as a constructor argument, rather than either
+    building its own (research.md R2, plan.md "One winner, one computation")."""
+
+    def test_scheme_resolver_and_concept_importer_share_the_same_matcher_instance(self, db, monkeypatch):
+        captured = {}
+        original_scheme_resolver_init = SchemeResolver.__init__
+        original_concept_importer_init = ConceptImporter.__init__
+
+        def spy_scheme_resolver_init(self, *args, **kwargs):
+            captured["scheme_resolver"] = kwargs["matcher"]
+            original_scheme_resolver_init(self, *args, **kwargs)
+
+        def spy_concept_importer_init(self, *args, **kwargs):
+            captured["concept_importer"] = kwargs["matcher"]
+            original_concept_importer_init(self, *args, **kwargs)
+
+        monkeypatch.setattr(SchemeResolver, "__init__", spy_scheme_resolver_init)
+        monkeypatch.setattr(ConceptImporter, "__init__", spy_concept_importer_init)
+
+        report = import_skos(FIXTURES / "rocks.ttl")
+
+        assert report.fatal == []
+        assert isinstance(captured["scheme_resolver"], LanguageMatcher)
+        assert captured["scheme_resolver"] is captured["concept_importer"]
 
 
 class TestImportSkosVocabulary:
@@ -277,6 +402,130 @@ class TestImportedVocabularyDefaultLanguage:
         assert scheme.default_language == ""
 
 
+class TestDefaultLanguageResolvesThroughTheMatcher:
+    """T006 — FR-007/decisions.md D9: the vocabulary's default language is
+    resolved by the same base-language matching rule as everything else, so a
+    vocabulary declaring itself in a variant of a configured language
+    resolves to that configured language rather than falling back to the
+    site's own default (the failure D9 describes)."""
+
+    def test_a_vocabulary_declaring_itself_in_a_variant_of_a_configured_language_resolves_to_it(self, db):
+        import_skos(FIXTURES / "declares-de-at.ttl")
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/farben/")
+        assert scheme.default_language == "de"
+        assert scheme.effective_default_language == "de"
+
+    def test_the_commonest_concept_language_fallback_also_resolves_through_the_matcher(self, db, tmp_path):
+        # The scheme itself declares no single language (two tags on its own
+        # prefLabel), so determine_default_language falls back to the
+        # commonest language among the concepts' own preferred labels — that
+        # fallback must resolve through the matcher too, not just the
+        # declared-language branch.
+        path = tmp_path / "commonest.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/hues/> a skos:ConceptScheme ;
+                skos:prefLabel "Hues"@en-gb, "Farben"@de .
+
+            <http://example.org/hues/a> a skos:Concept ;
+                skos:inScheme <http://example.org/hues/> ;
+                skos:prefLabel "Red"@en-gb .
+
+            <http://example.org/hues/b> a skos:Concept ;
+                skos:inScheme <http://example.org/hues/> ;
+                skos:prefLabel "Blue"@en-gb .
+            """
+        )
+        import_skos(path)
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/hues/")
+        assert scheme.default_language == "en"
+        assert scheme.effective_default_language == "en"
+
+    def test_a_vocabulary_whose_declared_language_shares_no_base_with_any_configured_language_still_falls_back(
+        self, db
+    ):
+        # Regression: unchanged from #50 — a declared language with no
+        # configured base at all still falls back to the site default.
+        import_skos(FIXTURES / "unconfigured_language_vocabulary.ttl")
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/geology2/")
+        assert scheme.effective_default_language == "en"
+
+
+class TestDefaultLanguageCommonestFallbackFoldsCaseLikeThePreferredLabelTally:
+    """T040 — FR-001/FR-007, decisions.md D34: ``SkosGraph.preferred_label_tag_counts`` folds
+    its keys case-insensitively (``key = language.lower()``), but
+    ``SchemeResolver.determine_default_language`` held a character-for-character copy of the
+    same walk over the same concept nodes and the same predicate *without* the fold — so
+    ``EN-GB`` and ``en-gb`` split one population's vote across two tally keys instead of
+    counting as the one published tag FR-001 says they are. A vocabulary published 60%
+    ``en-gb`` (mixed-case) and 40% ``fr`` therefore resolved its default language to ``fr``,
+    setting aside six of its ten concepts as ``NO_PREFERRED_LABEL``. The fix is a deletion, not
+    an edit (Article XV): ``determine_default_language`` calls ``preferred_label_tag_counts``
+    instead of keeping its own copy.
+    """
+
+    def _write(self, tmp_path: Path) -> Path:
+        lines = [
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .",
+            # Two languages on the scheme's own prefLabel so declared_languages has len != 1
+            # and determine_default_language falls through to the commonest-concept branch.
+            '<http://example.org/casetally/> a skos:ConceptScheme ; skos:prefLabel "Hues"@en-gb, "Farben"@de .',
+        ]
+        for i in range(4):
+            lines.append(
+                f"<http://example.org/casetally/fr{i}> a skos:Concept ; "
+                f'skos:inScheme <http://example.org/casetally/> ; skos:prefLabel "Rouge {i}"@fr .'
+            )
+        for i in range(3):
+            lines.append(
+                f"<http://example.org/casetally/upper{i}> a skos:Concept ; "
+                f'skos:inScheme <http://example.org/casetally/> ; skos:prefLabel "Red {i}"@EN-GB .'
+            )
+        for i in range(3):
+            lines.append(
+                f"<http://example.org/casetally/lower{i}> a skos:Concept ; "
+                f'skos:inScheme <http://example.org/casetally/> ; skos:prefLabel "Red {i}"@en-gb .'
+            )
+        path = tmp_path / "case_tally.ttl"
+        path.write_text("\n".join(lines))
+        return path
+
+    def test_a_published_tag_split_across_two_cases_is_counted_as_one_population(self, db, tmp_path):
+        path = self._write(tmp_path)
+        with override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]):
+            report = import_skos(path)
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/casetally/")
+        # en-gb (3 + 3 = 6, folded) outnumbers fr (4); en-gb shares its base with the
+        # configured "en", so the vocabulary's default language resolves to "en" — not "fr",
+        # which is where the unfolded tally's 4-vs-3-vs-3 split would send it.
+        assert scheme.effective_default_language == "en"
+        assert report.fatal == []
+
+    def test_the_predominant_en_gb_population_is_not_wrongly_set_aside(self, db, tmp_path):
+        # The vocabulary's default language resolves to "en" (the fix): every en-gb-labelled
+        # concept has a preferred label in it (via the matcher's base-language match) and
+        # imports. Under the bug, default_language resolved to "fr" instead, and these six
+        # concepts — having no French label at all — were wrongly set aside as
+        # NO_PREFERRED_LABEL. The four fr-only concepts have no English label either way, so
+        # their own exclusion is correct and not asserted against here.
+        path = self._write(tmp_path)
+        with override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]):
+            report = import_skos(path)
+        en_gb_uris = {f"http://example.org/casetally/upper{i}" for i in range(3)} | {
+            f"http://example.org/casetally/lower{i}" for i in range(3)
+        }
+        assert set(Concept.objects.filter(static_uri__in=en_gb_uris).values_list("static_uri", flat=True)) == en_gb_uris
+        wrongly_set_aside = {
+            entry.subject
+            for entry in report.set_aside
+            if entry.reason is SetAsideReason.NO_PREFERRED_LABEL and entry.subject in en_gb_uris
+        }
+        assert wrongly_set_aside == set()
+
+
 class TestImportConcepts:
     """T009 — concepts land inside the vocabulary being imported, each
     holding its published identifier and its default-language preferred
@@ -335,6 +584,410 @@ class TestImportConcepts:
         assert "http://example.org/rocks/granite" not in report.created
 
 
+class TestConceptLabelIsSelectedByTheWinnerRule:
+    """T007 — FR-002/FR-003: ``Concept.label`` is chosen by ``LanguageMatcher.resolve_winner``
+    (T021), the same rule ``import_labels``'s own surplus report reads, rather than exact tag
+    equality — so a concept whose only preferred label is a variant of the default language still
+    names the concept, and an exact match is never displaced by a more predominant variant."""
+
+    def test_a_concept_whose_only_preferred_label_is_a_variant_of_the_default_language_still_names_it(self, db):
+        import_skos(FIXTURES / "declares-de-at.ttl")
+        rot = Concept.objects.get(static_uri="http://example.org/farben/rot")
+        assert rot.label == "Rot"
+        assert rot.slug == "rot"
+
+    def test_an_exact_match_is_not_displaced_by_a_more_predominant_variant(self, db, tmp_path):
+        # "en-gb" is the predominant tag across the file (three occurrences),
+        # but the target concept also carries an exact "en" match, which
+        # FR-002 says always wins regardless of predominance.
+        path = tmp_path / "exact_wins.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/exactwins/> a skos:ConceptScheme ;
+                skos:prefLabel "Exact wins"@en .
+
+            <http://example.org/exactwins/other1> a skos:Concept ;
+                skos:inScheme <http://example.org/exactwins/> ;
+                skos:prefLabel "Other"@en-gb .
+
+            <http://example.org/exactwins/other2> a skos:Concept ;
+                skos:inScheme <http://example.org/exactwins/> ;
+                skos:prefLabel "Other"@en-gb .
+
+            <http://example.org/exactwins/target> a skos:Concept ;
+                skos:inScheme <http://example.org/exactwins/> ;
+                skos:prefLabel "Alpha"@en, "Beta"@en-gb .
+            """
+        )
+        import_skos(path)
+        target = Concept.objects.get(static_uri="http://example.org/exactwins/target")
+        assert target.label == "Alpha"
+        # T029/decisions.md D35: the slug is derived from the published
+        # identifier's own last segment, not from the winning label.
+        assert target.slug == "target"
+
+
+class TestLabelsNotesAndNamesResolveThroughTheMatcher:
+    """T008 — FR-001, call sites 3/4/5/6/7/8: ``import_labels`` and ``_import_notes`` store a
+    matched value under its resolved configured language rather than comparing raw published tags,
+    and ``SkosGraph.first_literal``'s ``language=`` filter — read for a vocabulary's own name and
+    description and for a collection's name — resolves through the matcher too."""
+
+    def test_an_en_only_vocabulary_imports_into_an_en_gb_configured_site(self, db):
+        # SC-001: general-to-specific. rocks.ttl's own content is unmodified;
+        # only the site's configured languages narrow to en-gb alone.
+        with override_settings(LANGUAGES=[("en-gb", "British English")]):
+            report = import_skos(FIXTURES / "rocks.ttl")
+            assert report.fatal == []
+            igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
+            assert igneous.label == "Igneous rock"
+            assert igneous.definition("en-gb") == "Rock formed by the cooling and solidification of magma or lava."
+            granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+            assert granite.alt_labels("en-gb") == ["Magma rock"]
+            assert granite.hidden_labels("en-gb") == ["Granit rock"]
+
+    def test_an_en_gb_only_vocabulary_imports_into_an_en_configured_site(self, db):
+        # SC-002: specific-to-general, the direction that stored nothing before this feature.
+        report = import_skos(FIXTURES / "en-gb-only.ttl")
+        assert report.fatal == []
+        colour = Concept.objects.get(static_uri="http://example.org/colours-gb/colour")
+        assert colour.label == "Colour"
+        assert colour.alt_labels("en") == ["Hue"]
+        assert colour.notes("en") == ["The visible spectral quality of light."]
+
+    def test_a_de_at_published_vocabulary_on_a_de_site_imports_its_preferred_labels_without_raising(self, db):
+        # SC-010's write half: T006 and T007 alone still stop short of this — the concept's own
+        # alt label and note are also tagged de-at and must resolve through the matcher too.
+        report = import_skos(FIXTURES / "declares-de-at.ttl")
+        assert report.fatal == []
+        rot = Concept.objects.get(static_uri="http://example.org/farben/rot")
+        assert rot.label == "Rot"
+        assert rot.alt_labels("de") == ["Karmesinrot"]
+        assert rot.notes("de") == ["Eine der Grundfarben."]
+
+    def test_a_tag_differing_only_in_case_is_treated_as_an_exact_match(self, db, tmp_path):
+        # SC-004.
+        path = tmp_path / "case.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/case/> a skos:ConceptScheme ;
+                skos:prefLabel "Case"@en .
+
+            <http://example.org/case/item> a skos:Concept ;
+                skos:inScheme <http://example.org/case/> ;
+                skos:prefLabel "Item"@en, "Artikel"@DE .
+            """
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        item = Concept.objects.get(static_uri="http://example.org/case/item")
+        assert item.preferred_label("de") == "Artikel"
+
+    def test_a_tag_sharing_no_base_language_with_any_configured_language_is_still_set_aside(self, db, tmp_path):
+        # SC-003.
+        path = tmp_path / "nobase.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/nobase/> a skos:ConceptScheme ;
+                skos:prefLabel "No base"@en .
+
+            <http://example.org/nobase/item> a skos:Concept ;
+                skos:inScheme <http://example.org/nobase/> ;
+                skos:prefLabel "Item"@en ;
+                skos:altLabel "アイテム"@ja .
+            """
+        )
+        report = import_skos(path)
+        item = Concept.objects.get(static_uri="http://example.org/nobase/item")
+        assert item.alt_labels("ja") == []
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.UNCONFIGURED_LANGUAGE]
+        assert len(entries) == 1
+        assert entries[0].subject == item.static_uri
+        assert entries[0].params["language"] == "ja"
+
+    def test_the_vocabularys_own_name_and_description_resolve_through_the_matcher_too(self, db, tmp_path):
+        # Call sites 6/7: without this, first_literal's exact filter finds no "de" literal and
+        # falls back to sorted(...)[0] across every language in the file.
+        path = tmp_path / "named.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+            @prefix dcterms: <http://purl.org/dc/terms/> .
+
+            <http://example.org/named/> a skos:ConceptScheme ;
+                skos:prefLabel "Aardvark scheme"@fr, "Named scheme"@de-at ;
+                dcterms:description "Aardvark description"@fr, "Named description"@de-at .
+
+            <http://example.org/named/item> a skos:Concept ;
+                skos:inScheme <http://example.org/named/> ;
+                skos:prefLabel "Item"@de-at .
+            """
+        )
+        import_skos(path)
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/named/")
+        assert scheme.effective_default_language == "de"
+        assert scheme.name == "Named scheme"
+        assert scheme.description == "Named description"
+
+    def test_a_collections_own_name_resolves_through_the_matcher_too(self, db, tmp_path):
+        # Call site 8.
+        path = tmp_path / "named_collection.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/namedcoll/> a skos:ConceptScheme ;
+                skos:prefLabel "Named collection scheme"@de .
+
+            <http://example.org/namedcoll/item> a skos:Concept ;
+                skos:inScheme <http://example.org/namedcoll/> ;
+                skos:prefLabel "Item"@de .
+
+            <http://example.org/namedcoll/coll> a skos:Collection ;
+                skos:prefLabel "Aardvark collection"@fr, "Named collection"@de-at ;
+                skos:member <http://example.org/namedcoll/item> .
+            """
+        )
+        import_skos(path)
+        collection = Collection.objects.get(static_uri="http://example.org/namedcoll/coll")
+        assert collection.name == "Named collection"
+
+
+class TestVocabularyAndCollectionNameSubstitutionIsReported:
+    """T027 — CORR-002, FR-006/Article XI, decisions.md D34: a vocabulary's name,
+    a vocabulary's description, and a collection's name are all filled by variant
+    matching through ``_localized_literal`` exactly as ``Concept.label`` is — but
+    unlike ``Concept.label``, none of the three reported a ``LANGUAGE_SUBSTITUTION``.
+    The same one-line guard ``Concept.label``'s own write already applies."""
+
+    def test_the_vocabularys_name_and_description_are_each_reported_as_a_substitution(self, db, tmp_path):
+        path = tmp_path / "named.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+            @prefix dcterms: <http://purl.org/dc/terms/> .
+
+            <http://example.org/named/> a skos:ConceptScheme ;
+                skos:prefLabel "Aardvark scheme"@fr, "Named scheme"@de-at ;
+                dcterms:description "Aardvark description"@fr, "Named description"@de-at .
+
+            <http://example.org/named/item> a skos:Concept ;
+                skos:inScheme <http://example.org/named/> ;
+                skos:prefLabel "Item"@de-at .
+            """
+        )
+        report = import_skos(path)
+        scheme_uri = "http://example.org/named/"
+        matching = [
+            entry
+            for entry in report.normalized
+            if entry.reason is NormalizedReason.LANGUAGE_SUBSTITUTION and entry.subject == scheme_uri
+        ]
+        # One entry each for the name and the description, both de-at -> de.
+        assert len(matching) == 2
+        assert all(entry.params == {"language": "de-at", "kept_as": "de"} for entry in matching)
+
+    def test_a_collections_name_is_reported_as_a_substitution(self, db, tmp_path):
+        path = tmp_path / "named_collection.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/namedcoll/> a skos:ConceptScheme ;
+                skos:prefLabel "Named collection scheme"@de .
+
+            <http://example.org/namedcoll/item> a skos:Concept ;
+                skos:inScheme <http://example.org/namedcoll/> ;
+                skos:prefLabel "Item"@de .
+
+            <http://example.org/namedcoll/coll> a skos:Collection ;
+                skos:prefLabel "Aardvark collection"@fr, "Named collection"@de-at ;
+                skos:member <http://example.org/namedcoll/item> .
+            """
+        )
+        report = import_skos(path)
+        collection = Collection.objects.get(static_uri="http://example.org/namedcoll/coll")
+        matching = [
+            entry
+            for entry in report.normalized
+            if entry.reason is NormalizedReason.LANGUAGE_SUBSTITUTION and entry.subject == collection.static_uri
+        ]
+        assert len(matching) == 1
+        assert matching[0].params == {"language": "de-at", "kept_as": "de"}
+
+    def test_an_exact_match_scheme_name_is_not_reported_as_a_substitution(self, db):
+        # SC-004: no substitution when the scheme's own name is published in
+        # exactly the resolved default language — declares-de-at.ttl's own
+        # de-at is a variant of de, so it must not appear here.
+        report = import_skos(FIXTURES / "rocks.ttl")
+        scheme_uri = "http://example.org/rocks/"
+        assert not any(
+            entry.reason is NormalizedReason.LANGUAGE_SUBSTITUTION and entry.subject == scheme_uri
+            for entry in report.normalized
+        )
+
+
+class TestLanguageSubstitutionIsReported:
+    """T009 — FR-006/SC-009: every value stored under a configured language other than the tag
+    it was published under is reported as a substitution, distinguishable from a value that was
+    not stored at all, and never counted in ``language_account()`` — that account is for what a
+    curator could recover by configuring something, and a substitution already made it in."""
+
+    def test_the_concepts_label_alt_label_and_note_are_each_reported_as_a_substitution(self, db):
+        report = import_skos(FIXTURES / "declares-de-at.ttl")
+        rot_uri = "http://example.org/farben/rot"
+        substitutions = {
+            (entry.params["language"], entry.params["kept_as"])
+            for entry in report.normalized
+            if entry.reason is NormalizedReason.LANGUAGE_SUBSTITUTION and entry.subject == rot_uri
+        }
+        assert substitutions == {("de-at", "de")}
+        assert (
+            len(
+                [
+                    entry
+                    for entry in report.normalized
+                    if entry.reason is NormalizedReason.LANGUAGE_SUBSTITUTION and entry.subject == rot_uri
+                ]
+            )
+            == 3
+        )  # the label, the alternative label, and the note
+
+    def test_a_substitution_is_distinguishable_from_a_value_that_was_not_stored(self, db, tmp_path):
+        path = tmp_path / "mixed.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/mixed/> a skos:ConceptScheme ;
+                skos:prefLabel "Mixed"@en .
+
+            <http://example.org/mixed/item> a skos:Concept ;
+                skos:inScheme <http://example.org/mixed/> ;
+                skos:prefLabel "Item"@en ;
+                skos:altLabel "Article"@en-gb, "記事"@ja .
+            """
+        )
+        report = import_skos(path)
+        item = Concept.objects.get(static_uri="http://example.org/mixed/item")
+        assert item.alt_labels("en") == ["Article"]
+        substitution_subjects = {
+            entry.subject for entry in report.normalized if entry.reason is NormalizedReason.LANGUAGE_SUBSTITUTION
+        }
+        not_stored_subjects = {
+            entry.subject for entry in report.set_aside if entry.reason is SetAsideReason.UNCONFIGURED_LANGUAGE
+        }
+        assert item.static_uri in substitution_subjects
+        assert item.static_uri in not_stored_subjects
+        substitution_languages = {
+            entry.params["language"]
+            for entry in report.normalized
+            if entry.reason is NormalizedReason.LANGUAGE_SUBSTITUTION and entry.subject == item.static_uri
+        }
+        assert substitution_languages == {"en-gb"}
+        not_stored_languages = {
+            entry.params["language"]
+            for entry in report.set_aside
+            if entry.reason is SetAsideReason.UNCONFIGURED_LANGUAGE and entry.subject == item.static_uri
+        }
+        assert not_stored_languages == {"ja"}
+
+    def test_a_substitution_does_not_appear_in_the_language_account(self, db):
+        report = import_skos(FIXTURES / "declares-de-at.ttl")
+        assert "de-at" not in report.language_account()
+
+    def test_an_exact_case_insensitive_match_is_not_reported_as_a_substitution(self, db, tmp_path):
+        # SC-004: a case-only difference is an exact match, not a variant.
+        path = tmp_path / "case_no_substitution.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/casesub/> a skos:ConceptScheme ;
+                skos:prefLabel "Case"@en .
+
+            <http://example.org/casesub/item> a skos:Concept ;
+                skos:inScheme <http://example.org/casesub/> ;
+                skos:prefLabel "Item"@en, "Artikel"@DE .
+            """
+        )
+        report = import_skos(path)
+        assert report.normalized == []
+
+
+class TestTheLanguageAccountReflectsARealImport:
+    """T011/T012 — FR-008/SC-011/SC-012/SC-013: :meth:`ImportReport.language_account`
+    driven from a real import through ``import_skos``, the way a curator
+    actually reaches it — not a hand-built report, which ``TestLanguageAccount``
+    in ``test_report.py`` already covers at the unit level (T004). The account
+    must cover every value not stored for a language reason and no value that
+    was stored, and must be present and empty rather than absent after a run
+    that left nothing behind, so #52 can render from it without asking which
+    kind of run produced it."""
+
+    def test_the_account_covers_every_unconfigured_value_and_no_stored_value(self, db, tmp_path):
+        path = tmp_path / "multilingual.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/multiling/> a skos:ConceptScheme ;
+                skos:prefLabel "Multiling"@en .
+
+            <http://example.org/multiling/a> a skos:Concept ;
+                skos:inScheme <http://example.org/multiling/> ;
+                skos:prefLabel "A"@en ;
+                skos:altLabel "A1"@es, "A2"@es .
+
+            <http://example.org/multiling/b> a skos:Concept ;
+                skos:inScheme <http://example.org/multiling/> ;
+                skos:prefLabel "B"@en ;
+                skos:note "B1"@ja .
+
+            <http://example.org/multiling/c> a skos:Concept ;
+                skos:inScheme <http://example.org/multiling/> ;
+                skos:prefLabel "C"@en ;
+                skos:altLabel "C1"@it ;
+                skos:note "C2"@it, "C3"@it .
+            """
+        )
+        report = import_skos(path)
+        assert report.language_account() == {"es": 2, "ja": 1, "it": 3}
+
+        # Covers every value not stored for a language reason...
+        unconfigured = [entry for entry in report.set_aside if entry.reason is SetAsideReason.UNCONFIGURED_LANGUAGE]
+        assert sum(report.language_account().values()) == len(unconfigured)
+
+        # ...and no value that was stored: the en preferred labels landed,
+        # and the account carries nothing under a configured language.
+        assert Concept.objects.get(static_uri="http://example.org/multiling/a").label == "A"
+        assert "en" not in report.language_account()
+
+    def test_present_and_empty_after_an_import_that_leaves_nothing_behind(self, db):
+        # SC-013: rocks.ttl is #50's own established clean-run fixture
+        # (TestReportPopulatedByARealRun pins report.set_aside == [] against
+        # it) — reused rather than duplicated, per decisions.md D21.
+        report = import_skos(FIXTURES / "rocks.ttl")
+        assert report.set_aside == []
+        assert report.language_account() == {}
+
+
 class TestConceptsImpliedByMembershipButNeverGivenAnRdfType:
     """FIX 17 (review, decisions.md D50) — ``concept_nodes`` used to come only
     from ``graph.subjects(rdf.RDF.type, SKOS.Concept)``. A node the file
@@ -387,17 +1040,67 @@ class TestConceptsImpliedByMembershipButNeverGivenAnRdfType:
 
 
 class TestConceptSlugs:
-    """T010 — FR-007/decisions.md D6: an imported concept's slug is derived
-    from its label by the model's own rule, disambiguated by a deterministic
-    numeric suffix when two concepts in one vocabulary derive the same
-    value; never derived from the identifier."""
+    """T029 — FR-017/decisions.md D35: an imported concept's slug is the
+    fragment of its published identifier where it has one, otherwise the
+    last segment of its path — assigned once and never recomputed from a
+    later import, even when the publisher renames the record (SC-026,
+    SC-027). Supersedes D6, which derived the slug from the label: two
+    concepts that happen to share a label no longer collide at all, because
+    the slug no longer reads the label, and a publisher rename that used to
+    move the slug (D6's own deliberate choice) now leaves it alone.
+    """
 
-    def test_two_concepts_sharing_a_label_get_distinct_deterministic_slugs(self, db):
+    def test_a_fragment_identifier_slugs_from_the_fragment(self, db, tmp_path):
+        path = tmp_path / "fragment_identifier.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <https://example.org/v/colours> a skos:ConceptScheme ; skos:prefLabel "Colours"@en .
+
+            <https://example.org/v/colours#colour> a skos:Concept ;
+                skos:inScheme <https://example.org/v/colours> ;
+                skos:prefLabel "Colour"@en .
+            """
+        )
+        import_skos(path)
+        colour = Concept.objects.get(static_uri="https://example.org/v/colours#colour")
+        assert colour.slug == "colour"
+
+    def test_a_path_only_identifier_slugs_from_the_last_path_segment(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
+        # The URI's own last path segment is "igneous"; the label is "Igneous
+        # rock". Under D6 the slug tracked the label ("igneous-rock"); under
+        # D35 it tracks the identifier instead.
+        assert igneous.slug == "igneous"
+
+    def test_a_publisher_rename_leaves_the_slug_and_local_url_unchanged(self, db):
+        # SC-027 — the case D6 deliberately let move, and D35 stops moving.
+        import_skos(FIXTURES / "rocks.ttl")
+        granite_before = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        slug_before = granite_before.slug
+        local_url_before = granite_before.local_url
+        assert granite_before.label == "Granite"
+
+        report = import_skos(FIXTURES / "rocks_updated.ttl")
+
+        granite_after = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        assert "http://example.org/rocks/granite" in report.updated
+        assert granite_after.label == "Granite (revised)"
+        assert granite_after.slug == slug_before
+        assert granite_after.local_url == local_url_before
+
+    def test_two_concepts_sharing_a_label_no_longer_collide_on_slug(self, db):
+        # duplicate_slug.ttl's two concepts share one preferred label
+        # ("Quartz") but have distinct identifiers; D35 slugs from the
+        # identifier, so there is no collision left for this fixture to
+        # exercise (T032 covers identifiers that actually collide).
         import_skos(FIXTURES / "duplicate_slug.ttl")
         first = Concept.objects.get(static_uri="http://example.org/quarry2/quartz-a")
         second = Concept.objects.get(static_uri="http://example.org/quarry2/quartz-b")
-        assert first.slug == "quartz"
-        assert second.slug == "quartz-2"
+        assert first.slug == "quartz-a"
+        assert second.slug == "quartz-b"
         assert first.static_uri != second.static_uri
 
     def test_reimporting_the_identical_file_keeps_each_concept_s_slug(self, db):
@@ -411,13 +1114,700 @@ class TestConceptSlugs:
         assert Concept.objects.get(static_uri="http://example.org/quarry2/quartz-b").slug == second_slug_before
         assert Concept.objects.filter(scheme__static_uri="http://example.org/quarry2/").count() == 2
 
-    def test_slug_is_never_derived_from_the_identifier(self, db):
+
+class TestConceptSlugCollisionIsIdentifierDerived:
+    """T032 — FR-020/SC-029: two concepts whose identifiers end in the same segment (e.g.
+    ``.../a/clay`` and ``.../b/clay``) both import with distinct slugs, and each keeps the slug it
+    had regardless of the order the file declares them in. ``import_concepts`` already processes
+    ``concept_nodes`` in a stable order sorted on the full identifier string (never the order a file
+    happens to declare them in), and ``assign_unique_slug``'s ``taken_slugs`` (FIX 16, D49) reads
+    each concept's own previously-stored slug back before minting a suffix — so once T029 changed the
+    base derivation to the identifier, the existing collision machinery already resolves this the
+    way FR-020 requires, with no separate order-tracking rule needed.
+    """
+
+    def _write(self, tmp_path: Path, name: str, first: str, second: str) -> Path:
+        path = tmp_path / name
+        path.write_text(
+            f"""
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/collision/> a skos:ConceptScheme ; skos:prefLabel "Collision"@en .
+
+            {first}
+            {second}
+            """
+        )
+        return path
+
+    def test_two_identifiers_sharing_a_last_segment_get_distinct_slugs(self, db, tmp_path):
+        a_clay = (
+            "<http://example.org/collision/a/clay> a skos:Concept ; "
+            'skos:inScheme <http://example.org/collision/> ; skos:prefLabel "Clay A"@en .'
+        )
+        b_clay = (
+            "<http://example.org/collision/b/clay> a skos:Concept ; "
+            'skos:inScheme <http://example.org/collision/> ; skos:prefLabel "Clay B"@en .'
+        )
+        path = self._write(tmp_path, "collision.ttl", a_clay, b_clay)
+        import_skos(path)
+
+        a = Concept.objects.get(static_uri="http://example.org/collision/a/clay")
+        b = Concept.objects.get(static_uri="http://example.org/collision/b/clay")
+        assert {a.slug, b.slug} == {"clay", "clay-2"}
+        assert a.slug != b.slug
+
+    def test_each_keeps_its_slug_when_the_file_is_reimported_with_the_records_declared_in_reverse_order(
+        self, db, tmp_path
+    ):
+        a_clay = (
+            "<http://example.org/collision/a/clay> a skos:Concept ; "
+            'skos:inScheme <http://example.org/collision/> ; skos:prefLabel "Clay A"@en .'
+        )
+        b_clay = (
+            "<http://example.org/collision/b/clay> a skos:Concept ; "
+            'skos:inScheme <http://example.org/collision/> ; skos:prefLabel "Clay B"@en .'
+        )
+        first_path = self._write(tmp_path, "collision_first.ttl", a_clay, b_clay)
+        import_skos(first_path)
+        a_slug_before = Concept.objects.get(static_uri="http://example.org/collision/a/clay").slug
+        b_slug_before = Concept.objects.get(static_uri="http://example.org/collision/b/clay").slug
+
+        second_path = self._write(tmp_path, "collision_second.ttl", b_clay, a_clay)
+        import_skos(second_path)
+
+        assert Concept.objects.get(static_uri="http://example.org/collision/a/clay").slug == a_slug_before
+        assert Concept.objects.get(static_uri="http://example.org/collision/b/clay").slug == b_slug_before
+
+
+class TestConceptSchemeSlugFollowsThePublishedIdentifier:
+    """T030 — FR-018/decisions.md D35: a vocabulary's own slug is the fragment of its published
+    identifier where it has one, otherwise the last segment of its path — assigned once and never
+    recomputed, exactly like a concept's (T029). Before this task ``ConceptScheme.save()`` re-derived
+    the slug from ``name`` on every save with no manual mechanism at all, so a vocabulary's name
+    arriving in a different language moved the address of every record it holds (SC-028) — the exact
+    case D35 measured: ``scheme.slug`` going from ``colours`` to ``colors`` with ``static_uri``
+    unchanged throughout.
+    """
+
+    def test_a_scheme_name_arriving_in_a_different_language_does_not_move_the_scheme_or_its_concepts(
+        self, db, tmp_path
+    ):
+        first = tmp_path / "renamed_scheme_first.ttl"
+        first.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/renamedscheme/> a skos:ConceptScheme ; skos:prefLabel "Colours"@en-gb .
+
+            <http://example.org/renamedscheme/clay> a skos:Concept ;
+                skos:inScheme <http://example.org/renamedscheme/> ;
+                skos:prefLabel "Clay"@en-gb .
+            """
+        )
+        second = tmp_path / "renamed_scheme_second.ttl"
+        second.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/renamedscheme/> a skos:ConceptScheme ; skos:prefLabel "Color"@en-us .
+
+            <http://example.org/renamedscheme/clay> a skos:Concept ;
+                skos:inScheme <http://example.org/renamedscheme/> ;
+                skos:prefLabel "Clay"@en-gb .
+            """
+        )
+        with override_settings(LANGUAGES=[("en", "English")]):
+            import_skos(first)
+        scheme_before = ConceptScheme.objects.get(static_uri="http://example.org/renamedscheme/")
+        slug_before = scheme_before.slug
+        clay_before = Concept.objects.get(static_uri="http://example.org/renamedscheme/clay")
+        local_url_before = clay_before.local_url
+
+        with override_settings(LANGUAGES=[("en", "English")]):
+            import_skos(second)
+
+        scheme_after = ConceptScheme.objects.get(static_uri="http://example.org/renamedscheme/")
+        clay_after = Concept.objects.get(static_uri="http://example.org/renamedscheme/clay")
+        assert scheme_after.name == "Color"
+        assert scheme_after.slug == slug_before
+        assert clay_after.local_url == local_url_before
+
+    def test_a_scheme_s_slug_is_the_last_segment_of_its_identifier_not_its_name(self, db):
         import_skos(FIXTURES / "rocks.ttl")
-        igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
-        # The URI's own last path segment is "igneous"; the label is "Igneous
-        # rock". If the slug tracked the identifier it would read "igneous",
-        # not "igneous-rock".
-        assert igneous.slug == "igneous-rock"
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/rocks/")
+        # The URI's own last path segment is "rocks"; the name is "Rock types",
+        # which would slugify to "rock-types" under the superseded rule (D6).
+        assert scheme.slug == "rocks"
+
+
+class TestConceptSchemeSlugCollisionIsIdentifierDerived:
+    """T035 — FR-018/FR-020/SC-028/SC-029, decisions.md D35: two vocabularies whose published
+    identifiers end in the same segment (``.../a/colours``, ``.../b/colours``) are ordinary in
+    SKOS, and T030's identifier-derived scheme slug (:meth:`SchemeResolver.resolve_scheme`) made
+    that an uncaught ``ValidationError`` out of ``ConceptScheme.save()`` — a regression against
+    cd4f1c6, where the slug came from each scheme's own distinct name. Resolved exactly the way
+    ``ConceptImporter.assign_unique_slug`` already resolves a concept collision: the same
+    identifier-derived base, a numeric suffix minted only when the candidate already belongs to a
+    *different* scheme (matched on ``static_uri``, so a scheme reads its own prior slug back to
+    itself and a re-import is stable). ``ConceptScheme.save()`` itself keeps refusing rather than
+    auto-suffixing (research R4) — the importer resolves its own collisions, as it already does
+    for concepts.
+    """
+
+    def _write(self, tmp_path: Path, name: str, uri: str, label: str) -> Path:
+        path = tmp_path / name
+        path.write_text(
+            f"""
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <{uri}> a skos:ConceptScheme ; skos:prefLabel "{label}"@en .
+            """
+        )
+        return path
+
+    def test_two_vocabularies_sharing_a_last_segment_both_import_with_distinct_slugs(self, db, tmp_path):
+        first = self._write(tmp_path, "scheme_collision_a.ttl", "http://a.org/colours", "Colours A")
+        second = self._write(tmp_path, "scheme_collision_b.ttl", "http://b.org/colours", "Colours B")
+
+        import_skos(first)
+        import_skos(second)
+
+        a = ConceptScheme.objects.get(static_uri="http://a.org/colours")
+        b = ConceptScheme.objects.get(static_uri="http://b.org/colours")
+        assert {a.slug, b.slug} == {"colours", "colours-2"}
+        assert a.slug != b.slug
+
+    def test_each_vocabulary_keeps_its_slug_when_its_own_file_is_reimported(self, db, tmp_path):
+        first = self._write(tmp_path, "scheme_collision_a.ttl", "http://a.org/colours", "Colours A")
+        second = self._write(tmp_path, "scheme_collision_b.ttl", "http://b.org/colours", "Colours B")
+        import_skos(first)
+        import_skos(second)
+        a_slug_before = ConceptScheme.objects.get(static_uri="http://a.org/colours").slug
+        b_slug_before = ConceptScheme.objects.get(static_uri="http://b.org/colours").slug
+
+        import_skos(first)
+        import_skos(second)
+
+        assert ConceptScheme.objects.get(static_uri="http://a.org/colours").slug == a_slug_before
+        assert ConceptScheme.objects.get(static_uri="http://b.org/colours").slug == b_slug_before
+
+
+class TestASlugAlreadyStoredIsReadBackNeverRecomputed:
+    """T041 — FR-020, decisions.md D35 (fix cycle 3): a record's slug is minted through
+    ``unique_slug_for_identifier`` only when the record does not already have one; a record
+    that does gets its stored slug read back and left alone. Before this, ``assign_unique_slug``
+    and ``resolve_scheme`` recomputed *every* record's slug on *every* import from whatever else
+    currently occupies the scheme/table — so a record's public address could move for a reason
+    that had nothing to do with its own identifier, whenever something else vacated (or newly
+    claimed) the base slug it was minted against. FR-020 requires the opposite: the same file
+    yields the same slugs on every import, "however it is traversed" — reworded here to "however
+    many times it is imported."
+    """
+
+    def test_a_vocabulary_keeps_its_suffixed_slug_after_a_colliding_sibling_is_deleted(self, db, tmp_path):
+        # (a) — two vocabularies whose identifiers both end in "#terms" import as "terms" and
+        # "terms-2"; deleting the first and re-importing the second's UNCHANGED file must not
+        # move the second's address onto the now-vacant "terms".
+        first = tmp_path / "terms_a.ttl"
+        first.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://a.example/x#terms> a skos:ConceptScheme ; skos:prefLabel "Terms A"@en .\n'
+        )
+        second = tmp_path / "terms_b.ttl"
+        second.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://b.example/x#terms> a skos:ConceptScheme ; skos:prefLabel "Terms B"@en .\n'
+        )
+        import_skos(first)
+        import_skos(second)
+        a = ConceptScheme.objects.get(static_uri="http://a.example/x#terms")
+        b = ConceptScheme.objects.get(static_uri="http://b.example/x#terms")
+        assert {a.slug, b.slug} == {"terms", "terms-2"}
+        b_slug_before = b.slug
+        b_local_url_before = b.local_url
+
+        a.delete()
+        report = import_skos(second)
+
+        b.refresh_from_db()
+        assert b.slug == b_slug_before
+        assert b.local_url == b_local_url_before
+        assert "http://b.example/x#terms" in report.updated
+
+    def test_a_concept_keeps_its_suffixed_slug_after_a_colliding_local_record_is_deleted(self, db, tmp_path):
+        # The same defect at concept granularity: an external concept collides on its base slug
+        # with a *locally authored* concept already occupying it (static_uri=None), gets
+        # suffixed on its first import, and must keep that suffix once the local record is
+        # deleted and the same file is re-imported unchanged.
+        path = tmp_path / "v4.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://v4.example/v4> a skos:ConceptScheme ; skos:prefLabel "V4"@en .\n'
+            "<http://v4.example/v4/one> a skos:Concept ; skos:inScheme <http://v4.example/v4> ; "
+            'skos:prefLabel "One"@en .\n'
+        )
+        import_skos(path)
+        scheme = ConceptScheme.objects.get(static_uri="http://v4.example/v4")
+        local_apple = Concept.objects.create(scheme=scheme, label="Apple")
+        assert local_apple.slug == "apple"
+
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://v4.example/v4> a skos:ConceptScheme ; skos:prefLabel "V4"@en .\n'
+            "<http://v4.example/v4/one> a skos:Concept ; skos:inScheme <http://v4.example/v4> ; "
+            'skos:prefLabel "One"@en .\n'
+            "<http://v4.example/v4/apple> a skos:Concept ; skos:inScheme <http://v4.example/v4> ; "
+            'skos:prefLabel "Apple V4"@en .\n'
+        )
+        import_skos(path)
+        remote_apple = Concept.objects.get(static_uri="http://v4.example/v4/apple")
+        assert remote_apple.slug == "apple-2"
+
+        local_apple.delete()
+        import_skos(path)
+
+        remote_apple.refresh_from_db()
+        assert remote_apple.slug == "apple-2"
+
+    def test_a_collection_keeps_its_suffixed_slug_after_a_colliding_sibling_is_deleted(self, db, tmp_path):
+        # CORR-301 — the same (a) shape at collection granularity, the third record kind: two
+        # collections in one vocabulary whose identifiers both end in "#colours" import as
+        # "colours" and "colours-2"; deleting the first and re-importing a file describing only
+        # the second, UNCHANGED, must not move the second's address onto the now-vacant
+        # "colours". Would fail (moving b to "colours") if CollectionImporter's own `if
+        # created:` guard around minting were removed or never existed.
+        path = tmp_path / "collections_collide.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/collcollide> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            '<http://pub.example/a#colours> a skos:Collection ; skos:prefLabel "Colours A"@en .\n'
+            '<http://pub.example/b#colours> a skos:Collection ; skos:prefLabel "Colours B"@en .\n'
+        )
+        import_skos(path)
+        a = Collection.objects.get(static_uri="http://pub.example/a#colours")
+        b = Collection.objects.get(static_uri="http://pub.example/b#colours")
+        assert {a.slug, b.slug} == {"colours", "colours-2"}
+        b_slug_before = b.slug
+        b_local_url_before = b.local_url
+
+        a.delete()
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/collcollide> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            '<http://pub.example/b#colours> a skos:Collection ; skos:prefLabel "Colours B"@en .\n'
+        )
+        report = import_skos(path)
+
+        b.refresh_from_db()
+        assert b.slug == b_slug_before
+        assert b.local_url == b_local_url_before
+        assert "http://pub.example/b#colours" in report.updated
+
+    def test_a_locally_authored_scheme_concept_and_collection_are_matched_not_duplicated_when_first_imported(
+        self, db, tmp_path
+    ):
+        # (c) — a locally authored scheme "Rocks" (slug "rocks", static_uri NULL) holding a
+        # locally authored concept "Granite" (slug "granite") and a locally authored collection
+        # "Igneous" (slug "igneous"), all static_uri NULL. Importing a file naming those exact
+        # composed local URIs must match all three existing rows via get_by_uri's local-parse
+        # fallback, not recompute a colliding slug for any of them and not create a second row
+        # for any of them. CORR-302: extended with the collection (T048) to also assert that a
+        # record the importer *matched* rather than created gets pinned (`slug_is_manual`) on
+        # all three kinds — D46 names this as the reason `set_slug`/direct attribute assignment
+        # became the write path even for a matched row — and that a subsequent local rename
+        # then leaves every address exactly where it was. Would fail (an address moving after
+        # its own unrelated rename) if any of the three `slug_is_manual = True` assignments on
+        # the matched-row path were ever skipped.
+        scheme = ConceptSchemeFactory(name="Rocks")
+        assert scheme.slug == "rocks"
+        concept = ConceptFactory(scheme=scheme, label="Granite")
+        assert concept.slug == "granite"
+        collection = CollectionFactory(scheme=scheme, name="Igneous")
+        assert collection.slug == "igneous"
+        base = conf.get_base_uri()
+
+        path = tmp_path / "local_rocks.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            f'<{base}/rocks> a skos:ConceptScheme ; skos:prefLabel "Rocks"@en .\n'
+            f"<{base}/rocks/granite> a skos:Concept ; skos:inScheme <{base}/rocks> ; "
+            'skos:prefLabel "Granite"@en .\n'
+            f'<{base}/rocks/collection/igneous> a skos:Collection ; skos:prefLabel "Igneous"@en .\n'
+        )
+        report = import_skos(path)
+
+        assert report.fatal == []
+        assert ConceptScheme.objects.filter(name="Rocks").count() == 1
+        assert Concept.objects.filter(scheme__name="Rocks", label="Granite").count() == 1
+        assert Collection.objects.filter(scheme__name="Rocks", name="Igneous").count() == 1
+        scheme.refresh_from_db()
+        concept.refresh_from_db()
+        collection.refresh_from_db()
+        assert scheme.slug == "rocks"
+        assert concept.slug == "granite"
+        assert collection.slug == "igneous"
+        assert scheme.slug_is_manual is True
+        assert concept.slug_is_manual is True
+        assert collection.slug_is_manual is True
+
+        scheme_url_before, concept_url_before, collection_url_before = (
+            scheme.local_url,
+            concept.local_url,
+            collection.local_url,
+        )
+        scheme.name = "Rock Types"
+        scheme.save()
+        concept.label = "Granitic Rock"
+        concept.save()
+        collection.name = "Igneous Rocks"
+        collection.save()
+
+        assert scheme.local_url == scheme_url_before
+        assert concept.local_url == concept_url_before
+        assert collection.local_url == collection_url_before
+
+
+class TestUniqueSlugForIdentifierTruncationNeverSlicesNegative:
+    """T046 — SEC-303: ``base[: max_length - len(suffix_text)]`` goes negative once a collision
+    suffix is as long as (or longer than) ``max_length``, and Python silently slices from the
+    *end* of the string instead of raising — at ``max_length == len(suffix_text)`` the slice
+    bound is exactly ``0``, and the returned candidate is the bare suffix, with no relationship
+    to the base at all. Unreachable from the three current call sites (all pass 255), fixed by
+    construction anyway with ``max(max_length - len(suffix_text), 1)``, which always keeps at
+    least one character of the base.
+    """
+
+    def test_a_collision_suffix_as_long_as_max_length_does_not_discard_the_base(self):
+        """Reproduces SEC-303's own evidence: with max_length=2, the base 'ab' collides, and the
+        retry appends suffix '-2' (also length 2). The unfixed slice, base[:2 - 2] + '-2', is
+        base[:0] + '-2' == '-2' — the base is gone entirely, and the result is indistinguishable
+        from another record's own base 'b-2'. Would fail (return '-2') without the fix.
+        """
+        result = unique_slug_for_identifier("http://e.org/#ab", {"ab": "other", "b-2": "other2"}, 2)
+        assert result != "-2"
+        assert result.startswith("a")
+
+    def test_a_collision_suffix_longer_than_max_length_still_fits_within_max_length(self):
+        """SEC-405, decisions.md D63 (fix cycle 5): the docstring's own contract is "the returned
+        candidate never exceeds max_length however many collisions it resolves" — true only once
+        the fix below clamps the whole candidate, not only the base. Before it, ``max_length=2``
+        with a two-character suffix returned ``'a-2'`` (length 3): ``base[: max(2 - 2, 1)]`` keeps
+        one base character, but nothing then trims the assembled ``base + suffix`` back down.
+        """
+        result = unique_slug_for_identifier("http://e.org/#ab", {"ab": "other", "b-2": "other2"}, 2)
+        assert len(result) <= 2
+
+    def test_a_normal_collision_is_unaffected_by_the_fix(self):
+        """max_length comfortably larger than any suffix (the shape every real field is in,
+        SlugField(max_length=255)) must keep resolving collisions exactly as before.
+        """
+        taken = {"granite": "other"}
+        result = unique_slug_for_identifier("http://e.org/#granite", taken, 255)
+        assert result == "granite-2"
+
+
+class TestUniqueSlugForIdentifierGivesUpRatherThanLoopingForever:
+    """T056 — CORR-503, decisions.md D66 (fix cycle 6): SEC-405's assembled-candidate clamp (D63)
+    can make two *different* suffixes render as the identical truncated candidate once
+    ``max_length`` is small relative to the suffix text. Reproduced exactly as the round-5 review
+    reported it: with ``max_length=2``, the first retry's candidate ``'a-2'`` clamps to ``'a-'``,
+    and every retry after it clamps to the same ``'a-'`` regardless of how large the suffix grows
+    — a candidate that already belongs to another record (``'a-'`` taken by ``'other2'``) then
+    loops without ever producing a different one. Confirmed hanging (60s+ with no return) before
+    this fix, on a call this module-level helper's own docstring exposes to any direct caller —
+    not reachable through ``import_skos`` today, since all three call sites pass
+    ``SlugField(max_length=255)``.
+    """
+
+    def test_a_collision_that_always_clamps_to_the_same_candidate_gives_up_rather_than_hanging(self):
+        """T061 — CORR-604 (round 6, low): asserting on the return value alone means a
+        regression of the give-up itself hangs this call forever rather than failing — pytest
+        never reaches the assertion below, and CI cannot tell the difference between that and a
+        stuck runner. No ``pytest-timeout`` dependency is added for one test; the call runs in a
+        daemon worker thread with a bounded ``join()`` instead, which is the same "fail within
+        seconds, not never" property using only the standard library. Five seconds is generous
+        for a call that, when it does not hang, returns in microseconds.
+        """
+        result_holder: list[str] = []
+        worker = threading.Thread(
+            target=lambda: result_holder.append(
+                unique_slug_for_identifier("http://e.org/#ab", {"ab": "other", "a-": "other2"}, 2)
+            ),
+            daemon=True,
+        )
+        worker.start()
+        worker.join(timeout=5)
+        assert not worker.is_alive(), "unique_slug_for_identifier did not return within 5s (non-termination regression)"
+        assert result_holder == [""]
+
+    def test_giving_up_does_not_disturb_a_collision_that_would_have_resolved_anyway(self):
+        """The existing SEC-303/SEC-405 fixtures resolve on their very first retry (``'a-'`` is
+        not taken in either), so the give-up path must never fire for them.
+        """
+        result = unique_slug_for_identifier("http://e.org/#ab", {"ab": "other", "b-2": "other2"}, 2)
+        assert result == "a-"
+
+    def test_a_normal_collision_chain_is_unaffected(self):
+        taken = {"granite": "other", "granite-2": "other2"}
+        result = unique_slug_for_identifier("http://e.org/#granite", taken, 255)
+        assert result == "granite-3"
+
+
+class TestUniqueSlugForIdentifierResolvesACollisionEvenWhenTheBaseIsAlreadyMaxLength:
+    """T060 — CORR-601/SEC-604 (round 6, high): D66's give-up (T056, fix cycle 6) seeds ``tried``
+    with ``base`` itself before the loop has generated any candidate. Whenever ``len(base) ==
+    max_length`` and ``base`` ends in ``-2``, the clamp (D63) makes the *first* retry's candidate
+    reproduce ``base`` exactly — ``base[:253] + "-2" == base`` at ``max_length=255`` — so the
+    give-up fires on the very first retry and abandons a collision the next suffix (``-3``)
+    resolves trivially. Reproduced exactly as the round-6 review reported it: two concepts whose
+    identifier fragments both slugify (then truncate to 255 characters) to the identical string
+    ``"a" * 253 + "-2"``.
+    """
+
+    def test_a_255_character_base_ending_in_dash_2_still_resolves_its_collision(self):
+        base = "a" * 253 + "-2"
+        assert len(base) == 255
+        result = unique_slug_for_identifier(f"http://e.org/#{base}", {base: "other"}, 255)
+        assert result != ""
+        assert result != base
+
+    def test_two_concepts_sharing_a_255_character_slug_base_both_import(self, db, tmp_path):
+        """The two fragments the round-6 review reproduced this with — both slugify (and
+        truncate) to the identical 255-character base, so this exercises the give-up through the
+        public ``import_skos``, not only the module-level helper directly.
+        """
+        fragment_a = "a" * 253 + "-2" + "xx"
+        fragment_b = "a" * 253 + "-2" + "yy"
+        path = tmp_path / "t060_collision.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/t060scheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            f"<http://pub.example/t060scheme#{fragment_a}> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/t060scheme> ; skos:prefLabel "Concept A"@en .\n'
+            f"<http://pub.example/t060scheme#{fragment_b}> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/t060scheme> ; skos:prefLabel "Concept B"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        assert report.set_aside == []
+        concepts = Concept.objects.filter(scheme__static_uri="http://pub.example/t060scheme")
+        assert concepts.count() == 2
+        slugs = set(concepts.values_list("slug", flat=True))
+        assert len(slugs) == 2
+
+
+class TestAGiveUpSlugIsReportedNotWrittenOrMislabeled:
+    """T060 — SEC-604 (round 6, low): D66's give-up return (``""``) is checked at
+    ``SchemeResolver.resolve_scheme``'s own call site (``VOCABULARY_SLUG_UNUSABLE``), but not at
+    ``ConceptImporter.assign_unique_slug`` or ``CollectionImporter.import_collections`` — an
+    empty slug from either reached ``save()`` unchecked and was caught only by the model's own
+    manual-slug validation, reported as ``STORED_SLUG_INVALID`` — a reason whose own message says
+    a *stored* slug fails validation, which is false for a record whose slug was never written at
+    all. ``unique_slug_for_identifier`` is monkeypatched to always give up, the shape a
+    to-date-unreachable collision (D51/D63: ~10^250 prior collisions at ``max_length=255``) would
+    produce, without needing to actually construct one.
+    """
+
+    def test_a_concept_s_give_up_slug_is_empty_slug_not_stored_slug_invalid(self, db, tmp_path, monkeypatch):
+        """The scheme itself is pre-created (matched, not created) so the patched give-up is
+        exercised only through the concept's own call site — a *created* scheme would hit
+        ``resolve_scheme``'s own already-guarded call first and refuse the whole run instead.
+        """
+        ConceptSchemeFactory(name="Vocab", static_uri="http://pub.example/sec604scheme")
+        path = tmp_path / "sec604_concept.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec604scheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/sec604scheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec604scheme> ; skos:prefLabel "One"@en .\n'
+        )
+        monkeypatch.setattr(exchange.skos, "unique_slug_for_identifier", lambda *args, **kwargs: "")
+        report = import_skos(path)
+        assert report.fatal == []
+        assert not Concept.objects.filter(static_uri="http://pub.example/sec604scheme#c1").exists()
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.EMPTY_SLUG]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://pub.example/sec604scheme#c1"
+        stored_slug_entries = [
+            entry for entry in report.set_aside if entry.reason is SetAsideReason.STORED_SLUG_INVALID
+        ]
+        assert stored_slug_entries == []
+
+    def test_a_collection_s_give_up_slug_is_empty_slug_not_stored_slug_invalid(self, db, tmp_path, monkeypatch):
+        """Same pre-creation reasoning as the concept test above."""
+        ConceptSchemeFactory(name="Vocab", static_uri="http://pub.example/sec604collscheme")
+        path = tmp_path / "sec604_collection.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec604collscheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/sec604collscheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec604collscheme> ; skos:prefLabel "One"@en .\n'
+            "<http://pub.example/sec604collscheme#grp> a skos:Collection ; "
+            'skos:prefLabel "Group"@en .\n'
+        )
+        monkeypatch.setattr(exchange.skos, "unique_slug_for_identifier", lambda *args, **kwargs: "")
+        report = import_skos(path)
+        assert report.fatal == []
+        assert not Collection.objects.filter(static_uri="http://pub.example/sec604collscheme#grp").exists()
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.EMPTY_SLUG]
+        assert any(entry.subject == "http://pub.example/sec604collscheme#grp" for entry in entries)
+        stored_slug_entries = [
+            entry for entry in report.set_aside if entry.reason is SetAsideReason.STORED_SLUG_INVALID
+        ]
+        assert stored_slug_entries == []
+
+
+class TestSlugAndNameLengthAreBoundedToTheField:
+    """T042 — SEC-002-shaped, decisions.md D35 (fix cycle 3): a published identifier segment or
+    name can be far longer than the field meant to hold it. Nothing on this write path calls
+    ``full_clean()``, so an over-long value lands unchecked on SQLite and raises a bare
+    ``DataError`` on PostgreSQL, aborting the whole run — the same failure shape SEC-002 already
+    guards for a label. ``unique_slug_for_identifier`` now truncates its derived base to the
+    field's own ``max_length`` (never a literal ``255`` written a second time) rather than
+    minting a slug the model would refuse; ``ConceptScheme.name`` and ``Collection.name`` get the
+    same pre-write ``VALUE_TOO_LONG`` set-aside guard ``Concept.label`` already has.
+    """
+
+    def test_a_concept_s_slug_is_truncated_to_the_field_s_max_length(self, db, tmp_path):
+        long_fragment = "a" * 400
+        path = tmp_path / "long_concept_identifier.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/longconcept> a skos:ConceptScheme ; skos:prefLabel "L"@en .\n'
+            f"<http://pub.example/longconcept#{long_fragment}> a skos:Concept ; "
+            "skos:inScheme <http://pub.example/longconcept> ; "
+            'skos:prefLabel "Long"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        concept = Concept.objects.get(static_uri=f"http://pub.example/longconcept#{long_fragment}")
+        max_length = Concept._meta.get_field("slug").max_length
+        assert len(concept.slug) <= max_length
+        concept.full_clean()
+
+    def test_a_scheme_s_slug_is_truncated_to_the_field_s_max_length(self, db, tmp_path):
+        long_fragment = "b" * 400
+        path = tmp_path / "long_scheme_identifier.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            f'<http://pub.example/longscheme#{long_fragment}> a skos:ConceptScheme ; skos:prefLabel "S"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        scheme = ConceptScheme.objects.get(static_uri=f"http://pub.example/longscheme#{long_fragment}")
+        max_length = ConceptScheme._meta.get_field("slug").max_length
+        assert len(scheme.slug) <= max_length
+        scheme.full_clean()
+
+    def test_a_collection_s_slug_is_truncated_to_the_field_s_max_length(self, db, tmp_path):
+        long_fragment = "c" * 400
+        path = tmp_path / "long_collection_identifier.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/longcollection> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            f'<http://pub.example/longcollection#{long_fragment}> a skos:Collection ; skos:prefLabel "Group"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        collection = Collection.objects.get(static_uri=f"http://pub.example/longcollection#{long_fragment}")
+        max_length = Collection._meta.get_field("slug").max_length
+        assert len(collection.slug) <= max_length
+        collection.full_clean()
+
+    def test_a_scheme_name_longer_than_the_field_is_fatal_on_first_import(self, db, tmp_path):
+        """T044, decisions.md D49 (fix cycle 4, ARCH-301/CORR-303/SEC-302): a *created* scheme
+        has no earlier name to fall back to, so an unusable one is fatal rather than stored
+        blank. Overturns the previous version of this test, which asserted
+        ``report.fatal == []`` and only checked ``len(scheme.name) <= max_length`` — a blank
+        name (the actual defect this cycle fixes) satisfies that length check too, so the old
+        assertion could not have caught it.
+        """
+        long_name = "N" * 300
+        path = tmp_path / "long_scheme_name.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            f'<http://pub.example/longschemename> a skos:ConceptScheme ; skos:prefLabel "{long_name}"@en .\n'
+        )
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(path)
+        report = exc_info.value.report
+        assert len(report.fatal) == 1
+        assert report.fatal[0].reason is FatalReason.VOCABULARY_NAME_UNUSABLE
+        assert report.fatal[0].subject == "http://pub.example/longschemename"
+        assert not ConceptScheme.objects.filter(static_uri="http://pub.example/longschemename").exists()
+
+    def test_a_matched_scheme_s_over_long_name_is_still_only_set_aside_keeping_the_old_name(self, db, tmp_path):
+        """The matched-row half of T044: a scheme that already has a name keeps it when a
+        re-import's name is unusable, set aside rather than fatal. Would fail if the new
+        created-only fatal branch fired for a matched row too.
+        """
+        scheme = ConceptSchemeFactory(name="Kept Name", static_uri="http://pub.example/longschemename2")
+        long_name = "N" * 300
+        path = tmp_path / "long_scheme_name_reimport.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            f'<http://pub.example/longschemename2> a skos:ConceptScheme ; skos:prefLabel "{long_name}"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        scheme.refresh_from_db()
+        assert scheme.name == "Kept Name"
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://pub.example/longschemename2"
+
+    def test_a_collection_name_longer_than_the_field_sets_aside_the_whole_collection_on_first_import(
+        self, db, tmp_path
+    ):
+        """T044, decisions.md D49 (fix cycle 4, ARCH-301/CORR-303/SEC-302): a *created*
+        collection has no earlier name to fall back to either — but unlike a scheme, the rest of
+        the file does not need this collection in order to import, so the whole record is set
+        aside (never created) rather than failing the run. Overturns the previous version of
+        this test, which only checked ``len(collection.name) <= max_length`` — a blank name (the
+        actual defect) satisfies that too.
+        """
+        long_name = "N" * 300
+        path = tmp_path / "long_collection_name.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/longcollectionname> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            f'<http://pub.example/longcollectionname#grp> a skos:Collection ; skos:prefLabel "{long_name}"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        assert not Collection.objects.filter(static_uri="http://pub.example/longcollectionname#grp").exists()
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://pub.example/longcollectionname#grp"
+
+    def test_a_matched_collection_s_over_long_name_is_still_only_set_aside_keeping_the_old_name(self, db, tmp_path):
+        """The matched-row half of T044 for a collection: an already-imported collection keeps
+        its stored name, and the collection itself is not removed, when a re-import's name is
+        unusable. Would fail if the created-only ``continue`` fired for a matched row too.
+        """
+        path = tmp_path / "long_collection_name_first.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/longcollectionname2> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            '<http://pub.example/longcollectionname2#grp> a skos:Collection ; skos:prefLabel "Group"@en .\n'
+        )
+        import_skos(path)
+        collection = Collection.objects.get(static_uri="http://pub.example/longcollectionname2#grp")
+        assert collection.name == "Group"
+
+        long_name = "N" * 300
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/longcollectionname2> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            f'<http://pub.example/longcollectionname2#grp> a skos:Collection ; skos:prefLabel "{long_name}"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        collection.refresh_from_db()
+        assert collection.name == "Group"
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(entries) == 1
 
 
 def _write_shared_label_file(tmp_path: Path, n: int) -> Path:
@@ -438,6 +1828,714 @@ def _write_shared_label_file(tmp_path: Path, n: int) -> Path:
     path = tmp_path / "shared_label.ttl"
     path.write_text("\n".join(lines))
     return path
+
+
+class TestOverLongNameSetAsideReportsThePublishedLanguage:
+    """T047 — CORR-305, decisions.md D52 (fix cycle 4): when a scheme's or collection's own
+    default-language ``skos:prefLabel`` is absent, the over-long name comes from the
+    any-language fallback (``SkosGraph.first_literal``) — the ``VALUE_TOO_LONG`` set-aside must
+    name the language that value was actually published in, not the target language the
+    fallback exists because nothing resolved to it.
+    """
+
+    def test_a_matched_scheme_s_over_long_fallback_name_reports_its_own_language_not_the_default(self, db, tmp_path):
+        """The scheme's effective default language is frozen at 'en' (a matched row, D46/D50 —
+        resolve_scheme never assigns default_language to a matched row). Its own prefLabel is
+        published only in 'fr', so the VALUE_TOO_LONG set-aside must say 'fr'. Would fail
+        (reporting 'en') if winning_tag stayed at its pre-fallback default.
+        """
+        scheme = ConceptSchemeFactory(name="Existing", static_uri="http://pub.example/corr305scheme")
+        long_name = "N" * 300
+        path = tmp_path / "corr305_scheme.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            f'<http://pub.example/corr305scheme> a skos:ConceptScheme ; skos:prefLabel "{long_name}"@fr .\n'
+        )
+        with override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]):
+            report = import_skos(path)
+
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(entries) == 1
+        assert entries[0].params["language"] == "fr"
+        scheme.refresh_from_db()
+        assert scheme.name == "Existing"
+
+    def test_a_matched_collection_s_over_long_fallback_name_reports_its_own_language_not_the_default(
+        self, db, tmp_path
+    ):
+        """The same shape one record kind over: an existing collection's own scheme has effective
+        default language 'en', the collection's re-published name is 'fr'-only and over-long.
+        Would fail (reporting 'en') without the fix.
+        """
+        scheme = ConceptSchemeFactory(name="Vocab", static_uri="http://pub.example/corr305collscheme")
+        collection = CollectionFactory(
+            scheme=scheme, name="Existing Group", static_uri="http://pub.example/corr305collscheme#grp"
+        )
+        long_name = "N" * 300
+        path = tmp_path / "corr305_collection.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/corr305collscheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            f'<http://pub.example/corr305collscheme#grp> a skos:Collection ; skos:prefLabel "{long_name}"@fr .\n'
+        )
+        with override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]):
+            report = import_skos(path)
+
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(entries) == 1
+        assert entries[0].params["language"] == "fr"
+        collection.refresh_from_db()
+        assert collection.name == "Existing Group"
+
+
+class TestAnyLanguageFallbackPrefersAStorableName:
+    """T051 — SEC-401, decisions.md D56: T047's any-language fallback
+    (``SkosGraph.first_literal_with_language``) selected the lexicographically first literal
+    regardless of length, so a single over-long ``skos:prefLabel`` in one language could refuse
+    an entire first import even though the same file also published a perfectly storable name in
+    another language. The fallback now selects the first *storable* literal; only when nothing
+    published fits the field does the vocabulary become fatal (a scheme) or the whole collection
+    get set aside (a collection).
+    """
+
+    def test_a_created_scheme_with_one_over_long_and_one_storable_name_imports_using_the_storable_one(
+        self, db, tmp_path
+    ):
+        long_name = "A" * 300
+        path = tmp_path / "sec401_scheme.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            f"<http://pub.example/sec401scheme> a skos:ConceptScheme ; "
+            f'skos:prefLabel "{long_name}"@de, "Zebra Vocabulary"@fr .\n'
+            "<http://pub.example/sec401scheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec401scheme> ; skos:prefLabel "One"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        scheme = ConceptScheme.objects.get(static_uri="http://pub.example/sec401scheme")
+        assert scheme.name == "Zebra Vocabulary"
+        assert Concept.objects.filter(static_uri="http://pub.example/sec401scheme#c1").exists()
+
+    def test_a_created_collection_with_one_over_long_and_one_storable_name_imports_using_the_storable_one(
+        self, db, tmp_path
+    ):
+        long_name = "A" * 300
+        path = tmp_path / "sec401_collection.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec401collscheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/sec401collscheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec401collscheme> ; skos:prefLabel "One"@en .\n'
+            f"<http://pub.example/sec401collscheme#grp> a skos:Collection ; "
+            f'skos:prefLabel "{long_name}"@de, "Zebra Group"@fr .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        collection = Collection.objects.get(static_uri="http://pub.example/sec401collscheme#grp")
+        assert collection.name == "Zebra Group"
+
+
+class TestADroppedCollectionIsDistinguishableFromAMatchedOneThatKeptItsName:
+    """T054 — CORR-404, decisions.md D60 (fix cycle 5): a created collection whose name is
+    unusable is dropped whole (``continue``, no row ever written); a matched collection whose
+    re-published name is unusable keeps its stored one and stays exactly as it was. Both reported
+    only ``VALUE_TOO_LONG``, whose message ("it was not stored") describes a field-level omission
+    on a record that exists — the two outcomes were distinguishable only by querying the database
+    the report exists to describe. A created collection now also gets ``COLLECTION_NOT_CREATED``,
+    naming the record-level outcome.
+    """
+
+    def test_a_created_collection_dropped_for_an_unusable_name_also_gets_its_own_record_level_reason(
+        self, db, tmp_path
+    ):
+        long_name = "N" * 300
+        path = tmp_path / "corr404_collection.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/corr404collscheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            f'<http://pub.example/corr404collscheme#grp> a skos:Collection ; skos:prefLabel "{long_name}"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        assert not Collection.objects.filter(static_uri="http://pub.example/corr404collscheme#grp").exists()
+        value_too_long = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(value_too_long) == 1
+        not_created = [entry for entry in report.set_aside if entry.reason is SetAsideReason.COLLECTION_NOT_CREATED]
+        assert len(not_created) == 1
+        assert not_created[0].subject == "http://pub.example/corr404collscheme#grp"
+
+    def test_a_matched_collection_kept_name_reports_only_value_too_long_not_not_created(self, db, tmp_path):
+        scheme = ConceptSchemeFactory(name="Vocab", static_uri="http://pub.example/corr404collscheme2")
+        collection = CollectionFactory(
+            scheme=scheme, name="Existing Group", static_uri="http://pub.example/corr404collscheme2#grp"
+        )
+        long_name = "N" * 300
+        path = tmp_path / "corr404_collection_matched.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/corr404collscheme2> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            f'<http://pub.example/corr404collscheme2#grp> a skos:Collection ; skos:prefLabel "{long_name}"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        collection.refresh_from_db()
+        assert collection.name == "Existing Group"
+        not_created = [entry for entry in report.set_aside if entry.reason is SetAsideReason.COLLECTION_NOT_CREATED]
+        assert not_created == []
+
+
+class TestOverLongDefaultLanguageNameFallsBackToAnotherStorableLanguage:
+    """T054 — CORR-402, decisions.md D56 (fix cycle 5): T051 only fixed the any-language
+    fallback branch (nothing published in the effective default language at all). When the
+    default-language ``skos:prefLabel`` exists but is itself over-long, ``resolve_scheme`` and
+    ``import_collections`` never ran that fallback — ``name_match`` was not ``None`` — so a
+    created record was fatal (a scheme) or dropped whole (a collection) even when another
+    configured language published a storable name in the same file.
+    """
+
+    def test_a_created_scheme_whose_default_language_name_is_over_long_falls_back_to_another_language(
+        self, db, tmp_path
+    ):
+        long_name = "A" * 300
+        path = tmp_path / "corr402_scheme.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            f'<http://pub.example/corr402scheme> a skos:ConceptScheme ; skos:prefLabel "{long_name}"@en, "Roches"@fr .\n'
+            "<http://pub.example/corr402scheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/corr402scheme> ; skos:prefLabel "One"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        scheme = ConceptScheme.objects.get(static_uri="http://pub.example/corr402scheme")
+        assert scheme.name == "Roches"
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(entries) == 1
+        assert entries[0].params["language"] == "en"
+
+    def test_a_created_collection_whose_default_language_name_is_over_long_falls_back_to_another_language(
+        self, db, tmp_path
+    ):
+        long_name = "A" * 300
+        path = tmp_path / "corr402_collection.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/corr402collscheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/corr402collscheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/corr402collscheme> ; skos:prefLabel "One"@en .\n'
+            f"<http://pub.example/corr402collscheme#grp> a skos:Collection ; "
+            f'skos:prefLabel "{long_name}"@en, "Roches"@fr .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        collection = Collection.objects.get(static_uri="http://pub.example/corr402collscheme#grp")
+        assert collection.name == "Roches"
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(entries) == 1
+        assert entries[0].params["language"] == "en"
+
+
+class TestNoPublishedNameAtAllIsUnusableTheSameAsOverLong:
+    """T054 — SEC-404, decisions.md D56 (fix cycle 5): D49/T044 closed the blank-name shape only
+    for the over-long trigger. A created scheme or collection with no ``skos:prefLabel`` at all
+    never enters that guard — ``name`` stays ``None`` all the way through, the ``elif name:``
+    assignment is skipped for falsiness, and the row would otherwise persist with the field
+    default ``''``, which fails its own ``full_clean()`` forever after — the exact state D49
+    already declares impossible for a created record, reached by a different route.
+    """
+
+    def test_a_created_scheme_with_no_preflabel_at_all_is_fatal_not_persisted_blank(self, db, tmp_path):
+        """T058, CORR-504, decisions.md D68 (fix cycle 6): overturns the reason this test
+        asserted since fix cycle 5 (D59) — ``VOCABULARY_NAME_UNUSABLE``, whose template says the
+        published name is "longer than this application can store." Nothing is published here at
+        all, so that message is false on this trigger; a dedicated
+        ``VOCABULARY_NAME_UNPUBLISHED`` names what actually happened. The type-only assertion
+        this test previously made could not have caught the message being wrong, so ``render()``
+        is now asserted too.
+
+        T061, SEC-603/CORR-603, decisions.md D71 (fix cycle 7): overturns this test's own
+        substring assertion in turn. T055's ``str(literal).strip()`` filter (this same cycle 6,
+        after this test was written) routes a *whitespace-only* published vocabulary name into
+        this identical fatal, and the message's claim that "no skos:prefLabel was published for
+        it at all" is false on that path — a triple was published, it was merely unusable. The
+        template is reworded to name the actual condition ("no skos:prefLabel with a usable
+        value was published ... in any language") rather than a fact about the file that does
+        not always hold; the substring this test checks for is updated to match.
+        """
+        path = tmp_path / "sec404_scheme.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            "@prefix dcterms: <http://purl.org/dc/terms/> .\n"
+            '<http://pub.example/sec404scheme> a skos:ConceptScheme ; dcterms:description "no name"@en .\n'
+            "<http://pub.example/sec404scheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec404scheme> ; skos:prefLabel "One"@en .\n'
+        )
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(path)
+        report = exc_info.value.report
+        assert len(report.fatal) == 1
+        assert report.fatal[0].reason is FatalReason.VOCABULARY_NAME_UNPUBLISHED
+        message = report.fatal[0].render()
+        assert "longer than" not in message
+        assert "no skos:prefLabel with a usable value was published" in message
+        assert not ConceptScheme.objects.filter(static_uri="http://pub.example/sec404scheme").exists()
+
+    def test_a_created_collection_with_no_preflabel_at_all_is_set_aside_not_persisted_blank(self, db, tmp_path):
+        path = tmp_path / "sec404_collection.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec404collscheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/sec404collscheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec404collscheme> ; skos:prefLabel "One"@en .\n'
+            "<http://pub.example/sec404collscheme#grp> a skos:Collection ; "
+            "skos:member <http://pub.example/sec404collscheme#c1> .\n"
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        assert not Collection.objects.filter(static_uri="http://pub.example/sec404collscheme#grp").exists()
+        # CORR-404, decisions.md D60 (fix cycle 5): COLLECTION_NOT_CREATED, not a reused
+        # VALUE_TOO_LONG — there is no over-long value to name for this trigger.
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.COLLECTION_NOT_CREATED]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://pub.example/sec404collscheme#grp"
+
+
+class TestAnEmptyPublishedLiteralIsNeverTreatedAsAUsableName:
+    """T055 — SEC-501/SEC-502/CORR-501/CORR-502/SEC-504, decisions.md D65 (fix cycle 6): every
+    name-selection path sorted an empty (or whitespace-only) literal ahead of a real one, because
+    the only filters applied so far (``max_length`` on the fallback, nothing at all on
+    ``first_literal``) admit ``""`` — it has length zero and it sorts first. Two opposite
+    symptoms, one root cause:
+
+    - A file that plainly publishes a usable name was refused outright, when the empty literal
+      happened to occupy the exact slot ``_localized_literal`` or the any-language fallback would
+      otherwise fill.
+    - A record was created and persisted with ``name == ''`` when T054's own second-chance
+      fallback treated the empty literal as "found a storable value" — the exact state D49 exists
+      to prevent, reopened through the fallback it added.
+
+    Fixed at the one place each is selected: ``SkosGraph.first_literal``,
+    ``SkosGraph.first_literal_with_language`` and (by construction, since it composes
+    ``first_literal``) ``_localized_literal`` now all treat a literal whose value is empty or
+    whitespace-only as unusable, never a candidate.
+    """
+
+    def test_a_created_scheme_with_an_empty_and_a_usable_name_in_the_same_language_uses_the_usable_one(
+        self, db, tmp_path
+    ):
+        """SEC-501 probe A: the empty literal and the usable one share the exact-match language
+        (the site default, ``en``), so ``_localized_literal``'s own per-tag exact match is what
+        must skip the empty one — the any-language fallback never runs at all for this probe.
+        """
+        path = tmp_path / "sec501_scheme_probe_a.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            "<http://pub.example/sec501schemea> a skos:ConceptScheme ; "
+            'skos:prefLabel ""@en, "Geology Vocabulary"@en .\n'
+            "<http://pub.example/sec501schemea#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec501schemea> ; skos:prefLabel "One"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        scheme = ConceptScheme.objects.get(static_uri="http://pub.example/sec501schemea")
+        assert scheme.name == "Geology Vocabulary"
+
+    def test_a_created_scheme_with_only_an_empty_default_language_literal_falls_back_to_another_language(
+        self, db, tmp_path
+    ):
+        """SEC-501 probe B: the default language (``en``) carries only the empty literal, so
+        ``_localized_literal`` finds no candidate at all and the any-language fallback
+        (``first_literal_with_language``) is what must skip the empty one and select the
+        storable ``de`` value instead.
+        """
+        path = tmp_path / "sec501_scheme_probe_b.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            "<http://pub.example/sec501schemeb> a skos:ConceptScheme ; "
+            'skos:prefLabel ""@en, "Geologie"@de .\n'
+            "<http://pub.example/sec501schemeb#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec501schemeb> ; skos:prefLabel "One"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        scheme = ConceptScheme.objects.get(static_uri="http://pub.example/sec501schemeb")
+        assert scheme.name == "Geologie"
+
+    def test_a_created_collection_with_an_empty_and_a_usable_name_uses_the_usable_one(self, db, tmp_path):
+        """SEC-501 probe C, collection counterpart."""
+        path = tmp_path / "sec501_collection.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec501collscheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/sec501collscheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec501collscheme> ; skos:prefLabel "One"@en .\n'
+            "<http://pub.example/sec501collscheme#grp> a skos:Collection ; "
+            'skos:prefLabel ""@en, "Igneous Rocks"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        collection = Collection.objects.get(static_uri="http://pub.example/sec501collscheme#grp")
+        assert collection.name == "Igneous Rocks"
+
+    def test_a_created_scheme_s_second_chance_fallback_never_picks_the_empty_literal(self, db, tmp_path):
+        """SEC-502/CORR-501: the over-long default-language name has nowhere storable to fall
+        back to except the empty ``de`` literal and the storable ``fr`` one — before the fix, the
+        second-chance fallback (T054, D58) treated the empty literal as found and persisted
+        ``name == ''``, exactly the state D49 declares impossible for a created record.
+        """
+        long_name = "A" * 300
+        path = tmp_path / "sec502_scheme.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            f"<http://pub.example/sec502scheme> a skos:ConceptScheme ; "
+            f'skos:prefLabel "{long_name}"@en, ""@de, "Geologie Vokabular"@fr .\n'
+            "<http://pub.example/sec502scheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec502scheme> ; skos:prefLabel "One"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        scheme = ConceptScheme.objects.get(static_uri="http://pub.example/sec502scheme")
+        assert scheme.name == "Geologie Vokabular"
+
+    def test_a_created_collection_s_second_chance_fallback_never_picks_the_empty_literal(self, db, tmp_path):
+        """SEC-502/CORR-501, collection counterpart."""
+        long_name = "A" * 300
+        path = tmp_path / "sec502_collection.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec502collscheme> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/sec502collscheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec502collscheme> ; skos:prefLabel "One"@en .\n'
+            f"<http://pub.example/sec502collscheme#grp> a skos:Collection ; "
+            f'skos:prefLabel "{long_name}"@en, ""@de, "Geologie Vokabular"@fr .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        collection = Collection.objects.get(static_uri="http://pub.example/sec502collscheme#grp")
+        assert collection.name == "Geologie Vokabular"
+
+    def test_a_whitespace_only_literal_is_treated_the_same_as_an_empty_one(self, db, tmp_path):
+        """SEC-504: a whitespace-only literal sorts ahead of a real name exactly as an empty
+        string does, and has no visible content once stored — the same emptiness test must treat
+        it the same way.
+        """
+        path = tmp_path / "sec504_scheme.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            "<http://pub.example/sec504scheme> a skos:ConceptScheme ; "
+            'skos:prefLabel "   "@en, "Geology Vocabulary"@en .\n'
+            "<http://pub.example/sec504scheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec504scheme> ; skos:prefLabel "One"@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        scheme = ConceptScheme.objects.get(static_uri="http://pub.example/sec504scheme")
+        assert scheme.name == "Geology Vocabulary"
+
+    def test_a_node_publishing_only_an_empty_literal_is_treated_as_no_usable_name_at_all(self, db, tmp_path):
+        """The record-level outcome when *every* published literal is unusable must be unchanged:
+        this is not a new way to have a name, it is the same "nothing storable" case D59 already
+        makes fatal for a created scheme — reported as ``VOCABULARY_NAME_UNPUBLISHED`` (T058,
+        decisions.md D68), since an empty literal is, per this same task's own fix, the same as
+        nothing having been published at all.
+        """
+        path = tmp_path / "sec501_scheme_none_usable.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec501schemenone> a skos:ConceptScheme ; skos:prefLabel ""@en .\n'
+            "<http://pub.example/sec501schemenone#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec501schemenone> ; skos:prefLabel "One"@en .\n'
+        )
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(path)
+        report = exc_info.value.report
+        assert len(report.fatal) == 1
+        assert report.fatal[0].reason is FatalReason.VOCABULARY_NAME_UNPUBLISHED
+        assert not ConceptScheme.objects.filter(static_uri="http://pub.example/sec501schemenone").exists()
+
+    def test_a_whitespace_only_vocabulary_name_is_refused_with_a_message_that_stays_true(self, db, tmp_path):
+        """T061 — SEC-603 (round 6, medium): a scheme publishing only a whitespace-only
+        ``skos:prefLabel`` reaches this identical fatal (T055's filter makes ``name`` arrive
+        ``None``, exactly as if nothing had been published), but a triple *was* published — the
+        message must not tell a curator to add one that is already in their file.
+        """
+        path = tmp_path / "sec603_scheme_whitespace_only.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec603schemewsonly> a skos:ConceptScheme ; skos:prefLabel "   "@en .\n'
+            "<http://pub.example/sec603schemewsonly#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/sec603schemewsonly> ; skos:prefLabel "One"@en .\n'
+        )
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(path)
+        report = exc_info.value.report
+        assert len(report.fatal) == 1
+        assert report.fatal[0].reason is FatalReason.VOCABULARY_NAME_UNPUBLISHED
+        message = report.fatal[0].render()
+        assert "at all" not in message
+        assert "no skos:prefLabel with a usable value was published" in message
+        assert not ConceptScheme.objects.filter(static_uri="http://pub.example/sec603schemewsonly").exists()
+
+
+class TestAnEmptyPublishedLiteralIsNeverAUsableNameForAnyRecordKind:
+    """T059 — SEC-601/CORR-602, decisions.md D69 (fix cycle 7): D65 (T055, fix cycle 6) filtered
+    an empty-or-whitespace-only literal out of ``SkosGraph.first_literal`` and
+    ``first_literal_with_language`` — the two accessors a vocabulary's and a collection's own
+    name are selected through. A concept's label is selected through a third accessor,
+    ``SkosGraph.preferred_label_in``, which D65 never touched, so a concept published as
+    ``skos:prefLabel ""@en, "Real Name"@en`` stored ``Concept.label == ''`` and reported "Real
+    Name" as a surplus preferred label discarded, not merely passed over.
+
+    Fixed structurally rather than by copying the same inline check to a third place:
+    ``SkosGraph.is_usable_literal`` is now the one predicate every literal-to-name-candidate read
+    shares (``first_literal``, ``first_literal_with_language``, ``preferred_label_in`` and
+    ``label_languages`` all call it), so a fourth record kind or a fifth call site inherits the
+    rule by construction rather than needing its own copy minted for it.
+    """
+
+    @pytest.mark.parametrize("record_kind", ["scheme", "concept", "collection"])
+    def test_an_empty_literal_never_beats_a_real_one_regardless_of_record_kind(self, db, tmp_path, record_kind):
+        """One parametrized test drives all three record kinds through the identical fixture
+        shape — an empty literal published alongside a real one, in the record's own name
+        predicate — so a regression in any single kind's selection path fails this one test,
+        not a kind-specific test nobody thought to write.
+        """
+        path = tmp_path / f"t059_{record_kind}.ttl"
+        if record_kind == "scheme":
+            path.write_text(
+                "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+                "<http://pub.example/t059scheme> a skos:ConceptScheme ; "
+                'skos:prefLabel ""@en, "Real Name"@en .\n'
+                "<http://pub.example/t059scheme#c1> a skos:Concept ; "
+                'skos:inScheme <http://pub.example/t059scheme> ; skos:prefLabel "One"@en .\n'
+            )
+        elif record_kind == "concept":
+            path.write_text(
+                "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+                '<http://pub.example/t059concept> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+                "<http://pub.example/t059concept#c1> a skos:Concept ; "
+                'skos:inScheme <http://pub.example/t059concept> ; skos:prefLabel ""@en, "Real Name"@en .\n'
+            )
+        else:
+            path.write_text(
+                "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+                '<http://pub.example/t059collection> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+                "<http://pub.example/t059collection#c1> a skos:Concept ; "
+                'skos:inScheme <http://pub.example/t059collection> ; skos:prefLabel "One"@en .\n'
+                "<http://pub.example/t059collection#grp> a skos:Collection ; "
+                'skos:prefLabel ""@en, "Real Name"@en .\n'
+            )
+
+        report = import_skos(path)
+        assert report.fatal == []
+
+        if record_kind == "scheme":
+            stored_name = ConceptScheme.objects.get(static_uri="http://pub.example/t059scheme").name
+        elif record_kind == "concept":
+            stored_name = Concept.objects.get(static_uri="http://pub.example/t059concept#c1").label
+        else:
+            stored_name = Collection.objects.get(static_uri="http://pub.example/t059collection#grp").name
+
+        assert stored_name == "Real Name"
+        assert not any(entry.reason is SetAsideReason.SURPLUS_PREFERRED_LABEL for entry in report.set_aside)
+
+    def test_a_whitespace_only_alternative_label_is_not_stored(self, db, tmp_path):
+        """Audit finding, T059 brief: ``ConceptImporter.import_labels`` reads ``skos:altLabel``/
+        ``skos:hiddenLabel`` (and a non-default-language ``skos:prefLabel``) straight off the
+        graph rather than through any of the four filtered accessors — the "fifth call site" the
+        structural fix exists to catch. A true empty string is already refused by
+        ``ConceptLabel.text``'s own ``blank=False`` (``full_clean()`` raises before the row is
+        written), but Django's blank check does not treat a whitespace-only string as blank, so
+        ``"   "`` used to pass straight through and get stored as a visible-nothing alternative
+        label. Routing this loop through the same ``is_usable_literal`` predicate closes it.
+        """
+        path = tmp_path / "t059_altlabel_whitespace.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/t059altlabel> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/t059altlabel#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/t059altlabel> ; skos:prefLabel "One"@en ; '
+            'skos:altLabel "   "@en .\n'
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        concept = Concept.objects.get(static_uri="http://pub.example/t059altlabel#c1")
+        assert list(concept.labels.all()) == []
+
+    def test_an_empty_only_non_default_language_preferred_label_is_silently_absent_not_a_crash(self, db, tmp_path):
+        """Audit finding, T059 brief: before the raw ``import_labels`` loop was routed through
+        ``is_usable_literal``, closing ``preferred_label_in``'s own gap alone would have made
+        this scenario raise ``KeyError`` instead of importing cleanly — a concept whose *only*
+        ``fr`` (a configured, non-default) preferred label is empty has no ``fr`` winner in
+        ``preferred_winner_by_language`` once empty candidates are excluded from it, but the raw
+        loop would still try to look one up for this literal without the same exclusion.
+        """
+        path = tmp_path / "t059_empty_only_variant.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/t059variantonly> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/t059variantonly#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/t059variantonly> ; skos:prefLabel "One"@en, ""@fr .\n'
+        )
+        with override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]):
+            report = import_skos(path)
+        assert report.fatal == []
+        concept = Concept.objects.get(static_uri="http://pub.example/t059variantonly#c1")
+        assert concept.label == "One"
+        assert list(concept.labels.all()) == []
+
+
+class TestAStoredSlugThatFailsValidationIsSetAsideNotEscaped:
+    """T045 — SEC-301, decisions.md D50 (fix cycle 4): T041's read-back means a matched record's
+    already-stored slug reaches the model's manual-slug validation unchanged. A slug written out
+    of band (``.update()``, ``loaddata``, ``bulk_create``, a data migration) never runs through
+    ``save()``'s own validation when it is written, so it can be malformed by the time an import
+    later matches that row and calls ``set_slug()``/``save()`` again — which, before this fix,
+    let ``django.core.exceptions.ValidationError`` escape ``import_skos`` entirely, outside its
+    own (``SkosImportError``/``SkosImportFailed``) exception hierarchy.
+    """
+
+    def test_a_scheme_s_out_of_band_slug_failing_validation_does_not_escape_import_skos(self, db, tmp_path):
+        """T052, CORR-401/SEC-402, decisions.md D57 (fix cycle 5): overturns the version of this
+        test fix cycle 4 shipped, which asserted ``report.fatal == []`` — the scheme could not be
+        resolved, so nothing else in the file has a target to import into, and a run that imports
+        nothing must not report ``fatal == []`` (every other ``return None, None`` in
+        ``resolve_scheme`` is preceded by ``add_fatal``; this one was not). The set-aside naming
+        the bad slug is unchanged; a fatal is now added alongside it.
+        """
+        scheme = ConceptSchemeFactory(name="Sec Three O One Scheme", static_uri="http://pub.example/sec301scheme")
+        ConceptScheme.objects.filter(pk=scheme.pk).update(slug="has spaces/and-slash")
+        path = tmp_path / "sec301_scheme.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec301scheme> a skos:ConceptScheme ; skos:prefLabel "Sec Three O One Scheme"@en .\n'
+        )
+
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(path)
+
+        report = exc_info.value.report
+        assert len(report.fatal) == 1
+        assert report.fatal[0].reason is FatalReason.VOCABULARY_RECORD_INVALID
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.STORED_SLUG_INVALID]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://pub.example/sec301scheme"
+        scheme.refresh_from_db()
+        assert scheme.slug == "has spaces/and-slash"
+
+    def test_a_matched_scheme_s_unconfigured_stored_default_language_is_fatal_not_a_mislabeled_bad_slug(
+        self, db, tmp_path
+    ):
+        """T052, CORR-401/SEC-403, decisions.md D57 (fix cycle 5): ``ConceptScheme.save()`` raises
+        ``ValidationError`` for its configured-language check exactly as it does for a bad manual
+        slug, and a matched row's stored ``default_language`` is never reassigned by
+        ``resolve_scheme`` (D46) — so a language later dropped from ``settings.LANGUAGES`` reaches
+        this path with the slug untouched and perfectly valid. The bare ``except ValidationError``
+        T045 added could not tell the two apart and reported this as ``STORED_SLUG_INVALID``,
+        which is false: the stored slug never changes in this scenario.
+        """
+        scheme = ConceptSchemeFactory(
+            name="Corr Four O One Scheme",
+            static_uri="http://pub.example/corr401scheme",
+            default_language="de",
+        )
+        path = tmp_path / "corr401_scheme.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/corr401scheme> a skos:ConceptScheme ; skos:prefLabel "Corr Four O One Scheme"@en .\n'
+            "<http://pub.example/corr401scheme#c1> a skos:Concept ; "
+            'skos:inScheme <http://pub.example/corr401scheme> ; skos:prefLabel "One"@en .\n'
+        )
+
+        with (
+            override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]),
+            pytest.raises(SkosImportFailed) as exc_info,
+        ):
+            import_skos(path)
+
+        report = exc_info.value.report
+        assert len(report.fatal) == 1
+        assert report.fatal[0].reason is FatalReason.VOCABULARY_RECORD_INVALID
+        slug_entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.STORED_SLUG_INVALID]
+        assert slug_entries == []
+        assert not Concept.objects.filter(static_uri="http://pub.example/corr401scheme#c1").exists()
+        scheme.refresh_from_db()
+        assert scheme.default_language == "de"
+
+    def test_a_non_dict_validation_error_from_scheme_save_is_a_fatal_not_an_attributeerror(
+        self, db, tmp_path, monkeypatch
+    ):
+        """T057, CORR-505/SEC-503, decisions.md D67 (fix cycle 6): ``ValidationError.message_dict``
+        is a property that raises ``AttributeError`` (``getattr(self, "error_dict")``) whenever the
+        exception was built from a bare message or a list rather than a field dict —
+        ``ValidationError("message")`` is the ordinary form a consumer's own ``pre_save`` receiver
+        or a ``ConceptScheme`` subclass override would raise, not the dict form every raise inside
+        this package's own ``ConceptScheme.save()`` chain uses. The handler's own ``"slug" in
+        exc.message_dict`` line therefore converted a non-dict ``ValidationError`` into an
+        ``AttributeError`` escaping ``import_skos`` — precisely the guarantee this except clause
+        exists to give. Reproduced by monkeypatching ``ConceptScheme.save`` directly, the same
+        shape a downstream receiver produces.
+        """
+        ConceptSchemeFactory(name="Corr Five O Five Scheme", static_uri="http://pub.example/corr505scheme")
+        path = tmp_path / "corr505_scheme.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/corr505scheme> a skos:ConceptScheme ; skos:prefLabel "Corr Five O Five Scheme"@en .\n'
+        )
+
+        def failing_save(self, *args, **kwargs):
+            raise ValidationError("a plain refusal, no field dict")
+
+        monkeypatch.setattr(ConceptScheme, "save", failing_save)
+
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(path)
+
+        report = exc_info.value.report
+        assert len(report.fatal) == 1
+        assert report.fatal[0].reason is FatalReason.VOCABULARY_RECORD_INVALID
+        slug_entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.STORED_SLUG_INVALID]
+        assert slug_entries == []
+
+    def test_a_concept_s_out_of_band_slug_failing_validation_does_not_escape_import_skos(self, db, tmp_path):
+        path = tmp_path / "sec301_concept.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec301concept> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            "<http://pub.example/sec301concept#one> a skos:Concept ; skos:inScheme <http://pub.example/sec301concept> ; "
+            'skos:prefLabel "One"@en .\n'
+        )
+        import_skos(path)
+        concept = Concept.objects.get(static_uri="http://pub.example/sec301concept#one")
+        Concept.objects.filter(pk=concept.pk).update(slug="has spaces/and-slash")
+
+        report = import_skos(path)
+
+        assert report.fatal == []
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.STORED_SLUG_INVALID]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://pub.example/sec301concept#one"
+        concept.refresh_from_db()
+        assert concept.slug == "has spaces/and-slash"
+
+    def test_a_collection_s_out_of_band_slug_failing_validation_does_not_escape_import_skos(self, db, tmp_path):
+        path = tmp_path / "sec301_collection.ttl"
+        path.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            '<http://pub.example/sec301collection> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .\n'
+            '<http://pub.example/sec301collection#grp> a skos:Collection ; skos:prefLabel "Group"@en .\n'
+        )
+        import_skos(path)
+        collection = Collection.objects.get(static_uri="http://pub.example/sec301collection#grp")
+        Collection.objects.filter(pk=collection.pk).update(slug="has spaces/and-slash")
+
+        report = import_skos(path)
+
+        assert report.fatal == []
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.STORED_SLUG_INVALID]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://pub.example/sec301collection#grp"
+        collection.refresh_from_db()
+        assert collection.slug == "has spaces/and-slash"
 
 
 class TestSlugAssignmentQueryCountIsLinearInASharedLabelGroup:
@@ -620,6 +2718,105 @@ class TestFatalFindingsAndAtomicity:
         existing.refresh_from_db()
         assert existing.name == "Original name"
         assert Concept.objects.count() == concept_count_before
+
+
+class TestVocabularyDefaultLanguageMustItselfBeConfigured:
+    """T024 — SC-023, S6 SEC-001, decisions.md D34: a vocabulary whose
+    ``effective_default_language`` is not itself one of the site's configured
+    languages fails the whole run with one fatal finding naming it, rather than
+    silently storing nothing while emitting one ``NO_PREFERRED_LABEL`` per
+    concept. ``effective_default_language`` falls back to ``settings.LANGUAGE_CODE``
+    unvalidated against ``settings.LANGUAGES`` — Django's own shipped defaults are
+    exactly this shape (``LANGUAGE_CODE='en-us'``, absent from the 99-code default
+    ``LANGUAGES``), a configuration most consuming projects hold simply by never
+    overriding either setting."""
+
+    def test_an_unconfigured_default_language_fails_the_run_with_one_fatal_finding(self, db):
+        with override_settings(LANGUAGE_CODE="pt"), pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(FIXTURES / "unconfigured_language_vocabulary.ttl")
+        report = exc_info.value.report
+        assert len(report.fatal) == 1
+        assert report.fatal[0].reason is FatalReason.DEFAULT_LANGUAGE_UNCONFIGURED
+        assert report.fatal[0].params["language"] == "pt"
+        assert ConceptScheme.objects.count() == 0
+        assert Concept.objects.count() == 0
+        # SC-023: one problem, not one NO_PREFERRED_LABEL per concept.
+        assert report.set_aside == []
+
+    def test_djangos_own_shipped_defaults_are_refused_cleanly_not_silently_emptied(self, db, tmp_path):
+        # SEC-001's exact repro: an existing, concept-bearing scheme whose
+        # default_language is frozen blank (D18) falls back to LANGUAGE_CODE,
+        # and LANGUAGE_CODE='en-us' is not itself in Django's own 99-code global
+        # LANGUAGES default — a configuration most consuming projects hold
+        # simply by never overriding either setting.
+        path = tmp_path / "soils.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+            <https://example.org/v/soils> a skos:ConceptScheme ; skos:prefLabel "Soils"@en-us .
+            <https://example.org/v/soils/clay> a skos:Concept ;
+                skos:inScheme <https://example.org/v/soils> ;
+                skos:prefLabel "Clay"@en-us .
+            """
+        )
+        with override_settings(LANGUAGE_CODE="en-us", LANGUAGES=global_settings.LANGUAGES):
+            target = ConceptSchemeFactory(static_uri="https://example.org/v/soils", default_language="")
+            ConceptFactory(scheme=target)
+            with pytest.raises(SkosImportFailed) as exc_info:
+                import_skos(path, scheme=target)
+        assert exc_info.value.report.fatal[0].reason is FatalReason.DEFAULT_LANGUAGE_UNCONFIGURED
+        assert exc_info.value.report.fatal[0].params["language"] == "en-us"
+
+    def test_the_sites_own_configured_default_never_trips_this(self, db):
+        # 'en' is literally in tests/settings.py's LANGUAGES — must never be
+        # mistaken for the unconfigured case.
+        report = import_skos(FIXTURES / "rocks.ttl")
+        assert report.fatal == []
+
+
+class TestVocabularySlugUnusableIsFatalNotAValidationError:
+    """T036 — FR-018, decisions.md D35: T030 made a vocabulary's own slug derive from its
+    published identifier's own segment, exactly like a concept's (T029), but only the concept path
+    (``import_concepts``' ``EMPTY_SLUG`` check) got a guard for a segment that ``slugify()``
+    strips down to nothing — the scheme path did not, so ``SchemeResolver.resolve_scheme`` let
+    ``ConceptScheme.save()`` raise an uncaught ``ValidationError`` instead. A regression against
+    cd4f1c6, where the slug came from the vocabulary's own name and 'Symbols' slugified fine.
+
+    Fatal rather than set-aside, deliberately: without a resolvable vocabulary there is nothing for
+    the rest of the file to import into.
+    """
+
+    def test_an_identifier_segment_that_slugifies_to_empty_fails_the_run_with_one_fatal_finding(self, db, tmp_path):
+        path = tmp_path / "unusable_scheme_slug.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://c.org/vocab/#±> a skos:ConceptScheme ; skos:prefLabel "Symbols"@en .
+            """
+        )
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(path)
+        report = exc_info.value.report
+        assert len(report.fatal) == 1
+        assert report.fatal[0].reason is FatalReason.VOCABULARY_SLUG_UNUSABLE
+        assert report.fatal[0].subject == "http://c.org/vocab/#±"
+        assert ConceptScheme.objects.count() == 0
+
+    def test_the_name_is_never_used_as_a_fallback_for_the_unusable_slug(self, db, tmp_path):
+        # FR-018's whole point: a local address never derives from a translated label. Falling
+        # back to the name here would reinstate the exact defect FR-018 exists to remove.
+        path = tmp_path / "unusable_scheme_slug_fallback.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://c.org/vocab2/#±> a skos:ConceptScheme ; skos:prefLabel "Symbols"@en .
+            """
+        )
+        with pytest.raises(SkosImportFailed):
+            import_skos(path)
+        assert not ConceptScheme.objects.filter(name="Symbols").exists()
 
 
 class TestReportPopulatedByARealRun:
@@ -995,6 +3192,298 @@ class TestSurplusPreferredLabelInTheDefaultLanguage:
         assert entries[0].params["language"] == "en"
 
 
+class TestPreferredLabelWinnerIsReKeyedOnTheResolvedLanguage:
+    """T013 — FR-002/FR-003, call site 3: ``import_labels``'s own preferred-label contest keys on
+    the *resolved* configured language rather than the raw published tag, and the winner comes from
+    :meth:`~controlled_vocabularies.exchange.languages.LanguageMatcher.resolve_winner` (T021) — the
+    identical computation ``import_concepts`` already runs for ``Concept.label`` over the identical
+    ``preferred_label_in`` candidates, so the two agree by construction rather than the coincidence
+    ``decisions.md`` D13 named. Grouping by raw tag let two *different* tags resolving to one
+    non-default configured language both reach ``add_label()`` — a raw-tag group can never see that
+    contest, because each tag was its own singleton group — crashing the run on the model's own
+    one-``PREFERRED``-row-per-(concept, language) constraint."""
+
+    def _predominant_variant_contest(self, tmp_path):
+        # de-at is predominant (3 occurrences across the file) over de-ch (1); neither is an exact
+        # "de" match, so the winner can only come from real predominance, not tag alphabetising.
+        path = tmp_path / "predominant_de.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/predominant/> a skos:ConceptScheme ;
+                skos:prefLabel "Predominant"@en .
+
+            <http://example.org/predominant/filler1> a skos:Concept ;
+                skos:inScheme <http://example.org/predominant/> ;
+                skos:prefLabel "Filler one"@en, "Eins"@de-at .
+
+            <http://example.org/predominant/filler2> a skos:Concept ;
+                skos:inScheme <http://example.org/predominant/> ;
+                skos:prefLabel "Filler two"@en, "Zwei"@de-at .
+
+            <http://example.org/predominant/target> a skos:Concept ;
+                skos:inScheme <http://example.org/predominant/> ;
+                skos:prefLabel "Target"@en, "Ziel-AT"@de-at, "Ziel-CH"@de-ch .
+            """
+        )
+        return path
+
+    def test_two_different_tags_resolving_to_one_non_default_language_no_longer_crash_the_run(self, db, tmp_path):
+        path = self._predominant_variant_contest(tmp_path)
+        with override_settings(LANGUAGES=[("en", "English"), ("de", "German")]):
+            report = import_skos(path)
+        assert report.fatal == []
+
+    def test_the_predominant_variant_is_stored_not_the_alphabetically_first_tag_or_value(self, db, tmp_path):
+        path = self._predominant_variant_contest(tmp_path)
+        with override_settings(LANGUAGES=[("en", "English"), ("de", "German")]):
+            import_skos(path)
+        target = Concept.objects.get(static_uri="http://example.org/predominant/target")
+        assert target.preferred_label("de") == "Ziel-AT"
+        assert ConceptLabel.objects.filter(concept=target, language="de", kind=ConceptLabel.Kind.PREFERRED).count() == 1
+
+    def test_importing_the_same_file_twice_stores_the_same_value_both_times(self, db, tmp_path):
+        # SC-006's second clause.
+        path = self._predominant_variant_contest(tmp_path)
+        with override_settings(LANGUAGES=[("en", "English"), ("de", "German")]):
+            import_skos(path)
+            import_skos(path)
+        target = Concept.objects.get(static_uri="http://example.org/predominant/target")
+        assert target.preferred_label("de") == "Ziel-AT"
+
+    def test_an_exact_match_in_a_non_default_language_wins_over_a_more_predominant_variant(self, db, tmp_path):
+        # SC-005, applied to call site 3's own contest rather than Concept.label's.
+        path = tmp_path / "exact_over_predominant_de.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/exactnondefault/> a skos:ConceptScheme ;
+                skos:prefLabel "Exact non-default"@en .
+
+            <http://example.org/exactnondefault/filler1> a skos:Concept ;
+                skos:inScheme <http://example.org/exactnondefault/> ;
+                skos:prefLabel "Filler one"@en, "Eins"@de-at .
+
+            <http://example.org/exactnondefault/filler2> a skos:Concept ;
+                skos:inScheme <http://example.org/exactnondefault/> ;
+                skos:prefLabel "Filler two"@en, "Zwei"@de-at .
+
+            <http://example.org/exactnondefault/target> a skos:Concept ;
+                skos:inScheme <http://example.org/exactnondefault/> ;
+                skos:prefLabel "Target"@en, "Ziel-AT"@de-at, "Ziel"@de .
+            """
+        )
+        with override_settings(LANGUAGES=[("en", "English"), ("de", "German")]):
+            report = import_skos(path)
+        assert report.fatal == []
+        target = Concept.objects.get(static_uri="http://example.org/exactnondefault/target")
+        assert target.preferred_label("de") == "Ziel"
+
+    def test_the_winner_reported_by_import_labels_agrees_with_concept_label_for_the_default_language(
+        self, db, tmp_path
+    ):
+        # A predominance-driven winner that differs from both an alphabetical-value pick and an
+        # alphabetical-tag pick — the case decisions.md D13 says the two computations agreed on
+        # only by coincidence before both read T021's rule from one place. If import_labels's own
+        # winner disagreed with Concept.label, the "loser" it names would be the very value stored.
+        path = tmp_path / "predominant_default.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/predominantdefault/> a skos:ConceptScheme ;
+                skos:prefLabel "Predominant default"@en-us .
+
+            <http://example.org/predominantdefault/filler1> a skos:Concept ;
+                skos:inScheme <http://example.org/predominantdefault/> ;
+                skos:prefLabel "Filler one"@en-us .
+
+            <http://example.org/predominantdefault/filler2> a skos:Concept ;
+                skos:inScheme <http://example.org/predominantdefault/> ;
+                skos:prefLabel "Filler two"@en-us .
+
+            <http://example.org/predominantdefault/target> a skos:Concept ;
+                skos:inScheme <http://example.org/predominantdefault/> ;
+                skos:prefLabel "Alpha"@en-gb, "Zed"@en-us .
+            """
+        )
+        with override_settings(LANGUAGES=[("en", "English")]):
+            report = import_skos(path)
+        target = Concept.objects.get(static_uri="http://example.org/predominantdefault/target")
+        assert target.label == "Zed"
+        losers = [
+            entry
+            for entry in report.set_aside
+            if entry.subject == target.static_uri
+            and entry.reason in (SetAsideReason.SURPLUS_PREFERRED_LABEL, SetAsideReason.VARIANT_NOT_KEPT)
+        ]
+        assert len(losers) == 1
+        assert losers[0].params["language"] != "en-us"
+
+
+class TestExactMatchPreferredLabelFailingOnItsOwnMeritsIsNotBackfilledByAVariant:
+    """T013 — spec Edge Cases: "A file carrying both an exact match and a variant for the same
+    value, where the exact match is empty or unusable. The exact match wins the contest and then
+    fails on its own merits, and the variant does not silently take its place." FR-002's exact-match
+    priority (``resolve_winner``, T021) and ``import_concepts``'s own pre-write length check
+    (SEC-002, decisions.md D34) already combine to produce this: ``resolve_winner`` is called once
+    and its winner is never displaced by a fallback to the next candidate. Pinned here as an explicit
+    regression, because backfilling from the variant is what an implementer chasing "don't lose
+    content" would naturally reach for, and is exactly what the spec forbids.
+
+    Demonstrated through ``VALUE_TOO_LONG`` rather than ``EMPTY_SLUG``: T029/decisions.md D35 moved
+    slug derivation from the label to the identifier, so a label's own content (here, its length) no
+    longer decides whether the *slug* is usable — but it still decides whether the *label* is, which
+    is the failure this test needs.
+    """
+
+    def test_the_concept_is_set_aside_under_value_too_long_and_the_variants_value_is_not_promoted(self, db, tmp_path):
+        path = tmp_path / "exact_fails_variant_available.ttl"
+        path.write_text(
+            f"""
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/emptyexact/> a skos:ConceptScheme ;
+                skos:prefLabel "Empty exact"@en .
+
+            <http://example.org/emptyexact/target> a skos:Concept ;
+                skos:inScheme <http://example.org/emptyexact/> ;
+                skos:prefLabel "{"x" * 300}"@en, "Usable"@en-gb .
+            """
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        entries = [
+            entry
+            for entry in report.set_aside
+            if entry.reason is SetAsideReason.VALUE_TOO_LONG and entry.subject == "http://example.org/emptyexact/target"
+        ]
+        assert len(entries) == 1
+        assert not Concept.objects.filter(static_uri="http://example.org/emptyexact/target").exists()
+
+
+class TestVariantContestLosersAreDiscriminatedInEveryConfiguredLanguage:
+    """T014 — FR-005, T022, decisions.md D14: once T013 re-keyed ``preferred_by_language`` on the
+    resolved language, one group can hold both a same-language duplicate and a genuine contest
+    loser. A loser whose published tag equals the winner's (case-insensitively) is a same-language
+    duplicate and keeps ``SURPLUS_PREFERRED_LABEL``; one published under a different tag is a
+    contest loser and takes ``VARIANT_NOT_KEPT`` — the same discriminator US-1's T008 already
+    applies to the default-language branch (decisions.md D24), extended here to every other
+    configured language (skos.py's own general branch)."""
+
+    def _three_preferred_labels_two_under_one_tag_one_under_a_variant(self, tmp_path):
+        # de-at wins on predominance (4 occurrences: 2 fillers + 2 on target) over de-ch (1); the
+        # two de-at values on target are a same-language duplicate, the de-ch value a contest loser.
+        path = tmp_path / "mixed_losers_de.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/mixedlosers/> a skos:ConceptScheme ;
+                skos:prefLabel "Mixed losers"@en .
+
+            <http://example.org/mixedlosers/filler1> a skos:Concept ;
+                skos:inScheme <http://example.org/mixedlosers/> ;
+                skos:prefLabel "Filler one"@en, "Eins"@de-at .
+
+            <http://example.org/mixedlosers/filler2> a skos:Concept ;
+                skos:inScheme <http://example.org/mixedlosers/> ;
+                skos:prefLabel "Filler two"@en, "Zwei"@de-at .
+
+            <http://example.org/mixedlosers/target> a skos:Concept ;
+                skos:inScheme <http://example.org/mixedlosers/> ;
+                skos:prefLabel "Target"@en, "Ziel-AT-1"@de-at, "Ziel-AT-2"@de-at, "Ziel-CH"@de-ch .
+            """
+        )
+        return path
+
+    def test_the_run_succeeds_and_stores_exactly_one_de_label(self, db, tmp_path):
+        path = self._three_preferred_labels_two_under_one_tag_one_under_a_variant(tmp_path)
+        with override_settings(LANGUAGES=[("en", "English"), ("de", "German")]):
+            report = import_skos(path)
+        assert report.fatal == []
+        target = Concept.objects.get(static_uri="http://example.org/mixedlosers/target")
+        assert target.preferred_label("de") == "Ziel-AT-1"
+        assert ConceptLabel.objects.filter(concept=target, language="de", kind=ConceptLabel.Kind.PREFERRED).count() == 1
+
+    def test_one_entry_of_each_reason_and_only_the_variant_reaches_the_language_account(self, db, tmp_path):
+        path = self._three_preferred_labels_two_under_one_tag_one_under_a_variant(tmp_path)
+        with override_settings(LANGUAGES=[("en", "English"), ("de", "German")]):
+            report = import_skos(path)
+        target_uri = "http://example.org/mixedlosers/target"
+        surplus = [
+            entry
+            for entry in report.set_aside
+            if entry.reason is SetAsideReason.SURPLUS_PREFERRED_LABEL and entry.subject == target_uri
+        ]
+        variant = [
+            entry
+            for entry in report.set_aside
+            if entry.reason is SetAsideReason.VARIANT_NOT_KEPT and entry.subject == target_uri
+        ]
+        assert len(surplus) == 1
+        assert surplus[0].params["language"] == "de"
+        assert len(variant) == 1
+        assert variant[0].params["language"] == "de-ch"
+        assert variant[0].params["kept_as"] == "de"
+        assert report.language_account().get("de-ch") == 1
+        assert "de" not in report.language_account()
+
+
+class TestAnEmptyLiteralDoesNotVoteOnPredominance:
+    """T061 — SEC-602 (round 6, medium): closed as a consequence of T059's structural fix
+    (decisions.md D69) rather than needing a fix of its own — ``SkosGraph.label_languages`` is
+    one of ``is_usable_literal``'s four call sites, so ``preferred_label_tag_counts`` (built
+    entirely from it) no longer tallies a literal that could never itself win a name slot.
+    Pinned here as its own regression test, in the shape the round-6 review reported it: before
+    T059, an empty or whitespace-only literal was excluded from ever winning a contest but still
+    counted toward its published tag's predominance, letting a publisher tip which of two *real*
+    variants fills a configured language's slot — for an entirely unrelated concept — using
+    literals that could not themselves be stored anywhere.
+    """
+
+    def test_two_unusable_literals_in_one_variant_cannot_flip_predominance_for_another_concept(self, db, tmp_path):
+        """Baseline predominance (without ``unusable1``/``unusable2``): ``de-de`` appears twice
+        (``filler`` and ``c1``), ``de-at`` once (``c1`` only) — ``de-de`` wins and
+        ``c1.preferred_label("de")`` is ``"Alpha DE"``. Before the fix, ``unusable1`` and
+        ``unusable2``'s own empty/whitespace ``de-at`` literals each still counted a vote,
+        pushing ``de-at`` to three against ``de-de``'s two and flipping ``c1``'s own stored value
+        to ``"Alpha AT"`` — neither publishing anything storable themselves.
+        """
+        path = tmp_path / "sec602_predominance.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/sec602/> a skos:ConceptScheme ;
+                skos:prefLabel "Sec Six O Two"@en .
+
+            <http://example.org/sec602/filler> a skos:Concept ;
+                skos:inScheme <http://example.org/sec602/> ;
+                skos:prefLabel "Filler"@en, "Filler DE"@de-de .
+
+            <http://example.org/sec602/c1> a skos:Concept ;
+                skos:inScheme <http://example.org/sec602/> ;
+                skos:prefLabel "One"@en, "Alpha DE"@de-de, "Alpha AT"@de-at .
+
+            <http://example.org/sec602/unusable1> a skos:Concept ;
+                skos:inScheme <http://example.org/sec602/> ;
+                skos:prefLabel "Two"@en, ""@de-at .
+
+            <http://example.org/sec602/unusable2> a skos:Concept ;
+                skos:inScheme <http://example.org/sec602/> ;
+                skos:prefLabel "Three"@en, "   "@de-at .
+            """
+        )
+        with override_settings(LANGUAGES=[("en", "English"), ("de", "German")]):
+            report = import_skos(path)
+        assert report.fatal == []
+        c1 = Concept.objects.get(static_uri="http://example.org/sec602/c1")
+        assert c1.preferred_label("de") == "Alpha DE"
+
+
 class TestConceptNotes:
     """T019 — FR-009/research.md R5: the definition and each of the six SKOS
     documentary note kinds are stored against their concept, each in its own
@@ -1033,6 +3522,135 @@ class TestConceptNotes:
         assert basalt.notes("en", ConceptNote.Kind.EXAMPLE) == []
         assert basalt.label == "Basalt"
         assert basalt.pk == basalt_pk
+
+
+class TestAlternativeLabelsHiddenLabelsAndNotesHaveNoPerLanguageContest:
+    """T015 — FR-004, SC-007: unlike the preferred-label slot, the models hold as many alternative
+    labels, hidden labels and notes per language as the file offers (``ConceptLabel``'s uniqueness
+    constraint is conditional on the preferred kind alone, and ``ConceptNote`` carries none at all,
+    decisions.md D4), so several variants resolving to one configured language are all stored and
+    none is set aside. T013/T014's contest applies only where storing more than one would collide —
+    the preferred slot — so ``variants.ttl`` (T005), carrying ``en-gb``/``en-us`` variants of an
+    alternative label and a note alongside its preferred label, should reach this branch's plain
+    resolve-and-store path unchanged, with no production code of its own."""
+
+    def test_alternative_labels_in_two_variants_of_one_configured_language_are_both_kept(self, db):
+        report = import_skos(FIXTURES / "variants.ttl")
+        assert report.fatal == []
+        colour = Concept.objects.get(static_uri="http://example.org/colours/colour")
+        assert set(colour.alt_labels("en")) == {"Colour", "Color"}
+
+    def test_neither_alternative_label_is_set_aside_as_a_duplicate_or_a_contest_loser(self, db):
+        # The concept's *preferred* label does have a contest (en-gb vs en-us for the default "en"
+        # slot, T008) and legitimately contributes exactly one loser entry; if the alternative label
+        # were wrongly run through the same contest, a second entry would appear alongside it.
+        report = import_skos(FIXTURES / "variants.ttl")
+        colour_uri = "http://example.org/colours/colour"
+        losses = [
+            entry
+            for entry in report.set_aside
+            if entry.subject == colour_uri
+            and entry.reason in (SetAsideReason.SURPLUS_PREFERRED_LABEL, SetAsideReason.VARIANT_NOT_KEPT)
+        ]
+        assert len(losses) == 1
+
+    def test_notes_in_two_variants_of_one_configured_language_are_both_kept(self, db):
+        import_skos(FIXTURES / "variants.ttl")
+        colour = Concept.objects.get(static_uri="http://example.org/colours/colour")
+        assert colour.notes("en") == [
+            "Spelling follows regional convention.",
+            "Spelling follows regional convention.",
+        ]
+
+
+class TestReimportAfterAddingALanguageStoresItsValues:
+    """T016 — FR-009/SC-014/SC-016: a file imported into a site configured for one language, then
+    re-imported after the site is reconfigured for a second language the file also carries, stores
+    that language's values for the concepts already present, and the report no longer counts them
+    as left behind. ``rocks.ttl`` already carries ``en``/``de``/``fr`` preferred labels for exactly
+    this population (decisions.md D16's own reference fixture)."""
+
+    def test_the_added_language_s_preferred_labels_are_stored_for_existing_concepts(self, db):
+        with override_settings(LANGUAGES=[("en", "English")]):
+            import_skos(FIXTURES / "rocks.ttl")
+        igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
+        assert igneous.preferred_label("fr") is None
+
+        with override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]):
+            import_skos(FIXTURES / "rocks.ttl")
+
+        igneous.refresh_from_db()
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        sedimentary = Concept.objects.get(static_uri="http://example.org/rocks/sedimentary")
+        assert igneous.preferred_label("fr") == "Roche ignée"
+        assert granite.preferred_label("fr") == "Granite"
+        assert sedimentary.preferred_label("fr") == "Roche sédimentaire"
+
+    def test_the_second_run_s_report_no_longer_counts_the_newly_stored_language_as_left_behind(self, db):
+        with override_settings(LANGUAGES=[("en", "English")]):
+            first_report = import_skos(FIXTURES / "rocks.ttl")
+        assert first_report.language_account().get("fr") == 3
+
+        with override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]):
+            second_report = import_skos(FIXTURES / "rocks.ttl")
+        assert "fr" not in second_report.language_account()
+
+
+class TestReimportAfterAddingALanguageKeepsEveryOtherRecordUnchanged:
+    """T017 — FR-009/SC-015: the same re-import leaves every ``Concept``'s, ``ConceptScheme``'s and
+    ``Collection``'s URI, ``static_uri``, slug, local URL and pk unchanged, and the content already
+    stored in a language the site held before the re-import is unchanged. Scoped per decisions.md
+    D16: ``ConceptLabel``/``ConceptNote`` rows are deleted and recreated on every run by design
+    (#50, ``skos.py``'s ``labels.all().delete()``), so their pks legitimately change and are not
+    asserted here — what is asserted about them is their values."""
+
+    @staticmethod
+    def _identity(obj) -> tuple[int, str, str | None, str, str]:
+        return (obj.pk, obj.uri, obj.static_uri, obj.slug, obj.local_url)
+
+    def test_every_concept_scheme_and_collection_keeps_its_identity_across_the_reimport(self, db):
+        with override_settings(LANGUAGES=[("en", "English")]):
+            import_skos(FIXTURES / "rocks.ttl")
+
+        scheme_before = self._identity(ConceptScheme.objects.get(static_uri=ROCKS_URI))
+        concept_uris = [
+            "http://example.org/rocks/igneous",
+            "http://example.org/rocks/granite",
+            "http://example.org/rocks/basalt",
+            "http://example.org/rocks/sedimentary",
+            "http://example.org/rocks/quartz",
+        ]
+        collection_uris = [
+            "http://example.org/rocks/collection/silica-bearing",
+            "http://example.org/rocks/collection/example-sequence",
+        ]
+        concepts_before = {uri: self._identity(Concept.objects.get(static_uri=uri)) for uri in concept_uris}
+        collections_before = {uri: self._identity(Collection.objects.get(static_uri=uri)) for uri in collection_uris}
+
+        with override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]):
+            import_skos(FIXTURES / "rocks.ttl")
+
+        assert self._identity(ConceptScheme.objects.get(static_uri=ROCKS_URI)) == scheme_before
+        for uri in concept_uris:
+            assert self._identity(Concept.objects.get(static_uri=uri)) == concepts_before[uri]
+        for uri in collection_uris:
+            assert self._identity(Collection.objects.get(static_uri=uri)) == collections_before[uri]
+
+    def test_content_already_held_in_english_is_unchanged_by_the_reimport(self, db):
+        with override_settings(LANGUAGES=[("en", "English")]):
+            import_skos(FIXTURES / "rocks.ttl")
+
+        with override_settings(LANGUAGES=[("en", "English"), ("fr", "French")]):
+            import_skos(FIXTURES / "rocks.ttl")
+
+        igneous = Concept.objects.get(static_uri="http://example.org/rocks/igneous")
+        granite = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+        assert igneous.label == "Igneous rock"
+        assert igneous.definition("en") == "Rock formed by the cooling and solidification of magma or lava."
+        assert granite.label == "Granite"
+        assert granite.alt_labels("en") == ["Magma rock"]
+        assert granite.hidden_labels("en") == ["Granit rock"]
+        assert granite.notes("en", ConceptNote.Kind.SCOPE) == ["Used here for coarse-grained intrusive igneous rock."]
 
 
 class TestUnconfiguredLanguageValuesAreSetAside:
@@ -1270,25 +3888,61 @@ class TestNoPreferredLabelFinishedByUS3:
         assert b.alt_labels("en") == ["B-alt"]
 
 
+class TestNoPreferredLabelConceptStillAccountsItsOwnLanguages:
+    """T026 — SC-025, S6 CORR-001, decisions.md D34: a concept skipped for
+    having no usable preferred label never reached ``import_labels``, so none
+    of its own published tags ever entered ``language_account()`` — the
+    failure landing precisely on the concept a curator most needs to be told
+    about (FR-008's sufficiency clause, SC-012). Accounted here under the
+    concept's own published tag(s), never under the configured default it
+    lacks — folding ``NO_PREFERRED_LABEL``'s own ``params["language"]`` (a
+    configured code) into the account the way a published tag is would be
+    D14's failure mode all over again."""
+
+    def test_the_skipped_concepts_own_published_language_is_visible_in_the_account(self, db):
+        with override_settings(LANGUAGES=[("en", "English")]):
+            report = import_skos(FIXTURES / "no_default_language_label.ttl")
+        assert "fr" in report.language_account()
+        assert not Concept.objects.filter(static_uri="http://example.org/quarry/c").exists()
+
+    def test_the_configured_default_language_itself_never_appears_in_the_account(self, db):
+        # D14's failure mode: NO_PREFERRED_LABEL's own params["language"] is the
+        # *configured* default the concept lacks, never a published tag — must
+        # never be folded into the account as though it were one.
+        with override_settings(LANGUAGES=[("en", "English")]):
+            report = import_skos(FIXTURES / "no_default_language_label.ttl")
+        assert "en" not in report.language_account()
+
+    def test_the_no_preferred_label_entry_itself_is_still_reported_unchanged(self, db):
+        with override_settings(LANGUAGES=[("en", "English")]):
+            report = import_skos(FIXTURES / "no_default_language_label.ttl")
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.NO_PREFERRED_LABEL]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/quarry/c"
+        assert entries[0].params["language"] == "en"
+
+
 class TestEmptySlugLabelIsSetAsideNotCrashed:
-    """FIX 5 (review, decisions.md D39) — ``_assign_unique_slug`` derives a
-    concept's slug from its preferred label with ``slugify()``, then sets
+    """FIX 5 (review, decisions.md D39), updated by T029/decisions.md D35 —
+    ``assign_unique_slug`` derives a concept's slug from its published
+    identifier's own segment with ``slugify()``, then sets
     ``slug_is_manual = True`` and lets ``Concept.save()`` write it.
-    ``save()`` refuses an *explicit* (manual) slug that is empty — a label
-    made up only of characters ``slugify()`` strips (e.g. ``"±"``) produces
-    exactly that. The label itself is perfectly fine; it is the *derived
-    slug* that is unusable, so the concept must be set aside and reported —
-    under a reason that names the real problem, not the model's own
-    slug-shaped message — rather than crashing the run on an uncaught
+    ``save()`` refuses an *explicit* (manual) slug that is empty — an
+    identifier segment made up only of characters ``slugify()`` strips
+    (e.g. a ``"±"`` fragment) produces exactly that. The identifier and the
+    label are both perfectly fine; it is the *derived slug* that is
+    unusable, so the concept must be set aside and reported — under a
+    reason that names the real problem, not the model's own slug-shaped
+    message — rather than crashing the run on an uncaught
     ``ValidationError``."""
 
-    def test_a_label_that_slugifies_to_empty_is_set_aside_and_named(self, db):
+    def test_an_identifier_segment_that_slugifies_to_empty_is_set_aside_and_named(self, db):
         report = import_skos(FIXTURES / "empty_slug_label.ttl")
         assert report.fatal == []
         entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.EMPTY_SLUG]
         assert len(entries) == 1
-        assert entries[0].subject == "http://example.org/emptyslug/symbol"
-        assert not Concept.objects.filter(static_uri="http://example.org/emptyslug/symbol").exists()
+        assert entries[0].subject == "http://example.org/emptyslug/symbol#±"
+        assert not Concept.objects.filter(static_uri="http://example.org/emptyslug/symbol#±").exists()
 
     def test_the_rest_of_the_vocabulary_imports_with_its_own_content_intact(self, db):
         import_skos(FIXTURES / "empty_slug_label.ttl")
@@ -1296,6 +3950,73 @@ class TestEmptySlugLabelIsSetAsideNotCrashed:
         normal = Concept.objects.get(static_uri="http://example.org/emptyslug/normal")
         assert normal.label == "Normal"
         assert normal.alt_labels("en") == ["Normal-alt"]
+
+    def test_the_message_does_not_blame_a_preferred_label_that_is_perfectly_usable(self, db):
+        """CORR-701 (review round 7, decisions.md D72) — the set-aside concept's label is
+        ``"Symbol"``, which slugifies perfectly well; it is the identifier's own ``#±``
+        fragment that does not. Since T029/decisions.md D35 moved the slug off the label
+        entirely, a message blaming the preferred label sends a curator to correct a value
+        that is not at fault, on every one of this reason's call sites."""
+        report = import_skos(FIXTURES / "empty_slug_label.ttl")
+        entry = next(entry for entry in report.set_aside if entry.reason is SetAsideReason.EMPTY_SLUG)
+        message = entry.render()
+        assert entry.subject in message
+        assert "preferred label" not in message
+
+    def test_a_collision_the_importer_gives_up_on_is_reported_without_blaming_the_identifier(
+        self, db, tmp_path, monkeypatch
+    ):
+        """CORR-701 — the second call site T060 added. Here the identifier segment *and* the
+        label are both perfectly usable and the slug is empty only because the collision
+        loop ran out of candidates, so a message naming characters ``slugify()`` strips is
+        false about a value the file never got wrong."""
+        monkeypatch.setattr(ConceptImporter, "assign_unique_slug", staticmethod(lambda *args, **kwargs: None))
+        source = tmp_path / "give_up.ttl"
+        source.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            "<http://giveup.example/scheme>\n"
+            "    a skos:ConceptScheme ;\n"
+            '    skos:prefLabel "Give up"@en .\n'
+            "<http://giveup.example/scheme/c1>\n"
+            "    a skos:Concept ;\n"
+            "    skos:inScheme <http://giveup.example/scheme> ;\n"
+            '    skos:prefLabel "Perfectly Fine Label"@en .\n',
+            encoding="utf-8",
+        )
+        report = import_skos(source)
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.EMPTY_SLUG]
+        assert [entry.subject for entry in entries] == ["http://giveup.example/scheme/c1"]
+        assert "preferred label" not in entries[0].render()
+
+
+class TestOverlongValueIsSetAsideNotCrashed:
+    """T025 — SC-024, S6 SEC-002, decisions.md D34: variant matching now routes
+    label values that were previously set aside (an exact-tag-only site never
+    reached them) into ``Concept.add_label``, whose ``full_clean()`` refuses text
+    beyond 255 characters. Guarded the way ``EMPTY_SLUG`` already guards the slug
+    (FIX 5): caught ahead of a rolled-back transaction, set aside with its own
+    reason, and the rest of the file — including the rest of the same concept —
+    still imports."""
+
+    def test_an_overlong_alt_label_is_set_aside_and_named_not_raised(self, db):
+        report = import_skos(FIXTURES / "value_too_long_label.ttl")
+        assert report.fatal == []
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.VALUE_TOO_LONG]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://example.org/longvalue/toolong"
+        assert entries[0].params["language"] == "en-GB"
+
+    def test_the_concept_carrying_the_overlong_value_still_imports_on_its_other_content(self, db):
+        import_skos(FIXTURES / "value_too_long_label.ttl")
+        toolong = Concept.objects.get(static_uri="http://example.org/longvalue/toolong")
+        assert toolong.label == "TooLong"
+        assert toolong.alt_labels("en") == []
+
+    def test_the_rest_of_the_file_still_imports(self, db):
+        import_skos(FIXTURES / "value_too_long_label.ttl")
+        ok = Concept.objects.get(static_uri="http://example.org/longvalue/ok")
+        assert ok.label == "OK"
+        assert ok.alt_labels("en") == ["OK-alt"]
 
 
 class TestBroaderAndNarrowerRelations:
@@ -1590,6 +4311,171 @@ class TestRelationDisjointness:
             "http://example.org/disjoint3/a",
             "http://example.org/disjoint3/b",
         }
+
+
+class TestCollectionSlugFollowsThePublishedIdentifier:
+    """T038 — FR-017/FR-019/decisions.md D35: a collection is a third imported record
+    with a published identifier and a real local address (``Collection.local_url``),
+    and it was missed when ``Concept`` (T029) and ``ConceptScheme`` (T030) moved to
+    identifier-derived slugs — three review lenses independently found the gap. A
+    publisher renaming a collection's ``skos:prefLabel`` must not move its slug or
+    ``local_url``, the same guarantee SC-026/SC-027 already give a concept and a
+    vocabulary. A collection authored on this site (never imported) keeps deriving its
+    slug from its name (FR-019).
+    """
+
+    def test_a_publisher_rename_leaves_the_collection_s_slug_and_local_url_unchanged(self, db, tmp_path):
+        first = tmp_path / "renamed_collection_first.ttl"
+        first.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://pub.example/x> a skos:ConceptScheme ; skos:prefLabel "Scheme"@en .
+
+            <http://pub.example/x#c1> a skos:Concept ;
+                skos:inScheme <http://pub.example/x> ;
+                skos:prefLabel "Concept One"@en .
+
+            <http://pub.example/x#grp> a skos:Collection ;
+                skos:prefLabel "Colours"@en ;
+                skos:member <http://pub.example/x#c1> .
+            """
+        )
+        import_skos(first)
+        collection_before = Collection.objects.get(static_uri="http://pub.example/x#grp")
+        slug_before = collection_before.slug
+        local_url_before = collection_before.local_url
+        assert collection_before.name == "Colours"
+
+        second = tmp_path / "renamed_collection_second.ttl"
+        second.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://pub.example/x> a skos:ConceptScheme ; skos:prefLabel "Scheme"@en .
+
+            <http://pub.example/x#c1> a skos:Concept ;
+                skos:inScheme <http://pub.example/x> ;
+                skos:prefLabel "Concept One"@en .
+
+            <http://pub.example/x#grp> a skos:Collection ;
+                skos:prefLabel "Colors"@en ;
+                skos:member <http://pub.example/x#c1> .
+            """
+        )
+        report = import_skos(second)
+
+        collection_after = Collection.objects.get(static_uri="http://pub.example/x#grp")
+        assert "http://pub.example/x#grp" in report.updated
+        assert collection_after.name == "Colors"
+        assert collection_after.slug == slug_before
+        assert collection_after.local_url == local_url_before
+
+    def test_a_collection_s_slug_is_the_last_segment_of_its_identifier_not_its_name(self, db):
+        import_skos(FIXTURES / "rocks.ttl")
+        collection = Collection.objects.get(static_uri="http://example.org/rocks/collection/silica-bearing")
+        # The URI's own last path segment is "silica-bearing"; the name is
+        # "Silica-bearing rocks", which would slugify to "silica-bearing-rocks"
+        # under the superseded name-derived rule (D6).
+        assert collection.slug == "silica-bearing"
+
+    def test_a_collection_created_on_this_site_still_derives_its_slug_from_its_name(self, db, scheme):
+        collection = Collection.objects.create(scheme=scheme, name="Silica bearing rocks")
+        assert collection.static_uri is None
+        assert collection.slug_is_manual is False
+        assert collection.slug == "silica-bearing-rocks"
+
+
+class TestUnusableCollectionSlugIsSetAsideNotCrashed:
+    """T039 — FR-011/FR-014, decisions.md D35 (fix cycle 3): T038 made a collection's slug
+    derive from its published identifier's own segment, exactly like a concept's, but the
+    concept-side ``EMPTY_SLUG`` guard (``import_concepts``'s pre-write
+    ``slugify(identifier_slug_segment(uri))`` check) was not mirrored for a collection — so an
+    identifier segment made up only of characters ``slugify()`` strips let
+    ``CollectionImporter.import_collections`` write an empty slug straight onto the row, and
+    ``Collection.save()``'s own manual-slug refusal (``An explicit slug must not be empty.``)
+    escaped uncaught, rolling back the whole run (SC-024). Guarded the same way, ahead of the
+    write: the collection is set aside under ``EMPTY_SLUG`` and the rest of the file — including
+    a concept in the very same file — still imports. Unlike a vocabulary, a collection is not
+    something the rest of the file needs in order to import, so this is a set-aside, not fatal.
+    """
+
+    def test_an_identifier_segment_that_slugifies_to_empty_is_set_aside_and_named(self, db, tmp_path):
+        path = tmp_path / "unusable_collection_slug.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://c.org/vocab3/> a skos:ConceptScheme ; skos:prefLabel "Symbols"@en .
+
+            <http://c.org/vocab3/ok> a skos:Concept ;
+                skos:inScheme <http://c.org/vocab3/> ;
+                skos:prefLabel "OK"@en .
+
+            <http://c.org/vocab3/#±> a skos:Collection ;
+                skos:prefLabel "Assorted symbols"@en ;
+                skos:member <http://c.org/vocab3/ok> .
+            """
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.EMPTY_SLUG]
+        assert len(entries) == 1
+        assert entries[0].subject == "http://c.org/vocab3/#±"
+        assert not Collection.objects.filter(static_uri="http://c.org/vocab3/#±").exists()
+
+    def test_the_rest_of_the_file_still_imports(self, db, tmp_path):
+        path = tmp_path / "unusable_collection_slug2.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://c.org/vocab4/> a skos:ConceptScheme ; skos:prefLabel "Symbols"@en .
+
+            <http://c.org/vocab4/ok> a skos:Concept ;
+                skos:inScheme <http://c.org/vocab4/> ;
+                skos:prefLabel "OK"@en .
+
+            <http://c.org/vocab4/#±> a skos:Collection ;
+                skos:prefLabel "Assorted symbols"@en ;
+                skos:member <http://c.org/vocab4/ok> .
+            """
+        )
+        import_skos(path)
+        assert ConceptScheme.objects.filter(static_uri="http://c.org/vocab4/").exists()
+        assert Concept.objects.filter(static_uri="http://c.org/vocab4/ok").exists()
+
+
+class TestCollectionsCollidingOnlyByNameNoLongerCrash:
+    """T039(a) — decisions.md D35 (fix cycle 3): before T038, two collections whose *names*
+    slugified to the same value (e.g. ``'Rock Types'@en`` and ``'rock types'@en``) raised an
+    uncaught ``ValidationError`` from ``Collection.save()``'s own colliding-slug refusal and
+    stored nothing at all — zero schemes, zero concepts. Since T038 a collection's slug is
+    identifier-derived, so two distinct identifiers never produce one slug and there is no
+    second collision mechanism to add (D35 — "assert that rather than adding a second
+    mechanism"); this asserts the already-resolved behaviour directly rather than re-deriving a
+    fix :class:`TestCollectionSlugFollowsThePublishedIdentifier` already proves.
+    """
+
+    def test_two_collections_sharing_a_name_but_not_an_identifier_both_import(self, db, tmp_path):
+        path = tmp_path / "collection_name_collision.ttl"
+        path.write_text(
+            """
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://c.org/vocab5/> a skos:ConceptScheme ; skos:prefLabel "Vocab"@en .
+
+            <http://c.org/vocab5/collection/a> a skos:Collection ; skos:prefLabel "Rock Types"@en .
+            <http://c.org/vocab5/collection/b> a skos:Collection ; skos:prefLabel "rock types"@en .
+            """
+        )
+        report = import_skos(path)
+        assert report.fatal == []
+        assert report.set_aside == []
+        a = Collection.objects.get(static_uri="http://c.org/vocab5/collection/a")
+        b = Collection.objects.get(static_uri="http://c.org/vocab5/collection/b")
+        assert a.slug != b.slug
+        assert {a.slug, b.slug} == {"a", "b"}
 
 
 class TestCollectionsAndMembership:
@@ -2147,6 +5033,41 @@ class TestFixtureCorpus:
             rdflib.URIRef("http://example.org/rocks/basalt"),
         ]
 
+    def test_variants_fixture_carries_several_variants_of_one_base_language_across_labels_and_notes(self):
+        # T005/FR-015/SC-020: several variants of one base language (en), spread
+        # across preferred labels, alternative labels, and notes — the contest
+        # population US-3 needs, reused rather than rebuilt by #52 (spec US-5).
+        graph = rdflib.Graph()
+        graph.parse(FIXTURES / "variants.ttl", format="turtle")
+        colour = rdflib.URIRef("http://example.org/colours/colour")
+
+        pref_labels = {(o.language, str(o)) for o in graph.objects(colour, SKOS.prefLabel)}
+        assert pref_labels == {("en-gb", "Colour"), ("en-us", "Color")}
+
+        alt_labels = {(o.language, str(o)) for o in graph.objects(colour, SKOS.altLabel)}
+        assert alt_labels == {("en-gb", "Colour"), ("en-us", "Color")}
+
+        note_languages = {o.language for o in graph.objects(colour, SKOS.note)}
+        assert note_languages == {"en-gb", "en-us"}
+
+    def test_en_gb_only_fixture_publishes_only_the_specific_to_general_direction(self):
+        # T005/SC-002: a vocabulary published only as en-gb, for a site configured
+        # only for en (no bare "en" tag anywhere in this file).
+        graph = rdflib.Graph()
+        graph.parse(FIXTURES / "en-gb-only.ttl", format="turtle")
+        languages = {literal.language for literal in graph.objects(None, SKOS.prefLabel)}
+        assert languages == {"en-gb"}
+
+    def test_declares_de_at_fixture_declares_itself_in_a_variant_of_a_configured_language(self):
+        # T005/SC-010: the vocabulary's own skos:prefLabel is a single de-at tag,
+        # for the default-language resolution path.
+        graph = rdflib.Graph()
+        graph.parse(FIXTURES / "declares-de-at.ttl", format="turtle")
+        scheme = rdflib.URIRef("http://example.org/farben/")
+        assert (scheme, rdflib.RDF.type, SKOS.ConceptScheme) in graph
+        scheme_labels = {(o.language, str(o)) for o in graph.objects(scheme, SKOS.prefLabel)}
+        assert scheme_labels == {("de-at", "Farben")}
+
     def test_blank_node_concept_fixture_has_no_uri_identity(self):
         graph = rdflib.Graph()
         graph.parse(FIXTURES / "blank_node_concept.ttl", format="turtle")
@@ -2301,7 +5222,16 @@ def _coverage_label_covered(
 ) -> bool:
     """Direct evidence that this ``skos:prefLabel``/``altLabel``/``hiddenLabel`` value
     landed — as the scheme's own name, a concept's identity anchor, or a
-    ``ConceptLabel`` row — or was reported set aside (FIX 13)."""
+    ``ConceptLabel`` row — or was reported set aside (FIX 13).
+
+    T008 (FS-007 US-1): a value may now land under a *resolved* configured language
+    other than its own published tag (FR-001/FR-006), so the landed-row check is no
+    longer scoped to ``language`` — decisions.md D21 named this sweep as something to
+    re-check once these fixtures' values start landing instead of being set aside.
+    ``VARIANT_NOT_KEPT`` (T022) joins the recognised set-aside reasons for the same
+    reason: a losing variant is reported under it, keyed by its own published tag,
+    exactly as ``UNCONFIGURED_LANGUAGE`` already is.
+    """
     if subject_uri in excluded_subjects:
         return True
     if kind == ConceptLabel.Kind.PREFERRED:
@@ -2311,12 +5241,19 @@ def _coverage_label_covered(
             return True
         if Collection.objects.filter(static_uri=subject_uri, name=text).exists():
             return True
-    if ConceptLabel.objects.filter(concept__static_uri=subject_uri, language=language, kind=kind, text=text).exists():
+    if ConceptLabel.objects.filter(concept__static_uri=subject_uri, kind=kind, text=text).exists():
         return True
     return any(
         entry.subject == subject_uri
         and entry.params.get("language") == language
-        and entry.reason in (SetAsideReason.UNCONFIGURED_LANGUAGE, SetAsideReason.SURPLUS_PREFERRED_LABEL)
+        and entry.reason
+        in (
+            SetAsideReason.UNCONFIGURED_LANGUAGE,
+            SetAsideReason.SURPLUS_PREFERRED_LABEL,
+            SetAsideReason.VARIANT_NOT_KEPT,
+            # T025, S6 SEC-002: a value the model's own field refuses on length.
+            SetAsideReason.VALUE_TOO_LONG,
+        )
         for entry in report.set_aside
     )
 
@@ -2325,10 +5262,15 @@ def _coverage_note_covered(
     subject_uri: str, language: str, text: str, kind: str, excluded_subjects: set[str], report
 ) -> bool:
     """Direct evidence that this note value landed as a ``ConceptNote`` row, or was
-    reported set aside (FIX 13)."""
+    reported set aside (FIX 13).
+
+    T008: not scoped to ``language`` on the landed-row check, for the same reason as
+    :func:`_coverage_label_covered` — a note may land under a resolved configured
+    language other than its own published tag.
+    """
     if subject_uri in excluded_subjects:
         return True
-    if ConceptNote.objects.filter(concept__static_uri=subject_uri, language=language, kind=kind, value=text).exists():
+    if ConceptNote.objects.filter(concept__static_uri=subject_uri, kind=kind, value=text).exists():
         return True
     return any(
         entry.subject == subject_uri
@@ -2772,3 +5714,104 @@ class TestFailureMessagesUseOnlyNamedPlaceholders:
         assert isinstance(err.message, Promise)
         assert uses_only_named_placeholders(str(err.message))
         assert err.code == "skos_import_failed"
+
+
+class TestNoContentIsStoredInAnUnconfiguredLanguage:
+    """T010 — FR-010/SC-017: across every matching path this feature introduces — the default
+    language, ``Concept.label``, labels, notes, and the vocabulary/collection name and
+    description — no value is ever stored in a language absent from the site's configuration.
+    This is the test that would fail if a later change made the matcher permissive."""
+
+    @staticmethod
+    def _assert_only_configured_languages_are_stored():
+        configured = {code for code, _label in django_settings.LANGUAGES}
+        stray_labels = ConceptLabel.objects.exclude(language__in=configured)
+        stray_notes = ConceptNote.objects.exclude(language__in=configured)
+        assert list(stray_labels) == []
+        assert list(stray_notes) == []
+        for scheme in ConceptScheme.objects.all():
+            assert scheme.effective_default_language in configured
+
+    @pytest.mark.parametrize("filename", ["rocks.ttl", "variants.ttl", "en-gb-only.ttl", "declares-de-at.ttl"])
+    def test_no_stray_language_lands_across_every_matching_path_this_feature_touches(self, db, filename):
+        report = import_skos(FIXTURES / filename)
+        assert report.fatal == []
+        self._assert_only_configured_languages_are_stored()
+
+    def test_the_invariant_holds_under_djangos_own_99_language_default(self, db, tmp_path):
+        # tests/settings.py declares its own three-language LANGUAGES list, so simply not
+        # overriding it here would silently mean that list rather than Django's own default —
+        # the obvious-looking test that pins nothing (decisions.md D12/D17). The ordinary
+        # consuming project declares no LANGUAGES at all, so this is the behaviour that needs
+        # holding still.
+        path = tmp_path / "many_languages.ttl"
+        path.write_text(
+            """
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+            <http://example.org/manylang/> a skos:ConceptScheme ;
+                skos:prefLabel "Many languages"@en .
+
+            <http://example.org/manylang/item> a skos:Concept ;
+                skos:inScheme <http://example.org/manylang/> ;
+                skos:prefLabel "Item"@en-us ;
+                skos:altLabel "Artikel"@de-at, "Nothing shares this base"@zzz .
+            """
+        )
+        with override_settings(LANGUAGES=global_settings.LANGUAGES):
+            report = import_skos(path)
+            assert report.fatal == []
+            self._assert_only_configured_languages_are_stored()
+            # A tag sharing no base with any of Django's 99 shipped languages is still refused,
+            # even under the largest configured set the package will ever see.
+            entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.UNCONFIGURED_LANGUAGE]
+            assert any(entry.params["language"] == "zzz" for entry in entries)
+
+
+class TestAddingABaseSharingLanguageLeavesEveryAddressWhereItWas:
+    """SC-022 — adding a configured language that *shares a base* with one the site already
+    holds, then re-importing the unchanged file, leaves every record's slug and local address
+    exactly as they were.
+
+    SC-015's test could never have failed this, because it only ever adds a language sharing no
+    base with an existing one (``en`` → ``en``+``fr``), so no incumbent's candidate set can
+    shrink. ``variants.ttl`` publishes one concept as ``"Colour"@en-gb`` and ``"Color"@en-us``
+    with no bare ``en`` anywhere, so adding ``en-gb`` genuinely moves which value wins the ``en``
+    slot — which is the case that must leave the address alone.
+
+    The concept's *name* is deliberately not asserted: SC-022's ``name`` clause is struck
+    (decisions.md D48). A displayed label following the site's language configuration is what
+    configuring a language asks for; an address following it is the harm FR-017 removes.
+    """
+
+    SCHEME_URI = "http://example.org/colours/"
+    CONCEPT_URI = "http://example.org/colours/colour"
+
+    @staticmethod
+    def _address(obj) -> tuple[int, str | None, str, str]:
+        return (obj.pk, obj.static_uri, obj.slug, obj.local_url)
+
+    def test_adding_en_gb_to_an_en_site_moves_no_slug_and_no_local_url(self, db):
+        with override_settings(LANGUAGES=[("en", "English")]):
+            assert import_skos(FIXTURES / "variants.ttl").fatal == []
+
+        scheme_before = self._address(ConceptScheme.objects.get(static_uri=self.SCHEME_URI))
+        concept_before = self._address(Concept.objects.get(static_uri=self.CONCEPT_URI))
+
+        with override_settings(LANGUAGES=[("en", "English"), ("en-gb", "British English")]):
+            assert import_skos(FIXTURES / "variants.ttl").fatal == []
+
+        assert self._address(ConceptScheme.objects.get(static_uri=self.SCHEME_URI)) == scheme_before
+        assert self._address(Concept.objects.get(static_uri=self.CONCEPT_URI)) == concept_before
+
+    def test_the_added_language_does_reach_the_stored_content(self, db):
+        # The guard above is only meaningful if the second run genuinely changed what is stored;
+        # otherwise it would pass against an import that did nothing at all.
+        with override_settings(LANGUAGES=[("en", "English")]):
+            import_skos(FIXTURES / "variants.ttl")
+        assert Concept.objects.get(static_uri=self.CONCEPT_URI).labels.filter(language="en-gb").count() == 0
+
+        with override_settings(LANGUAGES=[("en", "English"), ("en-gb", "British English")]):
+            import_skos(FIXTURES / "variants.ttl")
+        assert Concept.objects.get(static_uri=self.CONCEPT_URI).labels.filter(language="en-gb").count() > 0

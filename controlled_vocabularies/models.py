@@ -240,6 +240,29 @@ def _static_uri_field(help_text: "str | _StrPromise") -> models.CharField:
     )
 
 
+def _slug_is_manual_field(help_text: "str | _StrPromise") -> models.BooleanField:
+    """Build a ``slug_is_manual`` field, owning every attribute the three concrete models
+    (:class:`ConceptScheme`, :class:`Concept`, :class:`Collection`) must agree on (ARCH-302,
+    fix cycle 4, decisions.md D54) — the same rationale :func:`_static_uri_field` already gives.
+
+    Before this, each subclass hand-copied the whole field byte-for-byte, only ``help_text``
+    legitimately differing per model (a concept's slug tracks its *label*, a scheme's or a
+    collection's tracks its *name*). Called once per concrete model — and once for the abstract
+    base itself, below — with only that model's own ``help_text``.
+
+    No ``db_index`` (CORR-406, decisions.md D62, fix cycle 5): this is a low-cardinality flag read
+    only inside a record's own ``save()``, never filtered or ordered on, so an index would cost
+    writes for a lookup nothing ever performs. Both concrete field declarations this factory
+    replaced carried the identical comment; it is recorded once here, on the one place the field
+    is now declared, rather than lost when the byte-identical declarations were extracted.
+    """
+    return models.BooleanField(
+        default=False,
+        verbose_name=_("slug set manually"),
+        help_text=help_text,
+    )
+
+
 class StaticUriModel(models.Model):
     """Abstract base for a model carrying an externally assigned identifier (T028).
 
@@ -270,6 +293,19 @@ class StaticUriModel(models.Model):
             "wherever the field is exposed."
         )
     )
+    slug_is_manual = _slug_is_manual_field(
+        _(
+            "Whether the slug was set explicitly rather than derived automatically. "
+            "A manual slug is left untouched when the record is later renamed."
+        )
+    )
+
+    #: Declared, not assigned: the concrete slug field's own uniqueness scope (app-wide for
+    #: ConceptScheme, per-scheme for Concept and Collection) legitimately differs per model
+    #: (ARCH-302, decisions.md D54), so each subclass keeps declaring its own SlugField — this
+    #: annotation only lets :meth:`set_slug`/:meth:`_validate_manual_slug` reference ``self.slug``
+    #: from the shared base without a static-typing gap.
+    slug: str
 
     class Meta:
         abstract = True
@@ -298,6 +334,57 @@ class StaticUriModel(models.Model):
         comparing it against the configured base address (FR-003).
         """
         return bool(self.static_uri)
+
+    def set_slug(self, slug: str) -> None:
+        """Set an explicit slug that survives a later rename (FR-010/FR-017/FR-018,
+        decisions.md D35, ARCH-302 fix cycle 4 D54).
+
+        Marks the slug manual and saves, so from now on :meth:`save` leaves it untouched when
+        the record's own auto-derivation source (a concept's label, a scheme's or a
+        collection's name) later changes. The value is stored exactly as given rather than
+        re-slugified. The usual non-empty and uniqueness checks still apply, enforced by each
+        concrete subclass's own :meth:`save` (the scope — app-wide or per-scheme — differs per
+        model, so the check itself stays there). Shared by all three concrete subclasses: the
+        body was byte-identical on each before this cycle.
+
+        Not called from the import path at all (CORR-407, decisions.md D62, fix cycle 5):
+        :meth:`ConceptImporter.assign_unique_slug`, :meth:`CollectionImporter.import_collections`
+        and :meth:`SchemeResolver.resolve_scheme` all assign :attr:`slug`/:attr:`slug_is_manual`
+        directly and save once, to avoid a second write per imported record (decisions.md D46,
+        D55). This method is curator/API surface only, exercised directly by each model's own
+        test class.
+        """
+        self.slug = slug
+        self.slug_is_manual = True
+        self.save()
+
+    def _validate_manual_slug(self) -> None:
+        """Refuse an empty or malformed manual slug (ARCH-302 fix cycle 4, decisions.md D54).
+
+        Called from each concrete subclass's own :meth:`save`, in the branch taken when
+        :attr:`slug_is_manual` is set: a manual slug is stored verbatim (never re-slugified) but
+        must still be a well-formed single-segment slug — an empty or malformed value (spaces,
+        ``/``, control characters) would corrupt the composed URI and break ``get_by_uri``
+        (Article IX — identity IS the URI). ``save()`` never runs ``full_clean()``, so the
+        ``SlugField`` validator is applied explicitly here. Byte-identical on all three concrete
+        models before this cycle; the auto-derivation branch beside it (tracking a label or a
+        name) stays on each subclass, since what it derives *from* differs per model.
+        """
+        if not self.slug:
+            raise ValidationError({"slug": _("An explicit slug must not be empty.")})
+        try:
+            validate_unicode_slug(self.slug)
+        except ValidationError as exc:
+            raise ValidationError(
+                {
+                    "slug": ValidationError(
+                        _(
+                            "An explicit slug must be a valid slug — letters, numbers, "
+                            "hyphens or underscores, with no spaces or slashes."
+                        ),
+                    )
+                }
+            ) from exc
 
     def clean(self):
         """Normalise a blank ``static_uri`` to ``None`` and check its format."""
@@ -345,7 +432,11 @@ class ConceptScheme(StaticUriModel):
     """A controlled vocabulary — a named container for concepts (a SKOS concept scheme).
 
     The ``slug`` is derived from ``name`` on every save (dynamic while unpublished,
-    research R5) and is unique app-wide. The ``uri`` is composed on read.
+    research R5) unless :attr:`slug_is_manual` is set, in which case it is held
+    exactly as assigned (FR-018, decisions.md D35) — the same mechanism
+    :attr:`Concept.slug_is_manual` already gives a concept, so a vocabulary's own
+    published identifier can anchor its address the same way. It is unique app-wide.
+    The ``uri`` is composed on read.
     """
 
     name = models.CharField(
@@ -366,6 +457,12 @@ class ConceptScheme(StaticUriModel):
         help_text=_(
             "A URL-safe identifier derived automatically from the name. A slug must be unique across all vocabularies."
         ),
+    )
+    slug_is_manual = _slug_is_manual_field(
+        _(
+            "Whether the slug was set explicitly rather than derived from the name. "
+            "A manual slug is left untouched when the name later changes."
+        )
     )
     default_language = models.CharField(
         max_length=16,
@@ -424,8 +521,8 @@ class ConceptScheme(StaticUriModel):
         return self.default_language or settings.LANGUAGE_CODE
 
     def save(self, *args, **kwargs):
-        """Derive the slug from ``name``, freeze the default language once concepts
-        exist, and refuse an empty or colliding slug."""
+        """Derive the slug from ``name`` unless :attr:`slug_is_manual`, freeze the default
+        language once concepts exist, and refuse an empty or colliding slug."""
         # Freeze the default language once the vocabulary has concepts. Each concept's
         # identity anchor (``Concept.label``) is its preferred label in the effective
         # default language; changing that language afterwards would silently reinterpret
@@ -454,9 +551,17 @@ class ConceptScheme(StaticUriModel):
                     )
                 }
             )
-        self.slug = slugify(self.name, allow_unicode=True)
-        if not self.slug:
-            raise ValidationError({"name": _("Name must produce a non-empty slug.")})
+        if not self.slug_is_manual:
+            # An auto slug tracks the name; a manual one is left exactly as set
+            # (FR-018, decisions.md D35).
+            self.slug = slugify(self.name, allow_unicode=True)
+            if not self.slug:
+                raise ValidationError({"name": _("Name must produce a non-empty slug.")})
+        else:
+            # ARCH-302, fix cycle 4, decisions.md D54: the empty/malformed-manual-slug guard
+            # was byte-identical across all three concrete models — extracted to the shared
+            # base (Article XV).
+            self._validate_manual_slug()
         # Refuse a slug that collides with another scheme rather than minting a
         # duplicate identifier or silently auto-suffixing it (research R4).
         if ConceptScheme.objects.filter(slug=self.slug).exclude(pk=self.pk).exists():
@@ -538,13 +643,11 @@ class Concept(StaticUriModel):
             "A URL-safe identifier derived automatically from the label. A slug must be unique within a given vocabulary."
         ),
     )
-    slug_is_manual = models.BooleanField(
-        default=False,
-        verbose_name=_("slug set manually"),
-        help_text=_(
+    slug_is_manual = _slug_is_manual_field(
+        _(
             "Whether the slug was set explicitly rather than derived from the label. "
             "A manual slug is left untouched when the label later changes."
-        ),
+        )
     )
     static_uri = _static_uri_field(
         _(
@@ -587,19 +690,6 @@ class Concept(StaticUriModel):
         """
         return f"{self.scheme.local_url}/{self.slug}"
 
-    def set_slug(self, slug: str) -> None:
-        """Set an explicit slug that survives later relabels (FR-010).
-
-        Marks the slug manual and saves, so from now on :meth:`save` leaves it
-        untouched when :attr:`label` changes. The value is stored exactly as given
-        rather than re-slugified — this same mechanism later carries an imported
-        vocabulary's own slugs unchanged (spec R2). The usual non-empty and
-        within-scheme uniqueness checks still apply (FR-012).
-        """
-        self.slug = slug
-        self.slug_is_manual = True
-        self.save()
-
     def save(self, *args, **kwargs):
         """Derive the slug from ``label`` (unless set manually) and refuse an empty or colliding slug."""
         if not self.slug_is_manual:
@@ -619,26 +709,10 @@ class Concept(StaticUriModel):
                     }
                 )
         else:
-            # A manual slug is stored verbatim (not re-slugified) but must still be a
-            # well-formed single-segment slug: an empty or malformed value (spaces, '/',
-            # control chars) would corrupt the composed URI and break get_by_uri
-            # (Article IX — identity IS the URI). save() never runs full_clean(), so the
-            # SlugField validator is applied explicitly here.
-            if not self.slug:
-                raise ValidationError({"slug": _("An explicit slug must not be empty.")})
-            try:
-                validate_unicode_slug(self.slug)
-            except ValidationError as exc:
-                raise ValidationError(
-                    {
-                        "slug": ValidationError(
-                            _(
-                                "An explicit slug must be a valid slug — letters, numbers, "
-                                "hyphens or underscores, with no spaces or slashes."
-                            ),
-                        )
-                    }
-                ) from exc
+            # ARCH-302, fix cycle 4, decisions.md D54: the empty/malformed-manual-slug guard
+            # was byte-identical across all three concrete models — extracted to the shared
+            # base (Article XV).
+            self._validate_manual_slug()
         # Refuse a slug that collides with another concept in the same scheme
         # rather than minting a duplicate identifier or silently auto-suffixing
         # it (research R4). This guards both derived and explicit slugs (FR-012);
@@ -1264,8 +1338,13 @@ class Collection(StaticUriModel):
     is many-to-many and asserts no semantic relation between members (FS-004 FR-008). When
     :attr:`ordered` (a ``skos:OrderedCollection``) the members carry a deliberate sequence
     read back by :meth:`members`; otherwise the collection is a set. The ``slug`` is derived
-    from ``name`` on save and unique within the scheme; the ``uri`` is composed on read under
-    a ``/collection/`` segment so it can never collide with a concept URI (research R4).
+    from ``name`` on every save (dynamic while unpublished) unless :attr:`slug_is_manual` is
+    set, in which case it is held exactly as assigned (FR-017, decisions.md D35) — the same
+    mechanism :attr:`Concept.slug_is_manual`/:attr:`ConceptScheme.slug_is_manual` already give
+    a concept and a vocabulary, so an imported collection's own published identifier can
+    anchor its address the same way. It is unique within the scheme; the ``uri`` is composed
+    on read under a ``/collection/`` segment so it can never collide with a concept URI
+    (research R4).
     """
 
     scheme = models.ForeignKey(
@@ -1287,6 +1366,12 @@ class Collection(StaticUriModel):
         help_text=_(
             "A URL-safe identifier derived automatically from the name. A slug must be unique within a given vocabulary."
         ),
+    )
+    slug_is_manual = _slug_is_manual_field(
+        _(
+            "Whether the slug was set explicitly rather than derived from the name. "
+            "A manual slug is left untouched when the name later changes."
+        )
     )
     ordered = models.BooleanField(
         default=False,
@@ -1341,16 +1426,25 @@ class Collection(StaticUriModel):
         return f"{self.scheme.local_url}/collection/{self.slug}"
 
     def save(self, *args, **kwargs):
-        """Derive the slug from ``name`` and refuse an empty or colliding slug.
+        """Derive the slug from ``name`` unless :attr:`slug_is_manual`, and refuse an
+        empty or colliding slug.
 
         The same identity discipline :class:`ConceptScheme`/:class:`Concept` use: a
         non-empty slug, and no collision with another collection in the same vocabulary
         (the ``UniqueConstraint`` is the integrity backstop), with translatable
         named-placeholder messages.
         """
-        self.slug = slugify(self.name, allow_unicode=True)
-        if not self.slug:
-            raise ValidationError({"name": _("Name must produce a non-empty slug.")})
+        if not self.slug_is_manual:
+            # An auto slug tracks the name; a manual one is left exactly as set
+            # (FR-017, decisions.md D35).
+            self.slug = slugify(self.name, allow_unicode=True)
+            if not self.slug:
+                raise ValidationError({"name": _("Name must produce a non-empty slug.")})
+        else:
+            # ARCH-302, fix cycle 4, decisions.md D54: the empty/malformed-manual-slug guard
+            # was byte-identical across all three concrete models — extracted to the shared
+            # base (Article XV).
+            self._validate_manual_slug()
         if Collection.objects.filter(scheme=self.scheme, slug=self.slug).exclude(pk=self.pk).exists():
             raise ValidationError(
                 {

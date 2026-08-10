@@ -206,6 +206,30 @@ class TestConcept:
         assert Concept.objects.count() == 0
 
 
+class TestConceptSlugFollowsTheLabelWithNoPublisherIdentifier:
+    """T031 — FR-019/SC-030: a record authored on this site has no publisher identifier
+    to derive a slug from, so it must keep deriving its slug from its label exactly as
+    before T029 (decisions.md D35) changed slug derivation for *imported* records. This
+    guard exists because nothing on the import path (``assign_unique_slug``, T029)
+    exercises a concept with no ``static_uri`` — only ``Concept.save()``'s own
+    ``slug_is_manual`` branch does, and this pins that branch's behaviour directly."""
+
+    @pytest.mark.django_db
+    def test_a_locally_authored_concept_derives_its_slug_from_its_label(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        assert concept.static_uri is None
+        assert concept.slug_is_manual is False
+        assert concept.slug == "heat-flow"
+
+    @pytest.mark.django_db
+    def test_a_locally_authored_concept_s_slug_still_follows_a_relabel(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat Flow")
+        concept.label = "Surface Heat Flow"
+        concept.save()
+        assert concept.static_uri is None
+        assert concept.slug == "surface-heat-flow"
+
+
 class TestConceptIdentity:
     """US-3 — Every concept carries a stable identifier. The URI composes from the
     base address, scheme slug and concept slug (FR-005/FR-006); ``get_by_uri``
@@ -1885,6 +1909,82 @@ class TestCollectionMembership:
     def test_str_is_the_name(self, scheme):
         coll = Collection.objects.create(scheme=scheme, name="Common igneous rocks")
         assert str(coll) == "Common igneous rocks"
+
+
+class TestCollectionOverridableSlug:
+    """T038 — FR-017/decisions.md D35: a collection's slug can be set explicitly and then
+    survives a later rename, the same mechanism :class:`TestConceptOverridableSlug` already
+    covers for a concept — the model-level half of the import path's identifier-derived slug
+    (:class:`~controlled_vocabularies.exchange.skos.CollectionImporter`)."""
+
+    @pytest.mark.django_db
+    def test_explicit_slug_is_exactly_the_value_set_not_derived(self, scheme):
+        collection = Collection.objects.create(scheme=scheme, name="Igneous Rocks")
+        collection.set_slug("custom-identifier")
+        assert collection.slug == "custom-identifier"
+        assert collection.slug_is_manual is True
+        collection.refresh_from_db()
+        assert collection.slug == "custom-identifier"
+        assert collection.slug != "igneous-rocks"
+
+    @pytest.mark.django_db
+    def test_explicit_slug_survives_a_rename(self, scheme):
+        collection = Collection.objects.create(scheme=scheme, name="Igneous Rocks")
+        collection.set_slug("ig")
+        collection.name = "Igneous and Volcanic Rocks"
+        collection.save()
+        assert collection.slug == "ig"
+        collection.refresh_from_db()
+        assert collection.slug == "ig"
+
+    @pytest.mark.django_db
+    def test_slug_without_override_still_derives_from_name(self, scheme):
+        collection = Collection.objects.create(scheme=scheme, name="Igneous Rocks")
+        assert collection.slug == "igneous-rocks"
+        assert collection.slug_is_manual is False
+        collection.name = "Volcanic Rocks"
+        collection.save()
+        assert collection.slug == "volcanic-rocks"
+
+    @pytest.mark.django_db
+    def test_explicit_slug_colliding_within_scheme_is_refused(self, scheme):
+        Collection.objects.create(scheme=scheme, name="Igneous Rocks")  # slug "igneous-rocks"
+        other = Collection.objects.create(scheme=scheme, name="Sedimentary Rocks")
+        with pytest.raises(ValidationError):
+            other.set_slug("igneous-rocks")
+        assert scheme.collections.filter(slug="igneous-rocks").count() == 1
+
+    @pytest.mark.django_db
+    def test_explicit_slug_that_is_empty_or_malformed_is_refused(self, scheme):
+        """T048 — CORR-304/ARCH-303: ``Collection.save()``'s manual-slug branch carries the same
+        two refusals ``Concept.save()``'s identical branch already has tests for (empty, and one
+        ``validate_unicode_slug`` rejects) — models.py:1443-1457 — but nothing had ever called
+        ``Collection.set_slug()`` with a value that reaches either raise.
+
+        CORR-405, decisions.md D61 (fix cycle 5): the original version of this test asserted only
+        ``pytest.raises(ValidationError)``, which the empty-slug case satisfies whether it is
+        ``StaticUriModel._validate_manual_slug``'s own empty-specific raise or Django's
+        ``validate_unicode_slug`` (whose ``^[-\\w]+\\Z`` pattern also rejects ``""``) that raises
+        it — deleting the former left this test green. Asserting the specific message under
+        ``message_dict["slug"]`` makes each raise load-bearing on its own.
+        """
+        collection = Collection.objects.create(scheme=scheme, name="Igneous Rocks")
+        with pytest.raises(ValidationError) as empty_exc:
+            collection.set_slug("")
+        assert empty_exc.value.message_dict["slug"] == ["An explicit slug must not be empty."]
+        malformed_message = [
+            "An explicit slug must be a valid slug — letters, numbers, hyphens or underscores, "
+            "with no spaces or slashes."
+        ]
+        with pytest.raises(ValidationError) as slash_exc:
+            collection.set_slug("foo/bar")
+        assert slash_exc.value.message_dict["slug"] == malformed_message
+        with pytest.raises(ValidationError) as spaces_exc:
+            collection.set_slug("has spaces")
+        assert spaces_exc.value.message_dict["slug"] == malformed_message
+        # A valid explicit slug still works (regression guard).
+        collection.set_slug("ig-1")
+        assert collection.slug == "ig-1"
 
 
 class TestOrderedCollection:
