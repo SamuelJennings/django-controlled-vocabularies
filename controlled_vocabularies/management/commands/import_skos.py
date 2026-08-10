@@ -95,5 +95,5 @@ class Command(BaseCommand):
             raise CommandError(str(exc)) from exc
         finally:
             resolver.cleanup()
-        for line in ReportRenderer(report).render():
+        for line in ReportRenderer(report, rehearsal=rehearse).render():
             self.stdout.write(line)

@@ -318,3 +318,17 @@ class TestImportSkosCommandRehearsalFidelity:
         with pytest.raises(CommandError):
             call_command("import_skos", str(FIXTURES / "no_scheme_declared.ttl"), rehearse=True, stdout=StringIO())
         assert ConceptScheme.objects.count() == 0
+
+
+class TestImportSkosCommandRehearsalLine:
+    """T014, FR-010, `decisions.md` D9 — the rehearsal line reaches the command's actual
+    output: present for a rehearsal, absent for a live run of the same source."""
+
+    def test_the_rehearsal_line_is_present_for_a_rehearsal_and_absent_for_a_live_run(self, db):
+        rehearsal_out = StringIO()
+        call_command("import_skos", str(FIXTURES / "rocks.ttl"), rehearse=True, stdout=rehearsal_out)
+        assert "nothing was kept" in rehearsal_out.getvalue()
+
+        live_out = StringIO()
+        call_command("import_skos", str(FIXTURES / "rocks.ttl"), stdout=live_out)
+        assert "nothing was kept" not in live_out.getvalue()
