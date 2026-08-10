@@ -49,6 +49,11 @@
    "state": "IMPLEMENT",
    "at": "2026-08-10T12:40:00Z",
    "note": "US0 foundational (T001,T002,T015) dispatched on sonnet; check-skills green"
+  },
+  {
+   "state": "IMPLEMENT",
+   "at": "2026-08-10T20:15:00Z",
+   "note": "US0 done and merged to the feature branch; receipts green, verify green (910 passed, lint/typecheck/build green), tamper flag triaged as additive-only (D12); one transient conformance finding closes with T003"
   }
  ],
  "gates": {
@@ -78,7 +83,7 @@
    "priority": "P1",
    "issue": null,
    "worktree": "/home/sam/projects/samueljennings/dcv-us0",
-   "status": "in_progress",
+   "status": "done",
    "replans": 0,
    "tasks": [
     {

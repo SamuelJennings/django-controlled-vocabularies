@@ -233,3 +233,25 @@ than pre-built here on spec.
 
 **ADR:** not proposed — a test-fixture placement choice within one story, not a production-code
 design decision.
+
+## D12 — US0's tamper flag on `tests/test_exchange/test_skos.py` is approved as additive-only
+
+`forge tamper-check --base a3769f5 --head <US0 tip>` raised one flag,
+`modified_preexisting_test` on `tests/test_exchange/test_skos.py`. Triaged and approved.
+
+The check classifies from `git diff --name-status` alone, so any file matching the test pattern that
+carries an `M` status is flagged — appending a new test class to an existing test file is
+indistinguishable, at that granularity, from rewriting one. The diff here is 186 insertions and zero
+deletions: no pre-existing test function, assertion or fixture was touched, and no weakening
+construct (`skip`, `xfail`, commented assertion) was introduced. The additive claim T001 rests on is
+independently confirmed by the full suite passing at 910 with no edits to any existing test.
+
+Two additions were made to that file: `TestBaseUriThread` (new class, appended) and
+`TestImportSkosVocabulary::test_a_refusal_names_the_base_uri_when_given` (new method inside an
+existing class, which is what makes the status `M` rather than a clean append).
+
+**Revisit if:** a later story in this feature raises the same flag for a different reason. The
+recurring-flag shape itself — every story that adds a method to an existing test class trips this —
+is a kit observation for the S8 retro, not a change to make mid-feature.
+
+**ADR:** none — a guardrail triage local to this run, nothing downstream inherits it.
