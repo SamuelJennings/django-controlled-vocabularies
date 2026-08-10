@@ -331,6 +331,83 @@ Verified: `poetry run pytest tests/test_management/test_commands/test_import_sko
 tests/test_management/test_sources.py -q` (37 passed), `ruff check` + `ruff format --check` + `mypy`
 on the one changed test file (no production file touched).
 
+## 2026-08-10 — S4 IMPLEMENT — US3 (T012/T013/T014), Implementer
+
+`craft-tdd` and `craft-increments` loaded by name, receipts verified against the brief before
+any task started. Baseline confirmed green (945 tests) before touching anything.
+
+- **T012** — `--rehearse` on `Command`: `handle()` wraps the `import_skos()` call in an outer
+  `transaction.atomic()` block that raises a private `_Rehearsed(report)` sentinel right after
+  a successful call, caught immediately outside the block (`research.md` R5, `decisions.md`
+  D4). `SkosImporter.run`'s own `atomic()` becomes a savepoint under this outer block, exactly
+  as R5 describes; the importer itself is untouched. A refused source raises
+  `SkosImportFailed` from inside `import_skos()` before the sentinel line ever runs, so it
+  propagates past the sentinel's own `except` clause to the command's existing
+  `(SkosImportError, SkosImportFailed)` handler unchanged — no separate refusal path needed,
+  matching `plan.md` "Rehearsal".
+
+  Tests need a real transaction (per the brief), so `TestImportSkosCommandRehearsal` uses
+  `transactional_db`, never `db`. Verified the tests are not tautological per `craft-tdd`:
+  temporarily short-circuited the `if rehearse:` branch to prove both tests fail loudly when
+  the rollback is broken, then restored the real implementation (see `concerns` — not a
+  permanent artifact, no file left behind).
+
+  Tests: a rehearsal against a database already holding `rocks.ttl`, rehearsing an update
+  (`rocks_updated.ttl`), leaves every row of every model this app defines byte-for-byte
+  unchanged — snapshotted generically via `apps.get_app_config(...).get_models()` and
+  `.values()` rather than hand-picking tables, so "every table" is actually every table, not
+  the ones this task happened to think of; a rehearsal of a brand-new vocabulary against an
+  empty database creates nothing.
+
+Verified: `poetry run pytest tests/test_management/test_commands/test_import_skos.py -q` (18
+passed), `ruff check` + `ruff format --check` (one auto-format pass) + `mypy` on the one
+changed production file.
+
+- **T013** — No production code: T012's outer-atomic/sentinel already makes a rehearsal's
+  report the same object a live run's `import_skos()` call would produce, and a fatal finding
+  already exits the block before the sentinel line runs. This task is the two tests SC-003 and
+  the refusal scenario actually gate on (matching how US-2's T011 found its own wiring already
+  landed by T010).
+
+  Tests (`TestImportSkosCommandRehearsalFidelity`): the report `import_skos()` actually returns
+  is captured via a `monkeypatch` spy on the name the command module imports it under (real
+  function called through, not replaced), for a rehearsal and then a live run against the same
+  starting state (`rocks_updated.ttl` on a database already holding `rocks.ttl`) — `created`,
+  `updated`, `set_aside`, `normalized`, `absent_from_source` and `fatal` compared bucket by
+  bucket, not by rendered text, per the brief; `no_scheme_declared.ttl` (already used directly
+  against `import_skos()` in `test_skos.py` for the same `VOCABULARY_UNDETERMINED` fatal
+  finding) rehearsed through the command still raises `CommandError` and leaves the database
+  empty.
+
+Verified: `poetry run pytest tests/test_management/test_commands/test_import_skos.py -q` (20
+passed), `ruff check` + `ruff format --check` + `mypy` on the one changed test file (no
+production file touched). The `_snapshot()` helper T012 added needed a
+`# type: ignore[attr-defined]` for `model.objects` on a `type[Model]` from
+`get_models()` — a django-stubs gap, not a deviation (same class of fix as T003's own `cast`
+for `Command.help`) — missed in T012 because the mypy pre-commit hook is scoped to
+`controlled_vocabularies/` only and never checked the test file; caught here running `mypy`
+directly against it per this task's own verification step, folded into this commit since it
+touches the same method T013's tests exercise.
+
+- **T014** — `ReportRenderer.__init__` gains a keyword-only `rehearsal: bool = False`; `render()`
+  yields one extra line, `gettext_lazy("This was a rehearsal: nothing was kept.")`, only when
+  set, after the five bucket lines (FR-010, `decisions.md` D9) — a flag on the renderer, not a
+  print in `Command.handle()`, which now passes `rehearsal=rehearse` through to it instead of
+  calling it bare.
+
+  Tests: `TestReportRendererRehearsalLine` in `test_rendering.py` — a hand-built `ImportReport`
+  rendered with `rehearsal=True` includes the line, rendered without it does not (T015's own
+  "exercised against a hand-built report, no import needed" pattern). Added
+  `TestImportSkosCommandRehearsalLine` in `test_import_skos.py` on top of that, since the
+  task's own acceptance wording ("present for a rehearsal and absent for a live run of the
+  same source") reads as an end-to-end claim about the command's actual stdout, not only the
+  renderer in isolation — `--rehearse` against `rocks.ttl` prints the line, the same file
+  without the flag does not.
+
+Verified: `poetry run pytest tests/test_management/ -q` (46 passed), `ruff check` +
+`ruff format --check` + `mypy` on both changed production files. Full-repo verify (pytest,
+ruff, mypy, deptry) still to run once, per protocol, immediately before the completion report.
+
 ## Gates
 
 - **Spec gate:** approved 2026-08-10 by SamuelJennings. No conditions.

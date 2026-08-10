@@ -13,16 +13,23 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
+from django.utils.translation import gettext_lazy as _
 from django.utils.translation import ngettext_lazy
 
 from controlled_vocabularies.exchange.report import ImportReport
 
 
 class ReportRenderer:
-    """Turns an :class:`ImportReport` into translated lines a curator reads at a terminal."""
+    """Turns an :class:`ImportReport` into translated lines a curator reads at a terminal.
 
-    def __init__(self, report: ImportReport) -> None:
+    ``rehearsal`` is the one deliberate difference between a rehearsal's rendering and a live
+    run's (T014, FR-010, `decisions.md` D9): when set, one extra line states that nothing was
+    kept, so a rehearsal's counts are never mistaken for a completed import.
+    """
+
+    def __init__(self, report: ImportReport, *, rehearsal: bool = False) -> None:
         self.report = report
+        self.rehearsal = rehearsal
 
     def render(self) -> Iterator[str]:
         """Yield one line per bucket, in the order tasks.md T015 names them."""
@@ -45,3 +52,5 @@ class ReportRenderer:
                 len(self.report.absent_from_source),
             )
         ) % {"count": len(self.report.absent_from_source)}
+        if self.rehearsal:
+            yield str(_("This was a rehearsal: nothing was kept."))

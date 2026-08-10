@@ -18,10 +18,13 @@ from io import StringIO
 from pathlib import Path
 
 import pytest
+from django.apps import apps
 from django.core.management import CommandError, call_command
 from django.utils.functional import Promise
 
+from controlled_vocabularies.exchange.skos import import_skos
 from controlled_vocabularies.management import sources
+from controlled_vocabularies.management.commands import import_skos as import_skos_command
 from controlled_vocabularies.management.commands.import_skos import Command
 from controlled_vocabularies.models import Concept, ConceptScheme
 
@@ -243,3 +246,89 @@ class TestImportSkosCommandURLParity:
         assert Concept.objects.filter(static_uri=concept_uri).exists()
         assert not ConceptScheme.objects.filter(static_uri__startswith="file://").exists()
         assert not Concept.objects.filter(static_uri__startswith="file://").exists()
+
+
+class TestImportSkosCommandRehearsal:
+    """T012, spec Acceptance Scenario 1, `decisions.md` D4, `research.md` R5 — `--rehearse`
+    runs the whole import inside an outer transaction it then abandons. `transactional_db`,
+    not `db`: under `db` the test itself already runs inside a transaction rolled back at the
+    end, which would make a broken rehearsal (one that never actually rolls back) pass anyway.
+    """
+
+    @staticmethod
+    def _snapshot() -> dict[str, list[dict[str, object]]]:
+        """Every row of every model this app defines, field values included — proves every
+        table is unchanged rather than only that row counts match (tasks.md T012)."""
+        return {
+            model._meta.label: list(model.objects.order_by("pk").values())  # type: ignore[attr-defined]
+            for model in apps.get_app_config("controlled_vocabularies").get_models()
+        }
+
+    def test_a_rehearsal_against_a_populated_database_leaves_every_table_unchanged(self, transactional_db):
+        import_skos(FIXTURES / "rocks.ttl")
+        before = self._snapshot()
+
+        call_command("import_skos", str(FIXTURES / "rocks_updated.ttl"), rehearse=True, stdout=StringIO())
+
+        assert self._snapshot() == before
+
+    def test_a_rehearsal_of_a_new_vocabulary_against_an_empty_database_creates_nothing(self, transactional_db):
+        before = self._snapshot()
+
+        call_command("import_skos", str(FIXTURES / "rocks.ttl"), rehearse=True, stdout=StringIO())
+
+        assert self._snapshot() == before
+        assert ConceptScheme.objects.count() == 0
+
+
+class TestImportSkosCommandRehearsalFidelity:
+    """T013, spec Acceptance Scenarios 2-3, SC-003 — a rehearsal and a live run against the
+    same starting state produce equal reports, compared by bucket rather than by rendered
+    text; a source that would be refused is refused the same way whether rehearsed or not."""
+
+    def test_a_rehearsal_and_a_live_run_against_the_same_state_produce_equal_reports(
+        self, transactional_db, monkeypatch
+    ):
+        import_skos(FIXTURES / "rocks.ttl")
+
+        captured = []
+        real_import_skos = import_skos_command.import_skos
+
+        def spy(*args, **kwargs):
+            report = real_import_skos(*args, **kwargs)
+            captured.append(report)
+            return report
+
+        monkeypatch.setattr(import_skos_command, "import_skos", spy)
+
+        call_command("import_skos", str(FIXTURES / "rocks_updated.ttl"), rehearse=True, stdout=StringIO())
+        rehearsed_report = captured.pop()
+
+        call_command("import_skos", str(FIXTURES / "rocks_updated.ttl"), stdout=StringIO())
+        live_report = captured.pop()
+
+        assert rehearsed_report.created == live_report.created
+        assert rehearsed_report.updated == live_report.updated
+        assert rehearsed_report.set_aside == live_report.set_aside
+        assert rehearsed_report.normalized == live_report.normalized
+        assert rehearsed_report.absent_from_source == live_report.absent_from_source
+        assert rehearsed_report.fatal == live_report.fatal == []
+
+    def test_a_refused_source_is_reported_as_refused_when_rehearsed_and_still_exits_non_zero(self, transactional_db):
+        with pytest.raises(CommandError):
+            call_command("import_skos", str(FIXTURES / "no_scheme_declared.ttl"), rehearse=True, stdout=StringIO())
+        assert ConceptScheme.objects.count() == 0
+
+
+class TestImportSkosCommandRehearsalLine:
+    """T014, FR-010, `decisions.md` D9 — the rehearsal line reaches the command's actual
+    output: present for a rehearsal, absent for a live run of the same source."""
+
+    def test_the_rehearsal_line_is_present_for_a_rehearsal_and_absent_for_a_live_run(self, db):
+        rehearsal_out = StringIO()
+        call_command("import_skos", str(FIXTURES / "rocks.ttl"), rehearse=True, stdout=rehearsal_out)
+        assert "nothing was kept" in rehearsal_out.getvalue()
+
+        live_out = StringIO()
+        call_command("import_skos", str(FIXTURES / "rocks.ttl"), stdout=live_out)
+        assert "nothing was kept" not in live_out.getvalue()

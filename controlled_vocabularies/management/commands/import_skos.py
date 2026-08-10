@@ -14,12 +14,23 @@ from pathlib import Path
 from typing import Any, cast
 
 from django.core.management.base import BaseCommand, CommandError
+from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 
 from controlled_vocabularies.exchange.exceptions import SkosImportError, SkosImportFailed
+from controlled_vocabularies.exchange.report import ImportReport
 from controlled_vocabularies.exchange.skos import import_skos
 from controlled_vocabularies.management.rendering import ReportRenderer
 from controlled_vocabularies.management.sources import SourceResolver
+
+
+class _Rehearsed(Exception):
+    """Private sentinel that unwinds a rehearsal's outer transaction after a successful run,
+    carrying the report out with it (`research.md` R5, `decisions.md` D4). Caught immediately
+    outside the block it is raised in; never seen outside this module."""
+
+    def __init__(self, report: ImportReport) -> None:
+        self.report = report
 
 
 class Command(BaseCommand):
@@ -38,9 +49,16 @@ class Command(BaseCommand):
                 "Content-Type does not name one."
             ),
         )
+        parser.add_argument(
+            "--rehearse",
+            action="store_true",
+            default=False,
+            help=_("Perform the whole import and report the outcome, then leave the database exactly as it was."),
+        )
 
     def handle(self, *args: Any, **options: Any) -> None:
         source = options["source"]
+        rehearse = options["rehearse"]
         # A missing path is left to import_skos()/from_file's own is_file() check below, which
         # already names it distinctly (FR-002). A path that *exists* but cannot be opened for
         # permission reasons passes that same is_file() check, so it is caught here instead,
@@ -53,10 +71,29 @@ class Command(BaseCommand):
         resolver = SourceResolver(source, serialization=options["format"])
         try:
             resolved = resolver.resolve()
-            report = import_skos(resolved.path, serialization=resolved.serialization, base_uri=resolved.base_uri)
+            if rehearse:
+                # An outer atomic() exited by a sentinel, not a savepoint or a flag threaded
+                # into the importer: SkosImporter.run's own atomic() becomes a savepoint here,
+                # and the outer rollback discards it along with everything else (research.md
+                # R5, decisions.md D4). The importer is not modified and learns nothing about
+                # rehearsal, which is what keeps a rehearsal's report identical to a live one
+                # by construction. A refused run raises SkosImportFailed out of the block below
+                # and rolls back for the same reason it does today, so it needs no separate path.
+                try:
+                    with transaction.atomic():
+                        report = import_skos(
+                            resolved.path, serialization=resolved.serialization, base_uri=resolved.base_uri
+                        )
+                        # This *is* the sentinel-unwind pattern (plan.md "Rehearsal"): the raise
+                        # has to sit here, inside the block it unwinds, not in a helper function.
+                        raise _Rehearsed(report)  # noqa: TRY301
+                except _Rehearsed as done:
+                    report = done.report
+            else:
+                report = import_skos(resolved.path, serialization=resolved.serialization, base_uri=resolved.base_uri)
         except (SkosImportError, SkosImportFailed) as exc:
             raise CommandError(str(exc)) from exc
         finally:
             resolver.cleanup()
-        for line in ReportRenderer(report).render():
+        for line in ReportRenderer(report, rehearsal=rehearse).render():
             self.stdout.write(line)

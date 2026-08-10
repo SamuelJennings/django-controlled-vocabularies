@@ -52,3 +52,17 @@ class TestReportRendererBucketCounts:
         lines = [str(line) for line in ReportRenderer(ImportReport()).render()]
         assert len(lines) == 5
         assert all("0" in line for line in lines)
+
+
+class TestReportRendererRehearsalLine:
+    """T014, FR-010, `decisions.md` D9 — a rehearsal's output states plainly that nothing was
+    kept; a live run's does not. A flag on the renderer rather than a print in the command, so
+    the two renderings differ in exactly one deliberate place (plan.md "Rendering")."""
+
+    def test_a_rehearsal_states_that_nothing_was_kept(self):
+        lines = [str(line) for line in ReportRenderer(ImportReport(), rehearsal=True).render()]
+        assert any("nothing was kept" in line for line in lines)
+
+    def test_a_live_run_of_the_same_report_does_not_state_that_nothing_was_kept(self):
+        lines = [str(line) for line in ReportRenderer(ImportReport()).render()]
+        assert not any("nothing was kept" in line for line in lines)
