@@ -118,6 +118,36 @@ Full verify green throughout: `poetry run pytest -q` (910 passed), `ruff check .
 One naming/placement choice not dictated by the brief recorded as D11. Next: US-1 (T003–T005) wires
 `Command` around `SourceResolver`/`ReportRenderer`.
 
+## 2026-08-10 — S4 IMPLEMENT — US1 (T003/T004/T005), Implementer
+
+`craft-tdd` and `craft-increments` loaded by name, receipts verified against the brief before any
+task started. Baseline confirmed green (910 tests) before touching anything — the venv was stale
+against the lock file (`rdflib`/`defusedxml` missing); `poetry install` synced it, no source touched.
+
+- **T003** — `Command` in `management/commands/import_skos.py`: one positional `source`, a
+  `--format` option, `handle()` calling `import_skos(source, serialization=options["format"])` and
+  writing every line through `ReportRenderer` — the command never formats a report itself.
+  `Command.help` and both arguments' `help` are `gettext_lazy` from the first line (Article XII);
+  Django's own base arguments (`--verbosity` etc.) are excluded from that test since their help text
+  isn't this story's to translate. `SkosImportError`/`SkosImportFailed` caught and re-raised as
+  `CommandError` — minimal for now, T020 (US-5) is where every fatal finding prints, not this task.
+
+  Tests: `call_command` against `tests/fixtures/skos/rocks.ttl` on an empty database creates the
+  scheme and its 5 concepts, output names "8 records created." (scheme + 5 concepts + 2
+  collections — confirmed against a throwaway script before writing the assertion, not guessed); a
+  second run against the same file reports "8 records updated." / "0 records created." and no
+  duplicate concept.
+
+`Command.help = gettext_lazy(...)` fails `mypy` against django-stubs, which types `BaseCommand.help`
+as plain `str` — the proxy satisfies Django itself (`str()` runs wherever it's printed) but not the
+stub. Wrapped in `cast(str, ...)` for the type checker only, runtime value unchanged; the same
+`str | _StrPromise` mismatch models.py already works around for field `help_text`. Not a
+decisions.md-worthy choice — a known django-stubs gap, not a design decision.
+
+Verified: `poetry run pytest tests/test_management/test_commands/test_import_skos.py
+tests/test_management/test_rendering.py -q` (8 passed), `ruff check` + `ruff format --check` + `mypy`
+on the two changed files (clean after one auto-format pass and the `cast` fix).
+
 ## Gates
 
 - **Spec gate:** approved 2026-08-10 by SamuelJennings. No conditions.
