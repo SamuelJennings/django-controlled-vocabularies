@@ -192,7 +192,7 @@ class SkosGraph:
         self.graph = graph
 
     @classmethod
-    def from_file(cls, file: str | Path, *, serialization: str | None = None) -> SkosGraph:
+    def from_file(cls, file: str | Path, *, serialization: str | None = None, base_uri: str | None = None) -> SkosGraph:
         """Read ``file`` into a :class:`SkosGraph` (research.md R1, FR-002).
 
         ``serialization`` is the caller-stated format; when omitted it is guessed from the file's
@@ -205,6 +205,13 @@ class SkosGraph:
         URI from the file's own location (D13), which pre-read ``data=`` bytes would silently
         change.
 
+        ``base_uri``, when given, is passed to rdflib as ``publicID`` (FR-003, decisions.md D10):
+        a fetched document's relative identifiers resolve against the address it was published
+        at, not the temporary file it was written to for the parse. Omitted, this is exactly
+        today's behaviour — the parse takes its base from ``path`` itself (D13). ``base_uri`` also
+        settles what a refusal below calls the source, since a fetched document's temporary file
+        no longer exists by the time an operator reads the message.
+
         A file that cannot be found or parsed raises :class:`SkosImportError` rather than letting
         rdflib's own exception escape. The pre-flight scan itself is wrapped the same way (review
         fix 18, D51): a malformed document can make the scan raise a bare exception outside this
@@ -214,17 +221,18 @@ class SkosGraph:
         wrapping and propagate as themselves (D36).
         """
         path = Path(file)
+        source_name = str(base_uri or path)
         if not path.is_file():
             raise SkosImportError(
                 _("'%(file)s' could not be found."),
-                params={"file": str(path)},
+                params={"file": source_name},
                 code="skos_file_not_found",
             )
         resolved_format = serialization or rdflib.util.guess_format(str(path))
         if resolved_format not in _SUPPORTED_FORMATS:
             raise SkosImportError(
                 _("'%(file)s' is not in a serialization this application reads (Turtle, RDF/XML, or JSON-LD)."),
-                params={"file": str(path)},
+                params={"file": source_name},
                 code="skos_format_unsupported",
             )
         graph = rdflib.Graph()
@@ -237,13 +245,16 @@ class SkosGraph:
                 # Same pre-flight discipline, closing the equivalent hole D36 found in JSON-LD's own
                 # remote-`@context` route.
                 scan_json_ld(path.read_bytes())
-            graph.parse(str(path), format=resolved_format)
+            if base_uri is not None:
+                graph.parse(str(path), format=resolved_format, publicID=base_uri)
+            else:
+                graph.parse(str(path), format=resolved_format)
         except (UnsafeRdfXmlError, UnsafeJsonLdError):
             raise
         except Exception as exc:
             raise SkosImportError(
                 _("'%(file)s' could not be parsed as %(format)s: %(error)s"),
-                params={"file": str(path), "format": resolved_format, "error": str(exc)},
+                params={"file": source_name, "format": resolved_format, "error": str(exc)},
                 code="skos_parse_failed",
             ) from exc
         return cls(graph)
@@ -1898,10 +1909,12 @@ class SkosImporter:
         *,
         serialization: str | None = None,
         scheme: ConceptScheme | None = None,
+        base_uri: str | None = None,
     ) -> None:
         self.file = file
         self.serialization = serialization
         self.target = scheme
+        self.base_uri = base_uri
         self.report = ImportReport()
 
     def run(self) -> ImportReport:
@@ -1919,8 +1932,8 @@ class SkosImporter:
         only once nothing further can be checked does :class:`SkosImportFailed` actually raise,
         which is what triggers the rollback. A successful run's ``report.fatal`` is always empty.
         """
-        skos_graph = SkosGraph.from_file(self.file, serialization=self.serialization)
-        source_label = str(self.file)
+        skos_graph = SkosGraph.from_file(self.file, serialization=self.serialization, base_uri=self.base_uri)
+        source_label = str(self.base_uri or self.file)
 
         with transaction.atomic():
             declared_nodes = sorted(skos_graph.graph.subjects(rdflib.RDF.type, SKOS.ConceptScheme), key=str)
@@ -1983,12 +1996,14 @@ def import_skos(
     *,
     serialization: str | None = None,
     scheme: ConceptScheme | None = None,
+    base_uri: str | None = None,
 ) -> ImportReport:
     """Import a published SKOS file and return a structured report (FR-001).
 
     A thin wrapper over :class:`SkosImporter` — see :meth:`SkosImporter.run` for the transaction,
     upsert, and set-aside semantics. ``scheme`` names a target vocabulary for a file that declares
     none of its own, or is checked against one the file does declare — a mismatch fails the run
-    and writes nothing (FR-005).
+    and writes nothing (FR-005). ``base_uri``, when given, is the address a fetched document was
+    published at (FR-003, decisions.md D10); omitted, this is exactly today's behaviour.
     """
-    return SkosImporter(file, serialization=serialization, scheme=scheme).run()
+    return SkosImporter(file, serialization=serialization, scheme=scheme, base_uri=base_uri).run()
