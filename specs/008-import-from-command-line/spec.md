@@ -25,11 +25,17 @@ Two intake decisions widened the issue as written, and both are the maintainer's
 
 Five further ambiguities surfaced by the structured coverage scan over the drafted spec, resolved here against the intake decisions, the constitution, and what #50 and #51 already built.
 
-- **Q: How does the command tell a filesystem path from a URL?** → A: From the value itself — a source beginning `http://` or `https://` is fetched, and anything else is read from disk. A flag choosing between them would make the operator restate what the value already says, and the two forms cannot be confused: no filesystem path begins with a URL scheme. A value carrying some other scheme is refused rather than handed to the filesystem, because `ftp://vocab.ttl` is a stated intention this feature does not serve and reading it as a relative filename would fail with the wrong explanation. Integrated into FR-002 and Edge Cases.
+- **Q: How does the command tell a filesystem path from a URL?** → A: From the value itself — a source beginning `http://` or `https://` is fetched, and anything else is read from disk. A flag choosing between them would make the operator restate what the value already says. A value carrying some other scheme is refused rather than handed to the filesystem, because `ftp://vocab.ttl` is a stated intention this feature does not serve and reading it as a relative filename would fail with the wrong explanation. Integrated into FR-002 and Edge Cases.
 - **Q: A rehearsal reports what a live run "would" do. How faithful is that, exactly?** → A: It is the same run. The rehearsal performs the whole import — parse, match, write, set aside — inside a transaction it then abandons, so its report is produced by the code that produces a live one rather than by a second code path predicting it. Anything a live run would discover only at write time is discovered, which matters because several of the reasons a value is set aside are refusals by the models themselves. A predictive rehearsal would be a second implementation of the import, drifting from the first, and it would be silent about exactly the failures an operator runs a rehearsal to find. Integrated into FR-009.
 - **Q: Does a run that set values aside succeed?** → A: Yes, and it exits zero. Set-asides are the normal outcome of importing a published vocabulary into a site configured for a subset of its languages — #51 exists because they are expected, not exceptional. Only a run the importer refuses outright exits non-zero. A deployment script therefore learns from the exit status whether the vocabulary is present, which is the question it can act on, and reads the report for the question a person acts on. Integrated into FR-011 and FR-012.
 - **Q: A large external vocabulary can set aside hundreds of values. Does the command print all of them?** → A: No. By default it prints counts — per bucket, and within the set-aside bucket per reason, with the per-language breakdown #51 built. Individual entries are printed only when asked for. Several hundred lines scrolling past answers "what happened" and buries "what should I change", which is the question #51 was written to make answerable. Django's own `--verbosity` already means this, so it carries the choice rather than a new flag. Integrated into FR-007 and FR-008.
 - **Q: Is "rehearsal" an established term in this project?** → A: No, it is new here, and it will appear in the command's help text and its output. The project keeps its vocabulary in `CONTEXT.md`, so it belongs there rather than only inside a spec an operator will never open. Integrated into FR-016.
+
+### Session 2026-08-10 (post-gate, from planning research)
+
+One amendment to text drafted here, made after the Spec gate and reported to the maintainer at the plan notification. It corrects a criterion this spec got wrong, and does not change the scope he approved. Measurements are in `research.md` R2, rationale in `decisions.md` D10.
+
+- **Q: A document may state its identifiers relative to its own address. What are they relative to when the document was fetched rather than opened?** → A: The address it was fetched from. Parsing resolves relative identifiers against wherever the document was read, so a fetched document written to a temporary file and parsed from there acquires identities like `file:///tmp/tmpa1b2c3/concept-a` — different on every run, and belonging to no publisher. Article IX makes a concept's URI its identity and #49 built matching on the identifier its publisher assigned, so this is a defect rather than a detail. SC-002 originally required a URL import and a disk import of identical bytes to produce identical records, which is false for exactly these documents and false in the direction where the URL form is correct. Integrated into FR-003, SC-002, and User Story 2.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -60,10 +66,11 @@ An operator refreshing from upstream has no local copy and does not want one. Th
 
 **Acceptance Scenarios**:
 
-1. **Given** a published SKOS document reachable over HTTPS, **When** the command is run with that URL, **Then** the vocabulary lands exactly as importing the same bytes from a file would, and nothing records where it came from.
-2. **Given** a URL that cannot be reached, or answers with an error status, **When** the command is run with it, **Then** it fails naming the URL and what went wrong, writes nothing, and exits non-zero.
-3. **Given** a URL answering with something that is not RDF at all, such as a publisher's landing page, **When** the command is run with it, **Then** it fails saying the content could not be read as SKOS rather than reporting an empty vocabulary.
-4. **Given** a URL whose scheme is neither `http` nor `https`, **When** the command is run with it, **Then** it is refused as an unsupported source rather than read as a filename.
+1. **Given** a published SKOS document reachable over HTTPS whose identifiers are absolute, **When** the command is run with that URL, **Then** the vocabulary lands exactly as importing the same bytes from a file would, and nothing records where it came from.
+2. **Given** a published document stating its identifiers relative to its own address, **When** the command is run with that URL, **Then** its concepts are stored under the publisher's URIs rather than under any address local to the machine that fetched it.
+3. **Given** a URL that cannot be reached, or answers with an error status, **When** the command is run with it, **Then** it fails naming the URL and what went wrong, writes nothing, and exits non-zero.
+4. **Given** a URL answering with something that is not RDF at all, such as a publisher's landing page, **When** the command is run with it, **Then** it fails saying the content could not be read as SKOS rather than reporting an empty vocabulary.
+5. **Given** a URL whose scheme is neither `http` nor `https`, **When** the command is run with it, **Then** it is refused as an unsupported source rather than read as a filename.
 
 ---
 
@@ -152,8 +159,8 @@ Everything the command prints is translatable, the README tells an operator the 
 ### Functional Requirements
 
 - **FR-001**: The package MUST ship a Django management command that imports a published SKOS vocabulary, so that a deployment can import one without executing Python written for the occasion.
-- **FR-002**: The command MUST take exactly one source argument, which is either a local filesystem path or an `http`/`https` URL, distinguished by the value itself. Any other URL scheme MUST be refused as an unsupported source.
-- **FR-003**: A URL source MUST be retrieved and then imported through the same path a local file takes, including the existing safety scan and every normalisation rule, so that the two forms produce identical results for identical bytes. Nothing about the URL MUST be stored.
+- **FR-002**: The command MUST take exactly one source argument, which is either a local filesystem path or an `http`/`https` URL, distinguished by the value itself. Any other URL scheme MUST be refused as an unsupported source, and a Windows drive letter MUST NOT be mistaken for one.
+- **FR-003**: A URL source MUST be retrieved and then imported through the same path a local file takes, including the existing safety scan and every normalisation rule. The address it was fetched from MUST be the base URI its identifiers resolve against, so a vocabulary published with relative identifiers is stored under the URIs its publisher assigned. Nothing about the address MUST be stored.
 - **FR-004**: The command MUST let the operator name the source's serialization explicitly, and otherwise MUST determine it as the programmatic entry point already does.
 - **FR-005**: The command MUST delegate the import itself to the existing programmatic entry point and MUST NOT reimplement any part of reading, matching, or writing. It MUST NOT offer a way to name a target vocabulary: the source declares which vocabulary it is.
 - **FR-006**: On a completed run the command MUST report how many records were created, how many updated, how many values were set aside, how many were stored under a predicate or language other than the one published, and what the vocabulary holds that the source no longer mentions.
@@ -179,7 +186,7 @@ Everything the command prints is translatable, the README tells an operator the 
 ### Measurable Outcomes
 
 - **SC-001**: An operator with shell access to a deployment and a published SKOS file imports it with a single command and writes no Python.
-- **SC-002**: Importing a document by URL and importing the identical bytes from disk produce the same records and the same report.
+- **SC-002**: A vocabulary imported by URL is stored under the URIs its publisher assigned, including where the document states them relative to its own address. For a document whose identifiers are absolute, importing it by URL and importing the identical bytes from disk produce the same records and the same report.
 - **SC-003**: A rehearsal against a given database state produces the same report as a live run against that same state, and leaves every table unchanged.
 - **SC-004**: Importing a vocabulary that sets aside several hundred values produces default output that a person reads without scrolling and that names how many were set aside per reason and per language.
 - **SC-005**: Every refusal the importer can raise exits non-zero with an explanation and an unchanged database, and every completed run exits zero regardless of what it set aside.

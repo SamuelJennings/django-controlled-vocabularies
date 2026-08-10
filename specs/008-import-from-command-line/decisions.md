@@ -51,9 +51,13 @@ who have a genuine reason to use it. What is decided here is what the command ex
 No flag chooses between the two forms. A value beginning `http://` or `https://` is fetched, and
 anything else is opened from disk. A value carrying any other scheme is refused as unsupported.
 
-A flag was rejected as making the operator restate what the value already carries. The
-alternative failure — a path mistaken for a URL, or the reverse — is not reachable, since no
-filesystem path begins with a URL scheme.
+A flag was rejected as making the operator restate what the value already carries.
+
+The classification is a prefix test on `http://` and `https://`, not "does this value parse as
+having a scheme". Planning research found the looser test wrong: `urlsplit("C:/vocab/skos.ttl")`
+reports a scheme of `"c"`, so a Windows path would be sent down the network path. The refusal of
+other schemes therefore applies only to a parsed scheme longer than one character, which is what
+keeps a drive letter a path (`research.md` R3).
 
 Refusing an unrecognised scheme, rather than falling through to the filesystem, is the one place
 this spec adds a check rather than removing one, and it is not a guard against operator error. A
@@ -151,3 +155,36 @@ way to tell which kind of run produced it.
 
 So FR-010 requires the output to say that nothing was kept. It is one line, and it is the only
 difference between the two renderings, which is why it has to be deliberate rather than assumed.
+
+## D10 — A fetched document's identifiers resolve against the address it came from
+
+Found during planning research, after the Spec gate, and it corrects text drafted here rather than
+anything the maintainer approved.
+
+`rdflib` resolves relative identifiers against the base URI, and the base URI is wherever the
+document was read from. Published SKOS routinely uses relative forms — `<>` for the scheme,
+`<concept-a>` for a concept — so the choice is load-bearing. Measured on the project's own rdflib,
+the same bytes give `file:///tmp/tmpa1b2c3/concept-a` when parsed from a temporary file and
+`https://example.org/concept-a` when parsed with the publisher's address as base.
+
+The first is wrong in a way this package cannot tolerate. Article IX makes a concept's URI its
+identity, #49 built every matching path on the identifier a publisher assigned, and a temporary
+directory name is neither stable across runs nor meaningful to any other system. A re-import would
+create a second copy of every concept rather than updating the first.
+
+So the fetch is not merely "download, then import the file". The address has to travel with the
+bytes into the parse. `rdflib.Graph.parse` takes `publicID` for exactly this, which means
+`SkosGraph.from_file` gains an optional base-URI argument threaded through `SkosImporter` and
+`import_skos`. It defaults to today's behaviour, so no existing caller changes and a local file
+still takes its base from its own location, which is #50's D13 and stays true.
+
+This is the one place the feature touches the exchange layer, and the spec's "adds no import
+behaviour" line survives it: what a source *means* is unchanged, and what is added is the ability
+to tell the reader where a source came from when the reader cannot work it out for itself.
+
+SC-002 was amended in the same pass. As gated it required a URL import and a disk import of
+identical bytes to produce identical records, which is precisely false for a relative-URI document
+and false in the direction where the URL form is the correct one. It now requires the publisher's
+URIs either way, and identical results only where the identifiers are absolute.
+
+**ADR:** pending — assessed at S5 against the ADR bar.
