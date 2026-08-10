@@ -24,6 +24,7 @@ from django.utils.functional import Promise
 
 from controlled_vocabularies.exchange.skos import import_skos
 from controlled_vocabularies.management import sources
+from controlled_vocabularies.management.commands import import_skos as import_skos_command
 from controlled_vocabularies.management.commands.import_skos import Command
 from controlled_vocabularies.models import Concept, ConceptScheme
 
@@ -259,7 +260,7 @@ class TestImportSkosCommandRehearsal:
         """Every row of every model this app defines, field values included — proves every
         table is unchanged rather than only that row counts match (tasks.md T012)."""
         return {
-            model._meta.label: list(model.objects.order_by("pk").values())
+            model._meta.label: list(model.objects.order_by("pk").values())  # type: ignore[attr-defined]
             for model in apps.get_app_config("controlled_vocabularies").get_models()
         }
 
@@ -277,4 +278,43 @@ class TestImportSkosCommandRehearsal:
         call_command("import_skos", str(FIXTURES / "rocks.ttl"), rehearse=True, stdout=StringIO())
 
         assert self._snapshot() == before
+        assert ConceptScheme.objects.count() == 0
+
+
+class TestImportSkosCommandRehearsalFidelity:
+    """T013, spec Acceptance Scenarios 2-3, SC-003 — a rehearsal and a live run against the
+    same starting state produce equal reports, compared by bucket rather than by rendered
+    text; a source that would be refused is refused the same way whether rehearsed or not."""
+
+    def test_a_rehearsal_and_a_live_run_against_the_same_state_produce_equal_reports(
+        self, transactional_db, monkeypatch
+    ):
+        import_skos(FIXTURES / "rocks.ttl")
+
+        captured = []
+        real_import_skos = import_skos_command.import_skos
+
+        def spy(*args, **kwargs):
+            report = real_import_skos(*args, **kwargs)
+            captured.append(report)
+            return report
+
+        monkeypatch.setattr(import_skos_command, "import_skos", spy)
+
+        call_command("import_skos", str(FIXTURES / "rocks_updated.ttl"), rehearse=True, stdout=StringIO())
+        rehearsed_report = captured.pop()
+
+        call_command("import_skos", str(FIXTURES / "rocks_updated.ttl"), stdout=StringIO())
+        live_report = captured.pop()
+
+        assert rehearsed_report.created == live_report.created
+        assert rehearsed_report.updated == live_report.updated
+        assert rehearsed_report.set_aside == live_report.set_aside
+        assert rehearsed_report.normalized == live_report.normalized
+        assert rehearsed_report.absent_from_source == live_report.absent_from_source
+        assert rehearsed_report.fatal == live_report.fatal == []
+
+    def test_a_refused_source_is_reported_as_refused_when_rehearsed_and_still_exits_non_zero(self, transactional_db):
+        with pytest.raises(CommandError):
+            call_command("import_skos", str(FIXTURES / "no_scheme_declared.ttl"), rehearse=True, stdout=StringIO())
         assert ConceptScheme.objects.count() == 0
