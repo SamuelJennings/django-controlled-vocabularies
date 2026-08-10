@@ -1338,6 +1338,30 @@
           }
         }
       ]
+    },
+    {
+      "id": "US13",
+      "priority": "P1",
+      "issue": null,
+      "worktree": "/home/sam/projects/samueljennings/django-controlled-vocabularies",
+      "status": "done",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T062",
+          "status": "done",
+          "attempts": 0,
+          "evidence": {
+            "tests": [
+              "tests/test_exchange/test_skos.py"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 895 passed",
+              "forge verify  # lint/typecheck/test/build pass; conformance red on pre-existing pyproject line-length"
+            ]
+          }
+        }
+      ]
     }
   ],
   "budgets": {

@@ -66,10 +66,15 @@ class SetAsideReason(TextChoices):
     language) — whichever value is not the deterministically-kept one is
     the one set aside, in the vocabulary's default language exactly as much
     as in any other configured language. ``EMPTY_SLUG`` (review fix,
-    decisions.md D39) names a concept whose preferred label is made up only
-    of characters ``slugify()`` strips — the label itself is fine, but the
-    slug it derives is empty, which the model refuses to store; the concept
-    is set aside rather than crash the run on that refusal.
+    decisions.md D39; reworded fix cycle 8, S6 CORR-701, decisions.md D72)
+    names a concept or collection this run could not give a usable URL slug,
+    which the model refuses to store; the record is set aside rather than
+    crashing the run on that refusal. Its message names that outcome and not
+    a cause, because the causes differ by call site and no longer include the
+    preferred label at all: since T029/decisions.md D35 the slug derives from
+    the published identifier's own segment, so what can slugify to nothing is
+    that segment — or, on the paths T060 added, nothing is wrong with the
+    published values and the collision loop simply ran out of candidates.
     ``ALREADY_IN_ANOTHER_VOCABULARY`` (review fix 8/9, decisions.md D42) names
     a concept or collection whose identity is already held by a *different*
     vocabulary than the one being imported: moving a record between
@@ -129,7 +134,7 @@ class SetAsideReason(TextChoices):
     DEFAULT_LANGUAGE_FROZEN = "default_language_frozen", _("default language already fixed")
     RELATION_DISJOINTNESS = "relation_disjointness", _("broader/narrower and related both claimed for a pair")
     SURPLUS_PREFERRED_LABEL = "surplus_preferred_label", _("surplus preferred label in a language")
-    EMPTY_SLUG = "empty_slug", _("preferred label produces no usable slug")
+    EMPTY_SLUG = "empty_slug", _("no usable URL slug could be derived")
     ALREADY_IN_ANOTHER_VOCABULARY = "already_in_another_vocabulary", _("already belongs to another vocabulary")
     URI_HELD_BY_DIFFERENT_KIND = "uri_held_by_different_kind", _("identifier held by a different kind of record")
     NO_LANGUAGE_TAG = "no_language_tag", _("no language tag")
@@ -191,10 +196,7 @@ _REASON_TEMPLATES: dict[SetAsideReason, Promise] = {
         "'%(subject)s' carries more than one preferred label in the language '%(language)s'; only one is "
         "kept and the surplus value was set aside."
     ),
-    SetAsideReason.EMPTY_SLUG: _(
-        "'%(subject)s' has a preferred label made up only of characters this application strips when "
-        "deriving a URL slug, so no usable slug could be derived from it; it was set aside."
-    ),
+    SetAsideReason.EMPTY_SLUG: _("'%(subject)s' could not be given a usable URL slug, so it was set aside."),
     SetAsideReason.ALREADY_IN_ANOTHER_VOCABULARY: _(
         "'%(subject)s' already belongs to the vocabulary '%(current)s'; importing it into '%(target)s' "
         "would move it between vocabularies, so it was left where it is."

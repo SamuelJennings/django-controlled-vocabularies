@@ -3951,6 +3951,43 @@ class TestEmptySlugLabelIsSetAsideNotCrashed:
         assert normal.label == "Normal"
         assert normal.alt_labels("en") == ["Normal-alt"]
 
+    def test_the_message_does_not_blame_a_preferred_label_that_is_perfectly_usable(self, db):
+        """CORR-701 (review round 7, decisions.md D72) — the set-aside concept's label is
+        ``"Symbol"``, which slugifies perfectly well; it is the identifier's own ``#±``
+        fragment that does not. Since T029/decisions.md D35 moved the slug off the label
+        entirely, a message blaming the preferred label sends a curator to correct a value
+        that is not at fault, on every one of this reason's call sites."""
+        report = import_skos(FIXTURES / "empty_slug_label.ttl")
+        entry = next(entry for entry in report.set_aside if entry.reason is SetAsideReason.EMPTY_SLUG)
+        message = entry.render()
+        assert entry.subject in message
+        assert "preferred label" not in message
+
+    def test_a_collision_the_importer_gives_up_on_is_reported_without_blaming_the_identifier(
+        self, db, tmp_path, monkeypatch
+    ):
+        """CORR-701 — the second call site T060 added. Here the identifier segment *and* the
+        label are both perfectly usable and the slug is empty only because the collision
+        loop ran out of candidates, so a message naming characters ``slugify()`` strips is
+        false about a value the file never got wrong."""
+        monkeypatch.setattr(ConceptImporter, "assign_unique_slug", staticmethod(lambda *args, **kwargs: None))
+        source = tmp_path / "give_up.ttl"
+        source.write_text(
+            "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n"
+            "<http://giveup.example/scheme>\n"
+            "    a skos:ConceptScheme ;\n"
+            '    skos:prefLabel "Give up"@en .\n'
+            "<http://giveup.example/scheme/c1>\n"
+            "    a skos:Concept ;\n"
+            "    skos:inScheme <http://giveup.example/scheme> ;\n"
+            '    skos:prefLabel "Perfectly Fine Label"@en .\n',
+            encoding="utf-8",
+        )
+        report = import_skos(source)
+        entries = [entry for entry in report.set_aside if entry.reason is SetAsideReason.EMPTY_SLUG]
+        assert [entry.subject for entry in entries] == ["http://giveup.example/scheme/c1"]
+        assert "preferred label" not in entries[0].render()
+
 
 class TestOverlongValueIsSetAsideNotCrashed:
     """T025 — SC-024, S6 SEC-002, decisions.md D34: variant matching now routes

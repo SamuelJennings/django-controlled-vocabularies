@@ -2013,3 +2013,47 @@ message reword (the same "must hold on every path that reaches it" rule already 
 nothing further to reconcile). Revisit CORR-604's thread-based bound only if this suite ever needs
 a *general* per-test timeout policy across many tests, at which point `pytest-timeout` earns its
 place as a real dependency rather than infrastructure for one test.
+
+## D72 — CORR-701 (review round 7, fix cycle 8): `EMPTY_SLUG`'s message names its outcome, not
+a cause that is false at every one of its call sites
+
+**CORR-701** (round 7, medium): `EMPTY_SLUG` rendered "'%(subject)s' has a preferred label made
+up only of characters this application strips when deriving a URL slug, so no usable slug could
+be derived from it; it was set aside." That sentence was written for FIX 5/D39, when the slug
+*was* derived from the preferred label. T029/decisions.md D35 moved the derivation onto the
+published identifier's own segment, and nothing revisited the message. It is now false at all
+four call sites, verified by reproduction rather than by reading:
+
+- `import_concepts`' and `import_collections`' pre-write guards (D35, D39) fire on an unusable
+  *identifier segment*. The `empty_slug_label.ttl` fixture's own concept publishes
+  `skos:prefLabel "Symbol"@en`, which slugifies perfectly well.
+- The two give-up guards T060 added (D70) fire when `unique_slug_for_identifier` exhausts its
+  collision candidates. There the identifier and the label are both fine and nothing the
+  publisher wrote is at fault.
+
+A curator reading the old message is sent to correct a preferred label that is not the problem,
+and on the give-up paths there is no published value to correct at all.
+
+**Reworded** to name the outcome, which is the one thing true on every path that reaches this
+reason: "'%(subject)s' could not be given a usable URL slug, so it was set aside." The enum's
+own short label moves the same way, from "preferred label produces no usable slug" to "no usable
+URL slug could be derived". This is the reviewer's own preferred remedy (a) over minting a
+separate `SLUG_COLLISION_UNRESOLVED` reason: the two causes have the same remedy for a curator
+(none — the record has no address and was set aside), so telling them apart in the closed
+vocabulary would add a member that no caller would ever branch on differently.
+
+**No pre-existing test asserted the old wording.** Every existing test matches on
+`entry.reason is SetAsideReason.EMPTY_SLUG`, so unlike D71's reword nothing needed updating —
+checked before editing, not assumed. Two new tests pin the property that failed: one on the
+identifier-segment path via the existing fixture, one on the give-up path with
+`ConceptImporter.assign_unique_slug` stubbed to leave the slug empty. Both were proven red
+against the old template before the change.
+
+**Revisit if:** a caller ever needs to branch on *why* a slug could not be minted — at that
+point the distinction belongs in the closed vocabulary as its own reason, not in the message
+text. The "a message must hold on every path that reaches it" rule from D71 governs unchanged.
+
+**ADR:** none — a message-wording correction inside an existing closed vocabulary. It changes no
+structure and binds no future choice: the rule it applies ("a reason's message must be true on
+every path that reaches it") is D71's, already recorded, and this is its second application
+rather than a new position.
