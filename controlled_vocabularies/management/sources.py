@@ -43,10 +43,14 @@ _CONTENT_TYPE_SERIALIZATIONS = {
 # One socket-read timeout and one byte ceiling, neither configurable (plan.md "Source
 # resolution"). The operator cannot see how long a publisher takes to answer or how much
 # it intends to send, so both bound what the remote server chooses rather than an operator
-# mistake (craft-security "always/ask/never" — DoS via an unbounded transfer).
-_TIMEOUT_SECONDS = 2
+# mistake (craft-security "always/ask/never" — DoS via an unbounded transfer). Both are set
+# against real published vocabularies rather than the test fixtures: a large vocabulary is
+# often generated per request, so first-byte latency of several seconds is ordinary, and the
+# widely-vendored thesauri run to tens of megabytes in RDF/XML. The values catch a server that
+# has stopped answering or does not intend to stop sending, not a slow or large publisher.
+_TIMEOUT_SECONDS = 30
 _CHUNK_SIZE = 64 * 1024
-_MAX_RESPONSE_BYTES = 10 * 1024 * 1024  # 10 MiB
+_MAX_RESPONSE_BYTES = 50 * 1024 * 1024  # 50 MiB
 
 # An opener carrying only the http/https handlers (T008, research.md R3): a handler
 # removed, not a check added. Python's default opener's HTTPRedirectHandler permits a

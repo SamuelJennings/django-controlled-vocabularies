@@ -71,10 +71,17 @@ already closed, but `ftp://` is not.
 
 Checking the final URL on the response object does not close that: the response only exists once
 `urlopen` has followed the redirect and completed the transfer, so the FTP connection has already
-been made and the body already pulled. The fetch therefore uses an opener built from the
-`http`/`https` handlers alone — `build_opener(HTTPHandler, HTTPSHandler, HTTPRedirectHandler,
-HTTPErrorProcessor)` — which carries no handler for any other scheme and so raises before a
+been made and the body already pulled. The fetch therefore uses an opener carrying the
+`http`/`https` handlers alone, which has no handler for any other scheme and so raises before a
 connection is attempted. Removing a handler, rather than adding a check.
+
+**`build_opener` cannot build that opener** (corrected during T008, `decisions.md` D15). It merges
+its own default handlers for every protocol not overridden by an instance of the same default
+class, so `build_opener(HTTPHandler, HTTPSHandler, HTTPRedirectHandler, HTTPErrorProcessor)` still
+carries a live `FTPHandler`, `FileHandler` and `DataHandler`. The opener is an `OpenerDirector()`
+with six handlers added by hand instead: `HTTPHandler`, `HTTPSHandler`, `HTTPRedirectHandler`,
+`HTTPErrorProcessor`, `UnknownHandler`, `HTTPDefaultErrorHandler`. The last two are what make an
+unhandled scheme and a non-2xx status raise, rather than `open()` returning `None`.
 
 **`urlopen`'s timeout is per socket operation, not per transfer.** It bounds each individual read,
 so a server that answers slowly but continuously never trips it, and nothing bounds the number of

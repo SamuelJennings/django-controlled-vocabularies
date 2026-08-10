@@ -133,9 +133,11 @@ each rebasing on the last. US-4 touches only `rendering.py` and runs alongside t
   `import_skos` explicitly, so `from_file`'s extension guess (`skos.py:223`) is never consulted for
   a fetched document.
 
-  **The fetcher is an opener carrying only the `http`/`https` handlers** —
-  `urllib.request.build_opener(HTTPHandler, HTTPSHandler, HTTPRedirectHandler, HTTPErrorProcessor)`
-  — rather than `urlopen`'s default opener. Redirect targets are chosen by the remote server, and
+  **The fetcher is an opener carrying only the `http`/`https` handlers** — an
+  `urllib.request.OpenerDirector()` with `HTTPHandler`, `HTTPSHandler`, `HTTPRedirectHandler`,
+  `HTTPErrorProcessor`, `UnknownHandler` and `HTTPDefaultErrorHandler` added by hand
+  — rather than `urlopen`'s default opener. **Not `build_opener`**, which merges its own defaults
+  and would leave a live `FTPHandler` (`decisions.md` D15). Redirect targets are chosen by the remote server, and
   `HTTPRedirectHandler` permits `ftp` as well as `http` and `https` (`research.md` R3), so the
   default opener would open an FTP connection from the deployment host and only then let a check of
   the final URL reject the body. An opener with no handler for the scheme fails before the

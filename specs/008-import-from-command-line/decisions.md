@@ -356,3 +356,31 @@ scheme's handler is the control.
 **ADR:** pending — assessed at S5 against the ADR bar; corrects a factual claim in `research.md`
 R3, `plan.md` "Source resolution" and `tasks.md` T008, which name `build_opener` for this and
 should be corrected alongside.
+
+## D16 — The fetch timeout and byte ceiling are set against published vocabularies, not fixtures
+
+**Stage:** S4 verification, US-2 · **Status:** accepted
+
+T008 landed `_TIMEOUT_SECONDS = 2` and `_MAX_RESPONSE_BYTES = 10 MiB`. `plan.md` and `tasks.md`
+both say "one constant, no configuration surface" and name no number, so these were the
+implementer's own choice and were flagged for a maintainer decision in its report.
+
+Both were set to what the tests needed rather than to what the feature is for. The command exists
+to vendor a *published* vocabulary, and the published thesauri operators actually point it at fail
+on both values: a large vocabulary is commonly serialized per request, so first-byte latency over
+two seconds is ordinary rather than a fault, and the widely-vendored thesauri run to tens of
+megabytes in RDF/XML. Shipping those numbers would have refused ordinary sources with a message
+about a server that had stopped answering.
+
+Raised to **30 seconds** and **50 MiB**. Both still bound what the remote server chooses — a
+server that has stopped answering, or one that does not intend to stop sending — which is the
+control's stated purpose, and neither is a guard against operator error.
+
+The one test that consumed the real timeout (a non-responding socket) now monkeypatches it to
+0.5s, as the byte-ceiling test already did for its own constant. A test's convenience is not a
+reason to ship a value that is wrong in production.
+
+**Revisit if:** an operator reports a legitimate source refused by either ceiling, which is the
+signal that this should become configurable rather than a larger constant.
+
+**ADR:** no — an internal constant, recorded here.

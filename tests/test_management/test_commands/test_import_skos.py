@@ -21,6 +21,7 @@ import pytest
 from django.core.management import CommandError, call_command
 from django.utils.functional import Promise
 
+from controlled_vocabularies.management import sources
 from controlled_vocabularies.management.commands.import_skos import Command
 from controlled_vocabularies.models import Concept, ConceptScheme
 
@@ -173,7 +174,12 @@ class TestImportSkosCommandURLFailureModes:
         assert "could not be parsed" in str(exc_info.value)
         assert ConceptScheme.objects.count() == 0
 
-    def test_a_connection_that_never_answers_fails_on_a_timeout_rather_than_hanging(self, db, hanging_socket):
+    def test_a_connection_that_never_answers_fails_on_a_timeout_rather_than_hanging(
+        self, db, hanging_socket, monkeypatch
+    ):
+        # The shipped timeout is set for real publishers, which is far longer than a test
+        # should wait to prove the same behaviour.
+        monkeypatch.setattr(sources, "_TIMEOUT_SECONDS", 0.5)
         url = hanging_socket
         with pytest.raises(CommandError) as exc_info:
             call_command("import_skos", url, stdout=StringIO())
