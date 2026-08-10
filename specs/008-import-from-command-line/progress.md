@@ -45,6 +45,11 @@ stories, milestone v0.1.0.
 
 Spec gate brief posted to #52 as a bot comment and sent to the maintainer.
 
+## 2026-08-10 — Spec gate APPROVED
+
+Approved by the maintainer in session, without changes to the spec or the story set. Recorded here
+at the moment of approval, ahead of the ledger, so a crash between the gate and S3 cannot lose it.
+
 ## Gates
 
-- **Spec gate:** awaiting sign-off.
+- **Spec gate:** approved 2026-08-10 by SamuelJennings. No conditions.
