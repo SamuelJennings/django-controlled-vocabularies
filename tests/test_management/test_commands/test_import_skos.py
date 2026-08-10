@@ -29,6 +29,7 @@ from controlled_vocabularies.management.commands.import_skos import Command
 from controlled_vocabularies.models import Concept, ConceptScheme
 
 FIXTURES = Path(__file__).parent.parent.parent / "fixtures" / "skos"
+SECURITY_FIXTURES = Path(__file__).parent.parent.parent / "fixtures" / "security"
 ROCKS_URI = "http://example.org/rocks/"
 
 
@@ -350,3 +351,103 @@ class TestImportSkosCommandRefusalPrintsEveryFatalFinding:
         assert exc_info.value.returncode != 0
         assert ConceptScheme.objects.count() == 0
         assert Concept.objects.count() == 0
+
+
+class TestImportSkosCommandRefusesAnUndeterminedVocabulary:
+    """T021, FR-013, spec US-5 Acceptance Scenario 1, decisions.md D2 — a source declaring no
+    concept scheme is refused as not being SKOS, which falls out of the existing
+    ``VOCABULARY_UNDETERMINED`` fatal because the command names no target. The same refusal
+    covers two further spec Edge Cases that reach it for the same reason: an empty file, and
+    a file that parses to a graph carrying no SKOS content at all, both refused rather than
+    importing an empty vocabulary. The two new fixtures are built under ``tmp_path``, not
+    committed to ``tests/fixtures/skos/``, per decisions.md D11's own precedent."""
+
+    _NOT_SKOS_MESSAGE = "declares no vocabulary of its own, and no target vocabulary was named"
+
+    def test_a_source_declaring_no_concept_scheme_is_refused_as_not_skos(self, db):
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", str(FIXTURES / "no_scheme_declared.ttl"), stdout=StringIO())
+        assert self._NOT_SKOS_MESSAGE in str(exc_info.value)
+        assert exc_info.value.returncode != 0
+        assert ConceptScheme.objects.count() == 0
+
+    def test_an_empty_file_is_refused_rather_than_importing_an_empty_vocabulary(self, db, tmp_path):
+        empty = tmp_path / "empty.ttl"
+        empty.write_text("")
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", str(empty), stdout=StringIO())
+        assert self._NOT_SKOS_MESSAGE in str(exc_info.value)
+        assert exc_info.value.returncode != 0
+        assert ConceptScheme.objects.count() == 0
+
+    def test_a_graph_with_no_skos_content_is_refused_rather_than_importing_an_empty_vocabulary(self, db, tmp_path):
+        no_skos = tmp_path / "no_skos.ttl"
+        no_skos.write_text(
+            '@prefix dc: <http://purl.org/dc/elements/1.1/> .\n<http://example.org/thing> dc:title "Just a thing" .\n'
+        )
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", str(no_skos), stdout=StringIO())
+        assert self._NOT_SKOS_MESSAGE in str(exc_info.value)
+        assert exc_info.value.returncode != 0
+        assert ConceptScheme.objects.count() == 0
+
+
+class TestImportSkosCommandSafetyScanRefusalReachedFromBothSourceForms:
+    """T021, spec US-5 Acceptance Scenario 2 — a source the safety scan refuses is refused
+    with that reason and nothing parses further, proven from a filesystem path and from a
+    URL served over ``http_stub`` (T006), no real network call either way. Reinstates the
+    same measured fixtures ``test_exchange/test_skos.py`` already proves are wired to the
+    scan (``entity_bomb.rdf``, ``remote_context_string.jsonld``), surfaced through the
+    command rather than re-detected."""
+
+    def test_an_unsafe_rdf_xml_document_is_refused_from_a_path(self, db):
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", str(SECURITY_FIXTURES / "entity_bomb.rdf"), stdout=StringIO())
+        assert "e0" in str(exc_info.value)
+        assert exc_info.value.returncode != 0
+        assert ConceptScheme.objects.count() == 0
+
+    def test_an_unsafe_rdf_xml_document_is_refused_from_a_url(self, db, http_stub):
+        body = (SECURITY_FIXTURES / "entity_bomb.rdf").read_bytes()
+        http_stub.set_response("/entity_bomb.rdf", status=200, body=body, content_type="application/rdf+xml")
+        url = http_stub.url + "/entity_bomb.rdf"
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", url, stdout=StringIO())
+        assert "e0" in str(exc_info.value)
+        assert exc_info.value.returncode != 0
+        assert ConceptScheme.objects.count() == 0
+
+    def test_an_unsafe_json_ld_document_is_refused_from_a_path(self, db):
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", str(SECURITY_FIXTURES / "remote_context_string.jsonld"), stdout=StringIO())
+        assert "http://127.0.0.1:1/x.json" in str(exc_info.value)
+        assert exc_info.value.returncode != 0
+        assert ConceptScheme.objects.count() == 0
+
+    def test_an_unsafe_json_ld_document_is_refused_from_a_url(self, db, http_stub):
+        body = (SECURITY_FIXTURES / "remote_context_string.jsonld").read_bytes()
+        http_stub.set_response(
+            "/remote_context_string.jsonld", status=200, body=body, content_type="application/ld+json"
+        )
+        url = http_stub.url + "/remote_context_string.jsonld"
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", url, stdout=StringIO())
+        assert "http://127.0.0.1:1/x.json" in str(exc_info.value)
+        assert exc_info.value.returncode != 0
+        assert ConceptScheme.objects.count() == 0
+
+
+class TestImportSkosCommandSurfacesAnAmbiguousVocabularyRefusalUnchanged:
+    """T021, spec Edge Cases — a source declaring more than one concept scheme is already
+    refused by the importer (test_exchange/test_skos.py
+    ``TestChoosingBetweenDeclaredVocabularies``); the command surfaces that refusal
+    unchanged rather than reinterpreting it."""
+
+    def test_a_source_declaring_more_than_one_concept_scheme_is_refused_unchanged(self, db):
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", str(FIXTURES / "two_vocabularies.ttl"), stdout=StringIO())
+        message = str(exc_info.value)
+        assert "http://example.org/alpha/" in message
+        assert "http://example.org/beta/" in message
+        assert exc_info.value.returncode != 0
+        assert ConceptScheme.objects.count() == 0
