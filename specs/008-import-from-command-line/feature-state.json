@@ -73,18 +73,66 @@
    "tasks": [
     {
      "id": "T001",
-     "status": "todo",
-     "attempts": 0
+     "status": "done",
+     "attempts": 1,
+     "evidence": {
+      "tests": [
+       "tests/test_exchange/test_skos.py::TestBaseUriThread::test_a_given_base_uri_resolves_relative_identifiers_against_it",
+       "tests/test_exchange/test_skos.py::TestBaseUriThread::test_no_base_uri_resolves_relative_identifiers_against_the_file",
+       "tests/test_exchange/test_skos.py::TestBaseUriThread::test_absolute_identifiers_are_unaffected_by_a_given_base_uri",
+       "tests/test_exchange/test_skos.py::TestBaseUriThread::test_missing_file_refusal_names_the_base_uri_when_given",
+       "tests/test_exchange/test_skos.py::TestBaseUriThread::test_unsupported_serialization_refusal_names_the_base_uri_when_given",
+       "tests/test_exchange/test_skos.py::TestBaseUriThread::test_unparseable_file_refusal_names_the_base_uri_when_given",
+       "tests/test_exchange/test_skos.py::TestImportSkosVocabulary::test_a_refusal_names_the_base_uri_when_given"
+      ],
+      "commands": [
+       "poetry run pytest tests/test_exchange/test_skos.py::TestBaseUriThread tests/test_exchange/test_skos.py::TestImportSkosVocabulary::test_a_refusal_names_the_base_uri_when_given -q  # RED: 8 failed, TypeError: unexpected keyword argument 'base_uri'",
+       "poetry run pytest tests/test_exchange/test_skos.py -q  # GREEN: 416 passed",
+       "poetry run pytest -q  # 906 passed (895 baseline + 11 new, zero pre-existing tests edited)",
+       "poetry run ruff check controlled_vocabularies/exchange/skos.py tests/test_exchange/test_skos.py",
+       "poetry run ruff format controlled_vocabularies/exchange/skos.py tests/test_exchange/test_skos.py",
+       "poetry run mypy controlled_vocabularies/exchange/skos.py"
+      ]
+     }
     },
     {
      "id": "T002",
-     "status": "todo",
-     "attempts": 0
+     "status": "done",
+     "attempts": 1,
+     "evidence": {
+      "tests": [
+       "tests/test_management/test_commands/test_import_skos.py::TestManagementPackageSkeleton::test_management_package_is_importable",
+       "tests/test_management/test_commands/test_import_skos.py::TestManagementPackageSkeleton::test_management_commands_package_is_importable"
+      ],
+      "commands": [
+       "poetry run pytest tests/test_management/ -q  # RED: 2 failed, ModuleNotFoundError: controlled_vocabularies.management",
+       "poetry run pytest tests/test_management/ tests/test_standards.py -q  # GREEN: 47 passed",
+       "poetry run pytest -q  # 908 passed",
+       "poetry run ruff check controlled_vocabularies/management/ tests/test_management/",
+       "poetry run ruff format --check controlled_vocabularies/management/ tests/test_management/",
+       "poetry run mypy controlled_vocabularies/management/"
+      ]
+     }
     },
     {
      "id": "T015",
-     "status": "todo",
-     "attempts": 0
+     "status": "done",
+     "attempts": 1,
+     "evidence": {
+      "tests": [
+       "tests/test_management/test_rendering.py::TestReportRendererBucketCounts::test_a_populated_report_renders_each_bucket_count",
+       "tests/test_management/test_rendering.py::TestReportRendererBucketCounts::test_an_empty_report_still_prints_every_section_reading_zero"
+      ],
+      "commands": [
+       "poetry run pytest tests/test_management/test_rendering.py -q  # RED: ModuleNotFoundError: controlled_vocabularies.management.rendering",
+       "poetry run pytest tests/test_management/ -q  # GREEN: 4 passed",
+       "poetry run pytest -q  # 910 passed",
+       "poetry run ruff check controlled_vocabularies/management/rendering.py tests/test_management/test_rendering.py",
+       "poetry run ruff format controlled_vocabularies/management/rendering.py tests/test_management/test_rendering.py",
+       "poetry run mypy controlled_vocabularies/management/rendering.py",
+       "poetry run deptry ."
+      ]
+     }
     }
    ]
   },

@@ -74,6 +74,50 @@ re-checked against the code it cites first.
 - **ARCH-002 (low)** — the temporary file's serialization-carrying suffix was never consulted.
   Dropped.
 
+## 2026-08-10 — S4 IMPLEMENT — US0 (Foundational, T001/T002/T015), Implementer
+
+`craft-tdd` and `craft-increments` loaded by name, receipts verified against the brief before any
+task started. Baseline confirmed green (895 tests, HEAD `a3769f5`) before touching anything. Three
+commits, one per task, tree green and clean after each:
+
+- **T001** — `SkosGraph.from_file`, `SkosImporter` and `import_skos` gain a keyword-only `base_uri`,
+  passed to rdflib as `publicID`. Measured against the project's own rdflib (7.6.0) across all three
+  supported serializations before writing anything: each honours `publicID` identically, so the
+  "stop and report" branch in the brief was never reached. Every existing call site is unaffected —
+  proven by the whole pre-existing suite (895 tests) passing with zero edits, not just the new tests
+  passing. `SkosGraph.from_file`'s three refusals and `SkosImporter.run`'s `source_label` both take
+  `base_uri or file`, so a fetched document's refusal names the URL (FR-014).
+
+  The task's own three relative-URI fixtures (one per serialization, tasks.md's own naming) turned
+  out to conflict with a pre-existing test: committed under `tests/fixtures/skos/`, they are swept
+  by `TestEverySkosPredicateIsReadOrReported`'s directory walk and fail its plain `import_skos()`
+  (no `base_uri`) with `REFUSED_IDENTITY` — a `file://` identity is never one of
+  `conf.DEFAULT_ALLOWED_URI_SCHEMES`, which is exactly D13/D10's own documented "no base URI"
+  behaviour, not a defect. Registering them in that test's own exclusion table would have meant
+  editing a test this story does not own, which the brief rules out directly. Built as string
+  constants under `tmp_path` in the new tests instead — the same pattern already used elsewhere in
+  this file for the missing/unparseable-file cases — so the full suite stays green without touching
+  anything pre-existing. Recorded as decisions.md D11.
+
+- **T002** — `controlled_vocabularies/management/__init__.py` and `management/commands/__init__.py`,
+  empty, with mirrored `tests/test_management/__init__.py` and `test_commands/__init__.py` (Article
+  XIV). The failing-first test is an import check (`ModuleNotFoundError` before, clean import after)
+  — the only behaviour a pure package skeleton has to prove. `tests/test_standards.py` unaffected.
+
+- **T015** — `ReportRenderer` in `management/rendering.py`: one translated, `ngettext_lazy`-pluralized
+  line per bucket (created, updated, set aside, normalized, absent from source), always yielded, so
+  an empty report reads five zero-lines rather than omitting any section (FR-007/FR-008's own
+  reasoning, applied here across every bucket, not only the language account). Exercised entirely
+  against hand-built `ImportReport`s, per the brief's own acceptance — no import run. Set-aside
+  grouping by reason/language, per-entry detail at raised verbosity, and the rehearsal line are
+  US-4's and US-3's own tasks, added to this same class later; not anticipated here.
+
+Full verify green throughout: `poetry run pytest -q` (910 passed), `ruff check .`, `ruff format
+--check .`, `mypy` (`controlled_vocabularies/exchange/skos.py`, `controlled_vocabularies/management/`
+— whole-package `mypy controlled_vocabularies` run once more at the end), `deptry .`. Worktree clean.
+One naming/placement choice not dictated by the brief recorded as D11. Next: US-1 (T003–T005) wires
+`Command` around `SourceResolver`/`ReportRenderer`.
+
 ## Gates
 
 - **Spec gate:** approved 2026-08-10 by SamuelJennings. No conditions.
