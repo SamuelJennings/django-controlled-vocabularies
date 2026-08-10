@@ -18,9 +18,11 @@ from io import StringIO
 from pathlib import Path
 
 import pytest
+from django.apps import apps
 from django.core.management import CommandError, call_command
 from django.utils.functional import Promise
 
+from controlled_vocabularies.exchange.skos import import_skos
 from controlled_vocabularies.management import sources
 from controlled_vocabularies.management.commands.import_skos import Command
 from controlled_vocabularies.models import Concept, ConceptScheme
@@ -243,3 +245,36 @@ class TestImportSkosCommandURLParity:
         assert Concept.objects.filter(static_uri=concept_uri).exists()
         assert not ConceptScheme.objects.filter(static_uri__startswith="file://").exists()
         assert not Concept.objects.filter(static_uri__startswith="file://").exists()
+
+
+class TestImportSkosCommandRehearsal:
+    """T012, spec Acceptance Scenario 1, `decisions.md` D4, `research.md` R5 — `--rehearse`
+    runs the whole import inside an outer transaction it then abandons. `transactional_db`,
+    not `db`: under `db` the test itself already runs inside a transaction rolled back at the
+    end, which would make a broken rehearsal (one that never actually rolls back) pass anyway.
+    """
+
+    @staticmethod
+    def _snapshot() -> dict[str, list[dict[str, object]]]:
+        """Every row of every model this app defines, field values included — proves every
+        table is unchanged rather than only that row counts match (tasks.md T012)."""
+        return {
+            model._meta.label: list(model.objects.order_by("pk").values())
+            for model in apps.get_app_config("controlled_vocabularies").get_models()
+        }
+
+    def test_a_rehearsal_against_a_populated_database_leaves_every_table_unchanged(self, transactional_db):
+        import_skos(FIXTURES / "rocks.ttl")
+        before = self._snapshot()
+
+        call_command("import_skos", str(FIXTURES / "rocks_updated.ttl"), rehearse=True, stdout=StringIO())
+
+        assert self._snapshot() == before
+
+    def test_a_rehearsal_of_a_new_vocabulary_against_an_empty_database_creates_nothing(self, transactional_db):
+        before = self._snapshot()
+
+        call_command("import_skos", str(FIXTURES / "rocks.ttl"), rehearse=True, stdout=StringIO())
+
+        assert self._snapshot() == before
+        assert ConceptScheme.objects.count() == 0
