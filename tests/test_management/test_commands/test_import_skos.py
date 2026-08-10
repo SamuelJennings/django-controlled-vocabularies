@@ -471,3 +471,14 @@ class TestImportSkosCommandExitsZeroOnACompletedRun:
         mock_exit.assert_not_called()
         scheme = ConceptScheme.objects.get(static_uri="http://example.org/quarry3/")
         assert Concept.objects.filter(scheme=scheme, static_uri__endswith="/schist").exists()
+
+    def test_a_refused_run_exits_non_zero_through_the_same_call_site(self, db):
+        """The counterpart the assertion above needs to mean anything: were ``run_from_argv``
+        to stop reaching ``sys.exit`` at all, ``assert_not_called`` would keep passing and say
+        nothing. A refusal must fire it."""
+        command = Command(stdout=StringIO(), stderr=StringIO())
+        with mock.patch("sys.exit") as mock_exit:
+            command.run_from_argv(["manage.py", "import_skos", str(FIXTURES / "no_scheme_declared.ttl")])
+        mock_exit.assert_called_once()
+        assert mock_exit.call_args.args[0] != 0
+        assert ConceptScheme.objects.count() == 0
