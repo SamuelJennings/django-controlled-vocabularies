@@ -91,7 +91,13 @@ class Command(BaseCommand):
                     report = done.report
             else:
                 report = import_skos(resolved.path, serialization=resolved.serialization, base_uri=resolved.base_uri)
-        except (SkosImportError, SkosImportFailed) as exc:
+        except SkosImportFailed as exc:
+            # SkosImportFailed's own str() is one generic "N problem(s) were found" line
+            # (exchange/exceptions.py) — every collected finding is only reachable through
+            # exc.report.fatal, so this is where FR-011's "all of them, not just the first"
+            # actually happens (T020).
+            raise CommandError("\n".join(finding.render() for finding in exc.report.fatal)) from exc
+        except SkosImportError as exc:
             raise CommandError(str(exc)) from exc
         finally:
             resolver.cleanup()

@@ -16,6 +16,7 @@ import os
 import socket
 from io import StringIO
 from pathlib import Path
+from unittest import mock
 
 import pytest
 from django.apps import apps
@@ -29,6 +30,7 @@ from controlled_vocabularies.management.commands.import_skos import Command
 from controlled_vocabularies.models import Concept, ConceptScheme
 
 FIXTURES = Path(__file__).parent.parent.parent / "fixtures" / "skos"
+SECURITY_FIXTURES = Path(__file__).parent.parent.parent / "fixtures" / "security"
 ROCKS_URI = "http://example.org/rocks/"
 
 
@@ -332,3 +334,151 @@ class TestImportSkosCommandRehearsalLine:
         live_out = StringIO()
         call_command("import_skos", str(FIXTURES / "rocks.ttl"), stdout=live_out)
         assert "nothing was kept" not in live_out.getvalue()
+
+
+class TestImportSkosCommandRefusalPrintsEveryFatalFinding:
+    """T020, FR-011, spec US-5 Acceptance Scenario 3 — where the importer collects more than
+    one fatal finding, the command prints all of them, not only the first; the exit status
+    is non-zero; the database is unchanged. ``multiple_fatal_problems.ttl`` already carries
+    two distinct fatal findings at the exchange layer (test_exchange/test_skos.py
+    ``TestFatalFindingsAndAtomicity``) — surfaced here unchanged, not re-detected."""
+
+    def test_every_fatal_finding_prints_not_just_the_first(self, db):
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", str(FIXTURES / "multiple_fatal_problems.ttl"), stdout=StringIO())
+        message = str(exc_info.value)
+        assert "'Nameless' has no identifier that survives re-serialization" in message
+        assert "'ftp://mirror.example.org/mixed/refused' is not an identifier the application accepts" in message
+        assert exc_info.value.returncode != 0
+        assert ConceptScheme.objects.count() == 0
+        assert Concept.objects.count() == 0
+
+
+class TestImportSkosCommandRefusesAnUndeterminedVocabulary:
+    """T021, FR-013, spec US-5 Acceptance Scenario 1, decisions.md D2 — a source declaring no
+    concept scheme is refused as not being SKOS, which falls out of the existing
+    ``VOCABULARY_UNDETERMINED`` fatal because the command names no target. The same refusal
+    covers two further spec Edge Cases that reach it for the same reason: an empty file, and
+    a file that parses to a graph carrying no SKOS content at all, both refused rather than
+    importing an empty vocabulary. The two new fixtures are built under ``tmp_path``, not
+    committed to ``tests/fixtures/skos/``, per decisions.md D11's own precedent."""
+
+    _NOT_SKOS_MESSAGE = "declares no vocabulary of its own, and no target vocabulary was named"
+
+    def test_a_source_declaring_no_concept_scheme_is_refused_as_not_skos(self, db):
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", str(FIXTURES / "no_scheme_declared.ttl"), stdout=StringIO())
+        assert self._NOT_SKOS_MESSAGE in str(exc_info.value)
+        assert exc_info.value.returncode != 0
+        assert ConceptScheme.objects.count() == 0
+
+    def test_an_empty_file_is_refused_rather_than_importing_an_empty_vocabulary(self, db, tmp_path):
+        empty = tmp_path / "empty.ttl"
+        empty.write_text("")
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", str(empty), stdout=StringIO())
+        assert self._NOT_SKOS_MESSAGE in str(exc_info.value)
+        assert exc_info.value.returncode != 0
+        assert ConceptScheme.objects.count() == 0
+
+    def test_a_graph_with_no_skos_content_is_refused_rather_than_importing_an_empty_vocabulary(self, db, tmp_path):
+        no_skos = tmp_path / "no_skos.ttl"
+        no_skos.write_text(
+            '@prefix dc: <http://purl.org/dc/elements/1.1/> .\n<http://example.org/thing> dc:title "Just a thing" .\n'
+        )
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", str(no_skos), stdout=StringIO())
+        assert self._NOT_SKOS_MESSAGE in str(exc_info.value)
+        assert exc_info.value.returncode != 0
+        assert ConceptScheme.objects.count() == 0
+
+
+class TestImportSkosCommandSafetyScanRefusalReachedFromBothSourceForms:
+    """T021, spec US-5 Acceptance Scenario 2 — a source the safety scan refuses is refused
+    with that reason and nothing parses further, proven from a filesystem path and from a
+    URL served over ``http_stub`` (T006), no real network call either way. Reinstates the
+    same measured fixtures ``test_exchange/test_skos.py`` already proves are wired to the
+    scan (``entity_bomb.rdf``, ``remote_context_string.jsonld``), surfaced through the
+    command rather than re-detected."""
+
+    def test_an_unsafe_rdf_xml_document_is_refused_from_a_path(self, db):
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", str(SECURITY_FIXTURES / "entity_bomb.rdf"), stdout=StringIO())
+        assert "e0" in str(exc_info.value)
+        assert exc_info.value.returncode != 0
+        assert ConceptScheme.objects.count() == 0
+
+    def test_an_unsafe_rdf_xml_document_is_refused_from_a_url(self, db, http_stub):
+        body = (SECURITY_FIXTURES / "entity_bomb.rdf").read_bytes()
+        http_stub.set_response("/entity_bomb.rdf", status=200, body=body, content_type="application/rdf+xml")
+        url = http_stub.url + "/entity_bomb.rdf"
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", url, stdout=StringIO())
+        assert "e0" in str(exc_info.value)
+        assert exc_info.value.returncode != 0
+        assert ConceptScheme.objects.count() == 0
+
+    def test_an_unsafe_json_ld_document_is_refused_from_a_path(self, db):
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", str(SECURITY_FIXTURES / "remote_context_string.jsonld"), stdout=StringIO())
+        assert "http://127.0.0.1:1/x.json" in str(exc_info.value)
+        assert exc_info.value.returncode != 0
+        assert ConceptScheme.objects.count() == 0
+
+    def test_an_unsafe_json_ld_document_is_refused_from_a_url(self, db, http_stub):
+        body = (SECURITY_FIXTURES / "remote_context_string.jsonld").read_bytes()
+        http_stub.set_response(
+            "/remote_context_string.jsonld", status=200, body=body, content_type="application/ld+json"
+        )
+        url = http_stub.url + "/remote_context_string.jsonld"
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", url, stdout=StringIO())
+        assert "http://127.0.0.1:1/x.json" in str(exc_info.value)
+        assert exc_info.value.returncode != 0
+        assert ConceptScheme.objects.count() == 0
+
+
+class TestImportSkosCommandSurfacesAnAmbiguousVocabularyRefusalUnchanged:
+    """T021, spec Edge Cases — a source declaring more than one concept scheme is already
+    refused by the importer (test_exchange/test_skos.py
+    ``TestChoosingBetweenDeclaredVocabularies``); the command surfaces that refusal
+    unchanged rather than reinterpreting it."""
+
+    def test_a_source_declaring_more_than_one_concept_scheme_is_refused_unchanged(self, db):
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", str(FIXTURES / "two_vocabularies.ttl"), stdout=StringIO())
+        message = str(exc_info.value)
+        assert "http://example.org/alpha/" in message
+        assert "http://example.org/beta/" in message
+        assert exc_info.value.returncode != 0
+        assert ConceptScheme.objects.count() == 0
+
+
+class TestImportSkosCommandExitsZeroOnACompletedRun:
+    """T022, FR-012, decisions.md D5, spec US-5 Acceptance Scenario 4 — a run that stores the
+    vocabulary exits zero however much it set aside, because that is the bit a deployment
+    script reads. ``call_command`` bypasses ``Command.run_from_argv`` entirely (it calls
+    ``execute()`` directly), so it never exercises the one call site — Django's own, inside
+    ``except CommandError`` — that turns a refusal's ``returncode`` into ``sys.exit``. This
+    test goes through ``run_from_argv`` instead, the real command-line entry point, so the
+    assertion is on whether that call site fires, not merely on whether an exception was
+    raised."""
+
+    def test_a_run_that_sets_values_aside_still_exits_zero(self, db):
+        command = Command(stdout=StringIO())
+        with mock.patch("sys.exit") as mock_exit:
+            command.run_from_argv(["manage.py", "import_skos", str(FIXTURES / "unconfigured_language_values.ttl")])
+        mock_exit.assert_not_called()
+        scheme = ConceptScheme.objects.get(static_uri="http://example.org/quarry3/")
+        assert Concept.objects.filter(scheme=scheme, static_uri__endswith="/schist").exists()
+
+    def test_a_refused_run_exits_non_zero_through_the_same_call_site(self, db):
+        """The counterpart the assertion above needs to mean anything: were ``run_from_argv``
+        to stop reaching ``sys.exit`` at all, ``assert_not_called`` would keep passing and say
+        nothing. A refusal must fire it."""
+        command = Command(stdout=StringIO(), stderr=StringIO())
+        with mock.patch("sys.exit") as mock_exit:
+            command.run_from_argv(["manage.py", "import_skos", str(FIXTURES / "no_scheme_declared.ttl")])
+        mock_exit.assert_called_once()
+        assert mock_exit.call_args.args[0] != 0
+        assert ConceptScheme.objects.count() == 0
