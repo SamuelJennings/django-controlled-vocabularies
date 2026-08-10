@@ -99,9 +99,7 @@ class TestReportRendererSetAsideByReason:
         assert any("1" in line and str(SetAsideReason.UNCONFIGURED_LANGUAGE.label) in line for line in lines)
 
     def test_a_reason_with_no_entries_renders_no_line_for_itself(self):
-        report = ImportReport(
-            set_aside=[SetAsideEntry(reason=SetAsideReason.NOTATION, subject="http://example.org/a")]
-        )
+        report = ImportReport(set_aside=[SetAsideEntry(reason=SetAsideReason.NOTATION, subject="http://example.org/a")])
         lines = [str(line) for line in ReportRenderer(report).render()]
         assert not any(str(SetAsideReason.MAPPING.label) in line for line in lines)
 
@@ -148,29 +146,12 @@ class TestReportRendererAgainstARealRun:
     not only a hand-built one, so the accessors are exercised as the command will actually see
     them (tasks.md T016)."""
 
-    def test_a_real_run_setting_aside_several_reasons_and_languages_groups_them_correctly(self, db, tmp_path):
-        path = tmp_path / "setaside.ttl"
-        path.write_text(
-            """
-            @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
-
-            <http://example.org/setaside/> a skos:ConceptScheme ;
-                skos:prefLabel "Set-aside demo"@en .
-
-            <http://example.org/setaside/a> a skos:Concept ;
-                skos:inScheme <http://example.org/setaside/> ;
-                skos:prefLabel "A"@en ;
-                skos:notation "A1" ;
-                skos:exactMatch <http://example.org/other/a> ;
-                skos:altLabel "Ay"@es .
-
-            <http://example.org/setaside/b> a skos:Concept ;
-                skos:inScheme <http://example.org/setaside/> ;
-                skos:prefLabel "B"@en ;
-                skos:altLabel "Be"@es, "Bju"@ja .
-            """
-        )
-        report = import_skos(path)
+    def test_a_real_run_setting_aside_several_reasons_and_languages_groups_them_correctly(self, db):
+        # Committed under tests/fixtures/skos/ (T025) rather than written to tmp_path: every
+        # identifier here is absolute, so — unlike the relative-URI fixtures decisions.md D11
+        # documents — nothing about this document requires it to stay out of the directory
+        # TestEverySkosPredicateIsReadOrReported walks, and it passes that walk unmodified.
+        report = import_skos(FIXTURES / "setaside_multiple_reasons.ttl")
         grouped = report.set_aside_by_reason()
         assert len(grouped[SetAsideReason.NOTATION]) == 1
         assert len(grouped[SetAsideReason.MAPPING]) == 1

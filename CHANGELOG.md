@@ -32,8 +32,21 @@ All notable changes to this project are documented in this file. The format foll
   parsed, and a JSON-LD document is refused rather than fetched if its `@context` names a remote
   location, whether a plain string reference or an `@import` reference inside an inline object
   context. Reading a file never makes a network request. Both refusals raise an exported,
-  translatable `UnsafeRdfXmlError`/`UnsafeJsonLdError`, each a `SkosImportError` subclass. No
-  command-line or web-facing entry point yet — programmatic only. See the README.
+  translatable `UnsafeRdfXmlError`/`UnsafeJsonLdError`, each a `SkosImportError` subclass. A
+  management command wraps this for command-line use (see below). No web-facing entry point yet.
+  See the README.
+- A management command, `import_skos`, runs the same import from a terminal:
+  `python manage.py import_skos <source> [--format FORMAT] [--rehearse]`. The source can be a
+  local path or an `http://`/`https://` URL, fetched under a fixed timeout and byte ceiling and
+  read with its identifiers resolved against the address it came from, so a re-import updates the
+  same concepts the first import created. `--format` names the source's serialization for one
+  whose extension or `Content-Type` does not. `--rehearse` performs the entire import and reports
+  the outcome exactly as a live run would, then rolls the database back to its state beforehand.
+  Output is bucket counts by default — created, updated, set aside, normalized, and absent from
+  source, plus the set-aside account grouped by reason and by language — with every individual
+  set-aside entry added at `--verbosity 2` or above. The command exits non-zero only on a refusal.
+  A run that sets values aside — which importing a vocabulary published in more languages than a
+  site configures for always does — exits zero.
 - Importing now matches a published language tag by base language rather than by exact string
   equality. A file's `en` value fills a site configured for `en-gb`, and a file's `en-gb` value
   fills a site configured for `en`, matched case-insensitively in both directions, with an exact
