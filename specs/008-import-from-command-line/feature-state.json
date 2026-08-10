@@ -64,6 +64,11 @@
       "state": "IMPLEMENT",
       "at": "2026-08-10T20:35:00Z",
       "note": "US1 (T003-T005) done and verified; receipts green, forge verify green (918 passed, lint/typecheck/build/conformance green), two tamper flags triaged as additive with the skip guard approved (D14), one deviation accepted (D13)"
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-10T20:45:00Z",
+      "note": "US2 (T006-T011) dispatched on sonnet in dcv-us2; check-skills green for craft-tdd, craft-increments, craft-security; baseline verify green (918 passed)"
     }
   ],
   "gates": {
@@ -225,8 +230,8 @@
       "id": "US2",
       "priority": "P1",
       "issue": 79,
-      "worktree": null,
-      "status": "todo",
+      "worktree": "/home/sam/projects/samueljennings/dcv-us2",
+      "status": "in_progress",
       "replans": 0,
       "tasks": [
         {
