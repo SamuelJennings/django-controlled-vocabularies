@@ -148,6 +148,22 @@ Verified: `poetry run pytest tests/test_management/test_commands/test_import_sko
 tests/test_management/test_rendering.py -q` (8 passed), `ruff check` + `ruff format --check` + `mypy`
 on the two changed files (clean after one auto-format pass and the `cast` fix).
 
+- **T004** — A missing path is left to `import_skos()`/`from_file`'s own `is_file()` check, already
+  wrapped into `CommandError` by T003's handling; one source of truth for "absent." A path that
+  *exists* but cannot be opened for permission reasons has no distinct message from that path —
+  confirmed against a real 0o000 file before writing anything: it reaches `from_file`'s generic
+  parse-failure branch and reports "could not be parsed... Permission denied," not "unreadable."
+  `handle()` checks `os.access(path, os.R_OK)` itself, before calling `import_skos()`, and raises its
+  own `CommandError` — no edit to `exchange/skos.py`. Recorded as decisions.md D13.
+
+  Tests: a missing path names itself in the message and leaves the database empty; an unreadable
+  path (`tmp_path`, `chmod(0o000)`, restored in a `finally`) gets a message distinct from the missing
+  one and also leaves the database empty. Permission test skipped under uid 0, which ignores file
+  permissions entirely.
+
+Verified: `poetry run pytest tests/test_management/test_commands/test_import_skos.py -q` (8 passed),
+`ruff check` + `ruff format --check` (one auto-format pass) + `mypy` on the two changed files.
+
 ## Gates
 
 - **Spec gate:** approved 2026-08-10 by SamuelJennings. No conditions.

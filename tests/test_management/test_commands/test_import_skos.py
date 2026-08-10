@@ -12,10 +12,12 @@ rendering the result through :class:`~controlled_vocabularies.management.renderi
 """
 
 import importlib
+import os
 from io import StringIO
 from pathlib import Path
 
-from django.core.management import call_command
+import pytest
+from django.core.management import CommandError, call_command
 from django.utils.functional import Promise
 
 from controlled_vocabularies.management.commands.import_skos import Command
@@ -79,3 +81,33 @@ class TestImportSkosCommandHelpIsTranslatable:
         for dest, action in ours.items():
             assert action.help, f"{dest} has no help text"
             assert isinstance(action.help, Promise), f"{dest} help is not lazily translatable"
+
+
+class TestImportSkosCommandRefusesABadPath:
+    """T004 — spec Acceptance Scenario 4 and Edge Cases: a missing path fails naming the path,
+    writes nothing, and exits non-zero via `CommandError`; a path that exists but cannot be
+    opened for permission reasons is reported distinctly, not as absent (spec Edge Cases)."""
+
+    def test_a_missing_path_is_refused_naming_the_path_and_writes_nothing(self, db):
+        missing = str(FIXTURES / "does-not-exist.ttl")
+        with pytest.raises(CommandError) as exc_info:
+            call_command("import_skos", missing, stdout=StringIO())
+        assert missing in str(exc_info.value)
+        assert ConceptScheme.objects.count() == 0
+
+    @pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root ignores file permissions")
+    def test_an_unreadable_path_is_reported_distinctly_from_a_missing_one(self, db, tmp_path):
+        unreadable = tmp_path / "vocab.ttl"
+        unreadable.write_bytes((FIXTURES / "rocks.ttl").read_bytes())
+        unreadable.chmod(0o000)
+        try:
+            with pytest.raises(CommandError) as missing_exc:
+                call_command("import_skos", str(FIXTURES / "does-not-exist.ttl"), stdout=StringIO())
+            with pytest.raises(CommandError) as unreadable_exc:
+                call_command("import_skos", str(unreadable), stdout=StringIO())
+        finally:
+            unreadable.chmod(0o644)
+        assert str(missing_exc.value) != str(unreadable_exc.value)
+        assert "is not readable" in str(unreadable_exc.value)
+        assert "is not readable" not in str(missing_exc.value)
+        assert ConceptScheme.objects.count() == 0

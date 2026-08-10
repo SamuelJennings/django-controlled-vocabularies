@@ -9,6 +9,8 @@ line written; the command never formats a report itself, here or later (plan.md 
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any, cast
 
 from django.core.management.base import BaseCommand, CommandError
@@ -37,6 +39,13 @@ class Command(BaseCommand):
 
     def handle(self, *args: Any, **options: Any) -> None:
         source = options["source"]
+        # A missing path is left to import_skos()/from_file's own is_file() check below, which
+        # already names it distinctly (FR-002). A path that *exists* but cannot be opened for
+        # permission reasons passes that same is_file() check, so it is caught here instead,
+        # without touching exchange/skos.py (spec Edge Cases).
+        path = Path(source)
+        if path.is_file() and not os.access(path, os.R_OK):
+            raise CommandError(str(_("'%(file)s' exists but is not readable.")) % {"file": source})
         try:
             report = import_skos(source, serialization=options["format"])
         except (SkosImportError, SkosImportFailed) as exc:
