@@ -301,6 +301,36 @@ Verified: `poetry run pytest tests/test_management/test_commands/test_import_sko
 tests/test_management/test_sources.py -q` (34 passed), `ruff check` + `ruff format --check` + `mypy`
 + `deptry .` on all four changed files.
 
+- **T011** — The wiring itself, and the `Command.help`/`source`-argument help text mentioning a
+  URL, both landed with T010 (see that entry's own deviation note) — nothing left to change in
+  production code. This task is the two tests the spec actually gates on. Both passed on first run
+  against the already-wired `handle()` — checked before accepting, per `craft-tdd`: each genuinely
+  exercises `SourceResolver`'s fetch-then-import path through `call_command`, not a tautology, and
+  a manual check that dropping `base_uri` from the flow would resolve `<concept-a>` against a
+  temporary file rather than the stub's own address confirms the second test is not vacuously true.
+
+  Tests (`TestImportSkosCommandURLParity`, `test_import_skos.py`): `rocks.ttl` (absolute
+  identifiers) imported once over the stub and once from disk in the same test — `Concept`
+  `static_uri` set, the scheme's `name`, and the rendered report text are compared equal after
+  deleting the URL import's records before the disk import (SC-002). A document whose every
+  identifier is relative (`<>`, `<concept-a>`, string constants local to this test class — not
+  committed to `tests/fixtures/skos/`, so `TestEverySkosPredicateIsReadOrReported`'s directory walk
+  never sees it; served straight from `http_stub`'s in-memory response, so unlike T001's own
+  `tmp_path` fixtures (decisions.md D11) no file on disk is involved on the served side at all) is
+  imported over the stub and its scheme and concept are found at the stub's own address, with no
+  `file://`-prefixed `static_uri` anywhere (FR-003).
+
+  **"Nothing anywhere records the URL"** (FR-003's closing clause) is satisfied by construction
+  rather than by a dedicated test: `ConceptScheme`/`Concept` carry no field this story adds or
+  writes to (`models.py` untouched — out of scope, per the brief's prohibitions), and the only
+  place a fetched document's address appears in the database is as `static_uri` itself, which is
+  the document's own declared identity, not metadata about the fetch. The two tests above already
+  cover every write path this story adds.
+
+Verified: `poetry run pytest tests/test_management/test_commands/test_import_skos.py
+tests/test_management/test_sources.py -q` (37 passed), `ruff check` + `ruff format --check` + `mypy`
+on the one changed test file (no production file touched).
+
 ## Gates
 
 - **Spec gate:** approved 2026-08-10 by SamuelJennings. No conditions.
