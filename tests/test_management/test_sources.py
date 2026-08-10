@@ -12,6 +12,9 @@ import urllib.error
 import urllib.request
 
 import pytest
+from django.core.management.base import CommandError
+
+from controlled_vocabularies.management.sources import SourceResolver
 
 
 class TestHTTPStubFixture:
@@ -44,3 +47,28 @@ class TestHTTPStubFixture:
         http_stub.set_response("/vocab.ttl", status=200, body=b"ok")
         with urllib.request.urlopen(http_stub.url + "/vocab.ttl") as response:  # noqa: S310 -- stub is localhost-only
             assert response.read() == b"ok"
+
+
+class TestSourceResolverClassification:
+    """T007, research.md R3, decisions.md D3 — classifying a raw source argument, with no
+    fetch and no filesystem access, so every case here is exercised with no real network call."""
+
+    def test_a_value_beginning_http_is_a_url(self):
+        assert SourceResolver("http://example.org/vocab.ttl").classify() == "url"
+
+    def test_a_value_beginning_https_case_insensitively_is_a_url(self):
+        assert SourceResolver("HTTPS://host/v.ttl").classify() == "url"
+
+    def test_a_bare_relative_filename_is_a_path(self):
+        assert SourceResolver("vocab.ttl").classify() == "path"
+
+    def test_a_windows_drive_letter_is_a_path_not_a_one_letter_scheme(self):
+        assert SourceResolver("C:/vocab/skos.ttl").classify() == "path"
+
+    def test_an_absolute_unix_path_is_a_path(self):
+        assert SourceResolver("/srv/vocab/skos.ttl").classify() == "path"
+
+    def test_an_unsupported_scheme_is_refused_naming_the_scheme(self):
+        with pytest.raises(CommandError) as exc_info:
+            SourceResolver("ftp://host/v.ttl").classify()
+        assert "ftp" in str(exc_info.value)
