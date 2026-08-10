@@ -408,6 +408,73 @@ Verified: `poetry run pytest tests/test_management/ -q` (46 passed), `ruff check
 `ruff format --check` + `mypy` on both changed production files. Full-repo verify (pytest,
 ruff, mypy, deptry) still to run once, per protocol, immediately before the completion report.
 
+## 2026-08-10 — S4 IMPLEMENT — US5 (T020/T021/T022), Implementer
+
+`craft-tdd` and `craft-increments` loaded by name, receipts verified against the brief before
+any task started. Baseline confirmed green (952 tests) before touching anything.
+
+- **T020** — `SkosImportFailed`'s own `str()` is one generic "N problem(s) were found" line
+  (`exchange/exceptions.py`'s `ValidationError` message); every collected finding is only
+  reachable through `exc.report.fatal`. `Command.handle()`'s single `except (SkosImportError,
+  SkosImportFailed)` clause split into two: `SkosImportFailed` now raises `CommandError` from
+  `"\n".join(finding.render() for finding in exc.report.fatal)`, `SkosImportError` unchanged
+  (FR-011). No edit to `exchange/` — the findings already exist there; this only joins what was
+  already collected.
+
+  Tests: `multiple_fatal_problems.ttl` (already used at the exchange layer for the same
+  two-finding proof) through the command — both fatal findings' full rendered text present in
+  the `CommandError` message, not only the first; `CommandError.returncode != 0`; database
+  unchanged. Verified failing for the right reason before the fix (per `craft-tdd`): the
+  unmodified `handle()` produced only the generic "2 problem(s) were found" line.
+
+Verified: `poetry run pytest tests/test_management/test_commands/test_import_skos.py -q` (22
+passed), `ruff check` + `ruff format --check` (one auto-format pass on the test file) + `mypy`
+on both changed files.
+
+- **T021** — No production code: the scheme-less refusal (`VOCABULARY_UNDETERMINED`), the
+  safety scan's refusals, and the ambiguous-vocabulary refusal all already exist at the
+  exchange layer and already reach `Command.handle()`'s existing exception handling — this
+  task is the tests FR-013 and the spec's Edge Cases actually gate on, matching how US-2's
+  T011 and US-3's T013 found their own wiring already landed by an earlier task.
+
+  Tests: `no_scheme_declared.ttl` through the command names the not-SKOS message and exits
+  non-zero; two `tmp_path`-only fixtures (per decisions.md D11's own precedent, not committed
+  under `tests/fixtures/skos/`) — a genuinely empty file and a file parsing to a graph with
+  only non-SKOS content — both fall out of the same `VOCABULARY_UNDETERMINED` fatal, confirmed
+  against `import_skos()` directly before writing the command-level assertion (per `craft-tdd`,
+  not guessed). `entity_bomb.rdf` and `remote_context_string.jsonld` (the same measured
+  fixtures `test_exchange/test_skos.py` already proves are wired to the safety scan) refused
+  through the command from both a filesystem path and a URL served over `http_stub`, no real
+  network call either way. `two_vocabularies.ttl`'s existing `VOCABULARY_AMBIGUOUS` refusal
+  (`TestChoosingBetweenDeclaredVocabularies`, US-1) surfaced through the command unchanged,
+  naming both declared vocabularies.
+
+Verified: `poetry run pytest tests/test_management/test_commands/test_import_skos.py -q` (30
+passed), `ruff check` + `ruff format --check` + `mypy` on the one changed test file (no
+production file touched).
+
+- **T022** — No production code: a run that stores and sets aside already returns normally,
+  and Django's own `BaseCommand.run_from_argv` never calls `sys.exit` on that path — only its
+  `except CommandError` clause does. `call_command` (used by every other test in this file)
+  calls `Command.execute()` directly and never exercises `run_from_argv` at all, so it cannot
+  prove "exits zero" as anything but "did not raise" for this fixture; called through
+  `run_from_argv` instead — the actual command-line entry point — with `sys.exit` mocked, so
+  the assertion is on whether that one call site fires, per the acceptance criterion's own
+  wording ("assert on the exit status specifically"). Confirmed not tautological before
+  accepting it (per `craft-tdd`): the same mock against `no_scheme_declared.ttl` (a genuine
+  refusal) does record `sys.exit(1)`, so the assertion distinguishes the two outcomes rather
+  than passing regardless.
+
+  Tests: `unconfigured_language_values.ttl` (already used at the exchange layer for its own
+  `UNCONFIGURED_LANGUAGE` set-aside, three values in `es`, a language the test site's default
+  `LANGUAGES` does not configure) imported through `run_from_argv` — `sys.exit` never called,
+  the scheme and its concept both stored.
+
+Verified: `poetry run pytest tests/test_management/test_commands/test_import_skos.py -q` (31
+passed), `ruff check` + `ruff format --check` + `mypy` on the one changed test file (no
+production file touched). Full-repo verify (pytest, ruff, mypy, deptry) still to run once, per
+protocol, immediately before the completion report.
+
 ## Gates
 
 - **Spec gate:** approved 2026-08-10 by SamuelJennings. No conditions.
