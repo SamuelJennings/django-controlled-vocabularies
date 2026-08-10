@@ -183,6 +183,74 @@ passed), `ruff check` + `ruff format --check` + `mypy` on the changed test file 
 touched). Full-repo verify (pytest, ruff, mypy, deptry) still to run once, per protocol, immediately
 before the completion report.
 
+## 2026-08-10 — S4 IMPLEMENT — US2 (T006-T011), Implementer
+
+`craft-tdd`, `craft-increments` and `craft-security` loaded by name, receipts verified against the
+brief before any task started. Baseline confirmed green (918 tests) before touching anything.
+
+- **T006** — `http_stub` (`ThreadingHTTPServer` on port 0, a background thread, `set_response(path,
+  status=, body=, content_type=, headers=)` per path so one running server answers several scenarios
+  in one test) and `hanging_socket` (a bound, listening socket with nothing accepting or answering,
+  for the timeout case) added to `tests/conftest.py`, additive only. Standard library only.
+
+  Tests: `TestHTTPStubFixture` in the new `tests/test_management/test_sources.py` exercises the stub
+  directly with plain `urllib.request.urlopen` — a configured 200 with body/content-type, a
+  configured 404, an unconfigured path also answering 404, and a second `http_stub` instance getting
+  its own fresh port. `hanging_socket` is proven in T010, where the timeout case needs it.
+
+Verified: `poetry run pytest tests/test_management/test_sources.py -q` (4 passed), `ruff check` +
+`ruff format --check` (one `A002`/`S310` fix pass) + `mypy` on the two changed files.
+
+- **T007** — `SourceResolver.classify()` in the new `controlled_vocabularies/management/sources.py`:
+  a value beginning `http://`/`https://` (case-insensitive) is `"url"`; else `urlsplit(source).scheme`
+  of length ≤ 1 is `"path"` (a Windows drive letter parses as a one-character scheme); anything else
+  raises `CommandError` naming the scheme. `SourceResolver.__init__` takes `serialization`, not
+  `format` — `format` shadows the builtin (`ruff` `A002`), and `serialization` is the name
+  `from_file`/`import_skos` already use for the same value.
+
+  Tests: `TestSourceResolverClassification` — `http://…` and `HTTPS://…` as URLs, a bare relative
+  filename, `C:/vocab/skos.ttl` and an absolute Unix path as paths, `ftp://host/v.ttl` refused naming
+  `ftp`. No fetch, no filesystem access — classification only.
+
+Verified: `poetry run pytest tests/test_management/test_sources.py -q` (10 passed), `ruff check` +
+`ruff format --check` + `mypy` on the two changed files.
+
+- **T008** — `SourceResolver.resolve()`/`_fetch()`: for a URL, fetches to a temporary file
+  (`tempfile.mkstemp`) in chunks under `_TIMEOUT_SECONDS = 2` and `_MAX_RESPONSE_BYTES = 10 MiB`
+  (both plain module constants, no configuration surface), returns a `ResolvedSource(path, base_uri,
+  serialization)` with the URL as `base_uri`. `cleanup()` unlinks the temp file; the caller (T011)
+  calls it once in a `finally` around resolve-and-import, matching plan.md "the temporary file is
+  removed when the command finishes, whether or not the import succeeded" — not tied to `_fetch()`
+  itself, so a fetch failure's partial file is also removed by that same `finally`, never by
+  `_fetch()` catching its own exception.
+
+  **Deviation from the brief's own design doc, found by this task's own test (decisions.md D15):**
+  `research.md` R3 and `plan.md` name
+  `build_opener(HTTPHandler, HTTPSHandler, HTTPRedirectHandler, HTTPErrorProcessor)` as the
+  http/https-only opener. Built exactly as written, `opener.handlers` still carries `FTPHandler`,
+  `FileHandler`, `DataHandler` and `UnknownHandler` — `build_opener` always merges its own defaults
+  for any default class not *subclassed* by an argument, and none of the four named handlers
+  subclass `FTPHandler`. The redirect-to-ftp test caught this directly: against a non-routable
+  target it took 2.0s (this fetch's own timeout) rather than failing immediately, proving
+  `FTPHandler.ftp_open` really opened a connection — the exact real network call this opener exists
+  to prevent. Fixed by building `OpenerDirector()` by hand and adding only `HTTPHandler`,
+  `HTTPSHandler`, `HTTPRedirectHandler`, `HTTPErrorProcessor` and `UnknownHandler` via
+  `add_handler(...)`, which bypasses `build_opener`'s default-merging entirely; `UnknownHandler` is
+  needed too, since without any handler for `unknown_open`, `OpenerDirector.open()` returns `None`
+  for an unhandled scheme rather than raising. Re-run of the same test: `URLError` in under a
+  millisecond, no connection. This is a correction to `research.md`/`plan.md`/`tasks.md`'s own text,
+  not a new design decision — flagged for Forge in `concerns`.
+
+  Tests: `TestSourceResolverFetch` — a served document fetched to a temp file with the URL as
+  `base_uri`; the temp file gone after `cleanup()`; a redirect to another `http` URL followed and its
+  body fetched; a redirect to `ftp://10.255.255.1/…` (deliberately non-routable, so a real attempt
+  would hang rather than fail fast) refused in under a second, proving no connection was opened; a
+  response exceeding the byte ceiling (patched to 16 bytes via `monkeypatch` so the test does not
+  transfer 10 MiB) abandoned with `CommandError` naming the URL, temp file gone after `cleanup()`.
+
+Verified: `poetry run pytest tests/test_management/test_sources.py -q` (15 passed), `ruff check` +
+`ruff format --check` + `mypy` on the two changed files.
+
 ## Gates
 
 - **Spec gate:** approved 2026-08-10 by SamuelJennings. No conditions.

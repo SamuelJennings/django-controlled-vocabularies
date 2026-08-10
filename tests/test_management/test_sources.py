@@ -8,12 +8,15 @@ call is made anywhere in this file.
 
 from __future__ import annotations
 
+import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
 from django.core.management.base import CommandError
 
+from controlled_vocabularies.management import sources
 from controlled_vocabularies.management.sources import SourceResolver
 
 
@@ -72,3 +75,64 @@ class TestSourceResolverClassification:
         with pytest.raises(CommandError) as exc_info:
             SourceResolver("ftp://host/v.ttl").classify()
         assert "ftp" in str(exc_info.value)
+
+
+class TestSourceResolverFetch:
+    """T008, research.md R3 — the fetch: an opener carrying only the http/https handlers,
+    a byte ceiling, a temporary file, and cleanup on both the success and the failure path.
+    No real network call: every case is served by ``http_stub``."""
+
+    def test_a_served_document_is_fetched_to_a_temporary_file_with_the_url_as_base_uri(self, http_stub):
+        http_stub.set_response("/vocab.ttl", status=200, body=b"stub body", content_type="text/turtle")
+        url = http_stub.url + "/vocab.ttl"
+        resolver = SourceResolver(url, serialization="turtle")
+        resolved = resolver.resolve()
+        try:
+            assert Path(resolved.path).read_bytes() == b"stub body"
+            assert resolved.base_uri == url
+            assert resolved.serialization == "turtle"
+        finally:
+            resolver.cleanup()
+
+    def test_the_temporary_file_does_not_survive_cleanup(self, http_stub):
+        http_stub.set_response("/vocab.ttl", status=200, body=b"stub body")
+        resolver = SourceResolver(http_stub.url + "/vocab.ttl", serialization="turtle")
+        resolved = resolver.resolve()
+        resolver.cleanup()
+        assert not Path(resolved.path).exists()
+
+    def test_a_redirect_to_another_http_url_is_followed(self, http_stub):
+        http_stub.set_response("/redirect.ttl", status=302, headers={"Location": http_stub.url + "/target.ttl"})
+        http_stub.set_response("/target.ttl", status=200, body=b"redirected body", content_type="text/turtle")
+        resolver = SourceResolver(http_stub.url + "/redirect.ttl", serialization="turtle")
+        resolved = resolver.resolve()
+        try:
+            assert Path(resolved.path).read_bytes() == b"redirected body"
+        finally:
+            resolver.cleanup()
+
+    def test_a_redirect_to_a_non_http_scheme_is_refused_without_opening_a_connection(self, http_stub):
+        http_stub.set_response("/redirect.ttl", status=302, headers={"Location": "ftp://10.255.255.1/vocab.ttl"})
+        url = http_stub.url + "/redirect.ttl"
+        resolver = SourceResolver(url, serialization="turtle")
+        started = time.monotonic()
+        with pytest.raises(CommandError) as exc_info:
+            resolver.resolve()
+        elapsed = time.monotonic() - started
+        # A real connection attempt to a non-routable host would not fail this fast — the
+        # opener has no handler for ftp at all, so no connection is ever attempted (research.md R3).
+        assert elapsed < 1.0
+        assert url in str(exc_info.value)
+
+    def test_a_response_exceeding_the_byte_ceiling_is_abandoned_and_writes_nothing(self, http_stub, monkeypatch):
+        monkeypatch.setattr(sources, "_MAX_RESPONSE_BYTES", 16)
+        url = http_stub.url + "/big.ttl"
+        http_stub.set_response("/big.ttl", status=200, body=b"x" * 1000, content_type="text/turtle")
+        resolver = SourceResolver(url, serialization="turtle")
+        with pytest.raises(CommandError) as exc_info:
+            resolver.resolve()
+        assert url in str(exc_info.value)
+        temp_path = resolver._temp_path
+        assert temp_path is not None
+        resolver.cleanup()
+        assert not temp_path.exists()

@@ -9,12 +9,68 @@ is ``"c"``), not a network protocol, so it is not mistaken for one (research.md 
 
 from __future__ import annotations
 
+import os
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlsplit
+from urllib.request import (
+    HTTPErrorProcessor,
+    HTTPHandler,
+    HTTPRedirectHandler,
+    HTTPSHandler,
+    OpenerDirector,
+    UnknownHandler,
+)
 
 from django.core.management.base import CommandError
 from django.utils.translation import gettext_lazy as _
 
 _URL_PREFIXES = ("http://", "https://")
+
+# One socket-read timeout and one byte ceiling, neither configurable (plan.md "Source
+# resolution"). The operator cannot see how long a publisher takes to answer or how much
+# it intends to send, so both bound what the remote server chooses rather than an operator
+# mistake (craft-security "always/ask/never" — DoS via an unbounded transfer).
+_TIMEOUT_SECONDS = 2
+_CHUNK_SIZE = 64 * 1024
+_MAX_RESPONSE_BYTES = 10 * 1024 * 1024  # 10 MiB
+
+# An opener carrying only the http/https handlers (T008, research.md R3): a handler
+# removed, not a check added. Python's default opener's HTTPRedirectHandler permits a
+# redirect onto ftp as well as http/https, and checking the final URL on the response
+# object happens only after urllib has already connected and pulled the body — this
+# opener has no handler for any other scheme, so it fails before a connection is attempted.
+#
+# Built via OpenerDirector().add_handler(...) rather than build_opener(...): build_opener
+# always merges its own default handlers (FTPHandler, FileHandler, DataHandler, ...) for
+# every protocol not explicitly overridden by an instance of the *same* default class, so
+# build_opener(HTTPHandler, HTTPSHandler, HTTPRedirectHandler, HTTPErrorProcessor) still
+# carries a live FTPHandler — confirmed by inspecting opener.handlers and by a redirect to
+# ftp://10.255.255.1/... actually reaching ftplib's connect and timing out on it, which is
+# the real network call this design exists to prevent (decisions.md D15). UnknownHandler is
+# added so a scheme with no registered handler raises URLError immediately rather than
+# OpenerDirector.open() silently returning None.
+_opener = OpenerDirector()
+for _handler_class in (HTTPHandler, HTTPSHandler, HTTPRedirectHandler, HTTPErrorProcessor, UnknownHandler):
+    _opener.add_handler(_handler_class())
+
+
+@dataclass
+class ResolvedSource:
+    """What :class:`SourceResolver` hands the importer: a local path, plus the base URI
+    and serialization a fetched document carries (``None`` for a local path, which keeps
+    ``from_file``'s own defaults, T007-T009)."""
+
+    path: str
+    base_uri: str | None
+    serialization: str | None
+
+
+@dataclass
+class _Fetched:
+    path: Path
+    content_type: str | None
 
 
 class SourceResolver:
@@ -23,6 +79,7 @@ class SourceResolver:
     def __init__(self, source: str, *, serialization: str | None = None) -> None:
         self.source = source
         self.serialization = serialization
+        self._temp_path: Path | None = None
 
     def classify(self) -> str:
         """Return ``"url"`` or ``"path"`` for :attr:`source` (T007, research.md R3).
@@ -40,3 +97,55 @@ class SourceResolver:
             str(_("'%(source)s' names a source this command does not support ('%(scheme)s' is not http or https)."))
             % {"source": self.source, "scheme": scheme}
         )
+
+    def resolve(self) -> ResolvedSource:
+        """Classify :attr:`source` and, for a URL, fetch it (T007-T009).
+
+        The caller is responsible for calling :meth:`cleanup` once it is done with the
+        result, whether or not the import that follows succeeds (plan.md "Source
+        resolution").
+        """
+        if self.classify() == "path":
+            return ResolvedSource(path=self.source, base_uri=None, serialization=self.serialization)
+        fetched = self._fetch()
+        return ResolvedSource(path=str(fetched.path), base_uri=self.source, serialization=self.serialization)
+
+    def _fetch(self) -> _Fetched:
+        """Fetch :attr:`source` to a temporary file under a timeout and a byte ceiling
+        (T008, research.md R3)."""
+        try:
+            response = _opener.open(self.source, timeout=_TIMEOUT_SECONDS)
+        except OSError as exc:
+            raise CommandError(
+                str(_("'%(source)s' could not be retrieved: %(error)s")) % {"source": self.source, "error": exc}
+            ) from exc
+        with response:
+            content_type = response.headers.get_content_type()
+            fd, name = tempfile.mkstemp()
+            self._temp_path = Path(name)
+            written = 0
+            with os.fdopen(fd, "wb") as tmp:
+                while True:
+                    try:
+                        chunk = response.read(_CHUNK_SIZE)
+                    except OSError as exc:
+                        raise CommandError(
+                            str(_("'%(source)s' could not be retrieved: %(error)s"))
+                            % {"source": self.source, "error": exc}
+                        ) from exc
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if written > _MAX_RESPONSE_BYTES:
+                        raise CommandError(
+                            str(_("'%(source)s' exceeded the maximum response size and was abandoned."))
+                            % {"source": self.source}
+                        )
+                    tmp.write(chunk)
+        return _Fetched(path=self._temp_path, content_type=content_type)
+
+    def cleanup(self) -> None:
+        """Remove the temporary file a fetch wrote, if any (T008). A no-op for a local
+        path source, and safe to call more than once."""
+        if self._temp_path is not None:
+            self._temp_path.unlink(missing_ok=True)

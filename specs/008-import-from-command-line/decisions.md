@@ -307,3 +307,39 @@ not root. A conditional skip that silently swallowed the case on the machines we
 have been approved.
 
 **ADR:** none — a guardrail triage, not a design decision.
+
+## D15 — `build_opener` does not give an http/https-only opener; `OpenerDirector` built by hand does
+
+Found implementing T008. `research.md` R3 and `plan.md` "Source resolution" both name
+`urllib.request.build_opener(HTTPHandler, HTTPSHandler, HTTPRedirectHandler, HTTPErrorProcessor)`
+as the opener that carries no handler for any scheme but http/https, so a redirect onto `ftp`
+fails before a connection is attempted. Built exactly as written and inspected
+(`opener.handlers`), it still carries a live `FTPHandler`, `FileHandler`, `DataHandler` and
+`UnknownHandler` — `build_opener`'s own docstring says why: "If any of the handlers passed as
+arguments are subclasses of the default handlers, the default handlers will not be used," and it
+always adds its own defaults for every default class not matched that way. None of the four
+handlers named override `FTPHandler`.
+
+Confirmed the consequence directly, once as a spike and once as this task's own failing test: a
+`SourceResolver` fetch of a stub URL that 302-redirects to `ftp://10.255.255.1/vocab.ttl` (a
+non-routable address, chosen so a real connection attempt would hang rather than fail
+immediately) took 2.0s — the fetch's own socket timeout — meaning `FTPHandler.ftp_open` really
+ran and really opened `ftplib`'s connection. That is the exact real network call this feature's
+one security-motivated check exists to prevent (plan.md "Design", Article V), made worse by
+`build_opener` supplying it silently.
+
+The opener that matches the stated design is `OpenerDirector()` with only
+`HTTPHandler`, `HTTPSHandler`, `HTTPRedirectHandler` and `HTTPErrorProcessor` added via
+`add_handler(...)`, bypassing `build_opener`'s default-class merging entirely. That opener alone
+returns `None` from `.open()` for an unhandled protocol instead of raising (`OpenerDirector._open`
+falls through to an empty `unknown_open` chain and returns nothing), so `UnknownHandler` is added
+too — its `unknown_open` only raises `URLError('unknown url type: ...')`, never opens a socket.
+Confirmed against the same redirect target: `URLError` raised in under a millisecond, not 2s.
+
+**Revisit if:** a later change to this opener re-introduces `build_opener` for convenience —
+`OpenerDirector` + explicit `add_handler` calls has to stay the shape as long as excluding a
+scheme's handler is the control.
+
+**ADR:** pending — assessed at S5 against the ADR bar; corrects a factual claim in `research.md`
+R3, `plan.md` "Source resolution" and `tasks.md` T008, which name `build_opener` for this and
+should be corrected alongside.
