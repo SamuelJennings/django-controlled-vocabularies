@@ -596,3 +596,51 @@ Worked in `dcv-us6` on top of all five landed stories (baseline 975 passed).
 
   Verified: `poetry run pre-commit run --all-files` clean (ruff format, trailing-whitespace,
   end-of-file-fixer, mypy, deptry).
+
+- **T025** — Conformance and whole-feature verification.
+
+  Article XIV mirroring: `management/commands/import_skos.py`, `rendering.py`, and `sources.py`
+  each already have a same-named test module (`test_commands/test_import_skos.py`,
+  `test_rendering.py`, `test_sources.py`), and every test package directory down to
+  `test_management/test_commands/` carries its own `__init__.py`. Held already; nothing to fix.
+
+  Fixture review — every `tmp_path`-written document in the management package's own tests:
+
+  - `test_rendering.py::TestReportRendererAgainstARealRun` inlined a 15-line SKOS document with
+    absolute identifiers, used by exactly one test but with nothing about it (no relative URIs)
+    requiring `tmp_path`. Moved to `tests/fixtures/skos/setaside_multiple_reasons.ttl`; the test
+    now loads it from `FIXTURES` instead of writing it, with its five assertions byte-for-byte
+    unchanged. Checked before committing the move that the new file doesn't trip
+    `test_exchange/test_skos.py`'s `TestEverySkosPredicateIsReadOrReported` (which walks the whole
+    fixtures directory and requires every SKOS predicate to be read or reported): it passes on its
+    own (`-k setaside_multiple_reasons` → 1 passed), and the whole file passes with the new fixture
+    in place (`poetry run pytest tests/test_exchange/test_skos.py -q` → 418 passed) — the walk's
+    own parametrization and one sibling parametrization over `ALL_FIXTURES` each pick up the new
+    fixture as a case, accounting for the full suite's own +2 below.
+  - `test_import_skos.py::test_an_unreadable_path_is_reported_distinctly_from_a_missing_one`
+    `chmod(0o000)`s its file — left in `tmp_path`; a committed fixture cannot carry a permission
+    bit the test needs to set and restore itself.
+  - `test_import_skos.py::TestImportSkosCommandFormatOption`'s two tests (`vocab.mysteryext`) and
+    `TestImportSkosCommandRefusesAnUndeterminedVocabulary`'s two tests (`empty.ttl`, `no_skos.ttl`)
+    — left in `tmp_path`; each file's docstring already names why, citing decisions.md D11's own
+    precedent: a document that reads as fatal or as an unrecognised format would either fail
+    `TestEverySkosPredicateIsReadOrReported`'s walk or need it edited to add an exclusion, which
+    D11 already ruled out doing mid-feature. Not authored in this story, so not modified — reviewed
+    only.
+  - `tests/test_exchange/test_skos.py`'s own `tmp_path` fixtures (`TestBaseUriThread` and similar)
+    are D11's original subject and under `controlled_vocabularies/exchange/`'s test tree — out of
+    this story's scope and this file's prohibition either way; reviewed, not touched.
+
+  Full-suite run: `poetry run pytest -q` → 987 passed (975 baseline + 10 T023 + 2 from the new
+  fixture's own parametrized coverage). Coverage: 98% project-wide
+  (`--cov=controlled_vocabularies --cov-report=term-missing`), no file below 96%, well over the
+  90%/85% project/patch floors — and this story changes zero production lines, so patch coverage
+  is not a meaningful question here. `poetry run ruff check .` and `poetry run ruff format
+  --check .` both clean (format caught two lines this story's own edits left unformatted —
+  `test_rendering.py` and one long assertion in `test_standards.py` — fixed by `ruff format`
+  itself). `poetry run mypy` (config-scoped to `controlled_vocabularies/` per `pyproject.toml`)
+  clean, 16 files; `poetry run mypy tests/test_rendering.py tests/test_standards.py` directly,
+  also clean (the pre-commit hook does not reach `tests/`). `poetry run deptry .` clean.
+  `DJANGO_SETTINGS_MODULE=tests.settings poetry run python -m django makemigrations --check
+  --dry-run` → "No changes detected" (no model touched this story). `poetry run pre-commit run
+  --all-files` clean.

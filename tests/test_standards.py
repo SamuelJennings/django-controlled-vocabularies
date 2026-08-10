@@ -676,8 +676,7 @@ def test_management_package_i18n_sweep(module):
     source = Path(inspect.getfile(module)).read_text()
     visitor = _visit_source(source)
     assert visitor.positional_placeholders == [], (
-        f"{module.__name__} passes a positional placeholder to a translation call: "
-        f"{visitor.positional_placeholders}"
+        f"{module.__name__} passes a positional placeholder to a translation call: {visitor.positional_placeholders}"
     )
     assert visitor.bare_literals == [], (
         f"{module.__name__} passes a bare, untranslated literal to an output sink: {visitor.bare_literals}"
