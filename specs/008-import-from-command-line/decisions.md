@@ -255,3 +255,55 @@ recurring-flag shape itself — every story that adds a method to an existing te
 is a kit observation for the S8 retro, not a change to make mid-feature.
 
 **ADR:** none — a guardrail triage local to this run, nothing downstream inherits it.
+
+## D13 — T004's unreadable-path check lives in `Command`, not in `exchange/skos.py`
+
+Found implementing T004. The brief requires a message distinct from "not found" for a path that
+exists but cannot be opened for permission reasons, and separately prohibits editing `skos.py`
+without stopping the story.
+
+`SkosGraph.from_file`'s own `is_file()` check returns `True` for an unreadable file (`Path.is_file`
+needs execute permission on the parent directory, not read permission on the file itself), so a
+0o000 file reaches the parse. Depending on serialization, that parse fails inside the pre-flight
+scan's `read_bytes()` (RDF/XML, JSON-LD) or inside rdflib's own file open (Turtle), and either way
+is caught by `from_file`'s generic `except Exception` and reported as `"could not be parsed as
+%(format)s: %(error)s"` with the raw `OSError` text interpolated — confirmed against a real 0o000
+file before writing anything (`[Errno 13] Permission denied: '<path>'`). That message is factually
+distinct from "could not be found" already, but it says "could not be parsed," not "is not
+readable" — an accident of which stage the OS raised in, not a designed distinction, and fragile
+against a future change to the scan/parse order.
+
+`Command.handle()` checks `path.is_file() and not os.access(path, os.R_OK)` before calling
+`import_skos()` at all, and raises `CommandError` with its own `"'%(file)s' exists but is not
+readable."` directly. A missing path still falls through to `import_skos()`/`from_file`'s own
+check — one source of truth for "absent," not duplicated.
+
+**Revisit if:** US-2 makes a fetched URL's temporary file hit this same branch — a downloaded copy
+is written by the command itself and should always be readable, but if that ever changes the
+distinct message no longer applies only to a local path.
+
+**ADR:** none — a targeted fix within this task's own file, nothing downstream inherits it.
+
+## D14 — US-1's two tamper flags are triaged as additive, and the permission test's skip guard is approved
+
+`forge tamper-check --base 7ca2621` raised two flags on US-1's diff. Both are approved; neither is a
+weakened test.
+
+**`modified_preexisting_test` on `tests/test_management/test_commands/test_import_skos.py`.** The file
+existed at the story base because T002 created it as the skeleton's own test. The gate classifies on
+git file status alone, so appending classes to a file it did not create always flags — the same
+mechanism as D12. The diff is 117 insertions and zero deletions: the two skeleton tests are untouched,
+their assertions unchanged, and four new classes sit below them. Verified by reading the diff, not
+inferred from the insert/delete ratio.
+
+**`weakening_patterns_added`, one occurrence.** It is
+`@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0)` on
+`test_an_unreadable_path_is_reported_distinctly_from_a_missing_one`. A process running as uid 0
+ignores the file mode entirely, so `os.access(path, os.R_OK)` returns `True` for a 0o000 file and the
+scenario the test describes cannot be constructed — the guard prevents a false failure, it does not
+excuse one. Confirmed it does not fire where the suite actually runs: `pytest -rs` on this file
+reports 10 passed and zero skipped locally, and GitHub Actions' Ubuntu runners execute as `runner`,
+not root. A conditional skip that silently swallowed the case on the machines we test on would not
+have been approved.
+
+**ADR:** none — a guardrail triage, not a design decision.

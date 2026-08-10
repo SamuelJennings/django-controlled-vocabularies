@@ -118,6 +118,87 @@ Full verify green throughout: `poetry run pytest -q` (910 passed), `ruff check .
 One naming/placement choice not dictated by the brief recorded as D11. Next: US-1 (T003–T005) wires
 `Command` around `SourceResolver`/`ReportRenderer`.
 
+## 2026-08-10 — S4 IMPLEMENT — US1 (T003/T004/T005), Implementer
+
+`craft-tdd` and `craft-increments` loaded by name, receipts verified against the brief before any
+task started. Baseline confirmed green (910 tests) before touching anything — the venv was stale
+against the lock file (`rdflib`/`defusedxml` missing); `poetry install` synced it, no source touched.
+
+- **T003** — `Command` in `management/commands/import_skos.py`: one positional `source`, a
+  `--format` option, `handle()` calling `import_skos(source, serialization=options["format"])` and
+  writing every line through `ReportRenderer` — the command never formats a report itself.
+  `Command.help` and both arguments' `help` are `gettext_lazy` from the first line (Article XII);
+  Django's own base arguments (`--verbosity` etc.) are excluded from that test since their help text
+  isn't this story's to translate. `SkosImportError`/`SkosImportFailed` caught and re-raised as
+  `CommandError` — minimal for now, T020 (US-5) is where every fatal finding prints, not this task.
+
+  Tests: `call_command` against `tests/fixtures/skos/rocks.ttl` on an empty database creates the
+  scheme and its 5 concepts, output names "8 records created." (scheme + 5 concepts + 2
+  collections — confirmed against a throwaway script before writing the assertion, not guessed); a
+  second run against the same file reports "8 records updated." / "0 records created." and no
+  duplicate concept.
+
+`Command.help = gettext_lazy(...)` fails `mypy` against django-stubs, which types `BaseCommand.help`
+as plain `str` — the proxy satisfies Django itself (`str()` runs wherever it's printed) but not the
+stub. Wrapped in `cast(str, ...)` for the type checker only, runtime value unchanged; the same
+`str | _StrPromise` mismatch models.py already works around for field `help_text`. Not a
+decisions.md-worthy choice — a known django-stubs gap, not a design decision.
+
+Verified: `poetry run pytest tests/test_management/test_commands/test_import_skos.py
+tests/test_management/test_rendering.py -q` (8 passed), `ruff check` + `ruff format --check` + `mypy`
+on the two changed files (clean after one auto-format pass and the `cast` fix).
+
+- **T004** — A missing path is left to `import_skos()`/`from_file`'s own `is_file()` check, already
+  wrapped into `CommandError` by T003's handling; one source of truth for "absent." A path that
+  *exists* but cannot be opened for permission reasons has no distinct message from that path —
+  confirmed against a real 0o000 file before writing anything: it reaches `from_file`'s generic
+  parse-failure branch and reports "could not be parsed... Permission denied," not "unreadable."
+  `handle()` checks `os.access(path, os.R_OK)` itself, before calling `import_skos()`, and raises its
+  own `CommandError` — no edit to `exchange/skos.py`. Recorded as decisions.md D13.
+
+  Tests: a missing path names itself in the message and leaves the database empty; an unreadable
+  path (`tmp_path`, `chmod(0o000)`, restored in a `finally`) gets a message distinct from the missing
+  one and also leaves the database empty. Permission test skipped under uid 0, which ignores file
+  permissions entirely.
+
+Verified: `poetry run pytest tests/test_management/test_commands/test_import_skos.py -q` (8 passed),
+`ruff check` + `ruff format --check` (one auto-format pass) + `mypy` on the two changed files.
+
+- **T005** — `--format` reaching `from_file` as `serialization` needed no new production code: T003's
+  `handle()` already passes `options["format"]` straight through with no guessing of its own. Both
+  new tests passed on first run against the existing `import_skos.py` — not tautological (checked
+  before accepting it per `craft-tdd`): each `call_command` genuinely exercises the Command's own
+  `handle()`, and a fixture built with an extension `guess_format` cannot resolve (`vocab.mysteryext`,
+  real `rocks.ttl` bytes, `tmp_path`-only per decisions.md D11's own precedent — never committed
+  under `tests/fixtures/skos/`) either imports when `--format turtle` is given or is refused with
+  `from_file`'s existing "not in a serialization this application reads" message when it is not,
+  unchanged from #50.
+
+  Tests: the mystery-extension fixture imports with `--format turtle`, asserted on the stored
+  `ConceptScheme`; the same fixture without `--format` raises `CommandError` carrying `from_file`'s
+  own unsupported-serialization wording and leaves the database empty.
+
+Verified: `poetry run pytest tests/test_management/test_commands/test_import_skos.py -q` (10
+passed), `ruff check` + `ruff format --check` + `mypy` on the changed test file (no production file
+touched). Full-repo verify (pytest, ruff, mypy, deptry) still to run once, per protocol, immediately
+before the completion report.
+
 ## Gates
 
 - **Spec gate:** approved 2026-08-10 by SamuelJennings. No conditions.
+
+### US-1 verification (Forge, independent of the implementer's own run)
+
+- `forge check-receipts --brief dcv-us1-FS008-TASK_BRIEF.json` — green, both receipts verbatim.
+- `forge verify --base 7ca2621` — conformance, lint, typecheck, test, build all passed. Full suite
+  918 passed (910 at the US-1 base, 8 new).
+- `forge tamper-check --base 7ca2621` — two flags, both triaged and approved in decisions.md D14:
+  the test file existed at base because T002 created it (117 insertions, zero deletions, skeleton
+  tests untouched), and the one "weakening pattern" is a uid-0 guard on the permission test, which
+  does not fire where the suite runs (`pytest -rs`: 10 passed, 0 skipped).
+- Deviation D13 accepted: the unreadable-path check belongs in `Command.handle()`. Relying on
+  `from_file`'s generic parse-failure branch to distinguish an unreadable file would depend on which
+  stage the OS happened to raise in.
+- Implementer's typing note reviewed: `Command.help = cast(str, _(...))` is a django-stubs gap, not a
+  design choice — the runtime value is still the lazy proxy, and the test asserts that directly.
+  No decision recorded, correctly.
