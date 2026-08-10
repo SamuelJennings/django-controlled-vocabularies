@@ -411,3 +411,31 @@ records than the file mentions produces an absent-from-source section long enoug
 of the report — the same problem FR-007 solved for set-asides, arriving late for this bucket.
 
 **ADR:** no — a rendering-only interpretation of FR-007/FR-008, recorded here.
+
+## D18 — `--verbosity` is wired into the renderer at convergence, and a command-level test holds it there
+
+**Decided by:** convergence, after US-4 · **Tasks:** T018 (and T019, deleted)
+
+T018 gave `ReportRenderer` a `verbosity` argument and gated per-entry set-aside detail on it,
+exactly as FR-007 and D6 specify. Nothing passed it. `handle()` constructed the renderer with
+`rehearsal=` alone, so `--verbosity 2` changed nothing an operator could see, and the option
+FR-007 names as its own mechanism was inert.
+
+The gap is planning's, not the story's. T019 was the task that wired the renderer into `handle()`;
+it was deleted when T015 moved into the foundational phase, on the reasoning that with the renderer
+already in place there was no US-1 output left to replace. That reasoning held for the call site
+and not for its arguments, and the argument T018 added later had nowhere to be passed from. US-4's
+brief prohibited touching `commands/import_skos.py` — US-5 owned `handle()` in parallel — so the
+implementer could not have closed it, and its own tests construct the renderer directly, which is
+why they passed against an inert option.
+
+`handle()` now passes `verbosity=options["verbosity"]`, which Django populates for every command.
+Two tests in `test_import_skos.py` go through `call_command` rather than the renderer: the default
+prints no per-entry line, and `verbosity=2` prints every entry's own `render()`. Reverting the one
+argument fails the second, which is the property that makes them a gate rather than a restatement
+of T018's own tests.
+
+**Revisit if:** a future option of this command needs the same treatment — the lesson is that
+deleting a wiring task after moving the thing it wires leaves later arguments unrouted.
+
+**ADR:** no — a wiring defect and its regression test, recorded here.

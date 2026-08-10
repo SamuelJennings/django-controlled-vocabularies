@@ -482,3 +482,27 @@ class TestImportSkosCommandExitsZeroOnACompletedRun:
         mock_exit.assert_called_once()
         assert mock_exit.call_args.args[0] != 0
         assert ConceptScheme.objects.count() == 0
+
+
+class TestImportSkosCommandCarriesVerbosityIntoTheRenderer:
+    """Convergence (T018, FR-007, `decisions.md` D6/D18) — ``ReportRenderer`` gates per-entry
+    set-aside detail on a ``verbosity`` argument, and Django's own ``--verbosity`` is what was
+    specified to carry it. T019, deleted at planning as redundant, was the task that wired the
+    renderer into ``handle()``; the wiring of this argument went with it, and T018's tests
+    construct the renderer directly, so nothing proved the option reached it. These do."""
+
+    def test_the_default_verbosity_prints_counts_without_a_line_per_set_aside_value(self, db):
+        out = StringIO()
+        call_command("import_skos", str(FIXTURES / "unconfigured_language_values.ttl"), stdout=out)
+        lines = out.getvalue().splitlines()
+        assert any("set aside" in line for line in lines)
+        assert not any(line.startswith("'http://example.org/quarry3/") for line in lines)
+
+    def test_raised_verbosity_prints_one_line_per_set_aside_entry(self, db):
+        out = StringIO()
+        call_command("import_skos", str(FIXTURES / "unconfigured_language_values.ttl"), stdout=out, verbosity=2)
+        report = import_skos(FIXTURES / "unconfigured_language_values.ttl")
+        rendered = out.getvalue()
+        assert report.set_aside
+        for entry in report.set_aside:
+            assert str(entry.render()) in rendered

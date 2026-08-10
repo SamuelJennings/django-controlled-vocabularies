@@ -101,5 +101,5 @@ class Command(BaseCommand):
             raise CommandError(str(exc)) from exc
         finally:
             resolver.cleanup()
-        for line in ReportRenderer(report, rehearsal=rehearse).render():
+        for line in ReportRenderer(report, rehearsal=rehearse, verbosity=options["verbosity"]).render():
             self.stdout.write(line)
