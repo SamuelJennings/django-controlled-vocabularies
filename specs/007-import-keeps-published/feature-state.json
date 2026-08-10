@@ -3,7 +3,7 @@
   "feature": "007-import-keeps-published",
   "branch": "007-import-keeps-published",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "IMPLEMENT",
+  "state": "MERGED",
   "state_history": [
     {
       "state": "INTAKE",
@@ -104,6 +104,11 @@
       "state": "IMPLEMENT",
       "at": "2026-08-05T18:15:00Z",
       "note": "S6 review cycle 2 of 2: all three lenses request_changes, risk high, receipts green on all three. Seven verified high findings, dominated by one gap three lenses found independently \u2014 the identifier-derived address rule reached Concept and ConceptScheme but not Collection. Reproduced independently: a collection with identifier segment 'fines' imported as 'fine-fractions' and moved to 'small-particles' on a publisher rename. US8 (T038-T042) dispatched. Review budget now exhausted; a third red round is Sam's call."
+    },
+    {
+      "state": "MERGED",
+      "at": "2026-08-10T11:29:12Z",
+      "note": "PR #74 merged; approved by SamuelJennings"
     }
   ],
   "gates": {
@@ -124,8 +129,8 @@
       "at": "2026-08-05T09:36:00Z"
     },
     "merge": {
-      "approved_by": null,
-      "at": null
+      "approved_by": "SamuelJennings",
+      "at": "2026-08-10T11:29:02Z"
     }
   },
   "stories": [

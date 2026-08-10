@@ -1025,6 +1025,8 @@ it exactly as it already does to a concept and a vocabulary.
 **Revisit if:** never — this closes the third address space FR-017 was written to pin; the
 reasoning is identical to D35's and D39's, extended to the one record kind they didn't reach.
 
+**ADR:** none — applies D35's existing identifier-derived-slug rule to the third record kind it had missed. The rule is the decision; extending it to Collection is completing it, not choosing anything.
+
 ## D44 — T039 (fix cycle 3): an unusable derived collection slug is set aside; a name collision
 is no longer reachable at all
 
@@ -1053,6 +1055,8 @@ rest of the file needs in order to import, so this is a set-aside, never fatal.
 **Revisit if:** never — the same reasoning D39/D42 already give, split the same way between "the
 rest of the file can import around this" (set-aside) and "nothing can" (fatal).
 
+**ADR:** none — a defect fix. Two reproduced crashes given the set-aside treatment their sibling paths already used.
+
 ## D45 — T040 (fix cycle 3): the default-language commonest fallback now folds tag case exactly
 as the tally it echoes
 
@@ -1078,6 +1082,8 @@ handed.
 
 **Revisit if:** never — one computation, one shape, the same rule D13 and D27 already state for
 the two other places this codebase once kept a winner computed twice.
+
+**ADR:** none — removes a hand-copied walk that had drifted from the one it copied. No position is taken that a future change could contradict.
 
 ## D46 — T041 (fix cycle 3): a record's slug is read back from storage, never recomputed, once it
 has one
@@ -1132,6 +1138,8 @@ already stated as the intent behind seeding `taken_slugs` from a record's prior 
 makes it load-bearing for every call site rather than true only by the coincidence that nothing
 had yet vacated a slot.
 
+**ADR:** docs/adr/0002-an-address-is-minted-once-and-read-back-forever.md — this is the durable half of the addressing rule: a minted slug is read back, never recomputed. It binds every future record kind and every future importer, and the failure it prevents (an address moving because a sibling was deleted) is not one a reader would anticipate.
+
 ## D47 — T042 (fix cycle 3): a derived slug is bounded to its field, and a name gets the guard
 `Concept.label` already has
 
@@ -1157,6 +1165,8 @@ first import) rather than an unchecked over-long one.
 
 **Revisit if:** never — the same discipline SEC-002/D34 already established for a label, applied
 to the two other free-text fields and the one length this codebase had not yet bounded.
+
+**ADR:** none — bounds a derived value to its own field and reuses the guard Concept.label already had. Applying an existing guard to a new field.
 
 ## D48 — SC-022's `name` clause is struck: it belonged to the withdrawn FR-016
 
@@ -1186,6 +1196,8 @@ could not fail. The test fix cycle 1 wrote for this was removed with the T023 re
 there is currently no test on the branch covering it.
 
 **Revisit if:** FR-002 is ever narrowed again, in which case the two need re-reading together.
+
+**ADR:** none — strikes a success criterion that contradicted an approved requirement. Bookkeeping on the spec, superseded by FR-017-FR-020.
 
 ## D49 — T044 (fix cycle 4): an over-long name on a *first* import has nowhere to fall back to,
 and the fallback differs by what the record costs the rest of the file
@@ -1224,6 +1236,8 @@ proven.
 
 **Revisit if:** never — the same fatal-versus-set-aside split D42 already gives an unusable slug,
 applied to the one other field a first import can leave unusably empty.
+
+**ADR:** none — decides what a created record does when a matched record's fallback is unavailable to it. Local to the import path and fully described by docs/adr/0003-a-report-reason-is-an-outcome-and-its-message-must-always-be-true.md's outcome rule.
 
 ## D50 — T045 (fix cycle 4): a matched record's stored slug is now on the write path, so it must
 be caught, not merely trusted
@@ -1271,6 +1285,8 @@ underlying diagnosis and the choice to use `SetAsideReason` for the slug specifi
 correct; only these two details are corrected here rather than rewritten in place, per this file's
 own append-only convention.
 
+**ADR:** docs/adr/0002-an-address-is-minted-once-and-read-back-forever.md — recorded there as the consequence of reading a stored slug back rather than regenerating it: a value the importer did not mint cannot be assumed valid, so it is validated at the point of use.
+
 ## D51 — T046 (fix cycle 4): a collision suffix as long as the field slices the base away
 
 SEC-303: `unique_slug_for_identifier`'s collision retry computed `base[: max_length -
@@ -1300,6 +1316,8 @@ resolved, not merely documented — see D63, below. The docstring's own claim th
 in practice; D63 makes it true by construction instead of leaving the gap between the code and its
 own documented contract open.
 
+**ADR:** none — an off-by-one in a slice bound, reproduced and fixed. A defect, not a position.
+
 ## D52 — T047 (fix cycle 4): the any-language name fallback now names its own language, not the
 target it fell back from
 
@@ -1324,6 +1342,8 @@ of discarding the tag.
 
 **Revisit if:** never — the same shape `_localized_literal` already gives its own matched branch
 (pairing a value with the tag that won it), extended to the branch where nothing won.
+
+**ADR:** none — a variable that was never reassigned on its fallback branch, so the reported language named the target rather than what was actually stored. A defect.
 
 ## D53 — T048 (fix cycle 4): FR-020's owed tests for `Collection`, no production change
 
@@ -1351,6 +1371,8 @@ in `skos.py` or `models.py` changes for this task. Three additions, all test-onl
 **Revisit if:** never — these close the "two of three kinds" and "matched vs. created" shapes
 this feature has now hit twice (round two's dominant finding, per CORR-301's own framing), and no
 behaviour changed underneath them.
+
+**ADR:** none — test-only. Closes an owed-coverage gap the review's own mutation testing had already shown the code passes.
 
 ## D54 — T049 (fix cycle 4): the slug-pinning machinery is extracted, the same way `static_uri`
 already was
@@ -1397,6 +1419,8 @@ the extraction; the full suite (638 tests across `test_models.py`, `test_skos.py
 **Revisit if:** never — the same remedy the repo already chose for `static_uri`'s identical
 drift, applied to the one other field this feature added to all three models.
 
+**ADR:** none — applies the repo's existing _static_uri_field extraction pattern to a second shared field. Following an established convention, not setting one.
+
 ## D55 — T050 (fix cycle 4): the four small architecture cleanups (ARCH-304–307)
 
 All four applied on their merits; none was judged wrong.
@@ -1435,6 +1459,8 @@ guard.
 **Revisit if:** never — all four are legibility/consistency cleanups with no behaviour change;
 verified by the unchanged 847-test suite, `mypy`, and `makemigrations --check --dry-run`.
 
+**ADR:** none — four small cleanups (ARCH-304-307), each local to one call site, none changing behaviour.
+
 ## D56 — T051 (fix cycle 5): the any-language name fallback picks a storable literal, not
 merely the lexicographically first one
 
@@ -1472,6 +1498,8 @@ it is a different branch of the same function and the review scoped it as its ow
 **Revisit if:** never — a caller wanting "the best value I can actually store" from an RDF literal
 set is exactly what `max_length` on this one shared accessor gives both callers, without a second
 copy of the filtering logic.
+
+**ADR:** none — makes a fallback pick a literal the caller can actually store. Local to the name-selection path.
 
 ## D57 — T052 (fix cycle 5): a scheme's write failure is only a slug problem when it names the
 slug, and either way the vocabulary is unresolved
@@ -1525,6 +1553,8 @@ raises `SkosImportFailed` with one `VOCABULARY_RECORD_INVALID` fatal, keeping it
 already gives an identifier that cannot be minted, applied to a write that fails after the
 identifier was fine.
 
+**ADR:** none — narrows an over-broad except clause and adds the missing fatal on the one exit that lacked it. A defect fix.
+
 ## D58 — T054 (fix cycle 5): a created record's over-long default-language name also gets a
 second-chance storable fallback, not only the any-language branch
 
@@ -1558,6 +1588,8 @@ already tells a curator which value was lost and why.
 **Revisit if:** never — the same storable-first-literal fallback D56 introduced, reached from a
 second call site the review named as the branch it does not yet cover.
 
+**ADR:** none — extends D56's storable-fallback rule to the one branch it had not covered. Completing a fix.
+
 ## D59 — T054 (fix cycle 5): the blank-name guard also closes for a node with no
 skos:prefLabel published at all
 
@@ -1588,6 +1620,8 @@ since `VALUE_TOO_LONG` was never part of `_LANGUAGE_ACCOUNT_REASONS` in the firs
 **Revisit if:** the reused-message imprecision becomes a real curator complaint — at that point a
 dedicated `RECORD_NAME_UNPUBLISHED`-shaped reason is worth minting for both the scheme and the
 collection side together, rather than patched piecemeal.
+
+**ADR:** none — extends D49's blank-name guard to the second way a name can be unusable. Completing a fix.
 
 ## D60 — T054 (fix cycle 5): a dropped collection gets its own reason, distinct from a value
 lost off a record that still exists
@@ -1622,6 +1656,8 @@ one" rule the report's other reasons already follow (e.g. `ALREADY_IN_ANOTHER_VO
 record decision, not a value), applied to the one place a collection's own creation is silently
 implied by a value-level reason's absence of a record.
 
+**ADR:** docs/adr/0003-a-report-reason-is-an-outcome-and-its-message-must-always-be-true.md — the first statement of the outcome rule: a value lost from a surviving record and a record dropped in full are different outcomes and take different reasons.
+
 ## D61 — T054 (fix cycle 5): assert the manual-slug refusal message, not only its type
 
 CORR-405 (round 4, low): T048's `test_explicit_slug_that_is_empty_or_malformed_is_refused`
@@ -1647,6 +1683,8 @@ CORR-405 named only the test T048 itself introduced.
 **Revisit if:** never — the shared `_validate_manual_slug` means this one strengthened test
 already proves both raises for all three models; there is nothing left to weaken again.
 
+**ADR:** none — strengthens one test to assert the specific refusal rather than the exception type. Test hygiene.
+
 ## D62 — T054 (fix cycle 5): two documentation casualties from T049's extraction, restored
 
 CORR-406/CORR-407 (round 4, both low): T049's extraction of `slug_is_manual` onto
@@ -1670,6 +1708,8 @@ a living description of the current call graph, so the correction is additive.
 
 **Revisit if:** never — both are wording-only; `poetry run pytest tests/test_models.py
 tests/test_standards.py`, `ruff`, and `mypy` are unchanged.
+
+**ADR:** none — restores an indexing comment and corrects a docstring that T049's extraction had dropped or falsified. Documentation repair.
 
 ## D63 — T054 (fix cycle 5): unique_slug_for_identifier's candidate is clamped to max_length,
 matching its own documented contract
@@ -1695,6 +1735,8 @@ reaches this branch either way.
 **Revisit if:** never — the docstring's contract and the code now agree unconditionally, so there
 is nothing left to reconcile if a future call site ever does pass a small `max_length`.
 
+**ADR:** none — makes a function honour the length contract its own docstring already claimed. A defect.
+
 ## D64 — T054 (fix cycle 5): an empty language tag renders as a phrase, not empty quotes,
 fixed at the one boundary every entry's message passes through
 
@@ -1716,6 +1758,8 @@ treatment automatically rather than needing its own guard.
 
 **Revisit if:** never — one substitution point for every entry type, matching the "one computation,
 one shape" rule the report module's other shared logic already follows.
+
+**ADR:** none — substitutes a phrase for an empty language tag at the one boundary every message passes through. Covered by docs/adr/0003-a-report-reason-is-an-outcome-and-its-message-must-always-be-true.md; the placement is the obvious one once the rule is stated.
 
 ## D65 — T055 (fix cycle 6): an empty or whitespace-only literal is never a usable name, fixed at
 every place one is selected
@@ -1761,6 +1805,8 @@ accessors rather than patched at each of the four call sites (`resolve_scheme`'s
 any-language fallback, `import_collections`'s identical pair) that would otherwise each need their
 own guard.
 
+**ADR:** none — applies the empty-literal rule at every place a name is selected. The rule is what matters and it is a validation detail, not an architectural position.
+
 ## D66 — T056 (fix cycle 6): `unique_slug_for_identifier`'s collision loop gives up rather than
 looping forever
 
@@ -1798,6 +1844,8 @@ detecting it directly is simpler than deriving, and keeping in sync with, a clos
 on `max_length` and `suffix_text` that would have to be re-derived if the clamp in D63 ever
 changed shape again.
 
+**ADR:** none — a non-terminating loop, reproduced hanging under a timeout before the fix. A defect.
+
 ## D67 — T057 (fix cycle 6): `exc.message_dict` raises `AttributeError` for a non-dict
 `ValidationError`; read `error_dict` with a default instead
 
@@ -1825,6 +1873,8 @@ unconditional `add_fatal(VOCABULARY_RECORD_INVALID)` below it, so `import_skos` 
 **Revisit if:** never — the same defensive-read shape the round-5 recommendation names directly,
 and the only change needed to keep every shape of `ValidationError` inside this handler's own
 exception contract.
+
+**ADR:** none — reads ValidationError.error_dict with a default instead of a property that raises for a non-dict error. A Django API detail, corrected.
 
 ## D68 — T058 (fix cycle 6): a vocabulary refused for publishing no name gets its own reason, and
 two round-5 refusals gain success criteria
@@ -1872,6 +1922,8 @@ list, per this file's own append-only numbering — nothing renumbered, nothing 
 already applied to the collection side, extended to the one place it had not yet reached; the two
 new success criteria describe behaviour already proven by an existing test, so there is nothing
 further to reconcile.
+
+**ADR:** docs/adr/0003-a-report-reason-is-an-outcome-and-its-message-must-always-be-true.md — one of the four instances that established the rule: a refusal message that named a trigger which did not hold on the path raising it.
 
 ## D69 — T059 (fix cycle 7): the empty-literal-is-never-a-name rule reaches a concept's own
 label, structurally rather than as a third copy of the check
@@ -1922,6 +1974,8 @@ through one of the four `SkosGraph` accessors above or `ConceptImporter.import_l
 guarded loop — at that point the predicate needs a fifth caller taught about it explicitly, the
 one shape this decision exists to make rare.
 
+**ADR:** none — replaces two inline copies of a check with one shared predicate. Structural tidying inside one module; no future choice is constrained by it.
+
 ## D70 — T060 (fix cycle 7): the collision loop's give-up seeded `tried` with `base` itself,
 abandoning a resolvable collision; the give-up return is now guarded at all three call sites
 
@@ -1968,6 +2022,8 @@ at which point folding the guard into `unique_slug_for_identifier` itself (raisi
 tri-state) is worth reconsidering; not done here because that would change the contract for
 `SchemeResolver`'s own, already-correct call site too, which this task's scope does not require.
 
+**ADR:** none — a set seeded with the wrong initial value, abandoning collisions that were resolvable. Reproduced and fixed.
+
 ## D71 — T061 (fix cycle 7): the round-6 mediums and lows — a predominance vote already closed by
 D69, two refusal messages made true, and a hanging test made fail-fast
 
@@ -2013,6 +2069,8 @@ message reword (the same "must hold on every path that reaches it" rule already 
 nothing further to reconcile). Revisit CORR-604's thread-based bound only if this suite ever needs
 a *general* per-test timeout policy across many tests, at which point `pytest-timeout` earns its
 place as a real dependency rather than infrastructure for one test.
+
+**ADR:** docs/adr/0003-a-report-reason-is-an-outcome-and-its-message-must-always-be-true.md — the round that made the pattern visible: two more refusal messages found false on paths added after they were written, which is what motivated stating the rule rather than fixing each message.
 
 ## D72 — CORR-701 (review round 7, fix cycle 8): `EMPTY_SLUG`'s message names its outcome, not
 a cause that is false at every one of its call sites
