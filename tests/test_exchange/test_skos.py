@@ -160,6 +160,180 @@ class TestReadGraph:
         ).exists()
 
 
+#: T001, FR-003, decisions.md D10 — the same small document (an empty-relative
+#: scheme, two relative concepts, one skos:broader between them) in each
+#: supported serialization, so relative resolution is exercised on a subject,
+#: an object, and the scheme, in every format rdflib takes a base through by a
+#: different route. Written per-test under ``tmp_path`` rather than committed
+#: under ``tests/fixtures/skos/`` (decisions.md D10 implementation note):
+#: that directory is walked wholesale by ``TestFixtureCorpus`` and
+#: ``TestEverySkosPredicateIsReadOrReported``, and a document whose every
+#: identifier is relative can only ever fail the latter's plain
+#: ``import_skos()`` (no ``base_uri``) with ``REFUSED_IDENTITY`` — a ``file://``
+#: scheme is never in :data:`~controlled_vocabularies.conf.DEFAULT_ALLOWED_URI_SCHEMES`.
+#: That is not a defect this class exists to prove or fix, so the document is
+#: built in an unswept location instead of extending that pre-existing test's
+#: own fixture-exclusion table.
+_RELATIVE_URIS_TURTLE = """
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+<>
+    a skos:ConceptScheme ;
+    skos:prefLabel "Relative vocabulary"@en ;
+    skos:hasTopConcept <concept-a> .
+
+<concept-a>
+    a skos:Concept ;
+    skos:inScheme <> ;
+    skos:topConceptOf <> ;
+    skos:prefLabel "Concept A"@en .
+
+<concept-b>
+    a skos:Concept ;
+    skos:inScheme <> ;
+    skos:prefLabel "Concept B"@en ;
+    skos:broader <concept-a> .
+"""
+
+_RELATIVE_URIS_XML = """<?xml version="1.0" encoding="utf-8"?>
+<rdf:RDF
+    xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:skos="http://www.w3.org/2004/02/skos/core#">
+
+  <skos:ConceptScheme rdf:about="">
+    <skos:prefLabel xml:lang="en">Relative vocabulary</skos:prefLabel>
+    <skos:hasTopConcept rdf:resource="concept-a"/>
+  </skos:ConceptScheme>
+
+  <skos:Concept rdf:about="concept-a">
+    <skos:inScheme rdf:resource=""/>
+    <skos:topConceptOf rdf:resource=""/>
+    <skos:prefLabel xml:lang="en">Concept A</skos:prefLabel>
+  </skos:Concept>
+
+  <skos:Concept rdf:about="concept-b">
+    <skos:inScheme rdf:resource=""/>
+    <skos:prefLabel xml:lang="en">Concept B</skos:prefLabel>
+    <skos:broader rdf:resource="concept-a"/>
+  </skos:Concept>
+
+</rdf:RDF>
+"""
+
+_RELATIVE_URIS_JSONLD = """{
+  "@context": {
+    "skos": "http://www.w3.org/2004/02/skos/core#",
+    "prefLabel": {"@id": "skos:prefLabel"},
+    "inScheme": {"@id": "skos:inScheme", "@type": "@id"},
+    "topConceptOf": {"@id": "skos:topConceptOf", "@type": "@id"},
+    "hasTopConcept": {"@id": "skos:hasTopConcept", "@type": "@id"},
+    "broader": {"@id": "skos:broader", "@type": "@id"}
+  },
+  "@graph": [
+    {
+      "@id": "",
+      "@type": "skos:ConceptScheme",
+      "prefLabel": {"@value": "Relative vocabulary", "@language": "en"},
+      "hasTopConcept": "concept-a"
+    },
+    {
+      "@id": "concept-a",
+      "@type": "skos:Concept",
+      "inScheme": "",
+      "topConceptOf": "",
+      "prefLabel": {"@value": "Concept A", "@language": "en"}
+    },
+    {
+      "@id": "concept-b",
+      "@type": "skos:Concept",
+      "inScheme": "",
+      "prefLabel": {"@value": "Concept B", "@language": "en"},
+      "broader": "concept-a"
+    }
+  ]
+}
+"""
+
+
+class TestBaseUriThread:
+    """T001, FR-003, FR-014, decisions.md D10 — an optional ``base_uri`` on
+    :meth:`SkosGraph.from_file`, purely additive over #50/#51's own behaviour.
+
+    Every existing call in this module omits ``base_uri`` and must go on
+    behaving exactly as it does today — that is proven by this file's whole
+    pre-existing suite passing unmodified, not by anything in this class.
+    """
+
+    RELATIVE_SERIALIZATIONS = [
+        ("relative-uris.ttl", "turtle", _RELATIVE_URIS_TURTLE),
+        ("relative-uris.rdf", "xml", _RELATIVE_URIS_XML),
+        ("relative-uris.jsonld", "json-ld", _RELATIVE_URIS_JSONLD),
+    ]
+
+    @pytest.mark.parametrize("filename,fmt,content", RELATIVE_SERIALIZATIONS)
+    def test_a_given_base_uri_resolves_relative_identifiers_against_it(self, tmp_path, filename, fmt, content):
+        path = tmp_path / filename
+        path.write_text(content)
+        graph = SkosGraph.from_file(path, serialization=fmt, base_uri="https://example.org/vocab.ttl").graph
+        assert (
+            rdflib.URIRef("https://example.org/vocab.ttl"),
+            rdflib.RDF.type,
+            SKOS.ConceptScheme,
+        ) in graph
+        assert (
+            rdflib.URIRef("https://example.org/concept-a"),
+            rdflib.RDF.type,
+            SKOS.Concept,
+        ) in graph
+        assert (
+            rdflib.URIRef("https://example.org/concept-b"),
+            SKOS.broader,
+            rdflib.URIRef("https://example.org/concept-a"),
+        ) in graph
+
+    @pytest.mark.parametrize("filename,fmt,content", RELATIVE_SERIALIZATIONS)
+    def test_no_base_uri_resolves_relative_identifiers_against_the_file(self, tmp_path, filename, fmt, content):
+        path = tmp_path / filename
+        path.write_text(content)
+        graph = SkosGraph.from_file(path, serialization=fmt).graph
+        assert (rdflib.URIRef(path.as_uri()), rdflib.RDF.type, SKOS.ConceptScheme) in graph
+        assert (
+            rdflib.URIRef(path.parent.as_uri() + "/concept-a"),
+            rdflib.RDF.type,
+            SKOS.Concept,
+        ) in graph
+
+    def test_absolute_identifiers_are_unaffected_by_a_given_base_uri(self):
+        with_base = SkosGraph.from_file(FIXTURES / "rocks.ttl", base_uri="https://example.org/vocab.ttl").graph
+        without_base = SkosGraph.from_file(FIXTURES / "rocks.ttl").graph
+        assert (ROCKS_SCHEME_URI, rdflib.RDF.type, SKOS.ConceptScheme) in with_base
+        assert (ROCKS_SCHEME_URI, rdflib.RDF.type, SKOS.ConceptScheme) in without_base
+
+    def test_missing_file_refusal_names_the_base_uri_when_given(self, tmp_path):
+        missing = tmp_path / "does-not-exist.ttl"
+        with pytest.raises(SkosImportError) as exc_info:
+            SkosGraph.from_file(missing, base_uri="https://example.org/vocab.ttl")
+        assert "https://example.org/vocab.ttl" in str(exc_info.value)
+        assert str(missing) not in str(exc_info.value)
+
+    def test_unsupported_serialization_refusal_names_the_base_uri_when_given(self, tmp_path):
+        mystery = tmp_path / "vocab.mysteryext"
+        mystery.write_bytes((FIXTURES / "rocks.ttl").read_bytes())
+        with pytest.raises(SkosImportError) as exc_info:
+            SkosGraph.from_file(mystery, base_uri="https://example.org/vocab.ttl")
+        assert "https://example.org/vocab.ttl" in str(exc_info.value)
+        assert str(mystery) not in str(exc_info.value)
+
+    def test_unparseable_file_refusal_names_the_base_uri_when_given(self, tmp_path):
+        bad = tmp_path / "bad.ttl"
+        bad.write_text("this is not turtle @@@ not even close {{{ ]][[ ")
+        with pytest.raises(SkosImportError) as exc_info:
+            SkosGraph.from_file(bad, base_uri="https://example.org/vocab.ttl")
+        assert "https://example.org/vocab.ttl" in str(exc_info.value)
+        assert str(bad) not in str(exc_info.value)
+
+
 class TestPreferredLabelTagCounts:
     """T002 — the predominance count a variant contest is decided over
     (research.md R2, decisions.md D4/D5): how often each published tag appears
@@ -325,6 +499,18 @@ class TestImportSkosVocabulary:
         target = ConceptSchemeFactory(name="Loose concepts")
         report = import_skos(FIXTURES / "no_scheme_declared.ttl", scheme=target)
         assert report.fatal == []
+
+    def test_a_refusal_names_the_base_uri_when_given(self, db):
+        # T001, decisions.md D10: a fetched document's every refusal names
+        # where it came from, not the temporary file it happened to be
+        # written to for the parse.
+        path = FIXTURES / "no_scheme_declared.ttl"
+        with pytest.raises(SkosImportFailed) as exc_info:
+            import_skos(path, base_uri="https://example.org/loose.ttl")
+        finding = exc_info.value.report.fatal[0]
+        assert finding.reason is FatalReason.VOCABULARY_UNDETERMINED
+        assert "https://example.org/loose.ttl" in finding.render()
+        assert str(path) not in finding.render()
 
 
 class TestChoosingBetweenDeclaredVocabularies:

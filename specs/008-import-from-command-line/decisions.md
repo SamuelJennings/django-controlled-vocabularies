@@ -196,3 +196,40 @@ and false in the direction where the URL form is the correct one. It now require
 URIs either way, and identical results only where the identifiers are absolute.
 
 **ADR:** pending — assessed at S5 against the ADR bar.
+
+## D11 — T001's relative-URI fixtures are built under `tmp_path`, not committed under `tests/fixtures/skos/`
+
+Found implementing T001. `tasks.md` names three committed files —
+`tests/fixtures/skos/relative-uris.ttl/.rdf/.jsonld` — and that is what was tried first. Committing
+them there breaks `TestEverySkosPredicateIsReadOrReported` (`tests/test_exchange/test_skos.py`,
+T033/FIX 13), which walks every file in the directory and runs a plain `import_skos()` (no
+`base_uri`) against each, requiring `report.fatal == []`.
+
+That failure is not incidental. A document whose every identifier is relative can only ever resolve,
+with no `base_uri` given, to a `file://`-scheme identity — D13's own documented behaviour, and
+exactly what T001's second Given/When/Then scenario requires as its "no base URI" branch. `file` is
+not in `conf.DEFAULT_ALLOWED_URI_SCHEMES`, so `validate_static_uri` refuses it every time
+(`REFUSED_IDENTITY`). No content for these three fixtures avoids this: it is what "relative
+identifiers, no base URI" *means*, not a fixable defect in the fixtures. The corpus already carries
+this exact shape nine times over (`refused_uri_scheme.ttl`, `no_scheme_declared.ttl`,
+`two_vocabularies.ttl`, and six more), each registered by name in that test's own
+`_PREDICATE_COVERAGE_EXCLUDED_FIXTURES`, with a comment naming the dedicated test class that
+exercises it instead — but registering a tenth entry there means editing a pre-existing test, which
+this story's own governing rule forbids outright: the base-URI change is proven additive by the
+*entire* pre-existing suite passing with zero edits to any existing test, not most of it.
+
+So the three documents are built as string constants in `tests/test_exchange/test_skos.py`
+(`TestBaseUriThread`) and written to `tmp_path` per test, the same pattern this file already uses
+for `TestPreferredLabelTagCounts.test_counts_reflect_the_whole_file_not_any_one_concept` and the
+missing/unparseable-file cases in `TestReadGraph`. This satisfies every clause of T001's own
+Given/When/Then (all three serializations, both with and against a given `base_uri`, the refusal
+messages naming the URL) without touching a file `TestEverySkosPredicateIsReadOrReported` walks.
+
+**Revisit if:** a later story wants these three documents committed as reusable fixtures for its own
+tests (US-2's URL/disk parity test, T011, is the likely candidate — it already needs a served,
+relative-identifier document). At that point the right fix is a fixtures subdirectory `ALL_FIXTURES`
+does not walk (or an explicit opt-out on that constant), decided with the story that needs it rather
+than pre-built here on spec.
+
+**ADR:** not proposed — a test-fixture placement choice within one story, not a production-code
+design decision.
