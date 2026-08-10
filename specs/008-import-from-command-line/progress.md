@@ -575,3 +575,24 @@ Worked in `dcv-us6` on top of all five landed stories (baseline 975 passed).
   Verified: `poetry run pytest tests/test_standards.py -q` (55 passed, up from 45) at the commit;
   `poetry run ruff check tests/test_standards.py` and `poetry run mypy tests/test_standards.py`
   both clean.
+
+- **T024** — Documentation (Article VI, FR-016). README gains an "Importing from the command
+  line" section, placed directly after "Importing a published vocabulary" rather than replacing
+  any of it: both source forms, `--format`, `--rehearse`, and what raised `--verbosity` adds.
+  Corrected the two sentences the brief named as now false — the "no command-line ... entry point
+  yet" line (there is one now; the web-facing gap is still real) and "importing a file never makes
+  a network request" (still true of `import_skos()` reading a file; the command's own URL fetch
+  happens before any bytes reach that function). Also corrected a third, undiscovered instance of
+  the same stale claim in `CHANGELOG.md`'s first `Added` bullet, found while reading it for the
+  new bullet's placement — same sentence, same fix, not named in the brief but the same
+  documentation bug. `CONTEXT.md` gains a **Rehearsal** row in the "Importing published
+  vocabularies" table, same register as the three already there.
+
+  No behaviour changed. Ran a self-review against the humanizer skill's checklist (inflated
+  significance, promotional language, em-dash overuse, rule-of-three, AI vocabulary) against the
+  diff hunks only — nothing to fix; the density and phrasing already matched the surrounding
+  house style because the additions largely paraphrase `decisions.md` D4/D5/D10/D16's own
+  language.
+
+  Verified: `poetry run pre-commit run --all-files` clean (ruff format, trailing-whitespace,
+  end-of-file-fixer, mypy, deptry).
