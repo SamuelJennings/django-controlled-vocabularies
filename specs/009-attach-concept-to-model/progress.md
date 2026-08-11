@@ -49,3 +49,98 @@ Append-only. One line per stage transition and per gate outcome, written at the 
     not registry filtering). Neither changed a conclusion.
   Reviewer ran on Sonnet rather than Opus (dispatch omitted the model override). Findings judged on
   merit and all three verified true at source, so no re-run. Next: plan veto notification, then S4.
+- **2026-08-11T00:00:00Z · Implementer Phase F · T001.** Did: added `controlled_vocabularies/fields.py`
+  with `ConceptField(ForeignKey)` — fixes `to=Concept`, `on_delete=PROTECT`,
+  `limit_choices_to=Q(scheme__slug=vocabulary)`; rejects a consumer-supplied `on_delete` and a
+  missing/empty `vocabulary`, both `TypeError`; overrides `validate()` per the design review's
+  SPEC-001 finding so `.messages`/`str()` interpolate `vocabulary` instead of raising
+  `KeyError: 'vocabulary'`. Verified: `poetry run pytest -q tests/test_fields.py` — 13 passed,
+  including a test that reads `.messages` and one that reads `str()` on the raised
+  `ValidationError`, and a `CaptureQueriesContext`-wrapped construction asserting zero queries.
+  Independently reproduced the pre-fix `KeyError` against a copy of the field with the `validate()`
+  override removed, to confirm the test actually exercises SPEC-001 rather than merely asserting
+  `ValidationError` was raised. `ruff check`/`ruff format` clean. Next: T002. Watch: none.
+- **2026-08-11T00:20:00Z · Implementer Phase F · T002.** Blocked before writing any test-app code.
+  T001's construction-time rejections (`on_delete` in kwargs → `TypeError`; empty/missing
+  `vocabulary` → `TypeError`) make `ConceptField` impossible to round-trip through Django's own
+  field-state machinery without `deconstruct()` (T003, US-1, explicitly out of scope for this
+  phase — "Phase F builds the field's construction and the test app; those stories build on it").
+  `Field.clone()` — `self.__class__(*args, **kwargs)` from `self.deconstruct()` — is called by
+  `ModelState.from_model()` on *every* command that builds Django's migration state
+  (`makemigrations`, `makemigrations --check`, `migrate`, and pytest-django's own migration
+  application to build the test database), not only when writing a new migration file. Verified by
+  reproduction: built a throwaway app (`tests/_probe_testapp`, never committed, removed after)
+  with one model carrying `ConceptField(vocabulary="rock-type")`, added it to a scratch settings
+  module, and ran `django-admin makemigrations _probe_testapp` against this worktree's installed
+  Django 5.2.16 —
+  ```
+  TypeError: Couldn't reconstruct field rock_type on _probe_testapp.Specimen: ConceptField()
+  requires a non-empty 'vocabulary' naming the ConceptScheme slug to constrain choices to.
+  ```
+  raised from `field.clone()` inside `ModelState.from_model()`, before a migration file is even
+  written — `ForeignKey.deconstruct()`/`RelatedField.deconstruct()` emit `to`, `on_delete` and
+  `limit_choices_to` (confirmed against the installed source, matching `research.md` R2) but never
+  `vocabulary`, since T001 does not override `deconstruct()`. So any model carrying `ConceptField`
+  cannot pass through `makemigrations --check` or `migrate` — including the migration T002 itself
+  requires — until `vocabulary` survives that round trip. Adding `tests/testapp` to
+  `INSTALLED_APPS` in this state would turn pytest-django's own migration application red for the
+  whole suite (1006 tests), which the story's baseline-verify and "leave the tree green" rules both
+  forbid building on top of. No workaround attempted — implementing any form of round-trip
+  survival (a `deconstruct()` override or an equivalent `clone()` override) is T003's named scope,
+  dispatched to a separate worktree; doing it here would be exactly the prohibition this protocol
+  says to report blocked against rather than route around. Nothing committed for T002; worktree
+  left clean. Next: Forge to resolve the phase's task ordering (T003's `deconstruct()` — or an
+  equivalent minimal fix — needs to land before or inside Phase F, not after it). Watch: this also
+  blocks every one of US-1 through US-6, since Phase F is a hard dependency for all six.
+- **2026-08-11T00:40:00Z · Implementer Phase F · T003.** Forge moved T003 (`deconstruct()`) into
+  Phase F ahead of T002 (`tasks.md`/`plan.md` commits `565724b`, `06d4776`) after verifying the
+  T002 blocked report at both cited source lines. Did: `ConceptField.deconstruct()` strips `to`,
+  `on_delete`, `limit_choices_to` and adds `vocabulary`. First attempt paired it with a `clone()`
+  override that stringified `to` only for that call site; this fixed `makemigrations`
+  (`ModelState.from_model()`'s autodetector path) but not `migrate` — reproduced with the same
+  probe app, this time via `django-admin migrate` against a scratch sqlite DB, which failed at
+  `CreateModel.state_forwards()` building `ModelState` from the migration operation's own,
+  freshly-`__init__`-constructed field (not a `clone()`), hitting the identical
+  `ModelState.fields cannot refer to a model class` `ValueError`. Reported as a new finding per
+  instruction rather than patched further. Directed fix: `to` is the string
+  `"controlled_vocabularies.Concept"`, set unconditionally in `__init__`, `clone()` override
+  removed (the default `Field.clone()` now works unmodified), and the `Concept` import dropped
+  from `fields.py` entirely. Accepted consequence: an unbound field cannot run `validate()`
+  (`remote_field.model` only resolves once `contribute_to_class` binds the field to a real model),
+  so T001's `TestConceptFieldValidate` class (3 tests reading `.messages`/`str()`/`.code` on an
+  unbound field) no longer has anything to construct against and was deleted; `test_fixes_to_concept`
+  now asserts the string form. That behavioural proof is T005's, against a real test-app model —
+  not this task's. `tasks.md` already carries this as the design record (commit `06d4776`).
+  Verified: `poetry run pytest -q tests/test_fields.py` — 14 passed (11 construction/deconstruct +
+  3 removed from validate). End-to-end reproduction against the probe app (never committed, removed
+  after): `django-admin makemigrations` produces a clean migration
+  (`ConceptField(help_text=..., vocabulary='rock-type')`, none of the three stripped kwargs, no
+  `to`); `django-admin migrate` against a scratch sqlite DB applies cleanly; `makemigrations
+  --check --dry-run` reports "No changes detected", exit 0; and a bound `Specimen.full_clean()`
+  against a concept from the wrong vocabulary raises `ValidationError` whose `.messages` reads
+  `"2 is not a valid concept in the 'rock-type' vocabulary."` — the `validate()` override works
+  correctly once bound, exactly as T005 will prove. `ruff check`/`ruff format` clean. Next: T002.
+  Watch: `feature-state.json`'s `US1.tasks` still lists `T003` (not moved to `US0` alongside T001/
+  T002) — the ledger wasn't restructured when the plan moved the task; flagged in `concerns` rather
+  than restructured, since moving a task between story blocks is outside "flip your own tasks'
+  status/attempts/evidence."
+- **2026-08-11T01:00:00Z · Implementer Phase F · T002.** Unblocked by T003's corrected fix. Did:
+  new `tests/testapp/` (`apps.py`, `models.py`, `migrations/0001_initial.py`), added to
+  `INSTALLED_APPS` in `tests/settings.py`. Three models: `Specimen` (required `ConceptField`,
+  vocabulary `"rock-type"`), `Sample` (optional, `related_name="samples"`, vocabulary
+  `"mineral"`), `Artifact` (optional, vocabulary `"mineral"`, and already defines
+  `get_mineral_label()` — the exact name T011's `contribute_to_class()` would generate for a field
+  named `mineral` — so that story's collision guard has a real pre-existing definition to test
+  against). Factories (`SpecimenFactory`, `SampleFactory`, `ArtifactFactory`) added to
+  `tests/factories.py`. Two vocabulary fixtures (`multilingual_scheme`, `single_language_scheme`)
+  added to `tests/conftest.py` for #87/#88/#89 to reach without redefining, named for what they
+  are rather than for this feature. Verified: `poetry run pytest -q tests/test_testapp.py` — 9
+  passed (`TestMigrations` — tables queryable after migrating from zero, `makemigrations --check
+  --dry-run` exits normally rather than raising `SystemExit(1)`; `TestFactories` — the three
+  factories build valid saved records; `TestVocabularyFixtures` — the two scheme fixtures build
+  the shape their docstrings promise). Full suite: `poetry run pytest -q` — 1029 passed (1020 +
+  9). `poetry run pre-commit run --all-files` — all hooks green (trim-whitespace, end-of-file,
+  check-yaml, poetry-check, ruff lint, ruff format, mypy, deptry). Deliberately not tested here:
+  declaring/saving/reading back a concept through the field, the reverse accessor, `null`/`blank`
+  behaviour — that is T004's (US-1) acceptance, against a real model, not T002's. Phase F (T001,
+  T003, T002) complete; worktree clean, all three tasks committed.

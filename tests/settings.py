@@ -27,6 +27,7 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.auth",
     "controlled_vocabularies",
+    "tests.testapp",
 ]
 
 # Fixed base so URI-composition assertions are deterministic across the test suite.
