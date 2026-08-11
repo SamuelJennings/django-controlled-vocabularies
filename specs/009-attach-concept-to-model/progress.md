@@ -213,3 +213,25 @@ Append-only. One line per stage transition and per gate outcome, written at the 
   mypy, deptry). `DJANGO_SETTINGS_MODULE=tests.settings poetry run django-admin makemigrations
   --check --dry-run` — "No changes detected", exit 0. Diff scope across both tasks: `tests/test_fields.py`
   only. Next: US-3 (T007).
+- **2026-08-11 — Implementer US-3 · T007.** Did: added `TestConceptFieldDeleteGuard` to
+  `tests/test_fields.py` (no second file, per the plan's convention) — a proof task per `tasks.md`'s
+  own framing ("No new code either — `PROTECT` was fixed in T001"), so `fields.py` is unmodified.
+  Five tests: `concept.delete()` on a referenced concept raises `ProtectedError`, and both the
+  concept and the referencing `Specimen` survive; `Concept.objects.filter(pk=...).delete()` (bulk
+  queryset delete) is refused identically, confirming the guard lives in the relation rather than in
+  model validation; `scheme.delete()` on the `ConceptScheme` holding a referenced concept also raises
+  `ProtectedError` and removes nothing — `Concept.scheme` cascades (`on_delete=CASCADE`), so the
+  collector tries to cascade-delete the concept and meets `ConceptField`'s `PROTECT` on the way down,
+  confirmed by reading `controlled_vocabularies/models.py`'s `Concept.scheme` declaration before
+  writing the test rather than assuming the cascade direction; a concept no record references deletes
+  normally; deleting the referencing `Specimen` leaves the concept in place. No new `decisions.md`
+  entry — no deviation from `tasks.md`. No RED step to observe against new behaviour, consistent with
+  T005/T006: `on_delete=PROTECT` was fixed on the field in T001, so all 5 new tests passed on first
+  run, proving Phase F's mechanism rather than driving new code. Verified: `poetry run pytest -q
+  tests/test_fields.py::TestConceptFieldDeleteGuard` — 5 passed. `poetry run pytest -q
+  tests/test_fields.py` — 41 passed (36 + 5). Full suite: `poetry run pytest -q` — 1047 passed (1042
+  + 5). `poetry run pre-commit run --all-files` — all hooks green (trim-whitespace, end-of-file,
+  check-yaml, poetry-check, ruff lint, ruff format, mypy, deptry). `DJANGO_SETTINGS_MODULE=tests.settings
+  poetry run django-admin makemigrations --check --dry-run` — "No changes detected", exit 0. Diff
+  scope: `tests/test_fields.py` only. Next: US-4 (T008) or US-5 (T010), per `tasks.md`'s sequencing
+  (US-3, US-4, US-5 are independent of one another once Phase F lands).

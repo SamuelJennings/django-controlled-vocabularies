@@ -49,6 +49,13 @@ cannot run ``validate()`` at all.
   rejected rather than saved — proof that ``ForeignKey.formfield()`` passes
   ``limit_choices_to`` through, since nothing in this package's own source
   states that guarantee.
+- ``TestConceptFieldDeleteGuard`` — T007 (US-3): no new code — ``PROTECT``
+  was fixed on the field in T001. This class is the proof FR-007 needs: a
+  referenced concept survives both a single-instance and a bulk queryset
+  delete, the scheme holding it survives too (the cascade from scheme to
+  concept meets the protection on the way down), an unreferenced concept
+  deletes normally, and deleting the referencing record leaves the concept
+  in place.
 """
 
 import pytest
@@ -56,12 +63,13 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.db import connection
-from django.db.models import PROTECT, Q
+from django.db.models import PROTECT, Q, ProtectedError
 from django.test.utils import CaptureQueriesContext
 from django.utils.functional import Promise
 from django.utils.module_loading import import_string
 
 from controlled_vocabularies.fields import ConceptField
+from controlled_vocabularies.models import Concept, ConceptScheme
 from tests.factories import (
     ArtifactFactory,
     ConceptFactory,
@@ -370,3 +378,70 @@ class TestConceptFieldFormChoices:
         assert not form.is_valid()
         assert "rock_type" in form.errors
         assert Specimen.objects.count() == 0
+
+
+class TestConceptFieldDeleteGuard:
+    """T007 (US-3) — no new code: ``on_delete=PROTECT`` (T001) already refuses
+    any delete path that would strand a reference. This class is the proof
+    FR-007 needs."""
+
+    @pytest.mark.django_db
+    def test_deleting_a_referenced_concept_is_refused(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        concept = ConceptFactory(scheme=scheme)
+        specimen = SpecimenFactory(rock_type=concept)
+
+        with pytest.raises(ProtectedError):
+            concept.delete()
+
+        assert Concept.objects.filter(pk=concept.pk).exists()
+        assert Specimen.objects.filter(pk=specimen.pk).exists()
+
+    @pytest.mark.django_db
+    def test_bulk_queryset_delete_of_a_referenced_concept_is_refused(self):
+        """The protection lives in the relation rather than in model
+        validation, so a bulk ``QuerySet.delete()`` is refused exactly like a
+        single-instance delete."""
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        concept = ConceptFactory(scheme=scheme)
+        specimen = SpecimenFactory(rock_type=concept)
+
+        with pytest.raises(ProtectedError):
+            Concept.objects.filter(pk=concept.pk).delete()
+
+        assert Concept.objects.filter(pk=concept.pk).exists()
+        assert Specimen.objects.filter(pk=specimen.pk).exists()
+
+    @pytest.mark.django_db
+    def test_deleting_the_scheme_holding_a_referenced_concept_is_refused(self):
+        """``Concept.scheme`` cascades, so deleting the scheme tries to
+        cascade-delete the concept — and meets the same ``PROTECT`` on the
+        way down. Nothing in the scheme is removed."""
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        concept = ConceptFactory(scheme=scheme)
+        specimen = SpecimenFactory(rock_type=concept)
+
+        with pytest.raises(ProtectedError):
+            scheme.delete()
+
+        assert ConceptScheme.objects.filter(pk=scheme.pk).exists()
+        assert Concept.objects.filter(pk=concept.pk).exists()
+        assert Specimen.objects.filter(pk=specimen.pk).exists()
+
+    @pytest.mark.django_db
+    def test_an_unreferenced_concept_deletes_normally(self):
+        concept = ConceptFactory()
+
+        concept.delete()
+
+        assert not Concept.objects.filter(pk=concept.pk).exists()
+
+    @pytest.mark.django_db
+    def test_deleting_the_consuming_record_leaves_the_concept_in_place(self):
+        concept = ConceptFactory()
+        specimen = SpecimenFactory(rock_type=concept)
+
+        specimen.delete()
+
+        assert not Specimen.objects.filter(pk=specimen.pk).exists()
+        assert Concept.objects.filter(pk=concept.pk).exists()
