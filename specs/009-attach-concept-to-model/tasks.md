@@ -37,6 +37,18 @@ Phase F lands. US-6 is last because it documents what the others built.
   exist", which is wrong twice — the concept does exist, and the vocabulary is not named. `help_text`
   is set to a translatable default the consumer can override (Article XII makes it mandatory).
 
+  **The placeholder needs a `validate()` override to have anything to interpolate.**
+  `ForeignKey.validate()` builds the `ValidationError`'s `params` itself — `model`, `pk`, `field`,
+  `value`, and nothing else (`django/db/models/fields/related.py`, verified against the installed
+  Django 5.2.16). `ValidationError` defers `%`-substitution to iteration time
+  (`message %= error.params` in `core/exceptions.py.__iter__`, which backs both `.messages` and
+  `str()`), so a message carrying `%(vocabulary)s` constructs fine and raises `KeyError` the first
+  time anything reads it — including T005's own assertion. So `ConceptField.validate()` calls
+  `super().validate(...)` and catches the `code="invalid"` `ValidationError`, re-raising
+  `ValidationError(self.error_messages["invalid"], code="invalid", params={"vocabulary": self.vocabulary})`.
+  This is a message concern, not a second constraint mechanism — the refusal itself is still
+  `limit_choices_to`.
+
   Tests construct the field directly, unbound to any model. No consuming model exists yet.
 
 - **T002** — The consuming test app (FR-001, Article IV, Article XIV).
@@ -85,8 +97,11 @@ Phase F lands. US-6 is last because it documents what the others built.
 
 - **T005** — Validation refuses a concept from another vocabulary (FR-005, `research.md` R1).
 
-  No new validation code. `ForeignKey.validate()` applies `limit_choices_to` before checking
-  existence, so the refusal is already there — what this task adds is the proof and the message.
+  No new *constraint* code — `ForeignKey.validate()` applies `limit_choices_to` before checking
+  existence, so the refusal is already there. The message is the part that needs code, and it lands
+  in T001's `validate()` override (without it, reading the raised error's `.messages` raises
+  `KeyError: 'vocabulary'` rather than returning the text this task asserts on). What this task adds
+  is the proof.
 
   Tests: `full_clean()` on a record holding a concept from the other vocabulary raises
   `ValidationError`, the message names the expected vocabulary, and the message is the translatable
@@ -203,8 +218,17 @@ Phase F lands. US-6 is last because it documents what the others built.
   this feature delivers the single-value constraint, `ConceptsField` is #87, and the autocomplete is
   #88. Reconcile it, and define the term the package now puts into a consuming project's code.
 
-  Test: a standards test asserts no bare user-visible literal in `fields.py` or `checks.py`, in the
-  shape `tests/test_standards.py` already uses.
+  Test: a standards test asserts no bare user-visible literal in `fields.py` or `checks.py`. Follow
+  `tests/test_standards.py`'s AST-visitor shape, but **the visitor needs new sinks** — its existing
+  ones (`CommandError(...)`, `.stdout`/`.stderr.write(...)`, `add_argument(help=...)`, a class-level
+  `help = "..."`) match nothing a field or a check contains, so reused unmodified it reports zero
+  regardless of what the new modules do. The sinks to recognise here:
+  - `Field(help_text=..., verbose_name=...)` keyword-argument literals
+  - `error_messages` dict values
+  - bare strings passed to `ValidationError(...)`, `checks.Warning(...)` and `checks.Error(...)`
+
+  Prove the test works by reinstating a bare literal in `fields.py` and confirming it goes red
+  before wrapping it again.
 
 - **T013** — README and CHANGELOG (FR-012, Article VI).
 

@@ -17,7 +17,8 @@ either of them query the database when the field is declared, which FR-003 forbi
 `limit_choices_to` therefore raises `ValidationError` from `full_clean()` with code `invalid`.
 
 `ForeignKey.formfield()` passes `limit_choices_to` through to the form field
-(related.py:940–945), and `apply_limit_choices_to_to_formfield` narrows the queryset. So the choices
+(`RelatedField.formfield()`, `db/models/fields/related.py` ~line 467), and
+`apply_limit_choices_to_to_formfield` (`forms/models.py:123`) narrows the queryset. So the choices
 a `ModelForm` offers are restricted by the same declaration.
 
 `limit_choices_to` accepts a `Q` object, which is a lazily-evaluated expression tree and issues no
@@ -62,9 +63,11 @@ vocabulary is imported into. Is that true?
 therefore run every registered check before doing any work, and a check returning an `Error` raises
 `SystemCheckError` and aborts the command.
 
-Tag choice matters and cuts against the obvious answer. `Tags.database` looks right, but
-database-tagged checks are filtered out unless `--database` is passed to `manage.py check`
-(`core/checks/registry.py:85–86` plus `commands/check.py:48`), which is exactly backwards for a check
+Tag choice matters and cuts against the obvious answer. `Tags.database` looks right, but a
+database-tagged check only runs when `--database` is passed to `manage.py check`. The mechanism is a
+convention rather than registry filtering: `commands/check.py:48` collects `--database` into
+`databases`, `check.py:87` passes it down, and each database-tagged check opens with
+`if databases is None: return []` (`core/checks/database.py`). That is exactly backwards for a check
 whose whole purpose is to surface in an ordinary CI `manage.py check`. So the check is registered
 untagged.
 

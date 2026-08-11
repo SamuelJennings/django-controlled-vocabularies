@@ -25,3 +25,27 @@ Append-only. One line per stage transition and per gate outcome, written at the 
   `feature-state.json` generated. Cross-artifact analyze: all 12 FRs and all 6 SCs map to at least
   one task, every story maps to its issue, no unresolved markers. No spec amendment needed — the
   research confirmed the spec rather than contradicting it. Next: S3R design review.
+- **2026-08-11 — S3R DESIGN REVIEW.** One reviewer, three lenses, one round. Security `approve`
+  (0 findings), architecture `approve` (0 findings), spec-compliance `request_changes` (1 high,
+  2 medium, all `verified`). All three spec-compliance findings independently re-verified against
+  the installed Django 5.2.16 source and `tests/test_standards.py` before being accepted, and all
+  three applied as plan edits:
+  - **SPEC-001 (high).** `ForeignKey.validate()` builds its own `params` (`model`, `pk`, `field`,
+    `value`), and `ValidationError` interpolates at iteration time, so T001's planned
+    `%(vocabulary)s` message would raise `KeyError` the moment T005's own test read it. T001 now
+    carries a `validate()` override that re-raises with `params={"vocabulary": ...}`; T005 reworded
+    — the constraint needs no new code, the message does.
+  - **SPEC-002 (medium).** `plan.md` called US-3/US-4/US-5 independent while four stories write
+    `tests/test_fields.py` and three write `fields.py`, which collides across worktrees. Approach
+    section now states the real dispatch order: US-1/US-2 → US-3 → US-5 in sequence, US-4 the only
+    parallel story.
+  - **SPEC-003 (medium).** T012 reused `tests/test_standards.py`'s visitor, whose four sinks match
+    nothing a field or check contains — it would have reported zero regardless. T012 now names the
+    sinks (`help_text`/`verbose_name` kwargs, `error_messages` values, bare strings into
+    `ValidationError`/`checks.Warning`/`checks.Error`) and requires the gate be proven against a
+    reinstated bare literal.
+  - Two citation drifts in `research.md` corrected in passing (R1's `formfield` line reference,
+    R3's `Tags.database` skip mechanism — a per-check `if databases is None: return []` convention,
+    not registry filtering). Neither changed a conclusion.
+  Reviewer ran on Sonnet rather than Opus (dispatch omitted the model override). Findings judged on
+  merit and all three verified true at source, so no re-run. Next: plan veto notification, then S4.

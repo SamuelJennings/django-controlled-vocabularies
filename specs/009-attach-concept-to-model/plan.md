@@ -110,9 +110,20 @@ So it goes in a `tests/testapp/` app added to the test settings' `INSTALLED_APPS
 **Phase F — foundational, sequential, blocks everything.** The consuming test app has to exist before
 any story can be tested against a real model.
 
-**Then the stories.** US-1 and US-2 are close to the same code and are sequenced together. US-3, US-4
-and US-5 are genuinely independent of one another once Phase F lands. US-6 is last because it
-documents what the others built.
+**Then the stories.** US-1 and US-2 are close to the same code and are sequenced together. US-6 is
+last because it documents what the others built.
+
+**Dispatch order is constrained by shared files, not only by logic.** Each story runs in its own
+worktree, so two stories writing the same module collide at convergence. `fields.py` is written by
+T001 (Phase F), T003 (US-1) and T011 (US-5); `tests/test_fields.py` is written by T001, T003,
+T005/T006, T007 and T011. So:
+
+- **US-1/US-2, then US-3, then US-5 run in sequence.** All three add cases to
+  `tests/test_fields.py`, and US-5 also edits `fields.py`. They are logically independent of one
+  another; the constraint is the file, and two worktrees appending to the end of the same file
+  conflict on merge regardless.
+- **US-4 is the only genuinely parallel story.** It writes `checks.py` and `tests/test_checks.py`,
+  which no other story touches, so it can run alongside any of the above.
 
 The one sequencing constraint worth naming: **US-5 depends on `Concept.display_label()`, which is a
 change to this package's model rather than to the field.** It is not a dependency of US-1 through
