@@ -18,6 +18,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Model, UniqueConstraint
+from django.utils import translation
 from django.utils.functional import Promise
 
 from controlled_vocabularies import conf
@@ -1164,6 +1165,38 @@ class TestConceptPreferredLabels:
         assert concept.slug == original_slug
         assert concept.uri == original_uri
         assert concept.preferred_label("de") is None
+
+
+class TestConceptDisplayLabel:
+    """US-5 — FR-008: a concept's preferred label for display, resolved in the
+    active language and falling back to the vocabulary's default language
+    when the concept carries no preferred label in the active one.
+    ``preferred_label()`` itself is unchanged — the existing
+    ``TestConceptPreferredLabels`` class above still passing unmodified is
+    the regression proof (tasks.md T010)."""
+
+    @pytest.mark.django_db
+    def test_returns_the_active_languages_preferred_label(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+        concept.add_label(language="de", kind=ConceptLabel.Kind.PREFERRED, text="Wärmefluss")
+
+        with translation.override("de"):
+            assert concept.display_label() == "Wärmefluss"
+
+    @pytest.mark.django_db
+    def test_falls_back_to_the_default_language_when_the_active_one_has_no_label(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+
+        with translation.override("fr"):
+            assert concept.display_label() == "Heat flow"
+
+    @pytest.mark.django_db
+    def test_never_empty_for_a_concept_that_exists(self, scheme):
+        concept = Concept.objects.create(scheme=scheme, label="Heat flow")
+
+        for language in ("en", "de", "fr"):
+            with translation.override(language):
+                assert concept.display_label()
 
 
 class TestConceptAlternativeAndHiddenLabels:
