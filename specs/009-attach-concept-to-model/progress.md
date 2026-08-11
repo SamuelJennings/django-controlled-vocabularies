@@ -235,3 +235,55 @@ Append-only. One line per stage transition and per gate outcome, written at the 
   poetry run django-admin makemigrations --check --dry-run` — "No changes detected", exit 0. Diff
   scope: `tests/test_fields.py` only. Next: US-4 (T008) or US-5 (T010), per `tasks.md`'s sequencing
   (US-3, US-4, US-5 are independent of one another once Phase F lands).
+- **2026-08-11 — Implementer US-4 · T008.** Did: new `controlled_vocabularies/checks.py` —
+  `check_concept_field_vocabularies()`, registered **untagged** in `ControlledVocabulariesConfig.ready()`
+  per `research.md` R3 (`Tags.database` is skipped unless `--database` is passed, which is exactly the
+  bare `manage.py check` invocation FR-004 exists to make useful). Walks `apps.get_models()`, collects
+  every field that `isinstance(field, ConceptField)`, resolves the distinct vocabulary slugs in one
+  `ConceptScheme.objects.filter(slug__in=...)` query, and yields a `checks.Warning` (id
+  `controlled_vocabularies.W001`) per field whose slug is absent, naming the model, the field and the
+  slug via a `gettext_lazy`-wrapped, named-placeholder message. New `tests/test_checks.py`
+  `TestCheckConceptFieldVocabularies`: a field naming an absent vocabulary is warned about (asserted by
+  reading the warning's own `.msg`, not just its presence); once both vocabularies exist the check
+  reports nothing; every reported object is `django.core.checks.Warning`, not `Error`; the whole check
+  costs exactly one query however many `ConceptField`s are declared (`CaptureQueriesContext`, 3 fields
+  across 2 distinct slugs in the test app). RED observed for the right reason: temporarily stubbed
+  `check_concept_field_vocabularies()` to `return []` and confirmed all three behavioural assertions
+  failed (empty warning dict, empty list, 0 captured queries) before restoring the real body. No
+  `on_delete`/`vocabulary` refusal changes — `fields.py` untouched. Verified: `poetry run pytest -q
+  tests/test_checks.py::TestCheckConceptFieldVocabularies` — 4 passed. `ruff check`/`ruff format`
+  clean. Diff scope: `controlled_vocabularies/checks.py` (new), `controlled_vocabularies/apps.py`
+  (+`ready()`), `tests/test_checks.py` (new). Next: T009.
+
+  **Deviation, recorded rather than hidden:** `tests/test_checks.py` was authored in one pass covering
+  both T008 and T009 before T008 was committed, so T009's `TestCheckSurvivesUnmigratedDatabase` class
+  was present — and failing, since the `DatabaseError` guard didn't exist yet — at the moment T008's
+  commit was made. `craft-increments`' "tree is green between slices" held for every test *run* (T008
+  was verified narrow-scope green before committing), but not for the file as committed, since the
+  T009 class rode along unexercised. Caught immediately by running the whole file straight after
+  T008's commit, before starting T009's implementation; T009 landed within minutes closing the gap.
+  Recorded as a process note for future tasks sharing a test module: write and commit one task's test
+  class at a time, not the whole file up front.
+- **2026-08-11 — Implementer US-4 · T009.** Did: added `except DatabaseError: return []` around the
+  check's one query in `controlled_vocabularies/checks.py` — `ProgrammingError`, `OperationalError` and
+  an unreachable database all subclass `django.db.DatabaseError` (`research.md` R3), so the one clause
+  covers every case FR-004 names. New `TestCheckSurvivesUnmigratedDatabase` in `tests/test_checks.py`,
+  five tests: three run `poetry run django-admin check|makemigrations --check --dry-run|migrate` in a
+  **real subprocess** against a fresh, never-migrated `:memory:` sqlite database (`tests/settings.py`'s
+  own `DATABASES`) — a genuinely unmigrated connection, not a mock of `DatabaseError`, per `plan.md`
+  Risks' explicit call-out that this is "the single most likely defect in the feature"; two run
+  in-process against the normal (migrated, but vocabulary-absent) test database — silencing
+  `controlled_vocabularies.W001` via `SILENCED_SYSTEM_CHECKS` suppresses it from `manage.py check`'s
+  stderr output (Django's check command writes issues to `stderr`, not `stdout` — caught on first run
+  and corrected before this was reported green), and a `ModelForm` built from `Specimen` with the named
+  vocabulary absent offers an empty queryset rather than raising. RED observed for the right reason:
+  the three subprocess tests failed against T008's implementation with the actual, unmocked
+  `django.db.utils.OperationalError: no such table: controlled_vocabularies_conceptscheme` propagating
+  out of `django-admin migrate`/`check` (captured in the failure output) before the `except` clause was
+  added. Verified: `poetry run pytest -q tests/test_checks.py` — 9 passed (4 + 5). Full suite: `poetry
+  run pytest -q` — 1056 passed (1047 + 9). `poetry run pre-commit run --all-files` — all hooks green
+  (trim-whitespace, end-of-file, check-yaml, poetry-check, ruff lint, ruff format, mypy, deptry).
+  `DJANGO_SETTINGS_MODULE=tests.settings poetry run django-admin makemigrations --check --dry-run` —
+  "No changes detected", exit 0. No new `decisions.md` entry — no deviation from `tasks.md` beyond the
+  one recorded under T008. Diff scope: `controlled_vocabularies/checks.py`, `tests/test_checks.py`.
+  US-4 (T008, T009) complete. Next: US-5 (T010) or US-6 (T012), per `tasks.md`'s sequencing.
