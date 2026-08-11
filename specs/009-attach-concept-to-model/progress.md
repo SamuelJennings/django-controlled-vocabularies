@@ -49,3 +49,14 @@ Append-only. One line per stage transition and per gate outcome, written at the 
     not registry filtering). Neither changed a conclusion.
   Reviewer ran on Sonnet rather than Opus (dispatch omitted the model override). Findings judged on
   merit and all three verified true at source, so no re-run. Next: plan veto notification, then S4.
+- **2026-08-11T00:00:00Z · Implementer Phase F · T001.** Did: added `controlled_vocabularies/fields.py`
+  with `ConceptField(ForeignKey)` — fixes `to=Concept`, `on_delete=PROTECT`,
+  `limit_choices_to=Q(scheme__slug=vocabulary)`; rejects a consumer-supplied `on_delete` and a
+  missing/empty `vocabulary`, both `TypeError`; overrides `validate()` per the design review's
+  SPEC-001 finding so `.messages`/`str()` interpolate `vocabulary` instead of raising
+  `KeyError: 'vocabulary'`. Verified: `poetry run pytest -q tests/test_fields.py` — 13 passed,
+  including a test that reads `.messages` and one that reads `str()` on the raised
+  `ValidationError`, and a `CaptureQueriesContext`-wrapped construction asserting zero queries.
+  Independently reproduced the pre-fix `KeyError` against a copy of the field with the `validate()`
+  override removed, to confirm the test actually exercises SPEC-001 rather than merely asserting
+  `ValidationError` was raised. `ruff check`/`ruff format` clean. Next: T002. Watch: none.
