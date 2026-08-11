@@ -389,3 +389,39 @@ Append-only. One line per stage transition and per gate outcome, written at the 
   from T012; T013 added no tests). `poetry run pre-commit run --all-files` — all hooks green.
   `DJANGO_SETTINGS_MODULE=tests.settings poetry run django-admin makemigrations --check --dry-run`
   — "No changes detected", exit 0. Story complete; no tasks remain in `tasks.md`.
+- **2026-08-11 — S5 CONVERGE.** All six stories merged to the feature branch. Migration
+  consolidation: nothing to do — the only migration this feature introduces is the test app's
+  initial one, generated once by T002 and never amended. `craft-simplify` cleanup pass applied to
+  the feature diff. ADR graduation: nine decisions in `decisions.md`, each carrying an explicit
+  `**ADR:**` verdict; none met the bar (durable AND architectural AND non-obvious) for a
+  `docs/adr/` file, and the verdicts record why. `forge verify` green, `check-story-comments`
+  green after backfilling the missing markers, `stage-exit --stage S5` green.
+- **2026-08-11 — S6 REVIEW.** One round, one reviewer (correctness + spec-compliance lens), on
+  Opus, receipts verified. The security and architecture lenses were deliberately not run: the
+  diff touches no trust boundary, and the implementation did not deviate from the reviewed design.
+  Five findings, each reproduced against the branch before any edit and each fix proved by
+  reinstating the defect and watching the new test fail.
+  - **F1 (high)** — both readback accessors raised `RelatedObjectDoesNotExist` on a *required*
+    field with nothing attached, because they read the concept with a two-argument `getattr`. The
+    only test covering the empty case used a nullable field. Against FR-008, FR-009, the
+    accessors' own docstring and the README. Fixed with a three-argument `getattr`.
+  - **F2 (medium)** — `validate()` replaced Django's error `params` instead of merging into them,
+    so a consumer whose `error_messages["invalid"]` referenced `model`, `pk` or `field` got a
+    `KeyError` on first read — a 500 during form-error rendering. Fixed by merging.
+  - **F3 (medium)** — a consumer's own `limit_choices_to` was silently overwritten, while
+    `on_delete` two lines above is refused loudly. Now refused the same way (`decisions.md` D9).
+  - **F4 (low)** — the translatable-strings AST sweep recognised only `ast.Constant`, so an
+    f-string message would have passed clean. `ast.JoinedStr` now reports its source text.
+  - **F5 (low)** — the README named the wrong query as the conditional one, inverting
+    `research.md` R7's prefetching advice.
+
+  Suite 1080 after remedies. Review report posted as a bot comment on PR #96.
+- **2026-08-11 — S7 PR_READY.** PR body rewritten to contract with seven `Closes` lines (epic plus
+  six stories). `stage-exit --stage S7` green after backfilling ADR verdicts for D7 and D9. CI: the
+  Python 3.13 legs failed twice on a restored Poetry venv missing the project's own dependencies,
+  passed on re-run, and `main`'s same legs were green throughout — a shared-workflow cache flake,
+  not this diff, filed as `django-mvp/shared#22`. All nine checks green.
+- **2026-08-11 — GATE_MERGE: merged by Sam.** PR #96 merged to `main` at 16:31:13Z as
+  `cf17c2d`. The `Closes` block closed the epic (#86) and all six story sub-issues (#90–#95)
+  atomically. Ledger closed by `forge ledger-close`; `stage-exit --stage S8` green. Retro in
+  `engineering-org/runs/django-controlled-vocabularies/009-attach-concept-to-model/`.
