@@ -1,0 +1,9 @@
+{
+  "@context": [
+    { "skos": "http://www.w3.org/2004/02/skos/core#" },
+    [ { "@import": "exfil_secret.jsonld" } ]
+  ],
+  "@graph": [
+    { "@id": "http://example.org/nested-array/", "@type": "skos:ConceptScheme" }
+  ]
+}

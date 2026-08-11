@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -51,6 +52,16 @@ _CONTENT_TYPE_SERIALIZATIONS = {
 _TIMEOUT_SECONDS = 30
 _CHUNK_SIZE = 64 * 1024
 _MAX_RESPONSE_BYTES = 50 * 1024 * 1024  # 50 MiB
+
+# The third bound, and the one the other two do not cover (SEC-703, decisions.md D21).
+# _TIMEOUT_SECONDS is a per-socket-read timeout and _MAX_RESPONSE_BYTES counts bytes, so a
+# server that answers continuously but slowly — one byte every few seconds — resets the read
+# timeout forever and never approaches the ceiling. Measured on the branch before this: a
+# stub trickling one byte per 20s was still being read after 65 seconds having transferred
+# 3 bytes, and would never have stopped. Generous against the same real vocabularies the
+# other two are sized against: 50 MiB inside ten minutes is 85 KiB/s, slower than any
+# publisher this command is pointed at, and it is a stop rather than a rate limit.
+_MAX_TOTAL_SECONDS = 600  # 10 minutes
 
 # An opener carrying only the http/https handlers (T008, research.md R3): a handler
 # removed, not a check added. Python's default opener's HTTPRedirectHandler permits a
@@ -97,6 +108,9 @@ class ResolvedSource:
 class _Fetched:
     path: Path
     content_type: str | None
+    #: The address the document was actually served from, which differs from the one the
+    #: operator typed whenever a redirect was followed (CORR-001, decisions.md D20).
+    final_url: str
 
 
 class SourceResolver:
@@ -135,7 +149,7 @@ class SourceResolver:
             return ResolvedSource(path=self.source, base_uri=None, serialization=self.serialization)
         fetched = self._fetch()
         serialization = self._resolve_serialization(fetched)
-        return ResolvedSource(path=str(fetched.path), base_uri=self.source, serialization=serialization)
+        return ResolvedSource(path=str(fetched.path), base_uri=fetched.final_url, serialization=serialization)
 
     def _retrieval_error(self, exc: OSError) -> CommandError:
         """The one message for a retrieval that could not complete (T008, T010, FR-014).
@@ -157,9 +171,18 @@ class SourceResolver:
             raise self._retrieval_error(exc) from exc
         with response:
             content_type = response.headers.get_content_type()
+            # The address the response actually came from, not the one asked for
+            # (CORR-001, decisions.md D20). A vocabulary is very often published behind a
+            # redirecting address — a PURL, a w3id, a "/latest" alias — and RFC 3986 §5.1.3
+            # makes the *final* URL the base a relative identifier resolves against. Taking
+            # the typed address instead stored every relative identifier under a URI its
+            # publisher never assigned, so a later import from the canonical address created
+            # a second copy of the whole vocabulary — the outcome D10 exists to prevent.
+            final_url = response.url
             fd, name = tempfile.mkstemp()
             self._temp_path = Path(name)
             written = 0
+            started = time.monotonic()
             with os.fdopen(fd, "wb") as tmp:
                 while True:
                     try:
@@ -174,8 +197,13 @@ class SourceResolver:
                             str(_("'%(source)s' exceeded the maximum response size and was abandoned."))
                             % {"source": self.source}
                         )
+                    if time.monotonic() - started > _MAX_TOTAL_SECONDS:
+                        raise CommandError(
+                            str(_("'%(source)s' took too long to transfer and was abandoned."))
+                            % {"source": self.source}
+                        )
                     tmp.write(chunk)
-        return _Fetched(path=self._temp_path, content_type=content_type)
+        return _Fetched(path=self._temp_path, content_type=content_type, final_url=final_url)
 
     def _resolve_serialization(self, fetched: _Fetched) -> str:
         """Resolve a fetched document's serialization (T009, research.md R4): explicit
@@ -186,7 +214,11 @@ class SourceResolver:
         """
         if self.serialization:
             return self.serialization
-        guessed = rdflib.util.guess_format(urlsplit(self.source).path)
+        # Guessed from the address the document was served from, for the same reason the
+        # base URI is (CORR-001, decisions.md D20): an extensionless PURL redirecting to a
+        # ".ttl" is the ordinary shape, and guessing from the typed address would fall
+        # through to Content-Type or a refusal for a source that names its format plainly.
+        guessed = rdflib.util.guess_format(urlsplit(fetched.final_url).path)
         if guessed:
             return guessed
         mapped = _CONTENT_TYPE_SERIALIZATIONS.get(fetched.content_type or "")

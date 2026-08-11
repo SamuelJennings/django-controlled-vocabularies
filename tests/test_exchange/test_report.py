@@ -486,3 +486,69 @@ class TestReasonTemplatesUseOnlyNamedPlaceholders:
         assert uses_only_named_placeholders(template), (
             f"{reason} template carries something other than a named placeholder: {template!r}"
         )
+
+
+class TestDocumentSuppliedTextCannotDriveTheTerminal:
+    """SEC-702 (review, security lens, decisions.md D22) — every value in an entry is
+    text the source document chose, and since #52 that document can come from a remote
+    server and its account is written to an operator's terminal.
+
+    ``\\x1b[2K\\r`` erases the line being written and ``\\x1b[1A`` moves the cursor over
+    the one above, so before this a published label could overwrite the report of itself.
+    Measured on the branch: a refusal read ``'Innocent\\x1b[2K\\rALL CLEAR - 0 problems
+    found.\\x1b[1A' has no identifier that survives re-serialization`` — with the escape
+    sequences intact. It matters most under ``--rehearse``, whose only product is the
+    text an operator reads before deciding to commit.
+
+    Stripping happens at ``_render_params``, the one boundary all three entry kinds pass
+    through, so all three are covered by construction rather than one at a time.
+    """
+
+    _HOSTILE = "Innocent\x1b[2K\rALL CLEAR - 0 problems found.\x1b[1A"
+
+    def test_a_set_aside_subject_cannot_carry_an_escape_sequence(self):
+        entry = SetAsideEntry(
+            reason=SetAsideReason.UNCONFIGURED_LANGUAGE,
+            subject=self._HOSTILE,
+            params={"language": "es"},
+        )
+        rendered = entry.render()
+        assert "\x1b" not in rendered
+        assert "\r" not in rendered
+        # The text itself survives — this strips the control characters, it does not
+        # discard the value or replace it with a placeholder.
+        assert "Innocent" in rendered
+
+    def test_a_fatal_subject_cannot_carry_an_escape_sequence(self):
+        finding = FatalFinding(reason=FatalReason.REFUSED_IDENTITY, subject=self._HOSTILE, params={})
+        assert "\x1b" not in finding.render()
+
+    def test_a_normalized_param_cannot_carry_an_escape_sequence(self):
+        entry = NormalizedEntry(
+            reason=NormalizedReason.LANGUAGE_SUBSTITUTION,
+            subject="https://example.org/vocab/rocks/granite",
+            params={"language": "en-gb\x1b[1A", "kept_as": "en"},
+        )
+        assert "\x1b" not in entry.render()
+
+    def test_a_newline_cannot_fake_an_additional_report_line(self):
+        # The carve-out the usual "control characters minus \n and \t" rule would leave:
+        # a report entry is one line by construction, so an embedded newline both breaks
+        # the format and lets a document write a line of the account itself.
+        entry = SetAsideEntry(
+            reason=SetAsideReason.UNCONFIGURED_LANGUAGE,
+            subject="granite\n8 records created.",
+            params={"language": "es"},
+        )
+        assert "\n" not in entry.render()
+
+    def test_an_ordinary_subject_and_params_are_untouched(self):
+        # The control: stripping must be invisible to every real vocabulary.
+        entry = SetAsideEntry(
+            reason=SetAsideReason.UNCONFIGURED_LANGUAGE,
+            subject="https://example.org/vocab/rocks/granite (Granit, Gränit)",
+            params={"language": "es"},
+        )
+        rendered = entry.render()
+        assert "https://example.org/vocab/rocks/granite (Granit, Gränit)" in rendered
+        assert "es" in rendered

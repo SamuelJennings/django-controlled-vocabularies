@@ -221,10 +221,12 @@ python manage.py import_skos rocks.ttl
 ```
 
 The source can be a local filesystem path or an `http://`/`https://` URL, told apart by the value
-itself rather than by a flag. A URL is fetched under a fixed 30-second timeout and a fixed 50 MiB
-response ceiling, over a connection that only ever speaks http and https, and the fetched
-document's identifiers resolve against the address it came from — so a re-import updates the same
-concepts the first import created, rather than a second copy keyed by a temporary file path.
+itself rather than by a flag. A URL is fetched under a fixed 30-second read timeout, a fixed 50 MiB
+response ceiling and a fixed ten-minute deadline for the whole transfer, over a connection that
+only ever speaks http and https. The fetched document's identifiers resolve against the address it
+was served from, following any redirect — so a vocabulary published behind a PURL or a `/latest`
+alias is stored under the URIs its publisher assigned, and a re-import updates the same concepts
+the first import created rather than making a second copy.
 
 - `--format` names the source's serialization (`turtle`, `xml`, or `json-ld`), for a source whose
   extension or `Content-Type` does not.
@@ -234,6 +236,7 @@ concepts the first import created, rather than a second copy keyed by a temporar
 - `--verbosity`, Django's own option, prints bucket counts by default — how many records were
   created, updated, set aside, normalized, or absent from the source, plus the set-aside account
   grouped by reason and by language. At `2` or above, every individual set-aside entry prints too.
+  At `0` nothing prints at all, as with any Django command.
 
 A refusal exits non-zero and prints every reason the run was refused. A run that sets values aside
 still exits zero: importing a vocabulary published in more languages than a site is configured for

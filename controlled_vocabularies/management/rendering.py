@@ -28,9 +28,10 @@ class ReportRenderer:
     run's (T014, FR-010, `decisions.md` D9): when set, one extra line states that nothing was
     kept, so a rehearsal's counts are never mistaken for a completed import.
 
-    ``verbosity`` carries Django's own ``--verbosity`` (T018, FR-007, `decisions.md` D6): at the
-    default of 1, the set-aside account is counts only; at 2 or above, each set-aside entry also
-    prints, rendered by the entry's own ``render()``. No flag of this feature's own.
+    ``verbosity`` carries Django's own ``--verbosity`` (T018, FR-007, `decisions.md` D6): at 0
+    nothing prints at all, which is Django's own contract for that value (CORR-004, decisions.md
+    D23); at the default of 1, the set-aside account is counts only; at 2 or above, each set-aside
+    entry also prints, rendered by the entry's own ``render()``. No flag of this feature's own.
     """
 
     def __init__(self, report: ImportReport, *, rehearsal: bool = False, verbosity: int = 1) -> None:
@@ -41,7 +42,15 @@ class ReportRenderer:
     def render(self) -> Iterator[str]:
         """Yield translated lines: bucket counts, then the set-aside account (grouped by reason,
         per-entry detail at raised verbosity, then the per-language account), then the records
-        absent from the source, then the rehearsal line."""
+        absent from the source, then the rehearsal line. Nothing at all at ``--verbosity 0``."""
+        if self.verbosity == 0:
+            # CORR-004 (review, correctness): D6 justifies reusing Django's own option on the
+            # grounds that it "already means exactly this and every management command an
+            # operator has ever run supports it" — and Django's contract for 0 is no output.
+            # Only the >= 2 branch below existed, so a deployment script silencing this command
+            # the documented Django way got the full report on stdout. A refusal is unaffected:
+            # it is raised as a CommandError, not rendered here.
+            return
         yield str(
             ngettext_lazy("%(count)d record created.", "%(count)d records created.", len(self.report.created))
         ) % {"count": len(self.report.created)}

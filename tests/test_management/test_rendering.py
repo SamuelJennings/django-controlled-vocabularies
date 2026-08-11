@@ -217,3 +217,21 @@ class TestReportRendererVerbosity:
         report = ImportReport(set_aside=[entry])
         lines = [str(line) for line in ReportRenderer(report, verbosity=2).render()]
         assert entry.render() in lines
+
+    def test_verbosity_zero_prints_nothing_at_all(self):
+        # CORR-004 (review, correctness): D6 justifies reusing --verbosity on the grounds
+        # that Django's own option "already means exactly this", and Django's contract for
+        # 0 is no output. Only the >= 2 branch existed, so a deployment script silencing
+        # this command the documented way got the whole report on stdout.
+        report = self._report_with_several_hundred_set_asides()
+        assert list(ReportRenderer(report, verbosity=0).render()) == []
+
+    def test_verbosity_zero_silences_the_rehearsal_line_too(self):
+        # The rehearsal line is the one thing that could argue for an exception, since it
+        # says nothing was kept. It does not get one: at 0 there is no output to qualify,
+        # and a rehearsal at --verbosity 0 writes nothing anywhere either way.
+        assert list(ReportRenderer(ImportReport(), rehearsal=True, verbosity=0).render()) == []
+
+    def test_the_default_verbosity_still_prints_the_counts(self):
+        # The control: silencing 0 must not silence the default.
+        assert list(ReportRenderer(ImportReport()).render()) != []

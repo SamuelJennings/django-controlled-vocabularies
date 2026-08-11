@@ -18,7 +18,8 @@ every protocol not overridden by an instance of the same default class, so
 live `FTPHandler`, `FileHandler` and `DataHandler`. The last two entries above are what make an
 unhandled scheme and a non-2xx status raise, rather than `open()` returning `None`.
 
-Transfers are also bounded by a read timeout and a total byte ceiling.
+Transfers are also bounded three ways: a read timeout, a total byte ceiling, and a deadline on the
+elapsed time of the whole transfer.
 
 ## Why
 
@@ -44,6 +45,13 @@ The size ceiling exists for a related reason. The timeout bounds each socket rea
 so a server that answers slowly but continuously never trips it, and nothing otherwise bounds how
 much is written to disk and then read again by the safety scan — whose own purpose includes
 resisting oversized documents.
+
+The elapsed-time deadline was added later, because the paragraph above was wrong to offer the size
+ceiling as the answer to that slow server. The ceiling counts bytes, and the case it was offered
+for sends almost none. A server trickling a byte every few seconds resets the read timeout
+indefinitely and never comes near the ceiling: measured against a local stub, a fetch was still
+running after 65 seconds having transferred 3 bytes, and would not have stopped on its own. So
+there are three bounds rather than two, and each catches something the others cannot.
 
 None of this contradicts ADR 0004. That decision declines to guard the operator against their own
 mistakes. This one guards the process against what a third party sends it, which is the other side

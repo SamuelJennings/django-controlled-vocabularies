@@ -12,8 +12,17 @@ therefore resolve to the publisher's URIs, not to the copy's location.
 Omitted — which is every local-file caller — the parse takes its base from the file's own location,
 unchanged.
 
-The same value decides what a refusal calls the source. A failure on a fetched document names the
-address the operator typed, never the temporary file it happened to land in.
+Where a redirect was followed, the published address is the one the document was *served* from, not
+the one the operator typed. A vocabulary is commonly published behind a redirecting address — a
+PURL, a w3id, a `/latest` alias — and RFC 3986 §5.1.3 makes the final URL the base a relative
+identifier resolves against. Taking the typed address instead stores every relative identifier
+under a URI the publisher never assigned, so a later import from the canonical address creates a
+second copy of the whole vocabulary: the same failure this decision exists to prevent, reached by a
+route the first version of it did not cover.
+
+A refusal is the one thing that still names the typed address, never the served one and never the
+temporary file the bytes landed in. An operator who typed an address should be told about the
+address they typed.
 
 ## Why
 

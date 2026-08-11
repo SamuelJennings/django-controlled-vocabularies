@@ -40,6 +40,7 @@ before rdflib sees the document.
 |---|---|---|
 | `remote_context_string.jsonld` | `"@context"` as a bare string URL | The plainest form of the fetch. Refused with code `jsonld_remote_context_forbidden`. |
 | `remote_context_array.jsonld` | The same URL as one entry in an `@context` array, alongside a legitimate inline term map | Proves the scan walks array contexts instead of only checking the top-level string form. |
+| `remote_context_nested_array.jsonld` | The same URL one level deeper, inside an array *within* the `@context` array | `Context._prep_sources` recurses into a nested array to any depth and fetches every string it reaches; the scan's array branch used to check only string and object entries, so this shape passed it (SEC-701, decisions.md D19). |
 
 ### `@import` inside a context
 
@@ -47,12 +48,13 @@ before rdflib sees the document.
 and resolves a string value through the same `urlopen`-backed path a string `@context`
 uses. An inline object context was previously waved through on the reasoning that it
 "carries nothing to resolve", which was false — this is the measured defect behind
-decisions.md D47. All four are refused with code `jsonld_context_import_forbidden`.
+decisions.md D47. All five are refused with code `jsonld_context_import_forbidden`.
 
 | File | Where the `@import` hides |
 |---|---|
 | `exfil_via_import.jsonld` | The document's own top-level `@context`. This is the measured exploit: read through rdflib directly it merges in `exfil_secret.jsonld` and the leaked prefix resolves the scheme's URI to `http://example.org/SECRET-FROM-LOCAL-FILE/scheme` — the contents of a file the caller never named, chosen by the uploaded document. |
 | `context_import_array.jsonld` | An entry inside an `@context` array |
+| `context_import_nested_array.jsonld` | An object inside an array inside the `@context` array — the same hole as `remote_context_nested_array.jsonld`, reached by the other of the two fetch-triggering keys (SEC-701) |
 | `context_import_nested_term.jsonld` | A term definition's own scoped `@context` |
 | `context_import_graph_node.jsonld` | A node's own `@context` inside `@graph` |
 

@@ -506,3 +506,64 @@ class TestImportSkosCommandCarriesVerbosityIntoTheRenderer:
         assert report.set_aside
         for entry in report.set_aside:
             assert str(entry.render()) in rendered
+
+
+class TestImportSkosCommandRemovesTheFetchedTemporaryFile:
+    """CORR-002 (review, correctness) — ``handle()``'s ``finally: resolver.cleanup()`` was
+    the only guarantee that a fetched document's temporary file is removed, and nothing at
+    the command level checked it.
+
+    Every existing cleanup assertion lives in ``tests/test_management/test_sources.py``,
+    where the test body calls ``resolver.cleanup()`` itself — so they prove the resolver
+    can clean up, not that the command does. Moving the call out of the ``finally`` and
+    into the success path left the whole suite green while every refused URL import leaked
+    a file of up to the byte ceiling.
+
+    Both paths are pinned here because they fail differently: the success path leaks on a
+    misplaced call, the raise path leaks only when the ``finally`` itself is lost.
+    """
+
+    @staticmethod
+    def _watch_temp_paths(monkeypatch):
+        """Record the temp path of every resolver the command builds, then clean up as
+        usual — the path is private to the resolver and gone by the time the command
+        returns, so it has to be captured as it happens."""
+        seen = []
+        original = sources.SourceResolver.cleanup
+
+        def recording_cleanup(self):
+            if self._temp_path is not None:
+                seen.append(self._temp_path)
+            return original(self)
+
+        monkeypatch.setattr(sources.SourceResolver, "cleanup", recording_cleanup)
+        return seen
+
+    def test_a_completed_url_import_leaves_no_temporary_file(self, db, http_stub, monkeypatch):
+        seen = self._watch_temp_paths(monkeypatch)
+        http_stub.set_response(
+            "/rocks.ttl", status=200, body=(FIXTURES / "rocks.ttl").read_bytes(), content_type="text/turtle"
+        )
+        call_command("import_skos", http_stub.url + "/rocks.ttl", stdout=StringIO())
+        assert len(seen) == 1, "the command built no resolver, so this test proves nothing"
+        assert not seen[0].exists()
+
+    def test_a_refused_url_import_leaves_no_temporary_file(self, db, http_stub, monkeypatch):
+        # The fetch succeeds and the import is what fails, so the file exists at the moment
+        # the refusal is raised — the case a cleanup outside the finally would leak.
+        seen = self._watch_temp_paths(monkeypatch)
+        http_stub.set_response(
+            "/vocab.ttl", status=200, body=b"<html><body>Not found</body></html>", content_type="text/turtle"
+        )
+        with pytest.raises(CommandError):
+            call_command("import_skos", http_stub.url + "/vocab.ttl", stdout=StringIO())
+        assert len(seen) == 1, "the command built no resolver, so this test proves nothing"
+        assert not seen[0].exists()
+
+    def test_a_local_path_import_deletes_nothing(self, db, monkeypatch):
+        # The control: cleanup is a no-op for a path source, and the file the operator
+        # named is theirs, not a temporary the command may remove.
+        seen = self._watch_temp_paths(monkeypatch)
+        call_command("import_skos", str(FIXTURES / "rocks.ttl"), stdout=StringIO())
+        assert seen == []
+        assert (FIXTURES / "rocks.ttl").exists()

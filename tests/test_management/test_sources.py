@@ -43,13 +43,14 @@ class TestHTTPStubFixture:
             urllib.request.urlopen(http_stub.url + "/never-configured.ttl")  # noqa: S310 -- stub is localhost-only
         assert exc_info.value.code == 404
 
-    def test_each_test_gets_a_fresh_server_on_its_own_port(self, http_stub):
-        # A prior test's server is torn down (conftest's try/finally around
-        # serve_forever) rather than left bound, so a second http_stub fixture
-        # is free to claim a fresh ephemeral port without colliding.
-        http_stub.set_response("/vocab.ttl", status=200, body=b"ok")
-        with urllib.request.urlopen(http_stub.url + "/vocab.ttl") as response:  # noqa: S310 -- stub is localhost-only
-            assert response.read() == b"ok"
+    # CORR-003 (review, correctness): test_each_test_gets_a_fresh_server_on_its_own_port
+    # was deleted here. It was a byte-for-byte duplicate of the success case above minus
+    # the status and content-type assertions, and it recorded no port and referenced no
+    # prior server, so it could not distinguish a torn-down stub from a leaked one —
+    # deleting conftest's try/finally left it green. The honest replacement, probing the
+    # previous test's port, is flaky by construction: an ephemeral port the OS has since
+    # handed to another process reads as a leak. A test that cannot fail for its own
+    # reason and can fail for someone else's is worth less than the two lines it costs.
 
 
 class TestSourceResolverClassification:
@@ -116,6 +117,36 @@ class TestSourceResolverFetch:
         resolved = resolver.resolve()
         try:
             assert Path(resolved.path).read_bytes() == b"redirected body"
+            # CORR-001 (review, correctness): the base URI is the address the document was
+            # served from, not the one typed. This test asserted only on the bytes, so
+            # nothing pinned which of the two a redirected fetch reported.
+            assert resolved.base_uri == http_stub.url + "/target.ttl"
+        finally:
+            resolver.cleanup()
+
+    def test_a_fetch_with_no_redirect_reports_the_address_it_was_given(self, http_stub):
+        # The control for the line above: taking the base URI off the response must not
+        # change what an ordinary, unredirected fetch reports.
+        http_stub.set_response("/vocab.ttl", status=200, body=b"body", content_type="text/turtle")
+        resolver = SourceResolver(http_stub.url + "/vocab.ttl", serialization="turtle")
+        resolved = resolver.resolve()
+        try:
+            assert resolved.base_uri == http_stub.url + "/vocab.ttl"
+        finally:
+            resolver.cleanup()
+
+    def test_a_redirect_target_names_the_serialization_the_typed_address_does_not(self, http_stub):
+        # The second half of CORR-001: an extensionless redirecting address (a PURL, a
+        # w3id) landing on a ".ttl" is the ordinary publishing shape. Guessing from the
+        # typed address finds no extension and falls through; guessing from the served
+        # address reads it straight off. No --format and no Content-Type here, so the
+        # extension is the only thing that can answer.
+        http_stub.set_response("/latest", status=302, headers={"Location": http_stub.url + "/v2/rocks.ttl"})
+        http_stub.set_response("/v2/rocks.ttl", status=200, body=b"body")
+        resolver = SourceResolver(http_stub.url + "/latest")
+        resolved = resolver.resolve()
+        try:
+            assert resolved.serialization == "turtle"
         finally:
             resolver.cleanup()
 
@@ -144,6 +175,36 @@ class TestSourceResolverFetch:
         assert temp_path is not None
         resolver.cleanup()
         assert not temp_path.exists()
+
+    def test_a_transfer_exceeding_the_total_deadline_is_abandoned(self, http_stub, monkeypatch):
+        # SEC-703 (review, security): neither of the other two bounds catches a server
+        # that answers continuously but slowly. The read timeout is per read, so a
+        # trickle resets it forever, and the byte ceiling counts bytes a trickle never
+        # sends. Measured before this bound existed: 65 seconds elapsed, 3 bytes
+        # transferred, still running. The deadline is shortened here rather than the
+        # trickle slowed, so the test costs a fraction of a second.
+        monkeypatch.setattr(sources, "_MAX_TOTAL_SECONDS", 0)
+        url = http_stub.url + "/slow.ttl"
+        http_stub.set_response("/slow.ttl", status=200, body=b"x" * 1000, content_type="text/turtle")
+        resolver = SourceResolver(url, serialization="turtle")
+        with pytest.raises(CommandError) as exc_info:
+            resolver.resolve()
+        assert url in str(exc_info.value)
+        assert "too long" in str(exc_info.value)
+        temp_path = resolver._temp_path
+        assert temp_path is not None
+        resolver.cleanup()
+        assert not temp_path.exists()
+
+    def test_an_ordinary_fetch_is_well_inside_the_total_deadline(self, http_stub):
+        # The control: the deadline must be a stop for a pathological server, not a
+        # bound an ordinary local fetch can approach.
+        http_stub.set_response("/vocab.ttl", status=200, body=b"x" * 1000, content_type="text/turtle")
+        resolver = SourceResolver(http_stub.url + "/vocab.ttl", serialization="turtle")
+        started = time.monotonic()
+        resolver.resolve()
+        resolver.cleanup()
+        assert time.monotonic() - started < sources._MAX_TOTAL_SECONDS
 
 
 class TestSourceResolverSerializationLadder:

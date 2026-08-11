@@ -456,3 +456,129 @@ of T018's own tests.
 deleting a wiring task after moving the thing it wires leaves later arguments unrouted.
 
 **ADR:** no — a wiring defect and its regression test, recorded here.
+
+## D19 — The JSON-LD context scan walks nested arrays, because rdflib does
+
+**Decided by:** S6 review, security lens (SEC-701) · **Files:** `exchange/safety.py`
+
+`_check_context_value`'s array branch checked `str` entries and `dict` entries and silently
+ignored anything else. `Context._prep_sources` ends with `if isinstance(source, list):
+self._prep_sources(...)` — it recurses into a nested array to any depth and hands every string
+it reaches to `_fetch_context`, the same `urlopen`-backed path a bare string `@context` uses.
+So `{"@context": [["http://…"]]}` passed the scan and was fetched, `[["file:///…"]]` read a
+local file into the graph, and `[[{"@import": …}]]` reached the other fetch-triggering key the
+same way — while the flat forms either side of them were correctly refused. Measured on the
+branch before the fix, not inferred.
+
+The remedy is a recursion rather than a second hard-coded level: every entry of an array goes
+back through `_check_context_value` whatever its type, so a string is refused, a dict is checked
+for `@import`, and an array is walked. Two fixtures and a depth-4 case pin it, and an inline
+term map nested in an array is the control that the walk did not become a blanket refusal.
+
+This is a pre-existing hole in D36/D47's scan, not something #52 introduced. What #52 changed is
+who chooses the document: until this feature the file came from a curator's own disk, and now it
+can come from a remote server. That is why the lens caught it here, and why it is high rather
+than a note.
+
+**Revisit if:** rdflib changes how it resolves contexts — the scan tracks `_prep_sources` and
+`_read_source`, and a new fetch-triggering key would need its own branch.
+
+**ADR:** no — implements ADR 0007's existing posture; the ADR needs no amendment for it.
+
+## D20 — A fetched document's base URI is the address it was served from, not the one typed
+
+**Decided by:** S6 review, correctness lens (CORR-001) · **Files:** `management/sources.py`
+
+`resolve()` returned `base_uri=self.source`, the raw argument, and `_resolve_serialization`
+guessed the extension from it. Both now come from `response.url`, the address urllib actually
+landed on.
+
+RFC 3986 §5.1.3 makes the final URL the base a relative identifier resolves against, and a
+published vocabulary is very often behind a redirecting address — a PURL, a w3id, a `/latest`
+alias. Taking the typed address stored every relative identifier under a URI its publisher never
+assigned, so a later import from the canonical address created a second copy of the whole
+vocabulary: exactly the outcome D10 exists to prevent, reintroduced along a path D10 never
+covered. The existing redirect test asserted only on the returned bytes, so nothing pinned which
+of the two addresses a redirected fetch reported.
+
+The serialization ladder moves for the same reason and gains something: an extensionless PURL
+redirecting to a `.ttl` used to fall through the extension rung to `Content-Type` or a refusal,
+and now reads the extension straight off the served address.
+
+Error messages still name `self.source`. An operator who typed an address should be told about
+the address they typed, and that is unchanged.
+
+**Revisit if:** a publisher is found whose canonical identity is the alias rather than the target.
+The choice would then be per-source and would need an option, which no evidence yet asks for.
+
+**ADR:** no — an RFC-conformance fix inside D10's existing decision, recorded here.
+
+## D21 — A total transfer deadline, because neither existing bound catches a trickle
+
+**Decided by:** S6 review, security lens (SEC-703) · **Files:** `management/sources.py`
+
+`_TIMEOUT_SECONDS` is a per-socket-read timeout and `_MAX_RESPONSE_BYTES` counts bytes, so a
+server that answers continuously but slowly resets the read timeout forever and never approaches
+the ceiling. Measured: a stub trickling one byte every 20 seconds was still being read after 65
+seconds having transferred 3 bytes, and would never have stopped. ADR 0007 named the byte ceiling
+as the answer to a slow server, which was wrong in the one case where slowness is deliberate; the
+ADR is corrected in the same change.
+
+`_MAX_TOTAL_SECONDS = 600` bounds elapsed time in the same place the byte ceiling is checked. It
+is generous against the same real vocabularies D16 sized the other two against — 50 MiB inside
+ten minutes is 85 KiB/s — and it is a stop, not a rate limit. The reachable consequence was a
+hung deployment or CI step rather than anything worse, which is why this is a low finding fixed
+with one constant and one comparison.
+
+**Revisit if:** a legitimate publisher is found that cannot deliver inside ten minutes. The
+constant moves; the bound stays.
+
+**ADR:** no — an amendment to ADR 0007, made in the ADR itself.
+
+## D22 — Control characters are stripped from every document-supplied value in a report
+
+**Decided by:** S6 review, security lens (SEC-702) · **Files:** `exchange/report.py`
+
+A report entry's subject and params are text the source document chose — a `skos:prefLabel`,
+a language tag, a predicate name — and since #52 that document can be one a remote server hands
+over, rendered straight to an operator's terminal. `\x1b[2K\r` erases the line being written and
+`\x1b[1A` moves the cursor over the one above, so a published label could overwrite the account
+of itself. Measured on the branch: a refusal printed `'Innocent\x1b[2K\rALL CLEAR - 0 problems
+found.\x1b[1A' has no identifier that survives re-serialization`, escapes intact. It matters most
+under `--rehearse`, whose entire product is the text an operator reads before deciding to commit.
+
+`_render_params` strips the C0 and C1 ranges from every string value. That function is the one
+boundary all three entry kinds pass through, so fatal, set-aside and normalized entries are
+covered by construction rather than one at a time — the same reason D64 put the empty-language
+substitution there.
+
+The range includes newline and tab, which the usual carve-out keeps. A report entry is one line
+by construction, so an embedded newline both breaks the format and lets a document write a line
+of the account itself.
+
+This is not a guard against operator error, which ADR 0004 rules out of scope. It is the other
+side of that ruling, which ADR 0007 states: content chosen by a remote server is untrusted.
+
+**Revisit if:** a report value ever needs to carry a newline legitimately — a multi-line
+definition rendered as a block rather than a line would need its own path.
+
+**ADR:** no — implements ADR 0007's existing posture.
+
+## D23 — `--verbosity 0` prints nothing, which is Django's own contract for it
+
+**Decided by:** S6 review, correctness lens (CORR-004) · **Files:** `management/rendering.py`
+
+D6 justified carrying Django's `--verbosity` rather than inventing a flag on the grounds that it
+"already means exactly this and every management command an operator has ever run supports it".
+`render()` branched only at `>= 2`, so 0 printed the full report and the borrowed convention was
+honoured in one direction and not the other. A deployment script silencing this command the
+documented Django way got the whole account on stdout.
+
+`render()` now yields nothing at 0, including the rehearsal line: at 0 there is no output for it
+to qualify, and a rehearsal writes nothing anywhere regardless. A refusal is unaffected, because
+it is raised as a `CommandError` rather than rendered.
+
+**Revisit if:** an operator wants counts without detail and detail without counts, which would be
+three levels rather than Django's four and would argue for a flag after all.
+
+**ADR:** no — completing D6's stated convention, recorded here.
