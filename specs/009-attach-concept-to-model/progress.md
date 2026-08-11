@@ -371,3 +371,21 @@ Append-only. One line per stage transition and per gate outcome, written at the 
   `TestFieldsChecksI18nSweep` parametrizations).
   `ruff check`/`ruff format` clean. Diff scope: `tests/test_standards.py`, `CONTEXT.md`,
   `specs/009-attach-concept-to-model/decisions.md`. No deviation from `tasks.md`. Next: T013.
+- **2026-08-11 — Implementer US-6 · T013.** Did: added "Attaching a concept to your model" to
+  `README.md`, between "Configuration" and "Importing a published vocabulary" — a `ConceptField`
+  declaration on a `Specimen` model, reading `rock_type`/`get_rock_type_label()`/
+  `get_rock_type_uri()` back, what happens when `"rock-type"` has not been imported yet (the
+  `controlled_vocabularies.W001` check, not a startup failure), and the `research.md` R7 finding
+  that `select_related("<field>__scheme")` + `prefetch_related("<field>__labels")` collapse the
+  readback's per-row queries. Added a matching `CHANGELOG.md` entry at the top of `### Added`
+  (newest-first, matching the file's own ordering), following the file's existing entry shape:
+  what the field does, its guarantees, and the missing-vocabulary behaviour, with "See the
+  README." No test required — a documentation-only task, and no test in the suite reads either
+  file. Neither file passed through the humanizer, per prohibition — that runs once for the whole
+  feature at S7. No production code touched; no deviation from `tasks.md`. No `decisions.md`
+  entry. Diff scope: `README.md`, `CHANGELOG.md`.
+
+  US-6 (T012, T013) complete. Full suite: `poetry run pytest -q` — 1074 passed (1064 + 10, all
+  from T012; T013 added no tests). `poetry run pre-commit run --all-files` — all hooks green.
+  `DJANGO_SETTINGS_MODULE=tests.settings poetry run django-admin makemigrations --check --dry-run`
+  — "No changes detected", exit 0. Story complete; no tasks remain in `tasks.md`.
