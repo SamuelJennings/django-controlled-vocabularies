@@ -43,9 +43,16 @@ cannot run ``validate()`` at all.
   T001's ``validate()`` override exists for, only reachable against a real,
   bound model. A concept from the correct vocabulary passes; an optional
   field with nothing attached passes.
+- ``TestConceptFieldFormChoices`` — T006 (US-2): a ``ModelForm`` generated
+  from a consuming model offers only the named vocabulary's concepts as
+  choices, and a submission carrying another vocabulary's concept is
+  rejected rather than saved — proof that ``ForeignKey.formfield()`` passes
+  ``limit_choices_to`` through, since nothing in this package's own source
+  states that guarantee.
 """
 
 import pytest
+from django import forms
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.db import connection
@@ -323,3 +330,43 @@ class TestConceptFieldValidation:
         sample = Sample(name="Unclassified sample")
 
         sample.full_clean()
+
+
+class SpecimenForm(forms.ModelForm):
+    """Test-only — the plain ``ModelForm`` Django would auto-generate from
+    ``Specimen``, used by T006 to prove ``limit_choices_to`` reaches a form's
+    field choices and submission validation without this package adding any
+    form-layer code of its own."""
+
+    class Meta:
+        model = Specimen
+        fields = ["name", "rock_type"]
+
+
+class TestConceptFieldFormChoices:
+    """T006 (US-2) — also no new code: ``ForeignKey.formfield()`` passes
+    ``limit_choices_to`` through. This class is the proof FR-006 needs."""
+
+    @pytest.mark.django_db
+    def test_form_field_offers_only_the_named_vocabularys_concepts(self):
+        rock_scheme = ConceptSchemeFactory(name="Rock Type")
+        matching_concept = ConceptFactory(scheme=rock_scheme)
+        other_scheme = ConceptSchemeFactory(name="Mineral")
+        other_concept = ConceptFactory(scheme=other_scheme)
+
+        form = SpecimenForm()
+        choices = list(form.fields["rock_type"].queryset)
+
+        assert matching_concept in choices
+        assert other_concept not in choices
+
+    @pytest.mark.django_db
+    def test_form_submission_with_another_vocabularys_concept_is_rejected(self):
+        other_scheme = ConceptSchemeFactory(name="Mineral")
+        other_concept = ConceptFactory(scheme=other_scheme)
+
+        form = SpecimenForm(data={"name": "Wrong vocabulary", "rock_type": other_concept.pk})
+
+        assert not form.is_valid()
+        assert "rock_type" in form.errors
+        assert Specimen.objects.count() == 0

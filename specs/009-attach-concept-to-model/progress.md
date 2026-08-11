@@ -200,3 +200,16 @@ Append-only. One line per stage transition and per gate outcome, written at the 
   assuming it from `fields.py`'s docstring. No new `decisions.md` entry — no deviation from
   `tasks.md`. Verified: `poetry run pytest -q tests/test_fields.py::TestConceptFieldValidation` — 3
   passed. Next: T006.
+- **2026-08-11 — Implementer US-2 · T006.** Did: added `TestConceptFieldFormChoices` (plus a
+  test-only `SpecimenForm(forms.ModelForm)`, `fields = ["name", "rock_type"]` — the plain form Django
+  would auto-generate) to `tests/test_fields.py` — also a proof task ("Also no new code"), so
+  `fields.py` stays unmodified. `form.fields["rock_type"].queryset` contains a concept from the
+  "Rock Type" scheme and excludes one from a "Mineral" scheme; a submission carrying the "Mineral"
+  concept's pk fails `is_valid()`, reports on `"rock_type"`, and leaves `Specimen.objects.count()` at
+  0 — rejected rather than saved. No new `decisions.md` entry — no deviation from `tasks.md`.
+  Verified: `poetry run pytest -q tests/test_fields.py` — 36 passed (31 + 5 across T005/T006). Full
+  suite: `poetry run pytest -q` — 1042 passed (1037 + 5). `poetry run pre-commit run --all-files` —
+  all hooks green (trim-whitespace, end-of-file, check-yaml, poetry-check, ruff lint, ruff format,
+  mypy, deptry). `DJANGO_SETTINGS_MODULE=tests.settings poetry run django-admin makemigrations
+  --check --dry-run` — "No changes detected", exit 0. Diff scope across both tasks: `tests/test_fields.py`
+  only. Next: US-3 (T007).
