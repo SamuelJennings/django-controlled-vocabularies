@@ -114,18 +114,18 @@ then the URL path's extension, then the response `Content-Type` mapped to the th
 serializations, then a refusal naming what is missing and how to supply it. A local path keeps
 today's behaviour untouched.
 
-## R5 — Rehearsing inside a transaction
+## R5 — Previewing inside a transaction
 
 `SkosImporter.run` already wraps its work in `transaction.atomic()` (`skos.py:1925`), and raises
 `SkosImportFailed` on a fatal finding, which is what rolls a refused run back today.
 
-A rehearsal needs the opposite: roll back a run that *succeeded*. The Django pattern is an outer
+A dry run needs the opposite: roll back a run that *succeeded*. The Django pattern is an outer
 `atomic()` block exited by raising a sentinel exception caught immediately outside it. The inner
 `atomic()` becomes a savepoint, and the outer rollback discards everything including the savepoint.
 
 **Taken into the plan:** the command wraps its call in an outer `atomic()` and raises a private
 sentinel after capturing the report. The importer is not modified and knows nothing about
-rehearsal, which is what keeps the rehearsal's report identical to a live one by construction
+dry run, which is what keeps the dry run's report identical to a live one by construction
 rather than by agreement.
 
 ## R6 — What the report already offers a renderer

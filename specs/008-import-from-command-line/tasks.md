@@ -58,7 +58,7 @@ each rebasing on the last. US-4 touches only `rendering.py` and runs alongside t
   `CommandError: Unknown command` once T003 lands.
 
 - **T015** — `ReportRenderer` in `management/rendering.py`. Takes an `ImportReport`, a verbosity and
-  the rehearsal flag, and yields translated lines. This task covers the bucket counts: created,
+  the dry run flag, and yields translated lines. This task covers the bucket counts: created,
   updated, set aside, normalized, absent from source.
 
   **Empty sections still print, saying so** (FR-007 read with #51's own FR-008): an absent section
@@ -66,7 +66,7 @@ each rebasing on the last. US-4 touches only `rendering.py` and runs alongside t
 
   It is Foundational rather than US-4's opening task because the command prints through it from its
   first line. A US-1 that printed its own output would have that output — and the tests asserting
-  it — rewritten by US-4, which is the one thing this task file forbids. US-3's rehearsal line is a
+  it — rewritten by US-4, which is the one thing this task file forbids. US-3's dry run line is a
   flag on this class for the same reason.
 
   Tests: a report with content renders each count; a report with nothing in it renders every
@@ -184,33 +184,33 @@ each rebasing on the last. US-4 touches only `rendering.py` and runs alongside t
   (SC-002); the `relative-uris.ttl` fixture served over the stub is stored under the stub's own
   address rather than under any `file://` path (SC-002, FR-003); nothing anywhere records the URL.
 
-## US-3 — A run can be rehearsed before it is kept (P1)
+## US-3 — A run can be dry-run before it is kept (P1)
 
-- **T012** — The rehearsal flag and its rollback (`research.md` R5, `decisions.md` D4). A
-  `--rehearse` flag wraps the `import_skos` call in an outer `transaction.atomic()` exited by
+- **T012** — The dry run flag and its rollback (`research.md` R5, `decisions.md` D4). A
+  `--dry-run` flag wraps the `import_skos` call in an outer `transaction.atomic()` exited by
   raising a private sentinel carrying the report, caught immediately outside the block. The
-  importer is not modified and learns nothing about rehearsal.
+  importer is not modified and learns nothing about dry run.
 
   The tests need a real transaction, so they use `transactional_db` rather than `db` — under the
   default `db` fixture the whole test already runs inside a transaction that is rolled back, which
-  would make a broken rehearsal pass.
+  would make a broken dry run pass.
 
-  Tests: a rehearsal against a populated database leaves every table unchanged, asserted by
+  Tests: a dry run against a populated database leaves every table unchanged, asserted by
   comparing row counts and the specific records before and after, not only by counting.
 
-- **T013** — Rehearsal fidelity. A rehearsal and a live run against the same starting state produce
-  equal reports (SC-003), and a source that would be refused is reported as refused when rehearsed
+- **T013** — Dry run fidelity. A dry run and a live run against the same starting state produce
+  equal reports (SC-003), and a source that would be refused is reported as refused when dry-run
   and still exits non-zero.
 
   Tests: the equality assertion compares the report's buckets rather than rendered text; the
   refusal case uses a fixture with a fatal finding and asserts both the non-zero exit and the
   unchanged database.
 
-- **T014** — The rehearsal line. A rehearsal's output states that nothing was kept
+- **T014** — The dry run line. A dry run's output states that nothing was kept
   (FR-010, `decisions.md` D9), and a live run's does not. It is a flag on the renderer rather than
   a print in the command, so the two renderings differ in exactly one deliberate place.
 
-  Tests: the line is present for a rehearsal and absent for a live run of the same source.
+  Tests: the line is present for a dry run and absent for a live run of the same source.
 
 ## US-4 — The account of what was set aside is readable at a terminal (P2)
 
@@ -283,8 +283,8 @@ are never reused.)*
   Follow `tests/test_standards.py`'s existing approach rather than inventing a second mechanism.
 
 - **T024** — Documentation (Article VI, FR-016). README documents the command, both source forms,
-  the rehearsal flag and the verbosity behaviour, alongside the programmatic entry point.
-  `CONTEXT.md` gains **rehearsal** in the "Importing published vocabularies" table. CHANGELOG
+  the dry run flag and the verbosity behaviour, alongside the programmatic entry point.
+  `CONTEXT.md` gains **dry run** in the "Importing published vocabularies" table. CHANGELOG
   records the addition.
 
   All three are public markdown: humanize before commit, and no internal handles.

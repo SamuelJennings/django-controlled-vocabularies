@@ -24,8 +24,8 @@ from controlled_vocabularies.management.rendering import ReportRenderer
 from controlled_vocabularies.management.sources import SourceResolver
 
 
-class _Rehearsed(Exception):
-    """Private sentinel that unwinds a rehearsal's outer transaction after a successful run,
+class _DryRun(Exception):
+    """Private sentinel that unwinds a dry run's outer transaction after a successful run,
     carrying the report out with it (`research.md` R5, `decisions.md` D4). Caught immediately
     outside the block it is raised in; never seen outside this module."""
 
@@ -34,31 +34,52 @@ class _Rehearsed(Exception):
 
 
 class Command(BaseCommand):
-    # django-stubs types BaseCommand.help as `str`; gettext_lazy's proxy satisfies Django itself
-    # (str() is called wherever it's printed) but not the stub, hence the cast (Article XII).
+    # django-stubs types BaseCommand.help as `str`; gettext_lazy's proxy satisfies the attribute
+    # itself but not the stub, hence the cast (Article XII).
     help = cast(str, _("Import a published SKOS vocabulary from a local file or an http(s) URL."))
 
+    def create_parser(self, prog_name: str, subcommand: str, **kwargs: Any) -> Any:
+        """Build the parser, then force :attr:`help` to a real string (Article XII).
+
+        argparse formats the parser description through ``re.sub`` (``HelpFormatter._fill_text``),
+        which raises ``TypeError: expected string or bytes-like object`` on a ``gettext_lazy``
+        proxy — so ``--help`` fails outright rather than printing an untranslated line. Django
+        passes :attr:`help` straight through as ``description`` and never calls ``str()`` on it.
+
+        The parser is built once per invocation with the active language already set, so forcing
+        the proxy here is both the latest safe moment and a correctly translated one. Doing it at
+        class definition would bake in whichever language happened to be active at import.
+        """
+        parser = super().create_parser(prog_name, subcommand, **kwargs)
+        parser.description = str(parser.description)
+        return parser
+
     def add_arguments(self, parser: Any) -> None:
-        parser.add_argument("source", help=_("A local filesystem path or an http(s) URL to a SKOS file."))
+        # Each help is forced for the same reason as the description above: argparse runs every
+        # help string through re.sub as it lays the text out. `add_arguments` is called from
+        # `create_parser`, so this carries the same per-invocation translation timing.
+        parser.add_argument("source", help=str(_("A local filesystem path or an http(s) URL to a SKOS file.")))
         parser.add_argument(
             "--format",
             dest="format",
             default=None,
-            help=_(
-                "The source's serialization (turtle, xml, or json-ld), for a source whose extension or "
-                "Content-Type does not name one."
+            help=str(
+                _(
+                    "The source's serialization (turtle, xml, or json-ld), for a source whose extension or "
+                    "Content-Type does not name one."
+                )
             ),
         )
         parser.add_argument(
-            "--rehearse",
+            "--dry-run",
             action="store_true",
             default=False,
-            help=_("Perform the whole import and report the outcome, then leave the database exactly as it was."),
+            help=str(_("Perform the whole import and report the outcome, then leave the database exactly as it was.")),
         )
 
     def handle(self, *args: Any, **options: Any) -> None:
         source = options["source"]
-        rehearse = options["rehearse"]
+        dry_run = options["dry_run"]
         # A missing path is left to import_skos()/from_file's own is_file() check below, which
         # already names it distinctly (FR-002). A path that *exists* but cannot be opened for
         # permission reasons passes that same is_file() check, so it is caught here instead,
@@ -71,12 +92,12 @@ class Command(BaseCommand):
         resolver = SourceResolver(source, serialization=options["format"])
         try:
             resolved = resolver.resolve()
-            if rehearse:
+            if dry_run:
                 # An outer atomic() exited by a sentinel, not a savepoint or a flag threaded
                 # into the importer: SkosImporter.run's own atomic() becomes a savepoint here,
                 # and the outer rollback discards it along with everything else (research.md
                 # R5, decisions.md D4). The importer is not modified and learns nothing about
-                # rehearsal, which is what keeps a rehearsal's report identical to a live one
+                # a dry run, which is what keeps a dry run's report identical to a live one
                 # by construction. A refused run raises SkosImportFailed out of the block below
                 # and rolls back for the same reason it does today, so it needs no separate path.
                 try:
@@ -84,10 +105,10 @@ class Command(BaseCommand):
                         report = import_skos(
                             resolved.path, serialization=resolved.serialization, base_uri=resolved.base_uri
                         )
-                        # This *is* the sentinel-unwind pattern (plan.md "Rehearsal"): the raise
+                        # This *is* the sentinel-unwind pattern (plan.md "Dry run"): the raise
                         # has to sit here, inside the block it unwinds, not in a helper function.
-                        raise _Rehearsed(report)  # noqa: TRY301
-                except _Rehearsed as done:
+                        raise _DryRun(report)  # noqa: TRY301
+                except _DryRun as done:
                     report = done.report
             else:
                 report = import_skos(resolved.path, serialization=resolved.serialization, base_uri=resolved.base_uri)
@@ -101,5 +122,5 @@ class Command(BaseCommand):
             raise CommandError(str(exc)) from exc
         finally:
             resolver.cleanup()
-        for line in ReportRenderer(report, rehearsal=rehearse, verbosity=options["verbosity"]).render():
+        for line in ReportRenderer(report, dry_run=dry_run, verbosity=options["verbosity"]).render():
             self.stdout.write(line)

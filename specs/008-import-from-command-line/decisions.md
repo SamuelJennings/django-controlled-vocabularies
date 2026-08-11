@@ -72,28 +72,28 @@ one branch.
 
 **ADR:** none — the classification rule is sealed inside `SourceResolver.classify`, and the Windows drive-letter trap is recorded at the code that avoids it.
 
-## D4 — A rehearsal is a real run inside a transaction that is abandoned
+## D4 — A dry run is a real run inside a transaction that is abandoned
 
-The alternative is a predictive rehearsal: read the source, work out what would happen, report it,
+The alternative is a predictive dry run: read the source, work out what would happen, report it,
 never touch the database.
 
 It was rejected on two grounds. First, it is a second implementation of the import, and it drifts
 from the first the moment either changes — the classic failure of a preview that stops matching
 what it previews. Second, and decisively, it is silent about exactly the outcomes an operator runs
-a rehearsal to find. Several of the reasons a value is set aside are refusals by the models
+a dry run to find. Several of the reasons a value is set aside are refusals by the models
 themselves at write time: `EMPTY_SLUG` when no usable slug can be derived, `VALUE_TOO_LONG` when a
 field rejects a value on length, `STORED_SLUG_INVALID` when an already-stored slug no longer passes
 validation. A prediction that never writes discovers none of them, so it would report a clean run
 for a file that will not import.
 
 Running the real import and abandoning the transaction gets all of this for free, because
-`SkosImporter.run` already wraps its work in `transaction.atomic()`. The rehearsal is the same code
-producing the same report, which is what makes SC-003 — rehearsal report equals live report — a
+`SkosImporter.run` already wraps its work in `transaction.atomic()`. The dry run is the same code
+producing the same report, which is what makes SC-003 — dry run report equals live report — a
 meaningful assertion rather than a check that two implementations agree today.
 
-The cost is that a rehearsal takes as long as a real import and does the same database work before
+The cost is that a dry run takes as long as a real import and does the same database work before
 discarding it. For a vocabulary of any realistic size that is seconds, and an operator who asked
-for a rehearsal has already accepted waiting.
+for a dry run has already accepted waiting.
 
 **ADR:** docs/adr/0005-a-preview-is-the-real-operation-rolled-back.md
 
@@ -163,9 +163,9 @@ must return bytes to the path a local file already takes.
 
 **ADR:** none — an assumption that held. No dependency was added, so there is nothing for a future engineer to relitigate.
 
-## D9 — The rehearsal names itself in its own output
+## D9 — The dry run names itself in its own output
 
-A rehearsal's report is, by construction, identical to a live run's. That is the point, and it is
+A dry run's report is, by construction, identical to a live run's. That is the point, and it is
 also the risk: an operator scrolling back through a terminal sees "created 212 concepts" and has no
 way to tell which kind of run produced it.
 
@@ -435,7 +435,7 @@ of the report — the same problem FR-007 solved for set-asides, arriving late f
 
 T018 gave `ReportRenderer` a `verbosity` argument and gated per-entry set-aside detail on it,
 exactly as FR-007 and D6 specify. Nothing passed it. `handle()` constructed the renderer with
-`rehearsal=` alone, so `--verbosity 2` changed nothing an operator could see, and the option
+`dry run=` alone, so `--verbosity 2` changed nothing an operator could see, and the option
 FR-007 names as its own mechanism was inert.
 
 The gap is planning's, not the story's. T019 was the task that wired the renderer into `handle()`;
@@ -545,7 +545,7 @@ over, rendered straight to an operator's terminal. `\x1b[2K\r` erases the line b
 `\x1b[1A` moves the cursor over the one above, so a published label could overwrite the account
 of itself. Measured on the branch: a refusal printed `'Innocent\x1b[2K\rALL CLEAR - 0 problems
 found.\x1b[1A' has no identifier that survives re-serialization`, escapes intact. It matters most
-under `--rehearse`, whose entire product is the text an operator reads before deciding to commit.
+under `--dry-run`, whose entire product is the text an operator reads before deciding to commit.
 
 `_render_params` strips the C0 and C1 ranges from every string value. That function is the one
 boundary all three entry kinds pass through, so fatal, set-aside and normalized entries are
@@ -574,11 +574,89 @@ D6 justified carrying Django's `--verbosity` rather than inventing a flag on the
 honoured in one direction and not the other. A deployment script silencing this command the
 documented Django way got the whole account on stdout.
 
-`render()` now yields nothing at 0, including the rehearsal line: at 0 there is no output for it
-to qualify, and a rehearsal writes nothing anywhere regardless. A refusal is unaffected, because
+`render()` now yields nothing at 0, including the dry run line: at 0 there is no output for it
+to qualify, and a dry run writes nothing anywhere regardless. A refusal is unaffected, because
 it is raised as a `CommandError` rather than rendered.
 
 **Revisit if:** an operator wants counts without detail and detail without counts, which would be
 three levels rather than Django's four and would argue for a flag after all.
 
 **ADR:** no — completing D6's stated convention, recorded here.
+
+## D19 — The flag is `--dry-run`, not `--rehearse`
+
+Renamed at the merge gate on the maintainer's instruction, and the reasoning is worth keeping
+because the original name was chosen for a bad reason.
+
+`--rehearse` came from the issue's own prose, which described wanting "a rehearsal mode". That was
+the maintainer describing the idea, not naming the flag, and it was taken as though it were the
+latter. Nothing else recommended it.
+
+`--dry-run` is what this ecosystem already uses. Django's own `makemigrations` and `collectstatic`
+both carry it, so an operator running a Django management command has met the name before and
+expects it here. A package that spells the same idea differently makes its user learn a synonym for
+no gain.
+
+The one argument for the old name was that `--dry-run` can suggest a prediction, where this
+performs the import in full and rolls it back. That distinction matters to a maintainer, and it is
+recorded in ADR 0005 where a maintainer will find it. It does not matter to an operator at a
+terminal, whose expectation of `--dry-run` — show me what would happen, keep none of it — is
+exactly what the flag does.
+
+The rename runs through the command, `ReportRenderer`'s keyword, the `_DryRun` sentinel, the tests,
+the README, the CHANGELOG, and the `CONTEXT.md` glossary entry, which is now **Dry run**. The
+output line reads "This was a dry run: nothing was kept." No message catalog has shipped, so no
+translation is orphaned. The issue text quoted in `spec.md`'s Input line keeps the maintainer's
+original wording, because a quotation is a record of what was said.
+
+**ADR:** none — a naming decision recorded where it happened. ADR 0005 owns the mechanism and is
+unaffected by what the flag is called.
+
+## D20 — `--help` was broken, and the test that should have caught it enforced the break
+
+Found at the merge gate while confirming the `--dry-run` rename had reached the operator-facing
+help. `python manage.py import_skos --help` did not print. It raised:
+
+```
+TypeError: expected string or bytes-like object, got '__proxy__'
+```
+
+argparse lays out the parser description and every argument's help through `re.sub`
+(`HelpFormatter._fill_text` and `_split_lines`). Neither accepts a `gettext_lazy` proxy. Django
+hands `Command.help` straight to argparse as the parser `description` and never calls `str()` on
+it, so the proxies survived into the formatter and the first thing an operator runs failed
+outright.
+
+The comment in the code asserted the opposite — that "str() is called wherever it's printed" —
+which was never true of this path and was never checked.
+
+**The fix** forces the proxies at parser-construction time, not at class definition. `create_parser`
+runs once per invocation with the active language already set, so this is both the latest safe
+moment and a correctly translated one. Forcing at import would bake in whichever language happened
+to be active when the module loaded.
+
+**What let it through is the more useful part.** This feature's own test asserted:
+
+```python
+assert isinstance(action.help, Promise), f"{dest} help is not lazily translatable"
+```
+
+That test passed for the entire run, and it passed *because* the command was broken. It had taken
+"translatable" to mean "the object is still a lazy proxy at parse time", when Article XII asks that
+the string be wrapped at its source and resolved in the active language when displayed. Forcing at
+parser build satisfies the article exactly. The test encoded the mechanism it happened to observe
+rather than the requirement, and then defended it.
+
+Neither review lens caught this, and the reason is worth naming: every test exercised the command
+through `call_command`, which builds no help output. Nothing in the suite had ever rendered
+`--help`. A surface with no test is invisible to a reviewer reading tests for coverage.
+
+The replacement asserts the behaviour instead: `format_help()` returns text containing the
+description and each flag. It was proven against the defect — the fix was reverted, the test failed
+with "source help reaches argparse as a proxy, which breaks --help", and the fix restored. The
+source-level wrapping Article XII actually requires stays enforced by the AST sweep in
+`tests/test_standards.py`, which reads the code rather than the runtime types, and is unaffected.
+
+**ADR:** none — a defect and its regression test, recorded here. The general lesson (a test that
+asserts a mechanism rather than a requirement can hold a bug in place) is not specific enough to
+this codebase to constrain future work as a standing rule.

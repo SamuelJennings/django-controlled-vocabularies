@@ -230,7 +230,7 @@ the first import created rather than making a second copy.
 
 - `--format` names the source's serialization (`turtle`, `xml`, or `json-ld`), for a source whose
   extension or `Content-Type` does not.
-- `--rehearse` performs the entire import and reports the outcome exactly as a live run would,
+- `--dry-run` performs the entire import and reports the outcome exactly as a live run would,
   then leaves the database exactly as it was beforehand — useful for seeing what a file would set
   aside before deciding whether to configure a language for it.
 - `--verbosity`, Django's own option, prints bucket counts by default — how many records were

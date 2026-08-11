@@ -2,7 +2,7 @@
 
 ``ImportReport`` is the feature's public contract alongside the import itself: #51
 groups and counts what was set aside for a curator, and #52 renders a command-line
-summary and a rehearsal preview from it, neither re-reading the file nor parsing
+summary and a dry-run preview from it, neither re-reading the file nor parsing
 prose (spec Acceptance Scenario US1-11). Four buckets, each inspectable as data:
 what was created, what was updated, what was set aside with a reason, and what the
 source no longer mentions.
@@ -38,7 +38,7 @@ _NO_LANGUAGE_TAG = _("no language tag")
 #: text the *source document* chose, and since #52 a source document can be a file a remote
 #: server hands over, rendered straight to an operator's terminal. `\x1b[2K\r` erases the
 #: line being written and `\x1b[1A` moves the cursor over the one above it, so a document
-#: could overwrite the account of itself — worst on ``--rehearse``, whose entire product is
+#: could overwrite the account of itself — worst on ``--dry-run``, whose entire product is
 #: the text an operator reads before deciding to commit.
 #:
 #: The range includes newline and tab, which the usual "control characters" carve-out keeps.

@@ -64,13 +64,13 @@ class TestReportRendererBucketCounts:
         assert all("0" in line for line in lines)
 
 
-class TestReportRendererRehearsalLine:
-    """T014, FR-010, `decisions.md` D9 — a rehearsal's output states plainly that nothing was
+class TestReportRendererDryRunLine:
+    """T014, FR-010, `decisions.md` D9 — a dry run's output states plainly that nothing was
     kept; a live run's does not. A flag on the renderer rather than a print in the command, so
     the two renderings differ in exactly one deliberate place (plan.md "Rendering")."""
 
-    def test_a_rehearsal_states_that_nothing_was_kept(self):
-        lines = [str(line) for line in ReportRenderer(ImportReport(), rehearsal=True).render()]
+    def test_a_dry_run_states_that_nothing_was_kept(self):
+        lines = [str(line) for line in ReportRenderer(ImportReport(), dry_run=True).render()]
         assert any("nothing was kept" in line for line in lines)
 
     def test_a_live_run_of_the_same_report_does_not_state_that_nothing_was_kept(self):
@@ -226,11 +226,11 @@ class TestReportRendererVerbosity:
         report = self._report_with_several_hundred_set_asides()
         assert list(ReportRenderer(report, verbosity=0).render()) == []
 
-    def test_verbosity_zero_silences_the_rehearsal_line_too(self):
-        # The rehearsal line is the one thing that could argue for an exception, since it
+    def test_verbosity_zero_silences_the_dry_run_line_too(self):
+        # The dry run line is the one thing that could argue for an exception, since it
         # says nothing was kept. It does not get one: at 0 there is no output to qualify,
-        # and a rehearsal at --verbosity 0 writes nothing anywhere either way.
-        assert list(ReportRenderer(ImportReport(), rehearsal=True, verbosity=0).render()) == []
+        # and a dry run at --verbosity 0 writes nothing anywhere either way.
+        assert list(ReportRenderer(ImportReport(), dry_run=True, verbosity=0).render()) == []
 
     def test_the_default_verbosity_still_prints_the_counts(self):
         # The control: silencing 0 must not silence the default.

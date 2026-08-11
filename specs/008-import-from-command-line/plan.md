@@ -6,7 +6,7 @@
 
 A Django management command wraps the import #50 and #51 built, so a deployment can load a
 vocabulary from a terminal or a script. It takes one source, either a filesystem path or an
-`http`/`https` URL, and offers a rehearsal that performs the whole import and then abandons the
+`http`/`https` URL, and offers a dry run that performs the whole import and then abandons the
 transaction.
 
 Almost all of the work is at the edges: classifying the source, fetching bytes and handing them to
@@ -37,7 +37,7 @@ justification.
 | `SkosGraph.from_file` | `exchange/skos.py:195` | path check, format guess, safety scan, parse |
 | `ImportReport` + `set_aside_by_reason()` + `language_account()` | `exchange/report.py` | everything the renderer prints |
 | `SkosImportError` / `SkosImportFailed` | `exchange/exceptions.py` | the two refusals the command catches |
-| `transaction.atomic()` inside `SkosImporter.run` | `exchange/skos.py:1925` | becomes a savepoint under the rehearsal's outer block |
+| `transaction.atomic()` inside `SkosImporter.run` | `exchange/skos.py:1925` | becomes a savepoint under the dry run's outer block |
 
 ## Constitution Check
 
@@ -48,7 +48,7 @@ justification.
 | III — Anti-Abstraction | The renderer and the source resolver are classes because each has a subject, not because a second implementation is coming. Neither goes in `exchange/`, which would imply a reuse that does not exist. |
 | IV — Integration-First | The acceptance scenarios are the tests: `call_command` against real fixtures and a real HTTP stub, asserting on stored records and printed output. |
 | V — Security & data-safety | Fetched content is untrusted and reaches the existing safety scan unchanged. The fetcher is built from an opener carrying only the `http`/`https` handlers, so a redirect onto another protocol fails before a connection is opened rather than after the transfer (`research.md` R3). The copy is bounded by a byte ceiling, since the operator cannot see how much a remote server intends to send (FR-014). |
-| VI — Documentation | README documents the command, both source forms and the rehearsal. CHANGELOG records it. `CONTEXT.md` defines *rehearsal*. |
+| VI — Documentation | README documents the command, both source forms and the dry run. CHANGELOG records it. `CONTEXT.md` defines *dry run*. |
 | VII — Dependency discipline | No new dependency. `deptry` must stay green. |
 | XII — i18n | Every printed string and every help string is `gettext_lazy` with named placeholders. |
 | XIII — Data-model conventions | No models, no migrations. Nothing to index. |
@@ -148,22 +148,22 @@ refusal saying what could not be determined and that `--format` supplies it (`re
 
 The temporary file is removed when the command finishes, whether or not the import succeeded.
 
-### Rehearsal
+### Dry run
 
 ```
 try:
     with transaction.atomic():
         report = import_skos(...)
-        raise _Rehearsed(report)
-except _Rehearsed as done:
+        raise _DryRun(report)
+except _DryRun as done:
     report = done.report
 ```
 
 `SkosImporter.run`'s own `atomic()` becomes a savepoint inside this block, and the outer rollback
 discards it along with everything else (`research.md` R5). The importer is not modified and knows
-nothing about rehearsal, which is what makes the rehearsal's report identical to a live one by
+nothing about dry run, which is what makes the dry run's report identical to a live one by
 construction. A refused run raises `SkosImportFailed` out of the block and rolls back for the same
-reason it does today, so a rehearsed refusal needs no separate path.
+reason it does today, so a dry-run refusal needs no separate path.
 
 ### Rendering
 
@@ -176,7 +176,7 @@ Sections that are empty still print, saying so. An absent section and a section 
 the same thing to a reader and different things to a caller, which #51 already settled for the
 language account (its spec, FR-008).
 
-A rehearsal's output carries one extra line saying nothing was kept. That line is the only
+A dry run's output carries one extra line saying nothing was kept. That line is the only
 difference between the two renderings, which is why it is a deliberate flag on the renderer and not
 an incidental print in the command.
 
@@ -194,7 +194,7 @@ aside.
 | Foundational | package skeleton, `__init__.py` files, the base-URI thread through the exchange layer, `ReportRenderer` with its bucket counts |
 | US-1 (P1) | `Command` with a path source, delegation to `import_skos`, the rendered output, missing-path failure |
 | US-2 (P1) | `SourceResolver` fetch path, scheme rules, serialization resolution, HTTP stub fixture, relative-URI fixtures |
-| US-3 (P1) | the rehearsal flag, the rollback, the "nothing was kept" line |
+| US-3 (P1) | the dry run flag, the rollback, the "nothing was kept" line |
 | US-4 (P2) | the renderer's account in full — grouping by reason, the language account, absent-from-source, verbosity |
 | US-5 (P2) | refusal handling, exit statuses, all-findings printing |
 | US-6 (P3) | i18n sweep, README, CHANGELOG, `CONTEXT.md` glossary, test-structure conformance |

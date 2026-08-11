@@ -10,7 +10,7 @@
 
 **Serves**: G8 (external vocabularies as read-only references — a vocabulary nobody can get into a deployment is one nobody can reference) · G4 (faithful round-trip — the import half of it, reached without a Python shell) · **Roadmap**: R2 · **Issue**: #52
 
-> Scope note: this is the fourth and last slice of roadmap item R2, and the one that closes its "both a management command and a programmatic entry point" deliverable. [#50](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/50) built the import and its structured report, and [#51](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/51) decided what a curator is told about content that could not be kept. This feature owns **where an operator stands when they run one and what they read afterwards**: a management command, a source that may be a local file or a URL, a rendering of the existing report at a terminal, and a rehearsal that reports the same outcome and keeps none of it. It adds no new import behaviour — every decision about what a file means was made upstream of it. **Out of scope:** any change to what the import stores or sets aside, exporting or serving RDF (R4), the consumption field (R3), the editing interface and any web-facing entry point (R5), browsing (R6), scheduling or automating repeat runs, remembering where a vocabulary was fetched from, and importing anything the source does not itself declare as a SKOS concept scheme.
+> Scope note: this is the fourth and last slice of roadmap item R2, and the one that closes its "both a management command and a programmatic entry point" deliverable. [#50](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/50) built the import and its structured report, and [#51](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/51) decided what a curator is told about content that could not be kept. This feature owns **where an operator stands when they run one and what they read afterwards**: a management command, a source that may be a local file or a URL, a rendering of the existing report at a terminal, and a dry run that reports the same outcome and keeps none of it. It adds no new import behaviour — every decision about what a file means was made upstream of it. **Out of scope:** any change to what the import stores or sets aside, exporting or serving RDF (R4), the consumption field (R3), the editing interface and any web-facing entry point (R5), browsing (R6), scheduling or automating repeat runs, remembering where a vocabulary was fetched from, and importing anything the source does not itself declare as a SKOS concept scheme.
 
 ## Clarifications
 
@@ -26,10 +26,10 @@ Two intake decisions widened the issue as written, and both are the maintainer's
 Five further ambiguities surfaced by the structured coverage scan over the drafted spec, resolved here against the intake decisions, the constitution, and what #50 and #51 already built.
 
 - **Q: How does the command tell a filesystem path from a URL?** → A: From the value itself — a source beginning `http://` or `https://` is fetched, and anything else is read from disk. A flag choosing between them would make the operator restate what the value already says. A value carrying some other scheme is refused rather than handed to the filesystem, because `ftp://vocab.ttl` is a stated intention this feature does not serve and reading it as a relative filename would fail with the wrong explanation. Integrated into FR-002 and Edge Cases.
-- **Q: A rehearsal reports what a live run "would" do. How faithful is that, exactly?** → A: It is the same run. The rehearsal performs the whole import — parse, match, write, set aside — inside a transaction it then abandons, so its report is produced by the code that produces a live one rather than by a second code path predicting it. Anything a live run would discover only at write time is discovered, which matters because several of the reasons a value is set aside are refusals by the models themselves. A predictive rehearsal would be a second implementation of the import, drifting from the first, and it would be silent about exactly the failures an operator runs a rehearsal to find. Integrated into FR-009.
+- **Q: A dry run reports what a live run "would" do. How faithful is that, exactly?** → A: It is the same run. The dry run performs the whole import — parse, match, write, set aside — inside a transaction it then abandons, so its report is produced by the code that produces a live one rather than by a second code path predicting it. Anything a live run would discover only at write time is discovered, which matters because several of the reasons a value is set aside are refusals by the models themselves. A predictive dry run would be a second implementation of the import, drifting from the first, and it would be silent about exactly the failures an operator runs a dry run to find. Integrated into FR-009.
 - **Q: Does a run that set values aside succeed?** → A: Yes, and it exits zero. Set-asides are the normal outcome of importing a published vocabulary into a site configured for a subset of its languages — #51 exists because they are expected, not exceptional. Only a run the importer refuses outright exits non-zero. A deployment script therefore learns from the exit status whether the vocabulary is present, which is the question it can act on, and reads the report for the question a person acts on. Integrated into FR-011 and FR-012.
 - **Q: A large external vocabulary can set aside hundreds of values. Does the command print all of them?** → A: No. By default it prints counts — per bucket, and within the set-aside bucket per reason, with the per-language breakdown #51 built. Individual entries are printed only when asked for. Several hundred lines scrolling past answers "what happened" and buries "what should I change", which is the question #51 was written to make answerable. Django's own `--verbosity` already means this, so it carries the choice rather than a new flag. Integrated into FR-007 and FR-008.
-- **Q: Is "rehearsal" an established term in this project?** → A: No, it is new here, and it will appear in the command's help text and its output. The project keeps its vocabulary in `CONTEXT.md`, so it belongs there rather than only inside a spec an operator will never open. Integrated into FR-016.
+- **Q: Is "dry run" an established term in this project?** → A: No, it is new here, and it will appear in the command's help text and its output. The project keeps its vocabulary in `CONTEXT.md`, so it belongs there rather than only inside a spec an operator will never open. Integrated into FR-016.
 
 ### Session 2026-08-10 (post-gate, from planning research)
 
@@ -74,20 +74,20 @@ An operator refreshing from upstream has no local copy and does not want one. Th
 
 ---
 
-### User Story 3 - A run can be rehearsed before it is kept (Priority: P1)
+### User Story 3 - A run can be dry-run before it is kept (Priority: P1)
 
-Before importing a vocabulary into a deployment that already holds data, an operator wants to see what the run would do. They add a flag, get the report a live run would have produced, and the database is untouched afterwards. If the rehearsal shows a problem in their file, they fix the file and rehearse again, having written nothing.
+Before importing a vocabulary into a deployment that already holds data, an operator wants to see what the run would do. They add a flag, get the report a live run would have produced, and the database is untouched afterwards. If the dry run shows a problem in their file, they fix the file and dry run again, having written nothing.
 
-**Why this priority**: Named explicitly in the issue, and the reason an operator will reach for the command at all on a database that matters. A report they can only get by committing to the change is not a rehearsal.
+**Why this priority**: Named explicitly in the issue, and the reason an operator will reach for the command at all on a database that matters. A report they can only get by committing to the change is not a dry run.
 
-**Independent Test**: Rehearse an import against a populated database, assert the report matches a live run of the same source against the same starting state, and assert every table is unchanged afterwards.
+**Independent Test**: Run a dry-run import against a populated database, assert the report matches a live run of the same source against the same starting state, and assert every table is unchanged afterwards.
 
 **Acceptance Scenarios**:
 
-1. **Given** a populated database, **When** a source is imported in rehearsal mode, **Then** the report names what would be created, updated and set aside, and no row anywhere has changed.
-2. **Given** the same database and source, **When** the rehearsal is followed by a live run, **Then** the live run's report matches the rehearsal's.
-3. **Given** a source that would be refused, **When** it is rehearsed, **Then** the rehearsal reports the refusal rather than reporting success.
-4. **Given** any rehearsal, **When** it finishes, **Then** its output states that nothing was kept, so a report of two hundred created concepts cannot be mistaken for a completed import.
+1. **Given** a populated database, **When** a source is imported in dry run mode, **Then** the report names what would be created, updated and set aside, and no row anywhere has changed.
+2. **Given** the same database and source, **When** the dry run is followed by a live run, **Then** the live run's report matches the dry run's.
+3. **Given** a source that would be refused, **When** it is dry-run, **Then** the dry run reports the refusal rather than reporting success.
+4. **Given** any dry run, **When** it finishes, **Then** its output states that nothing was kept, so a report of two hundred created concepts cannot be mistaken for a completed import.
 
 ---
 
@@ -137,7 +137,7 @@ Everything the command prints is translatable, the README tells an operator the 
 **Acceptance Scenarios**:
 
 1. **Given** the command's help text and every message it prints, **When** the source is inspected, **Then** each is wrapped for translation with named placeholders, per Article XII.
-2. **Given** the shipped documentation, **When** the README is read, **Then** it documents the command, both source forms, and the rehearsal flag, alongside the programmatic entry point.
+2. **Given** the shipped documentation, **When** the README is read, **Then** it documents the command, both source forms, and the dry run flag, alongside the programmatic entry point.
 3. **Given** the test suite, **When** the modules are located, **Then** they mirror the source tree per Article XIV and the fixtures are reusable rather than inlined per test.
 
 ---
@@ -150,7 +150,7 @@ Everything the command prints is translatable, the README tells an operator the 
 - A URL answering with a success status and an HTML body fails as unreadable content, not as an empty vocabulary.
 - A file exists but cannot be read for permission reasons — reported as such, distinctly from a file that is absent.
 - A source declares more than one concept scheme, which the importer already refuses. The command surfaces that refusal unchanged.
-- A rehearsal of a source that would be refused reports the refusal and still exits non-zero, because the outcome it is rehearsing is a failure.
+- A dry run of a source that would be refused reports the refusal and still exits non-zero, because the outcome it is previewing is a failure.
 - The database is unreachable or unmigrated when the command runs — Django's own failure, surfaced rather than caught.
 - An empty file, or a file that parses to a graph with no SKOS content, is refused rather than importing an empty vocabulary.
 
@@ -166,19 +166,19 @@ Everything the command prints is translatable, the README tells an operator the 
 - **FR-006**: On a completed run the command MUST report how many records were created, how many updated, how many values were set aside, how many were stored under a predicate or language other than the one published, and what the vocabulary holds that the source no longer mentions.
 - **FR-007**: The set-aside account MUST be grouped by reason with a count per reason, and MUST include the per-language breakdown of values not stored for a language reason. Individual entries MUST be printed only at raised verbosity, and MUST NOT be printed by default.
 - **FR-008**: Records the vocabulary holds that the source no longer mentions MUST be reported separately from values that were set aside, because they are existing data left untouched rather than incoming content refused.
-- **FR-009**: The command MUST offer a rehearsal mode that performs the whole import and produces the report a live run of the same source against the same database state would produce, then leaves the database unchanged. The report MUST be produced by the import itself rather than by a separate prediction of it.
-- **FR-010**: A rehearsal's output MUST state that nothing was kept, so its counts cannot be read as a completed import.
+- **FR-009**: The command MUST offer a dry run mode that performs the whole import and produces the report a live run of the same source against the same database state would produce, then leaves the database unchanged. The report MUST be produced by the import itself rather than by a separate prediction of it.
+- **FR-010**: A dry run's output MUST state that nothing was kept, so its counts cannot be read as a completed import.
 - **FR-011**: A run the importer refuses MUST print why in curator-facing terms, MUST leave the database unchanged, and MUST exit non-zero. Where the importer collects several problems, all of them MUST be printed.
 - **FR-012**: A run that completes MUST exit zero however much it set aside, because setting values aside is an expected outcome of importing a published vocabulary and not a failure.
 - **FR-013**: A source that declares no concept scheme MUST be refused as not being a SKOS vocabulary. The command names no target vocabulary, so this follows from the existing entry point rather than adding a rule to it.
 - **FR-014**: A source that cannot be retrieved, opened, or read MUST fail naming the source and the cause, MUST write nothing, and MUST exit non-zero. A retrieval that cannot complete MUST fail rather than wait indefinitely.
 - **FR-015**: Every string the command prints, including its help text, MUST be translatable per Article XII, with named placeholders so the message identifiers stay static.
-- **FR-016**: `CONTEXT.md` MUST define **rehearsal**, which this feature introduces and puts in front of an operator. The README MUST document the command, both source forms, and the rehearsal flag. The CHANGELOG MUST record the addition.
+- **FR-016**: `CONTEXT.md` MUST define **dry run**, which this feature introduces and puts in front of an operator. The README MUST document the command, both source forms, and the dry run flag. The CHANGELOG MUST record the addition.
 
 ### Key Entities *(include if feature involves data)*
 
 - **Source**: What the operator points the command at — a filesystem path or an `http`/`https` URL. It resolves to bytes and nothing about it survives the run.
-- **Rehearsal**: A run performed in full and then abandoned, reporting what it did without keeping any of it.
+- **Dry run**: A run performed in full and then abandoned, reporting what it did without keeping any of it.
 - **Import report**: The structured outcome #50 defined and #51 extended. This feature reads it and renders it. It adds nothing to it and parses none of its rendered messages.
 
 ## Success Criteria *(mandatory)*
@@ -187,7 +187,7 @@ Everything the command prints is translatable, the README tells an operator the 
 
 - **SC-001**: An operator with shell access to a deployment and a published SKOS file imports it with a single command and writes no Python.
 - **SC-002**: A vocabulary imported by URL is stored under the URIs its publisher assigned, including where the document states them relative to its own address. For a document whose identifiers are absolute, importing it by URL and importing the identical bytes from disk produce the same records and the same report.
-- **SC-003**: A rehearsal against a given database state produces the same report as a live run against that same state, and leaves every table unchanged.
+- **SC-003**: A dry run against a given database state produces the same report as a live run against that same state, and leaves every table unchanged.
 - **SC-004**: Importing a vocabulary that sets aside several hundred values produces default output that a person reads without scrolling and that names how many were set aside per reason and per language.
 - **SC-005**: Every refusal the importer can raise exits non-zero with an explanation and an unchanged database, and every completed run exits zero regardless of what it set aside.
 - **SC-006**: Coverage floors hold (project ≥ 90%, patch ≥ 85%), lint, type-check and dependency checks pass, and no user-visible string in the command is untranslatable.

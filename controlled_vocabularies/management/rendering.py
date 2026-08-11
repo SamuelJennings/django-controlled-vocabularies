@@ -24,9 +24,9 @@ from controlled_vocabularies.exchange.report import ImportReport
 class ReportRenderer:
     """Turns an :class:`ImportReport` into translated lines a curator reads at a terminal.
 
-    ``rehearsal`` is the one deliberate difference between a rehearsal's rendering and a live
+    ``dry_run`` is the one deliberate difference between a dry run's rendering and a live
     run's (T014, FR-010, `decisions.md` D9): when set, one extra line states that nothing was
-    kept, so a rehearsal's counts are never mistaken for a completed import.
+    kept, so a dry run's counts are never mistaken for a completed import.
 
     ``verbosity`` carries Django's own ``--verbosity`` (T018, FR-007, `decisions.md` D6): at 0
     nothing prints at all, which is Django's own contract for that value (CORR-004, decisions.md
@@ -34,15 +34,15 @@ class ReportRenderer:
     entry also prints, rendered by the entry's own ``render()``. No flag of this feature's own.
     """
 
-    def __init__(self, report: ImportReport, *, rehearsal: bool = False, verbosity: int = 1) -> None:
+    def __init__(self, report: ImportReport, *, dry_run: bool = False, verbosity: int = 1) -> None:
         self.report = report
-        self.rehearsal = rehearsal
+        self.dry_run = dry_run
         self.verbosity = verbosity
 
     def render(self) -> Iterator[str]:
         """Yield translated lines: bucket counts, then the set-aside account (grouped by reason,
         per-entry detail at raised verbosity, then the per-language account), then the records
-        absent from the source, then the rehearsal line. Nothing at all at ``--verbosity 0``."""
+        absent from the source, then the dry-run line. Nothing at all at ``--verbosity 0``."""
         if self.verbosity == 0:
             # CORR-004 (review, correctness): D6 justifies reusing Django's own option on the
             # grounds that it "already means exactly this and every management command an
@@ -75,8 +75,8 @@ class ReportRenderer:
             yield from self._render_set_aside_detail()
         yield from self._render_language_account()
         yield from self._render_absent_from_source_detail()
-        if self.rehearsal:
-            yield str(_("This was a rehearsal: nothing was kept."))
+        if self.dry_run:
+            yield str(_("This was a dry run: nothing was kept."))
 
     def _render_set_aside_by_reason(self) -> Iterator[str]:
         """One line per reason with its count (T016, FR-007), read from

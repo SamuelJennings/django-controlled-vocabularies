@@ -497,7 +497,7 @@ class TestDocumentSuppliedTextCannotDriveTheTerminal:
     the one above, so before this a published label could overwrite the report of itself.
     Measured on the branch: a refusal read ``'Innocent\\x1b[2K\\rALL CLEAR - 0 problems
     found.\\x1b[1A' has no identifier that survives re-serialization`` — with the escape
-    sequences intact. It matters most under ``--rehearse``, whose only product is the
+    sequences intact. It matters most under ``--dry-run``, whose only product is the
     text an operator reads before deciding to commit.
 
     Stripping happens at ``_render_params``, the one boundary all three entry kinds pass

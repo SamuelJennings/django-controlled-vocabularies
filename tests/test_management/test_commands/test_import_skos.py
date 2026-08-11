@@ -71,23 +71,48 @@ class TestImportSkosCommandCreatesAndUpdates:
 
 
 class TestImportSkosCommandHelpIsTranslatable:
-    """T003 — Article XII: ``Command.help`` and every argument's ``help`` are ``gettext_lazy``
-    from the first line written."""
+    """T003 — Article XII: every help string is wrapped for translation at its source.
 
-    def test_command_help_is_lazily_translatable(self):
+    That wrapping is enforced statically by ``TestManagementPackageI18nSweep`` in
+    ``tests/test_standards.py``, which reads the AST. What is asserted here is the runtime
+    half: the strings reach argparse as real strings, because a lazy proxy that survives
+    into the parser makes ``--help`` raise rather than print.
+    """
+
+    def test_command_help_is_lazily_translatable_at_its_source(self):
+        # The class attribute stays lazy. Only the parser's own copy is forced, in
+        # create_parser, with the active language already set.
         assert isinstance(Command.help, Promise)
 
-    def test_every_argument_help_is_lazily_translatable(self):
+    def test_help_output_renders(self):
+        """The regression test for a `--help` that raised instead of printing.
+
+        argparse lays out both the description and every argument help through ``re.sub``
+        (``HelpFormatter._fill_text`` / ``_split_lines``), which rejects a ``gettext_lazy``
+        proxy with ``TypeError: expected string or bytes-like object``. Django hands
+        ``Command.help`` straight to argparse as ``description`` and never calls ``str()``
+        on it, so leaving the proxies in place broke the first thing an operator runs.
+        """
+        parser = Command().create_parser("manage.py", "import_skos")
+        rendered = parser.format_help()
+        assert "Import a published SKOS vocabulary" in rendered
+        assert "--dry-run" in rendered
+        assert "--format" in rendered
+        assert "A local filesystem path or an http(s) URL" in rendered
+
+    def test_every_argument_help_reaches_the_parser_as_a_real_string(self):
         # Only this command's own arguments — Django's base arguments (verbosity,
         # settings, pythonpath, ...) carry Django's own plain-str help and are not
         # this story's to translate.
-        command = Command()
-        parser = command.create_parser("manage.py", "import_skos")
-        ours = {action.dest: action for action in parser._actions if action.dest in ("source", "format")}
-        assert set(ours) == {"source", "format"}
+        parser = Command().create_parser("manage.py", "import_skos")
+        ours = {
+            action.dest: action for action in parser._actions if action.dest in ("source", "format", "dry_run")
+        }
+        assert set(ours) == {"source", "format", "dry_run"}
         for dest, action in ours.items():
             assert action.help, f"{dest} has no help text"
-            assert isinstance(action.help, Promise), f"{dest} help is not lazily translatable"
+            assert isinstance(action.help, str), f"{dest} help reaches argparse as a proxy, which breaks --help"
+        assert isinstance(parser.description, str)
 
 
 class TestImportSkosCommandRefusesABadPath:
@@ -250,11 +275,11 @@ class TestImportSkosCommandURLParity:
         assert not Concept.objects.filter(static_uri__startswith="file://").exists()
 
 
-class TestImportSkosCommandRehearsal:
-    """T012, spec Acceptance Scenario 1, `decisions.md` D4, `research.md` R5 — `--rehearse`
+class TestImportSkosCommandDryRun:
+    """T012, spec Acceptance Scenario 1, `decisions.md` D4, `research.md` R5 — `--dry-run`
     runs the whole import inside an outer transaction it then abandons. `transactional_db`,
     not `db`: under `db` the test itself already runs inside a transaction rolled back at the
-    end, which would make a broken rehearsal (one that never actually rolls back) pass anyway.
+    end, which would make a broken dry run (one that never actually rolls back) pass anyway.
     """
 
     @staticmethod
@@ -266,29 +291,29 @@ class TestImportSkosCommandRehearsal:
             for model in apps.get_app_config("controlled_vocabularies").get_models()
         }
 
-    def test_a_rehearsal_against_a_populated_database_leaves_every_table_unchanged(self, transactional_db):
+    def test_a_dry_run_against_a_populated_database_leaves_every_table_unchanged(self, transactional_db):
         import_skos(FIXTURES / "rocks.ttl")
         before = self._snapshot()
 
-        call_command("import_skos", str(FIXTURES / "rocks_updated.ttl"), rehearse=True, stdout=StringIO())
+        call_command("import_skos", str(FIXTURES / "rocks_updated.ttl"), dry_run=True, stdout=StringIO())
 
         assert self._snapshot() == before
 
-    def test_a_rehearsal_of_a_new_vocabulary_against_an_empty_database_creates_nothing(self, transactional_db):
+    def test_a_dry_run_of_a_new_vocabulary_against_an_empty_database_creates_nothing(self, transactional_db):
         before = self._snapshot()
 
-        call_command("import_skos", str(FIXTURES / "rocks.ttl"), rehearse=True, stdout=StringIO())
+        call_command("import_skos", str(FIXTURES / "rocks.ttl"), dry_run=True, stdout=StringIO())
 
         assert self._snapshot() == before
         assert ConceptScheme.objects.count() == 0
 
 
-class TestImportSkosCommandRehearsalFidelity:
-    """T013, spec Acceptance Scenarios 2-3, SC-003 — a rehearsal and a live run against the
+class TestImportSkosCommandDryRunFidelity:
+    """T013, spec Acceptance Scenarios 2-3, SC-003 — a dry run and a live run against the
     same starting state produce equal reports, compared by bucket rather than by rendered
-    text; a source that would be refused is refused the same way whether rehearsed or not."""
+    text; a source that would be refused is refused the same way whether dry-run or not."""
 
-    def test_a_rehearsal_and_a_live_run_against_the_same_state_produce_equal_reports(
+    def test_a_dry_run_and_a_live_run_against_the_same_state_produce_equal_reports(
         self, transactional_db, monkeypatch
     ):
         import_skos(FIXTURES / "rocks.ttl")
@@ -303,33 +328,33 @@ class TestImportSkosCommandRehearsalFidelity:
 
         monkeypatch.setattr(import_skos_command, "import_skos", spy)
 
-        call_command("import_skos", str(FIXTURES / "rocks_updated.ttl"), rehearse=True, stdout=StringIO())
-        rehearsed_report = captured.pop()
+        call_command("import_skos", str(FIXTURES / "rocks_updated.ttl"), dry_run=True, stdout=StringIO())
+        dry_run_report = captured.pop()
 
         call_command("import_skos", str(FIXTURES / "rocks_updated.ttl"), stdout=StringIO())
         live_report = captured.pop()
 
-        assert rehearsed_report.created == live_report.created
-        assert rehearsed_report.updated == live_report.updated
-        assert rehearsed_report.set_aside == live_report.set_aside
-        assert rehearsed_report.normalized == live_report.normalized
-        assert rehearsed_report.absent_from_source == live_report.absent_from_source
-        assert rehearsed_report.fatal == live_report.fatal == []
+        assert dry_run_report.created == live_report.created
+        assert dry_run_report.updated == live_report.updated
+        assert dry_run_report.set_aside == live_report.set_aside
+        assert dry_run_report.normalized == live_report.normalized
+        assert dry_run_report.absent_from_source == live_report.absent_from_source
+        assert dry_run_report.fatal == live_report.fatal == []
 
-    def test_a_refused_source_is_reported_as_refused_when_rehearsed_and_still_exits_non_zero(self, transactional_db):
+    def test_a_refused_source_is_reported_as_refused_when_dry_run_and_still_exits_non_zero(self, transactional_db):
         with pytest.raises(CommandError):
-            call_command("import_skos", str(FIXTURES / "no_scheme_declared.ttl"), rehearse=True, stdout=StringIO())
+            call_command("import_skos", str(FIXTURES / "no_scheme_declared.ttl"), dry_run=True, stdout=StringIO())
         assert ConceptScheme.objects.count() == 0
 
 
-class TestImportSkosCommandRehearsalLine:
-    """T014, FR-010, `decisions.md` D9 — the rehearsal line reaches the command's actual
-    output: present for a rehearsal, absent for a live run of the same source."""
+class TestImportSkosCommandDryRunLine:
+    """T014, FR-010, `decisions.md` D9 — the dry run line reaches the command's actual
+    output: present for a dry run, absent for a live run of the same source."""
 
-    def test_the_rehearsal_line_is_present_for_a_rehearsal_and_absent_for_a_live_run(self, db):
-        rehearsal_out = StringIO()
-        call_command("import_skos", str(FIXTURES / "rocks.ttl"), rehearse=True, stdout=rehearsal_out)
-        assert "nothing was kept" in rehearsal_out.getvalue()
+    def test_the_dry_run_line_is_present_for_a_dry_run_and_absent_for_a_live_run(self, db):
+        dry_run_out = StringIO()
+        call_command("import_skos", str(FIXTURES / "rocks.ttl"), dry_run=True, stdout=dry_run_out)
+        assert "nothing was kept" in dry_run_out.getvalue()
 
         live_out = StringIO()
         call_command("import_skos", str(FIXTURES / "rocks.ttl"), stdout=live_out)
