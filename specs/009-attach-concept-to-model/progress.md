@@ -144,3 +144,23 @@ Append-only. One line per stage transition and per gate outcome, written at the 
   declaring/saving/reading back a concept through the field, the reverse accessor, `null`/`blank`
   behaviour — that is T004's (US-1) acceptance, against a real model, not T002's. Phase F (T001,
   T003, T002) complete; worktree clean, all three tasks committed.
+- **2026-08-11 — S4 Phase F accepted.** T001, T003, T002 on `009-phase-f`, merged to the feature
+  branch at `f36510e`. `forge verify` green (lint, typecheck, 1029 tests, build, conformance),
+  `check-receipts` green, tamper-check's three flags all confirmed additive-only edits to
+  `tests/conftest.py`, `tests/factories.py` and `tests/settings.py` that T002 requires.
+
+  **Two plan corrections landed mid-phase, both raised by the Implementer reporting blocked rather
+  than routing around a boundary, and both verified at source before being accepted:**
+  - `deconstruct()` (T003) moved from US-1 into Phase F. `ModelState.from_model()` clones every
+    local field through `deconstruct()`, so nothing carrying `ConceptField` could migrate — or build
+    a test database — without it. US-1 is now T004 alone.
+  - `to` is the string `"controlled_vocabularies.Concept"`, set unconditionally in `__init__`. A
+    resolved model class is refused by migration state. The first attempt stringified it in a
+    `clone()` override, which fixed the autodetector and left `migrate` broken; the override is
+    gone. Consequence accepted rather than worked around: an unbound field cannot resolve
+    `remote_field.model`, so T001's bound `validate()` tests were deleted and the message assertion
+    sits in T005, which is where the design review put it.
+
+  At convergence: `tests/test_testapp.py` folded into `tests/test_fields.py` (it mirrored no source
+  module, which conformance rejects — a test app is scaffolding, not a package), and the ledger's
+  US0/US1 task lists reconciled with `tasks.md`. Next: US-1 (T004), then US-2.
