@@ -55,13 +55,22 @@
       "tasks": [
         {
           "id": "T001",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_fields.py::TestConceptFieldConstruction",
+              "tests/test_fields.py::TestConceptFieldValidate"
+            ],
+            "commands": [
+              "poetry run pytest -q tests/test_fields.py"
+            ]
+          }
         },
         {
           "id": "T002",
-          "status": "todo",
-          "attempts": 0
+          "status": "blocked",
+          "attempts": 1
         }
       ]
     },
