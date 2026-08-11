@@ -18,8 +18,20 @@ Phase F lands. US-6 is last because it documents what the others built.
 - **T001** — `ConceptField` construction (FR-001, FR-002, FR-007, FR-010, `research.md` R1, R5).
 
   New module `controlled_vocabularies/fields.py`. `ConceptField(ForeignKey)` takes `vocabulary` as
-  its first argument and fixes three things the consumer does not supply: `to=Concept`,
-  `on_delete=PROTECT`, and `limit_choices_to=Q(scheme__slug=vocabulary)`.
+  its first argument and fixes three things the consumer does not supply:
+  `to="controlled_vocabularies.Concept"`, `on_delete=PROTECT`, and
+  `limit_choices_to=Q(scheme__slug=vocabulary)`.
+
+  **`to` is the string form, always, and this is not a detail.** A resolved model class in `to` is
+  rejected outright by migration state — `ModelState` raises `ValueError: Model fields in
+  "ModelState.fields" cannot refer to a model class`, because state has to be rebuildable without
+  every referenced model already loaded. An ordinary `ForeignKey` never trips this, since its own
+  `deconstruct()` stringifies a live-class `to` before anything rebuilds from it; this field strips
+  `to` from `deconstruct()` entirely (T003), so `__init__` is the only place the string can come
+  from. Doing it anywhere else — a `clone()` override, a special case for the autodetector — fixes
+  one call site and leaves `migrate` and pytest-django's test-database build broken, which is
+  exactly what the first attempt did. The string form also removes the `Concept` import from this
+  module, and with it a circular-import risk.
 
   The `Q` is constructed, never evaluated, so nothing queries the database while the declaration is
   being read. That is FR-003's mechanism and it is asserted here rather than assumed, with
@@ -49,7 +61,14 @@ Phase F lands. US-6 is last because it documents what the others built.
   This is a message concern, not a second constraint mechanism — the refusal itself is still
   `limit_choices_to`.
 
-  Tests construct the field directly, unbound to any model. No consuming model exists yet.
+  **T001 implements `validate()`; T005 proves it.** With a string `to`, `remote_field.model` only
+  resolves when the field is attached to a model class (`RelatedField.contribute_to_class()` defers
+  to `lazy_related_operation`), so an unbound field cannot run `validate()` at all — and no
+  consuming model exists at this task. So T001's tests assert what an unbound field can:
+  construction, both rejections, zero queries, and that `error_messages["invalid"]` carries the
+  named placeholder. The behavioural assertion — raise, then *read* `.messages` and find the
+  vocabulary named — is T005's, against a real test-app model, which is where the design review
+  put it. Do not write a throwaway model in `tests/test_fields.py` to bring it forward.
 
 - **T003** — `deconstruct()` (FR-001, `research.md` R2). *(Moved into Phase F from US-1 on
   2026-08-11 — see below. It was never a US-1 refinement; nothing that carries this field can
@@ -120,7 +139,9 @@ still works end-to-end here, and T004 is still what proves it.)*
   is the proof.
 
   Tests: `full_clean()` on a record holding a concept from the other vocabulary raises
-  `ValidationError`, the message names the expected vocabulary, and the message is the translatable
+  `ValidationError`; **reading** `.messages` (not merely catching the error) shows the message names
+  the expected vocabulary — that read is the assertion the whole `validate()` override exists for,
+  and it is this task's alone, because an unbound field cannot reach it. The message is the translatable
   one from T001 rather than Django's default. A concept from the correct vocabulary passes. A record
   with nothing attached and an optional field passes.
 
