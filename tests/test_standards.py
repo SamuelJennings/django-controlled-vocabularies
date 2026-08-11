@@ -722,6 +722,11 @@ class _FieldsChecksI18nVisitor(ast.NodeVisitor):
         # message — the shape checks.py actually uses — passes unseen.
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod):
             node = node.left
+        # An f-string is the construction a developer reaches for when a message
+        # needs interpolating, and it is exactly as untranslated as a plain
+        # literal. ast.JoinedStr carries no .value, so report its source text.
+        if isinstance(node, ast.JoinedStr):
+            return ast.unparse(node)
         return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
 
     def visit_Call(self, node: ast.Call) -> None:
@@ -816,6 +821,10 @@ class TestFieldsChecksI18nVisitorCatchesAViolation:
         # under the call.
         visitor = _visit_fields_checks_source("checks.Warning('boom %(model)s' % {'model': m})\n")
         assert visitor.bare_literals == ["boom %(model)s"]
+
+    def test_catches_a_bare_f_string_message(self):
+        visitor = _visit_fields_checks_source("checks.Warning(f'boom {model}')\n")
+        assert visitor.bare_literals == ["f'boom {model}'"]
 
     def test_catches_a_bare_hint_keyword_literal(self):
         visitor = _visit_fields_checks_source("checks.Warning(_('fine'), hint='boom')\n")

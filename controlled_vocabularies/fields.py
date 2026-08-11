@@ -56,6 +56,11 @@ class ConceptField(ForeignKey):
             )
         if "on_delete" in kwargs:
             raise TypeError("ConceptField() sets on_delete=PROTECT itself; a consumer may not override it.")
+        if "limit_choices_to" in kwargs:
+            raise TypeError(
+                "ConceptField() sets limit_choices_to itself to constrain choices to "
+                "'vocabulary'; a consumer may not override it."
+            )
         self.vocabulary = vocabulary
         kwargs["to"] = "controlled_vocabularies.Concept"
         kwargs["on_delete"] = PROTECT
@@ -94,7 +99,11 @@ class ConceptField(ForeignKey):
             raise ValidationError(
                 self.error_messages["invalid"],
                 code="invalid",
-                params={"value": value, "vocabulary": self.vocabulary},
+                # Carry the ForeignKey's own params through. A consumer's
+                # error_messages["invalid"] is free to use `model`, `pk` or
+                # `field`, and dropping them would reproduce the same
+                # KeyError-on-read this override exists to prevent.
+                params={**(exc.params or {}), "value": value, "vocabulary": self.vocabulary},
             ) from exc
 
     def contribute_to_class(self, cls, name, private_only=False, **kwargs):
@@ -113,12 +122,16 @@ class ConceptField(ForeignKey):
         """
         super().contribute_to_class(cls, name, private_only=private_only, **kwargs)
 
+        # Three-arg getattr, not two: on a required field with nothing attached
+        # Django's forward descriptor raises RelatedObjectDoesNotExist rather
+        # than returning None. It subclasses AttributeError, so a default turns
+        # that back into the None both accessors promise.
         def get_label(instance):
-            concept = getattr(instance, name)
+            concept = getattr(instance, name, None)
             return concept.display_label() if concept is not None else None
 
         def get_uri(instance):
-            concept = getattr(instance, name)
+            concept = getattr(instance, name, None)
             return concept.uri if concept is not None else None
 
         label_attr_name = f"get_{name}_label"

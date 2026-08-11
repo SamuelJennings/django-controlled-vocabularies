@@ -107,6 +107,13 @@ class TestConceptFieldConstruction:
         with pytest.raises(TypeError, match="on_delete"):
             ConceptField(vocabulary="rock-type", on_delete=PROTECT)
 
+    def test_rejects_consumer_supplied_limit_choices_to(self):
+        # The vocabulary constraint IS limit_choices_to, so accepting a
+        # consumer's would silently discard either theirs or the constraint.
+        # Refused loudly, the same way on_delete is.
+        with pytest.raises(TypeError, match="limit_choices_to"):
+            ConceptField(vocabulary="rock-type", limit_choices_to=Q(label="Granite"))
+
     def test_rejects_missing_vocabulary(self):
         with pytest.raises(TypeError, match="vocabulary"):
             ConceptField()
@@ -340,6 +347,26 @@ class TestConceptFieldValidation:
 
         sample.full_clean()
 
+    @pytest.mark.django_db
+    def test_the_re_raise_keeps_the_foreign_keys_own_params(self):
+        # error_messages is an ordinary field kwarg, and a consumer's message
+        # may use any placeholder a plain ForeignKey supplies. The override
+        # adds `vocabulary` to those params; it must not replace them, or
+        # reading .messages raises KeyError at form-render time.
+        field = Specimen._meta.get_field("rock_type")
+        original = field.error_messages["invalid"]
+        field.error_messages["invalid"] = "%(model)s pk=%(pk)s field=%(field)s in %(vocabulary)s"
+        try:
+            other_concept = ConceptFactory(scheme=ConceptSchemeFactory(name="Mineral"))
+            specimen = Specimen(name="Wrong vocabulary", rock_type=other_concept)
+
+            with pytest.raises(ValidationError) as excinfo:
+                specimen.full_clean()
+
+            assert any("rock-type" in message for message in excinfo.value.messages)
+        finally:
+            field.error_messages["invalid"] = original
+
 
 class SpecimenForm(forms.ModelForm):
     """Test-only — the plain ``ModelForm`` Django would auto-generate from
@@ -490,6 +517,15 @@ class TestConceptFieldLabelAndUriAccessors:
 
         assert sample.get_mineral_label() is None
         assert sample.get_mineral_uri() is None
+
+    def test_both_accessors_return_none_on_a_required_field_with_nothing_attached(self):
+        # A required field's forward descriptor raises RelatedObjectDoesNotExist
+        # rather than returning None, so the nullable case above does not cover
+        # this one. Both accessors promise None, never a raise.
+        specimen = Specimen(name="not yet classified")
+
+        assert specimen.get_rock_type_label() is None
+        assert specimen.get_rock_type_uri() is None
 
     @pytest.mark.django_db
     def test_a_models_own_definition_survives_the_contribution_guard(self):

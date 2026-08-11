@@ -132,7 +132,7 @@ slug. If the vocabulary genuinely arrives in a later deployment step, silence th
 `SILENCED_SYSTEM_CHECKS`.
 
 Reading `get_<field>_label()` on every row of a list costs a query for the concept and one for its
-labels, plus one for the scheme when the active language is not the vocabulary's default, per row.
+scheme, plus one for its labels when the active language is not the vocabulary's default, per row.
 `select_related("rock_type__scheme")` and `prefetch_related("rock_type__labels")` collapse that
 back to a fixed number of queries for the whole list.
 

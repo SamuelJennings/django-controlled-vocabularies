@@ -164,3 +164,14 @@ every one of them a message that can reach an end user through a form, an admin 
 the visitor has to carve out and someone later has to remember why.
 
 **ADR:** none — a scope boundary for one feature's translation sweep, not a standing rule.
+
+## D9 — `limit_choices_to` is refused, not merged (S6 review, F3)
+
+`ConceptField` sets `limit_choices_to` to express the vocabulary constraint itself. A consumer
+passing their own was silently discarded: `get_limit_choices_to()` returned only the scheme
+filter, so a consumer narrowing choices further shipped a form offering more than they asked for
+and nothing said so.
+
+Refused with a `TypeError` at construction, the way `on_delete` already is. Combining the two `Q`
+objects with `&` is the larger design change and is not what the failure demanded — a consumer who
+needs a narrower set can filter the form field's queryset in their own `ModelForm`.
