@@ -3,7 +3,7 @@
   "feature": "009-attach-concept-to-model",
   "branch": "009-attach-concept-to-model",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "PLAN",
+  "state": "IMPLEMENT",
   "state_history": [
     {
       "state": "INTAKE",
@@ -29,6 +29,26 @@
       "state": "PLAN",
       "at": "2026-08-11T10:45:00Z",
       "note": "plan.md, research.md R1-R7 verified against Django source, tasks.md T001-T013; no spec amendment needed"
+    },
+    {
+      "state": "DESIGN_REVIEW",
+      "at": "2026-08-11T11:10:00Z",
+      "note": "one reviewer, three lenses, dispatched on sonnet; check-skills green; security approve, architecture approve, spec-compliance request_changes"
+    },
+    {
+      "state": "DESIGN_REVIEW",
+      "at": "2026-08-11T11:30:00Z",
+      "note": "3/3 findings verified true at source; SPEC-001 (high) blocking, remedied in plan/tasks; sonnet dispatch judged on merit, no opus re-run"
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-11T11:45:00Z",
+      "note": "plan veto notification posted as bot comment on #86; Phase F dispatched on sonnet in worktree dcv-usF"
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-11T13:30:00Z",
+      "note": "Phase F (T001, T003, T002) accepted and merged at f36510e; verify green (1029 tests), receipts green, tamper flags additive-only. Two plan corrections landed mid-phase: T003 moved to Phase F, `to` fixed as the string form"
     }
   ],
   "gates": {
@@ -42,6 +62,22 @@
         "the vocabulary constraint is validation, the delete guard is the database",
         "label readback falls back to the vocabulary's default language"
       ]
+    },
+    "design_review": {
+      "approved_by": "design-panel",
+      "at": "2026-08-11T11:30:00Z",
+      "self_resolved": [
+        "SPEC-001 (high, verified) blocking \u2014 ForeignKey.validate() builds its own params, so the vocabulary placeholder needed a validate() override; remedied in tasks.md T001",
+        "two non-blocking findings carried into the Phase F brief as watch items"
+      ]
+    },
+    "plan": {
+      "approved_by": "notified",
+      "at": "2026-08-11T11:45:00Z"
+    },
+    "merge": {
+      "approved_by": null,
+      "at": null
     }
   },
   "stories": [
