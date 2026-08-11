@@ -186,3 +186,17 @@ Append-only. One line per stage transition and per gate outcome, written at the 
   poetry-check, ruff lint, ruff format, mypy, deptry). `DJANGO_SETTINGS_MODULE=tests.settings poetry
   run django-admin makemigrations --check --dry-run` — "No changes detected", exit 0. Diff scope:
   `tests/test_fields.py` only. Next: US-2 (T005).
+- **2026-08-11 — Implementer US-2 · T005.** Did: added `TestConceptFieldValidation` to
+  `tests/test_fields.py` (no second file, per the plan's convention) — a proof task per `tasks.md`'s
+  own framing ("No new constraint code"), so `fields.py` is unmodified. `Specimen(rock_type=<concept
+  from a "Mineral" scheme>).full_clean()` raises `ValidationError`; reading `.messages` (not merely
+  catching the error, per the task's own emphasis) finds `"rock-type"` named — the assertion T001's
+  `validate()` override exists for, only reachable against a real bound model per Phase F's design
+  record. A concept from the correct vocabulary (`ConceptSchemeFactory(name="Rock Type")`, slugifying
+  to `"rock-type"`) passes `full_clean()`; `Sample(name=...)` with the optional `mineral` field unset
+  also passes, restated here per `tasks.md`'s T005 scope alongside T004's identical coverage of the
+  same case. Confirmed the `ForeignKey.validate()` mechanism this proves by reading the installed
+  Django 5.2.16 source directly (`db/models/fields/related.py`) before writing the tests, rather than
+  assuming it from `fields.py`'s docstring. No new `decisions.md` entry — no deviation from
+  `tasks.md`. Verified: `poetry run pytest -q tests/test_fields.py::TestConceptFieldValidation` — 3
+  passed. Next: T006.

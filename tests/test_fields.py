@@ -37,9 +37,16 @@ cannot run ``validate()`` at all.
   ``verbose_name``, ``help_text``, the automatic index — behave exactly as
   they would on a plain ``ForeignKey``, asserted directly on the bound field
   rather than only through a save/reload round trip.
+- ``TestConceptFieldValidation`` — T005 (US-2): ``full_clean()`` on a record
+  holding a concept from another vocabulary raises ``ValidationError``, and
+  *reading* ``.messages`` shows the vocabulary named — the behavioural proof
+  T001's ``validate()`` override exists for, only reachable against a real,
+  bound model. A concept from the correct vocabulary passes; an optional
+  field with nothing attached passes.
 """
 
 import pytest
+from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.db import connection
 from django.db.models import PROTECT, Q
@@ -283,3 +290,36 @@ class TestConceptFieldOrdinaryOptions:
     def test_the_fks_index_is_present(self):
         field = Specimen._meta.get_field("rock_type")
         assert field.db_index is True
+
+
+class TestConceptFieldValidation:
+    """T005 (US-2) — no new constraint code: ``ForeignKey.validate()`` already
+    applies ``limit_choices_to`` before checking existence. What this class
+    proves is the behavioural chain T001's ``validate()`` override exists
+    for — raise, then *read* ``.messages`` and find the vocabulary named —
+    which an unbound field (T001's own tests) cannot reach."""
+
+    @pytest.mark.django_db
+    def test_full_clean_rejects_a_concept_from_another_vocabulary(self):
+        other_scheme = ConceptSchemeFactory(name="Mineral")
+        other_concept = ConceptFactory(scheme=other_scheme)
+        specimen = Specimen(name="Wrong vocabulary", rock_type=other_concept)
+
+        with pytest.raises(ValidationError) as excinfo:
+            specimen.full_clean()
+
+        assert any("rock-type" in message for message in excinfo.value.messages)
+
+    @pytest.mark.django_db
+    def test_full_clean_accepts_a_concept_from_the_correct_vocabulary(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        concept = ConceptFactory(scheme=scheme)
+        specimen = Specimen(name="Correct vocabulary", rock_type=concept)
+
+        specimen.full_clean()
+
+    @pytest.mark.django_db
+    def test_full_clean_accepts_an_optional_field_with_nothing_attached(self):
+        sample = Sample(name="Unclassified sample")
+
+        sample.full_clean()
