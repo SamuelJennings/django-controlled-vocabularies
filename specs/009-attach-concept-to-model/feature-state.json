@@ -3,7 +3,7 @@
   "feature": "009-attach-concept-to-model",
   "branch": "009-attach-concept-to-model",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "PR_READY",
+  "state": "MERGED",
   "state_history": [
     {
       "state": "INTAKE",
@@ -54,6 +54,11 @@
       "state": "IMPLEMENT",
       "at": "2026-08-11T17:55:00Z",
       "note": "US-5 (T010, T011) accepted and merged at 86227e4; verify green (1064 tests), receipts green, tamper flags triaged in decisions.md D7. Story/task statuses for US-1..US-5 reconciled in the same pass \u2014 they had stood at todo since Phase F."
+    },
+    {
+      "state": "MERGED",
+      "at": "2026-08-11T16:31:13Z",
+      "note": "PR #96 merged; approved by SamuelJennings"
     }
   ],
   "gates": {
@@ -81,8 +86,8 @@
       "at": "2026-08-11T11:45:00Z"
     },
     "merge": {
-      "approved_by": null,
-      "at": null
+      "approved_by": "SamuelJennings",
+      "at": "2026-08-11T16:30:55Z"
     }
   },
   "stories": [
@@ -331,15 +336,15 @@
   "budgets": {
     "converge_cycles": {
       "max": 2,
-      "used": 0
+      "used": 1
     },
     "review_cycles": {
       "max": 1,
-      "used": 0
+      "used": 1
     },
     "design_review_cycles": {
       "max": 1,
-      "used": 0
+      "used": 1
     },
     "tokens": {
       "max": 4000000,
@@ -348,6 +353,6 @@
   },
   "pr": {
     "number": 96,
-    "draft": true
+    "draft": false
   }
 }
