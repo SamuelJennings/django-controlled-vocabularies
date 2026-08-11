@@ -56,11 +56,10 @@
         {
           "id": "T001",
           "status": "done",
-          "attempts": 1,
+          "attempts": 2,
           "evidence": {
             "tests": [
-              "tests/test_fields.py::TestConceptFieldConstruction",
-              "tests/test_fields.py::TestConceptFieldValidate"
+              "tests/test_fields.py::TestConceptFieldConstruction"
             ],
             "commands": [
               "poetry run pytest -q tests/test_fields.py"
@@ -69,8 +68,18 @@
         },
         {
           "id": "T002",
-          "status": "blocked",
-          "attempts": 1
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_testapp.py::TestMigrations",
+              "tests/test_testapp.py::TestFactories",
+              "tests/test_testapp.py::TestVocabularyFixtures"
+            ],
+            "commands": [
+              "poetry run pytest -q tests/test_testapp.py"
+            ]
+          }
         }
       ]
     },
@@ -84,8 +93,16 @@
       "tasks": [
         {
           "id": "T003",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 2,
+          "evidence": {
+            "tests": [
+              "tests/test_fields.py::TestConceptFieldDeconstruct"
+            ],
+            "commands": [
+              "poetry run pytest -q tests/test_fields.py"
+            ]
+          }
         },
         {
           "id": "T004",
