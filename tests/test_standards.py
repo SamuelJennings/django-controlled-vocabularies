@@ -28,6 +28,8 @@ from django.db.models import Model, UniqueConstraint
 from django.utils.functional import Promise
 from django.utils.text import Truncator
 
+from controlled_vocabularies import checks as checks_module
+from controlled_vocabularies import fields as fields_module
 from controlled_vocabularies.exchange.report import (
     NormalizedEntry,
     NormalizedReason,
@@ -683,4 +685,140 @@ class TestManagementPackageI18nSweep:
         )
         assert visitor.bare_literals == [], (
             f"{module.__name__} passes a bare, untranslated literal to an output sink: {visitor.bare_literals}"
+        )
+
+
+# --- FS-009 US-6 (T012): fields.py and checks.py carry no bare user-visible literal ---
+#
+# The management-package sweep above (`_ManagementI18nVisitor`) is built for CommandError,
+# stdout/stderr.write, add_argument(help=...) and a class-level help = "...". None of those
+# shapes appears in a field or a system check, so pointing it at fields.py/checks.py unmodified
+# would report a clean sweep regardless of what the two modules actually contain — the exact
+# false-green tasks.md warns against. This visitor recognises the sinks a field and a check
+# actually carry: a Field/ForeignKey-style call's `help_text=`/`verbose_name=` keyword literal
+# (including `kwargs.setdefault("help_text", ...)`, the form `ConceptField` uses so a consumer
+# can still override the default), an `error_messages`/`default_error_messages` dict's literal
+# values, and a bare string passed to `ValidationError(...)`, `checks.Warning(...)` or
+# `checks.Error(...)`. `on_delete`/`vocabulary` are rejected via bare `TypeError`s in
+# `fields.py`, deliberately outside every one of these sinks — they are developer-facing,
+# import-time diagnostics, not something an end user ever reads (decisions.md D8).
+
+_FIELDS_CHECKS_MODULES = [fields_module, checks_module]
+_FIELD_METADATA_KEYWORDS = {"help_text", "verbose_name"}
+
+
+class _FieldsChecksI18nVisitor(ast.NodeVisitor):
+    """Walks one module's AST, recording every bare string literal reaching a field's or a
+    check's user-visible sinks."""
+
+    def __init__(self) -> None:
+        self.bare_literals: list[str] = []
+
+    @staticmethod
+    def _str_constant(node: ast.expr) -> str | None:
+        return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+    def visit_Call(self, node: ast.Call) -> None:
+        func = node.func
+        is_validation_error = isinstance(func, ast.Name) and func.id == "ValidationError"
+        is_checks_diagnostic = (
+            isinstance(func, ast.Attribute)
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "checks"
+            and func.attr in {"Warning", "Error"}
+        )
+        if is_validation_error or is_checks_diagnostic:
+            for arg in node.args:
+                literal = self._str_constant(arg)
+                if literal is not None:
+                    self.bare_literals.append(literal)
+        elif isinstance(func, ast.Attribute) and func.attr == "setdefault":
+            # kwargs.setdefault("help_text", <value>) — how ConceptField ships a default
+            # while still letting a consumer override it.
+            if len(node.args) == 2 and self._str_constant(node.args[0]) in _FIELD_METADATA_KEYWORDS:
+                literal = self._str_constant(node.args[1])
+                if literal is not None:
+                    self.bare_literals.append(literal)
+        else:
+            # A Field/ForeignKey-style call carrying help_text=/verbose_name= directly.
+            for kw in node.keywords:
+                if kw.arg in _FIELD_METADATA_KEYWORDS:
+                    literal = self._str_constant(kw.value)
+                    if literal is not None:
+                        self.bare_literals.append(literal)
+        self.generic_visit(node)
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        # error_messages = {...} / default_error_messages = {...} — every dict value is a
+        # message a consumer eventually reads off a raised ValidationError.
+        names = {target.id for target in node.targets if isinstance(target, ast.Name)}
+        if names & {"error_messages", "default_error_messages"} and isinstance(node.value, ast.Dict):
+            for value in node.value.values:
+                literal = self._str_constant(value)
+                if literal is not None:
+                    self.bare_literals.append(literal)
+        self.generic_visit(node)
+
+
+def _visit_fields_checks_source(source: str) -> _FieldsChecksI18nVisitor:
+    visitor = _FieldsChecksI18nVisitor()
+    visitor.visit(ast.parse(source))
+    return visitor
+
+
+class TestFieldsChecksI18nVisitorCatchesAViolation:
+    """Proves the sweep below is a real gate, not a vacuous one: each of these feeds it a
+    deliberately bad snippet, mirroring a shape fields.py/checks.py actually contains, that it
+    must flag before the sweep test trusts it to report the two modules clean."""
+
+    def test_catches_a_bare_help_text_keyword_literal(self):
+        visitor = _visit_fields_checks_source("ForeignKey(help_text='boom')\n")
+        assert visitor.bare_literals == ["boom"]
+
+    def test_catches_a_bare_verbose_name_keyword_literal(self):
+        visitor = _visit_fields_checks_source("CharField(verbose_name='boom')\n")
+        assert visitor.bare_literals == ["boom"]
+
+    def test_catches_a_bare_help_text_default_via_kwargs_setdefault(self):
+        visitor = _visit_fields_checks_source("kwargs.setdefault('help_text', 'boom')\n")
+        assert visitor.bare_literals == ["boom"]
+
+    def test_catches_a_bare_error_messages_dict_value(self):
+        visitor = _visit_fields_checks_source("error_messages = {'invalid': 'boom'}\n")
+        assert visitor.bare_literals == ["boom"]
+
+    def test_catches_a_bare_literal_raised_as_a_validation_error(self):
+        visitor = _visit_fields_checks_source("raise ValidationError('boom')\n")
+        assert visitor.bare_literals == ["boom"]
+
+    def test_catches_a_bare_literal_as_a_checks_warning(self):
+        visitor = _visit_fields_checks_source("checks.Warning('boom')\n")
+        assert visitor.bare_literals == ["boom"]
+
+    def test_catches_a_bare_literal_as_a_checks_error(self):
+        visitor = _visit_fields_checks_source("checks.Error('boom')\n")
+        assert visitor.bare_literals == ["boom"]
+
+    def test_does_not_flag_a_translated_sink(self):
+        visitor = _visit_fields_checks_source(
+            "from django.utils.translation import gettext_lazy as _\n"
+            "kwargs.setdefault('help_text', _('fine'))\n"
+            "error_messages = {'invalid': _('fine')}\n"
+            "raise ValidationError(_('fine'))\n"
+        )
+        assert visitor.bare_literals == []
+
+
+class TestFieldsChecksI18nSweep:
+    """T012 — the sweep itself, run against the real files. Every user-visible string
+    ``ConceptField`` and ``check_concept_field_vocabularies`` put in front of a person is
+    translatable; the developer-facing ``on_delete``/``vocabulary`` ``TypeError``s are outside
+    every sink this visitor recognises, so they are exempt by construction (decisions.md D8)."""
+
+    @pytest.mark.parametrize("module", _FIELDS_CHECKS_MODULES, ids=lambda m: m.__name__)
+    def test_module_carries_no_bare_user_visible_literal(self, module):
+        source = Path(inspect.getfile(module)).read_text()
+        visitor = _visit_fields_checks_source(source)
+        assert visitor.bare_literals == [], (
+            f"{module.__name__} passes a bare, untranslated literal to a user-visible sink: {visitor.bare_literals}"
         )

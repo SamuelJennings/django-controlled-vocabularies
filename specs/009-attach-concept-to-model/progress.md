@@ -340,3 +340,34 @@ Append-only. One line per stage transition and per gate outcome, written at the 
   check-yaml, poetry-check, ruff lint, ruff format, mypy, deptry). `DJANGO_SETTINGS_MODULE=tests.settings
   poetry run django-admin makemigrations --check --dry-run` — "No changes detected", exit 0. Next:
   US-6 (T012, T013), the only story left.
+- **2026-08-11 — Implementer US-6 · T012.** Did: audited `fields.py` and `checks.py` string by
+  string — every user-visible message in both (the `help_text` default, `default_error_messages`,
+  the `checks.Warning` message and hint) was already wrapped with `gettext_lazy` and named
+  placeholders by the tasks that wrote them (T001, T008), so no production code changed. The work
+  was proving that, rather than assuming it: added `_FieldsChecksI18nVisitor` to
+  `tests/test_standards.py`, an AST visitor with the sinks `tasks.md` names —
+  `Field`/`ForeignKey`-style `help_text=`/`verbose_name=` keyword literals (and the
+  `kwargs.setdefault("help_text", …)` form `ConceptField` actually uses),
+  `error_messages`/`default_error_messages` dict values, and bare strings into
+  `ValidationError(...)`, `checks.Warning(...)`, `checks.Error(...)` — deliberately not the
+  existing `_ManagementI18nVisitor`, whose four sinks (`CommandError`, `.stdout`/`.stderr.write`,
+  `add_argument(help=...)`, a class-level `help = "..."`) match nothing either module contains and
+  would have reported a false-clean sweep. `TestFieldsChecksI18nVisitorCatchesAViolation` (8 tests)
+  proves the visitor against synthetic snippets mirroring each sink, including one confirming a
+  translated sink is *not* flagged. `TestFieldsChecksI18nSweep` runs it against the two real
+  modules. Proved the gate is real per the ritual: reinstated a bare literal in `fields.py`
+  (`kwargs.setdefault("help_text", "A concept from this field's configured vocabulary.")`), ran
+  `poetry run pytest -q "tests/test_standards.py::TestFieldsChecksI18nSweep::test_module_carries_no_bare_user_visible_literal[controlled_vocabularies.fields]"`,
+  observed the real failure (`AssertionError: ... passes a bare, untranslated literal ...
+  ["A concept from this field's configured vocabulary."]`), then reverted and confirmed
+  `git diff controlled_vocabularies/fields.py` was empty and the suite green again. Reconciled
+  `CONTEXT.md`'s `ConceptField / ConceptsField` row: now states this feature delivers the
+  single-value field, attributes `ConceptsField` to #87 and the autocomplete widget to #88, and
+  defines the term as what a consuming project's own `models.py` writes into its code. Recorded
+  the `on_delete`/`vocabulary` `TypeError` exemption as `decisions.md` D8 — both are developer-facing,
+  import-time diagnostics outside every sink the visitor recognises, exempt by construction rather
+  than by a special case. Verified: `poetry run pytest -q tests/test_standards.py` — 65 passed (55
+  existing + 10 new: 8 `TestFieldsChecksI18nVisitorCatchesAViolation` + 2
+  `TestFieldsChecksI18nSweep` parametrizations).
+  `ruff check`/`ruff format` clean. Diff scope: `tests/test_standards.py`, `CONTEXT.md`,
+  `specs/009-attach-concept-to-model/decisions.md`. No deviation from `tasks.md`. Next: T013.

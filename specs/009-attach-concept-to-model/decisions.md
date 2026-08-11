@@ -141,3 +141,26 @@ of an existing `from django.db.models import` line, and a new class appended aft
 `TestConceptPreferredLabels` is untouched, which is what T010 relies on as its regression proof.
 
 Approved under D4's "a legitimate refactor can be approved by Forge with a decisions.md entry".
+
+## D8 — T012's on_delete/vocabulary refusals are exempt from the translation sweep
+
+`fields.py` raises two bare `TypeError`s from `ConceptField.__init__()`: a consumer-supplied
+`on_delete`, and a missing or empty `vocabulary`. Neither is wrapped with `gettext_lazy`, and
+T012's standards test does not ask them to be.
+
+Both fire at Python import time, while a project's own `models.py` is being read — before a
+request exists, before a user is involved, before there is anyone to localize the message for.
+The reader is the developer who wrote the field declaration, working from a traceback in their
+own terminal or CI log, exactly like Django's own `TypeError`s for a malformed field (an
+unrecognised kwarg, an invalid `on_delete` value) which are equally untranslated. Wrapping them
+would suggest an end user might see one, which they cannot: a model that raises at import time
+never serves a page.
+
+So `TestFieldsChecksI18nSweep`'s visitor (`tests/test_standards.py`) does not treat `TypeError`
+as a sink at all — only `ValidationError`, `checks.Warning`, `checks.Error`, `help_text`/
+`verbose_name` keyword literals, and `error_messages`/`default_error_messages` dict values,
+every one of them a message that can reach an end user through a form, an admin page, or
+`manage.py check`. The two `TypeError`s are exempt by construction rather than by a special case
+the visitor has to carve out and someone later has to remember why.
+
+**ADR:** none — a scope boundary for one feature's translation sweep, not a standing rule.
