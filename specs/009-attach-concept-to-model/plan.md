@@ -108,7 +108,10 @@ So it goes in a `tests/testapp/` app added to the test settings' `INSTALLED_APPS
 ## Approach
 
 **Phase F — foundational, sequential, blocks everything.** The consuming test app has to exist before
-any story can be tested against a real model.
+any story can be tested against a real model. It carries T001, T003 and T002, in that order: the
+field, then `deconstruct()`, then the test app. `deconstruct()` moved here from US-1 on 2026-08-11
+because `ModelState.from_model()` clones every field through `deconstruct()`, so no model carrying
+`ConceptField` can migrate — or even build a test database — until it exists.
 
 **Then the stories.** US-1 and US-2 are close to the same code and are sequenced together. US-6 is
 last because it documents what the others built.
@@ -121,7 +124,7 @@ T005/T006, T007 and T011. So:
 - **US-1/US-2, then US-3, then US-5 run in sequence.** All three add cases to
   `tests/test_fields.py`, and US-5 also edits `fields.py`. They are logically independent of one
   another; the constraint is the file, and two worktrees appending to the end of the same file
-  conflict on merge regardless.
+  conflict on merge regardless. (US-1 is now T004 alone; T003 moved to Phase F.)
 - **US-4 is the only genuinely parallel story.** It writes `checks.py` and `tests/test_checks.py`,
   which no other story touches, so it can run alongside any of the above.
 

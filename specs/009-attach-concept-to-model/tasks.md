@@ -51,6 +51,29 @@ Phase F lands. US-6 is last because it documents what the others built.
 
   Tests construct the field directly, unbound to any model. No consuming model exists yet.
 
+- **T003** — `deconstruct()` (FR-001, `research.md` R2). *(Moved into Phase F from US-1 on
+  2026-08-11 — see below. It was never a US-1 refinement; nothing that carries this field can
+  migrate without it.)*
+
+  `ForeignKey.deconstruct()` emits `to`, `on_delete` and `limit_choices_to`. All three are fixed by
+  this field, and `limit_choices_to` is derived from `vocabulary`, so leaving them in would put a
+  `Q` literal in every consumer's migration that duplicates the `vocabulary` string and drifts from
+  it the moment either changes. `ConceptField.deconstruct()` deletes all three and adds `vocabulary`.
+
+  **Why this is foundational and not US-1's.** `Field.clone()` rebuilds a field by calling
+  `self.__class__(*args, **kwargs)` from its own `deconstruct()` output
+  (`db/models/fields/__init__.py:666`), and `ModelState.from_model()` clones every local field
+  (`db/migrations/state.py:807`). That runs on `makemigrations`, `makemigrations --check`, `migrate`
+  and pytest-django's test-database build. Without this task, `deconstruct()` emits no `vocabulary`
+  while `__init__` requires one and rejects `on_delete` — so every one of those commands raises
+  `TypeError: Couldn't reconstruct field …` before writing anything, and T002's test app cannot
+  produce an initial migration at all. Found by the Phase F Implementer, which reported T002 blocked
+  rather than routing around the phase boundary; verified at both source lines.
+
+  Test: a round trip. Deconstruct a field, rebuild it from the emitted path and kwargs, and assert
+  the rebuilt field carries the same vocabulary, the same `limit_choices_to`, and `PROTECT`. Assert
+  the emitted kwargs contain none of the three stripped names.
+
 - **T002** — The consuming test app (FR-001, Article IV, Article XIV).
 
   New `tests/testapp/`, added to `INSTALLED_APPS` in `tests/settings.py`. It holds the models this
@@ -71,16 +94,9 @@ Phase F lands. US-6 is last because it documents what the others built.
 
 ## US-1 — A project attaches a concept with one declaration (#90, P1)
 
-- **T003** — `deconstruct()` (FR-001, `research.md` R2).
-
-  `ForeignKey.deconstruct()` emits `to`, `on_delete` and `limit_choices_to`. All three are fixed by
-  this field, and `limit_choices_to` is derived from `vocabulary`, so leaving them in would put a
-  `Q` literal in every consumer's migration that duplicates the `vocabulary` string and drifts from
-  it the moment either changes. `ConceptField.deconstruct()` deletes all three and adds `vocabulary`.
-
-  Test: a round trip. Deconstruct a field, rebuild it from the emitted path and kwargs, and assert
-  the rebuilt field carries the same vocabulary, the same `limit_choices_to`, and `PROTECT`. Assert
-  the emitted kwargs contain none of the three stripped names.
+*(T003 moved to Phase F on 2026-08-11 — a model carrying `ConceptField` cannot migrate without it,
+so it blocks T002 rather than building on it. US-1's story boundary is unchanged: the declaration
+still works end-to-end here, and T004 is still what proves it.)*
 
 - **T004** — Declaring, storing, and reading back (FR-001, FR-010).
 
