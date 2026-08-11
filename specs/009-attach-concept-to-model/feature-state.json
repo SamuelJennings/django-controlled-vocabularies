@@ -296,19 +296,34 @@
       "id": "US6",
       "priority": "P3",
       "issue": 95,
-      "worktree": null,
-      "status": "todo",
+      "worktree": "/home/sam/projects/samueljennings/dcv-us6",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T012",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_standards.py::TestFieldsChecksI18nVisitorCatchesAViolation",
+              "tests/test_standards.py::TestFieldsChecksI18nSweep"
+            ],
+            "commands": [
+              "poetry run pytest -q tests/test_standards.py"
+            ]
+          }
         },
         {
           "id": "T013",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [],
+            "commands": [
+              "poetry run pre-commit run --all-files"
+            ]
+          }
         }
       ]
     }
