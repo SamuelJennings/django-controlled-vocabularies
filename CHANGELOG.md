@@ -15,9 +15,8 @@ All notable changes to this project are documented in this file. The format foll
   `get_<field>_uri()` accessors reading the attached concept's preferred label (falling back to
   the vocabulary's default language) and URI, without overwriting either name on a model that
   already defines it. A named vocabulary that has not been imported yet does not stop the field
-  from being declared or the app from starting; `manage.py check` reports a warning
-  (`controlled_vocabularies.W001`) naming the model, field, and missing slug instead. See the
-  README.
+  from being declared or the app from starting. Instead, `manage.py check` reports a warning
+  (`controlled_vocabularies.W001`) naming the model, field, and missing slug. See the README.
 - Importing a published SKOS vocabulary: `import_skos(file, *, serialization=None, scheme=None)`
   reads a Turtle, RDF/XML, or JSON-LD file and creates or updates the vocabulary it declares, its
   concepts, their labels and documentary notes, their broader/narrower and related relationships,

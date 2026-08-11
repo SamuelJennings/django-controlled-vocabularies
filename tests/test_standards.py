@@ -705,6 +705,7 @@ class TestManagementPackageI18nSweep:
 
 _FIELDS_CHECKS_MODULES = [fields_module, checks_module]
 _FIELD_METADATA_KEYWORDS = {"help_text", "verbose_name"}
+_DIAGNOSTIC_MESSAGE_KEYWORDS = {"msg", "message", "hint"}
 
 
 class _FieldsChecksI18nVisitor(ast.NodeVisitor):
@@ -716,6 +717,11 @@ class _FieldsChecksI18nVisitor(ast.NodeVisitor):
 
     @staticmethod
     def _str_constant(node: ast.expr) -> str | None:
+        # A message is routinely interpolated at its sink (`"%(model)s …" % {...}`), which puts
+        # an ast.BinOp where the literal would otherwise sit. Unwrap it, or every interpolated
+        # message — the shape checks.py actually uses — passes unseen.
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod):
+            node = node.left
         return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
 
     def visit_Call(self, node: ast.Call) -> None:
@@ -732,6 +738,12 @@ class _FieldsChecksI18nVisitor(ast.NodeVisitor):
                 literal = self._str_constant(arg)
                 if literal is not None:
                     self.bare_literals.append(literal)
+            # `hint=` and `msg=` are read by the same person as the positional message.
+            for kw in node.keywords:
+                if kw.arg in _DIAGNOSTIC_MESSAGE_KEYWORDS:
+                    literal = self._str_constant(kw.value)
+                    if literal is not None:
+                        self.bare_literals.append(literal)
         elif isinstance(func, ast.Attribute) and func.attr == "setdefault":
             # kwargs.setdefault("help_text", <value>) — how ConceptField ships a default
             # while still letting a consumer override it.
@@ -799,12 +811,23 @@ class TestFieldsChecksI18nVisitorCatchesAViolation:
         visitor = _visit_fields_checks_source("checks.Error('boom')\n")
         assert visitor.bare_literals == ["boom"]
 
+    def test_catches_a_bare_interpolated_message(self):
+        # checks.py's own message shape: the literal sits under a `%` BinOp, not directly
+        # under the call.
+        visitor = _visit_fields_checks_source("checks.Warning('boom %(model)s' % {'model': m})\n")
+        assert visitor.bare_literals == ["boom %(model)s"]
+
+    def test_catches_a_bare_hint_keyword_literal(self):
+        visitor = _visit_fields_checks_source("checks.Warning(_('fine'), hint='boom')\n")
+        assert visitor.bare_literals == ["boom"]
+
     def test_does_not_flag_a_translated_sink(self):
         visitor = _visit_fields_checks_source(
             "from django.utils.translation import gettext_lazy as _\n"
             "kwargs.setdefault('help_text', _('fine'))\n"
             "error_messages = {'invalid': _('fine')}\n"
             "raise ValidationError(_('fine'))\n"
+            "checks.Warning(_('fine %(model)s') % {'model': m}, hint=_('fine'))\n"
         )
         assert visitor.bare_literals == []
 

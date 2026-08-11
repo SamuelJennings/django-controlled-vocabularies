@@ -109,34 +109,32 @@ class Specimen(models.Model):
     rock_type = ConceptField(vocabulary="rock-type")
 ```
 
-`vocabulary` names the owning `ConceptScheme` by its slug, not a database relation — a field
-declaration is read when Python imports the module, and a vocabulary is rows in a table that may
-not exist yet, so the field can only carry the slug. Only a concept whose `scheme.slug` matches is
-offered as a form choice or accepted by `full_clean()`; a concept from another vocabulary is
-refused. Deleting a concept a record still references is refused too (`on_delete=PROTECT`),
-whether the delete reaches it directly or cascades down from its scheme.
+`vocabulary` names the owning `ConceptScheme` by its slug rather than by a database relation. A
+field declaration is read when Python imports the module, and a vocabulary is rows in a table that
+may not exist yet, so the slug is all the field can carry. Only a concept whose `scheme.slug`
+matches is offered as a form choice or accepted by `full_clean()`. A concept from another
+vocabulary is refused, and so is deleting a concept a record still references
+(`on_delete=PROTECT`), whether the delete reaches it directly or cascades down from its scheme.
 
 Reading a concept back:
 
 ```python
 specimen.rock_type              # the attached Concept, or None
-specimen.get_rock_type_label()  # its preferred label in the active language, falling back to
-                                 # the vocabulary's default language — never empty for an
-                                 # attached concept
+specimen.get_rock_type_label()  # its preferred label in the active language, falling
+                                # back to the vocabulary's default language
 specimen.get_rock_type_uri()    # its URI
 ```
 
-If `"rock-type"` has not been imported yet — a fresh install, before the vocabulary's own import
-step has run — nothing about the field declaration fails. `manage.py check` reports a warning
-(`controlled_vocabularies.W001`) naming the model, the field, and the missing slug, so the gap
-surfaces where a developer already looks rather than as an exception at an arbitrary import;
-silence it with `SILENCED_SYSTEM_CHECKS` if the vocabulary genuinely arrives in a later deployment
-step.
+If `"rock-type"` has not been imported yet, which is the state of a fresh install before the
+vocabulary's own import step has run, nothing about the field declaration fails. `manage.py check`
+reports a warning (`controlled_vocabularies.W001`) naming the model, the field, and the missing
+slug. If the vocabulary genuinely arrives in a later deployment step, silence the warning with
+`SILENCED_SYSTEM_CHECKS`.
 
-Reading `get_<field>_label()` on every row of a list costs a query for the concept, one for its
-labels, and — when the active language is not the vocabulary's default — one for the scheme, per
-row. `select_related("rock_type__scheme")` and `prefetch_related("rock_type__labels")` collapse
-that back to a fixed number of queries for the whole list.
+Reading `get_<field>_label()` on every row of a list costs a query for the concept and one for its
+labels, plus one for the scheme when the active language is not the vocabulary's default, per row.
+`select_related("rock_type__scheme")` and `prefetch_related("rock_type__labels")` collapse that
+back to a fixed number of queries for the whole list.
 
 ## Importing a published vocabulary
 
