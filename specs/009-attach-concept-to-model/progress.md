@@ -124,3 +124,23 @@ Append-only. One line per stage transition and per gate outcome, written at the 
   T002) — the ledger wasn't restructured when the plan moved the task; flagged in `concerns` rather
   than restructured, since moving a task between story blocks is outside "flip your own tasks'
   status/attempts/evidence."
+- **2026-08-11T01:00:00Z · Implementer Phase F · T002.** Unblocked by T003's corrected fix. Did:
+  new `tests/testapp/` (`apps.py`, `models.py`, `migrations/0001_initial.py`), added to
+  `INSTALLED_APPS` in `tests/settings.py`. Three models: `Specimen` (required `ConceptField`,
+  vocabulary `"rock-type"`), `Sample` (optional, `related_name="samples"`, vocabulary
+  `"mineral"`), `Artifact` (optional, vocabulary `"mineral"`, and already defines
+  `get_mineral_label()` — the exact name T011's `contribute_to_class()` would generate for a field
+  named `mineral` — so that story's collision guard has a real pre-existing definition to test
+  against). Factories (`SpecimenFactory`, `SampleFactory`, `ArtifactFactory`) added to
+  `tests/factories.py`. Two vocabulary fixtures (`multilingual_scheme`, `single_language_scheme`)
+  added to `tests/conftest.py` for #87/#88/#89 to reach without redefining, named for what they
+  are rather than for this feature. Verified: `poetry run pytest -q tests/test_testapp.py` — 9
+  passed (`TestMigrations` — tables queryable after migrating from zero, `makemigrations --check
+  --dry-run` exits normally rather than raising `SystemExit(1)`; `TestFactories` — the three
+  factories build valid saved records; `TestVocabularyFixtures` — the two scheme fixtures build
+  the shape their docstrings promise). Full suite: `poetry run pytest -q` — 1029 passed (1020 +
+  9). `poetry run pre-commit run --all-files` — all hooks green (trim-whitespace, end-of-file,
+  check-yaml, poetry-check, ruff lint, ruff format, mypy, deptry). Deliberately not tested here:
+  declaring/saving/reading back a concept through the field, the reverse accessor, `null`/`blank`
+  behaviour — that is T004's (US-1) acceptance, against a real model, not T002's. Phase F (T001,
+  T003, T002) complete; worktree clean, all three tasks committed.
