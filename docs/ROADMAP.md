@@ -1,6 +1,6 @@
 # Roadmap: django-controlled-vocabularies
 
-**Date:** 2026-07-22
+**Date:** 2026-08-11
 
 This document was designed against [GOALS.md](../GOALS.md). See also [CONTEXT.md](../CONTEXT.md) for
 domain terminology and [memory/constitution.md](../memory/constitution.md) for project standards.
@@ -25,8 +25,8 @@ minors, and one minor can move two goals. And once `1.0` ships, a breaking chang
 `1.x`; it waits for the next major, because a consumer pinned to `>=1,<2` is trusting that it will
 not break.
 
-The repo is at `0.0.x` today. R1 is done and R2 through R5 are not, so the first published release
-is still some way off.
+The repo is at `0.0.x` today. R1 and R2 are done; R3 through R5 are not, so the first published
+release is still some way off.
 
 ## Essential goals: v0.1.0
 
@@ -72,11 +72,20 @@ served URLs, and the editing interface.
 
 ### R2 — RDF import
 
-*Full feature · advances G4, and G8, G6.*
+*Full feature · advances G4, and G8, G6.* **Delivered.**
 
 Import is the only way to get real vocabularies into the system: the heat-flow vocabularies already
-published as Turtle, large external sets, and whatever a curator starts from. Until it exists,
-nothing downstream can be tested against real data.
+published as Turtle, large external sets, and whatever a curator starts from. Until it existed,
+nothing downstream could be tested against real data. It shipped as four features:
+
+- concepts keeping the identifier they were published under
+  ([#49](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/49));
+- importing a published SKOS vocabulary from a file, in any of Turtle, RDF/XML, or JSON-LD
+  ([#50](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/50));
+- keeping the languages the site supports and reporting the rest
+  ([#51](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/51));
+- running an import from the command line
+  ([#52](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/52)).
 
 **Deliverables:**
 
@@ -94,7 +103,8 @@ interface.
 *Full feature · advances G2.*
 
 This is what the whole package was built for: letting a Django project attach controlled-vocabulary
-concepts to its own models as first-class data. It depends on R1.
+concepts to its own models as first-class data. It depends on R1, and with R2 delivered there are
+now real imported vocabularies to build and test the field against, rather than only fixtures.
 
 **Deliverables:**
 
