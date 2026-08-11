@@ -19,3 +19,9 @@ Append-only. One line per stage transition and per gate outcome, written at the 
   (`issuecomment-5253525466`), carrying the five self-resolved ambiguities and the one open risk
   (Article IX still describing a per-concept lifecycle that #19's ruling superseded — R4's to
   reconcile). No conditions attached. Proceeding to S3 PLAN.
+- **2026-08-11 — S3 PLAN.** `research.md` R1–R7 (every finding verified against Django's own source
+  in the project virtualenv, not documentation), `plan.md` with the Constitution Check clean and no
+  Complexity Tracking entries, `tasks.md` T001–T013 across a foundational phase and the six stories,
+  `feature-state.json` generated. Cross-artifact analyze: all 12 FRs and all 6 SCs map to at least
+  one task, every story maps to its issue, no unresolved markers. No spec amendment needed — the
+  research confirmed the spec rather than contradicting it. Next: S3R design review.

@@ -1,0 +1,206 @@
+{
+  "$schema": "https://openclaw.local/schemas/feature-state.schema.json",
+  "feature": "009-attach-concept-to-model",
+  "branch": "009-attach-concept-to-model",
+  "repo": "SamuelJennings/django-controlled-vocabularies",
+  "state": "PLAN",
+  "state_history": [
+    {
+      "state": "INTAKE",
+      "at": "2026-08-11T09:00:00Z",
+      "note": "issue #86 grilled; one question \u2014 behaviour when the named vocabulary is absent from the database"
+    },
+    {
+      "state": "SPECIFY",
+      "at": "2026-08-11T09:30:00Z",
+      "note": "spec.md, 6 stories, FR-001..012, SC-001..006; clarify scan resolved 4 further ambiguities; decisions.md D1-D6"
+    },
+    {
+      "state": "SETUP",
+      "at": "2026-08-11T10:00:00Z",
+      "note": "epic #86 promoted, stories #90-#95, draft PR #96; stage-exit S2 green"
+    },
+    {
+      "state": "GATE_SPEC",
+      "at": "2026-08-11T10:15:00Z",
+      "note": "approved by Sam in session, no conditions"
+    },
+    {
+      "state": "PLAN",
+      "at": "2026-08-11T10:45:00Z",
+      "note": "plan.md, research.md R1-R7 verified against Django source, tasks.md T001-T013; no spec amendment needed"
+    }
+  ],
+  "gates": {
+    "spec": {
+      "approved_by": "SamuelJennings",
+      "at": "2026-08-11T10:15:00Z",
+      "self_resolved": [
+        "a missing vocabulary is a warning, never a failure to start",
+        "the declaration names its vocabulary by slug, not URI",
+        "the check is a warning and stays silent when it cannot query",
+        "the vocabulary constraint is validation, the delete guard is the database",
+        "label readback falls back to the vocabulary's default language"
+      ]
+    }
+  },
+  "stories": [
+    {
+      "id": "US0",
+      "priority": "P1",
+      "issue": null,
+      "worktree": null,
+      "status": "todo",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T001",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T002",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
+    },
+    {
+      "id": "US1",
+      "priority": "P1",
+      "issue": 90,
+      "worktree": null,
+      "status": "todo",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T003",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T004",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
+    },
+    {
+      "id": "US2",
+      "priority": "P1",
+      "issue": 91,
+      "worktree": null,
+      "status": "todo",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T005",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T006",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
+    },
+    {
+      "id": "US3",
+      "priority": "P1",
+      "issue": 92,
+      "worktree": null,
+      "status": "todo",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T007",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
+    },
+    {
+      "id": "US4",
+      "priority": "P2",
+      "issue": 93,
+      "worktree": null,
+      "status": "todo",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T008",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T009",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
+    },
+    {
+      "id": "US5",
+      "priority": "P2",
+      "issue": 94,
+      "worktree": null,
+      "status": "todo",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T010",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T011",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
+    },
+    {
+      "id": "US6",
+      "priority": "P3",
+      "issue": 95,
+      "worktree": null,
+      "status": "todo",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T012",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T013",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
+    }
+  ],
+  "budgets": {
+    "converge_cycles": {
+      "max": 2,
+      "used": 0
+    },
+    "review_cycles": {
+      "max": 1,
+      "used": 0
+    },
+    "design_review_cycles": {
+      "max": 1,
+      "used": 0
+    },
+    "tokens": {
+      "max": 4000000,
+      "used": 0
+    }
+  },
+  "pr": {
+    "number": 96,
+    "draft": true
+  }
+}
