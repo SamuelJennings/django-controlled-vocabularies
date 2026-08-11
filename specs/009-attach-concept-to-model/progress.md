@@ -60,3 +60,35 @@ Append-only. One line per stage transition and per gate outcome, written at the 
   Independently reproduced the pre-fix `KeyError` against a copy of the field with the `validate()`
   override removed, to confirm the test actually exercises SPEC-001 rather than merely asserting
   `ValidationError` was raised. `ruff check`/`ruff format` clean. Next: T002. Watch: none.
+- **2026-08-11T00:20:00Z · Implementer Phase F · T002.** Blocked before writing any test-app code.
+  T001's construction-time rejections (`on_delete` in kwargs → `TypeError`; empty/missing
+  `vocabulary` → `TypeError`) make `ConceptField` impossible to round-trip through Django's own
+  field-state machinery without `deconstruct()` (T003, US-1, explicitly out of scope for this
+  phase — "Phase F builds the field's construction and the test app; those stories build on it").
+  `Field.clone()` — `self.__class__(*args, **kwargs)` from `self.deconstruct()` — is called by
+  `ModelState.from_model()` on *every* command that builds Django's migration state
+  (`makemigrations`, `makemigrations --check`, `migrate`, and pytest-django's own migration
+  application to build the test database), not only when writing a new migration file. Verified by
+  reproduction: built a throwaway app (`tests/_probe_testapp`, never committed, removed after)
+  with one model carrying `ConceptField(vocabulary="rock-type")`, added it to a scratch settings
+  module, and ran `django-admin makemigrations _probe_testapp` against this worktree's installed
+  Django 5.2.16 —
+  ```
+  TypeError: Couldn't reconstruct field rock_type on _probe_testapp.Specimen: ConceptField()
+  requires a non-empty 'vocabulary' naming the ConceptScheme slug to constrain choices to.
+  ```
+  raised from `field.clone()` inside `ModelState.from_model()`, before a migration file is even
+  written — `ForeignKey.deconstruct()`/`RelatedField.deconstruct()` emit `to`, `on_delete` and
+  `limit_choices_to` (confirmed against the installed source, matching `research.md` R2) but never
+  `vocabulary`, since T001 does not override `deconstruct()`. So any model carrying `ConceptField`
+  cannot pass through `makemigrations --check` or `migrate` — including the migration T002 itself
+  requires — until `vocabulary` survives that round trip. Adding `tests/testapp` to
+  `INSTALLED_APPS` in this state would turn pytest-django's own migration application red for the
+  whole suite (1006 tests), which the story's baseline-verify and "leave the tree green" rules both
+  forbid building on top of. No workaround attempted — implementing any form of round-trip
+  survival (a `deconstruct()` override or an equivalent `clone()` override) is T003's named scope,
+  dispatched to a separate worktree; doing it here would be exactly the prohibition this protocol
+  says to report blocked against rather than route around. Nothing committed for T002; worktree
+  left clean. Next: Forge to resolve the phase's task ordering (T003's `deconstruct()` — or an
+  equivalent minimal fix — needs to land before or inside Phase F, not after it). Watch: this also
+  blocks every one of US-1 through US-6, since Phase F is a hard dependency for all six.
