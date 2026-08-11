@@ -97,6 +97,37 @@ class ConceptField(ForeignKey):
                 params={"value": value, "vocabulary": self.vocabulary},
             ) from exc
 
+    def contribute_to_class(self, cls, name, private_only=False, **kwargs):
+        """Add ``get_<name>_label()`` and ``get_<name>_uri()`` to the
+        consuming model (FR-008, FR-009), named the way Django's own
+        ``get_FOO_display()`` is (``Field.contribute_to_class``'s own
+        precedent for a derived read named after a field).
+
+        ``get_<name>_label()`` delegates to
+        :meth:`~controlled_vocabularies.models.Concept.display_label`;
+        ``get_<name>_uri()`` returns the attached concept's ``uri``
+        unchanged. Both return ``None``, never raise, when nothing is
+        attached. The ``setattr`` is guarded: a model that already defines
+        either name keeps its own definition rather than having it
+        silently overwritten.
+        """
+        super().contribute_to_class(cls, name, private_only=private_only, **kwargs)
+
+        def get_label(instance):
+            concept = getattr(instance, name)
+            return concept.display_label() if concept is not None else None
+
+        def get_uri(instance):
+            concept = getattr(instance, name)
+            return concept.uri if concept is not None else None
+
+        label_attr_name = f"get_{name}_label"
+        uri_attr_name = f"get_{name}_uri"
+        if not hasattr(cls, label_attr_name):
+            setattr(cls, label_attr_name, get_label)
+        if not hasattr(cls, uri_attr_name):
+            setattr(cls, uri_attr_name, get_uri)
+
     def deconstruct(self):
         """Strip the three kwargs this field fixes and record ``vocabulary`` instead.
 

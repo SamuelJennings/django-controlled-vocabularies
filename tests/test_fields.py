@@ -63,13 +63,14 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.db import connection
-from django.db.models import PROTECT, Q, ProtectedError
+from django.db.models import PROTECT, ProtectedError, Q
 from django.test.utils import CaptureQueriesContext
+from django.utils import translation
 from django.utils.functional import Promise
 from django.utils.module_loading import import_string
 
 from controlled_vocabularies.fields import ConceptField
-from controlled_vocabularies.models import Concept, ConceptScheme
+from controlled_vocabularies.models import Concept, ConceptLabel, ConceptScheme
 from tests.factories import (
     ArtifactFactory,
     ConceptFactory,
@@ -445,3 +446,53 @@ class TestConceptFieldDeleteGuard:
 
         assert not Specimen.objects.filter(pk=specimen.pk).exists()
         assert Concept.objects.filter(pk=concept.pk).exists()
+
+
+class TestConceptFieldLabelAndUriAccessors:
+    """T011 (US-5) — FR-008/FR-009: ``contribute_to_class()`` gives the
+    consuming model ``get_<field>_label()`` and ``get_<field>_uri()``, named
+    the way Django's own ``get_FOO_display()`` is. The label accessor
+    delegates to T010's ``Concept.display_label()``; the URI accessor returns
+    the concept's own ``uri`` unchanged. Both return ``None`` rather than
+    raising when nothing is attached, and the ``setattr`` is guarded so a
+    model that already defines one of these names keeps its own."""
+
+    @pytest.mark.django_db
+    def test_label_accessor_returns_the_active_languages_preferred_label(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        concept = ConceptFactory(scheme=scheme, label="Basalt")
+        concept.add_label(language="de", kind=ConceptLabel.Kind.PREFERRED, text="Basalt (de)")
+        specimen = SpecimenFactory(rock_type=concept)
+
+        with translation.override("de"):
+            assert specimen.get_rock_type_label() == "Basalt (de)"
+
+    @pytest.mark.django_db
+    def test_label_accessor_falls_back_to_the_vocabulary_default(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        concept = ConceptFactory(scheme=scheme, label="Basalt")
+        specimen = SpecimenFactory(rock_type=concept)
+
+        with translation.override("fr"):
+            assert specimen.get_rock_type_label() == "Basalt"
+
+    @pytest.mark.django_db
+    def test_uri_accessor_returns_the_concepts_own_uri_unchanged(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        concept = ConceptFactory(scheme=scheme)
+        specimen = SpecimenFactory(rock_type=concept)
+
+        assert specimen.get_rock_type_uri() == concept.uri
+
+    @pytest.mark.django_db
+    def test_both_accessors_return_none_when_nothing_is_attached(self):
+        sample = SampleFactory()
+
+        assert sample.get_mineral_label() is None
+        assert sample.get_mineral_uri() is None
+
+    @pytest.mark.django_db
+    def test_a_models_own_definition_survives_the_contribution_guard(self):
+        artifact = ArtifactFactory()
+
+        assert artifact.get_mineral_label() == "this artifact's own label, not the field's"
