@@ -27,6 +27,16 @@ cannot run ``validate()`` at all.
   path/kwargs round-trips (T003, moved into Phase F because
   ``ModelState.from_model()`` clones every field through ``deconstruct()``,
   so T002's test app cannot migrate without it).
+- ``TestConceptFieldRoundTrip`` — T004 (US-1): declaring the field on a real
+  model, saving, and reading back a concept survives a save/reload; the
+  optional field validates and saves with nothing attached; and using the
+  field this way stays ``makemigrations --check`` clean, the regression guard
+  against ``deconstruct()`` rotting.
+- ``TestConceptFieldOrdinaryOptions`` — T004 (US-1): the field's ordinary
+  ``ForeignKey`` options — ``related_name``, ``null``/``blank``,
+  ``verbose_name``, ``help_text``, the automatic index — behave exactly as
+  they would on a plain ``ForeignKey``, asserted directly on the bound field
+  rather than only through a save/reload round trip.
 """
 
 import pytest
@@ -38,7 +48,13 @@ from django.utils.functional import Promise
 from django.utils.module_loading import import_string
 
 from controlled_vocabularies.fields import ConceptField
-from tests.factories import ArtifactFactory, SampleFactory, SpecimenFactory
+from tests.factories import (
+    ArtifactFactory,
+    ConceptFactory,
+    ConceptSchemeFactory,
+    SampleFactory,
+    SpecimenFactory,
+)
 from tests.testapp.models import Artifact, Sample, Specimen
 
 
@@ -201,3 +217,69 @@ class TestConceptVocabularyFixtures:
     @pytest.mark.django_db
     def test_the_two_schemes_are_distinct(self, multilingual_scheme, single_language_scheme):
         assert multilingual_scheme.pk != single_language_scheme.pk
+
+
+class TestConceptFieldRoundTrip:
+    """T004 (US-1) — end-to-end usage of the field the way a consuming project
+    would use it: a concept from the named vocabulary survives a save/reload,
+    an optional field with nothing attached validates and saves, and using the
+    field this way stays ``makemigrations --check`` clean."""
+
+    @pytest.mark.django_db
+    def test_saving_and_reloading_returns_the_same_concept(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        concept = ConceptFactory(scheme=scheme)
+        specimen = SpecimenFactory(rock_type=concept)
+
+        reloaded = Specimen.objects.get(pk=specimen.pk)
+
+        assert reloaded.rock_type == concept
+
+    @pytest.mark.django_db
+    def test_optional_field_with_nothing_attached_validates_and_saves(self):
+        sample = Sample(name="Unclassified sample")
+
+        sample.full_clean()
+        sample.save()
+
+        assert sample.pk is not None
+        assert sample.mineral is None
+
+    @pytest.mark.django_db
+    def test_makemigrations_check_stays_clean_after_declaring_and_saving(self):
+        """Regression guard for ``deconstruct()`` (T003): using the field
+        end-to-end must not surface an undeclared model change beyond what
+        Phase F already committed."""
+        ConceptFactory()
+        SpecimenFactory()
+
+        call_command("makemigrations", "--check", "--dry-run", verbosity=0)
+
+
+class TestConceptFieldOrdinaryOptions:
+    """T004 (US-1) — the field's ordinary ``ForeignKey`` options behave
+    exactly as they would on a plain ``ForeignKey``, asserted directly on the
+    bound field rather than only through a save/reload round trip."""
+
+    def test_related_name_produces_the_reverse_accessor(self):
+        field = Sample._meta.get_field("mineral")
+        assert field.remote_field.get_accessor_name() == "samples"
+
+    def test_required_field_is_not_null_or_blank(self):
+        field = Specimen._meta.get_field("rock_type")
+        assert field.null is False
+        assert field.blank is False
+
+    def test_optional_field_is_null_and_blank(self):
+        field = Sample._meta.get_field("mineral")
+        assert field.null is True
+        assert field.blank is True
+
+    def test_verbose_name_and_help_text_are_what_was_declared(self):
+        field = Specimen._meta.get_field("rock_type")
+        assert field.verbose_name == "rock type"
+        assert str(field.help_text) == "The rock type this specimen is classified as."
+
+    def test_the_fks_index_is_present(self):
+        field = Specimen._meta.get_field("rock_type")
+        assert field.db_index is True

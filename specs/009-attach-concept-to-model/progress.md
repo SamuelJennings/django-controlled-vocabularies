@@ -164,3 +164,25 @@ Append-only. One line per stage transition and per gate outcome, written at the 
   At convergence: `tests/test_testapp.py` folded into `tests/test_fields.py` (it mirrored no source
   module, which conformance rejects — a test app is scaffolding, not a package), and the ledger's
   US0/US1 task lists reconciled with `tasks.md`. Next: US-1 (T004), then US-2.
+- **2026-08-11 — Implementer US-1 · T004.** Did: added `TestConceptFieldRoundTrip` and
+  `TestConceptFieldOrdinaryOptions` to `tests/test_fields.py` (no second file, per the plan's
+  convention). Round trip: `SpecimenFactory(rock_type=concept)` against a concept built in a scheme
+  named "Rock Type" (slugifies to `"rock-type"`, `Specimen`'s declared vocabulary) survives a reload
+  via `Specimen.objects.get(pk=...)`; `Sample(name=...)` with `mineral` unset passes `full_clean()`
+  and saves; declaring and saving through the field stays `makemigrations --check --dry-run` clean
+  (the regression guard against T003's `deconstruct()` rotting, restated here per `tasks.md`'s T004
+  scope rather than relying solely on T002's identical assertion). Ordinary options asserted directly
+  on the bound field rather than only through save/reload: `Sample.mineral`'s
+  `remote_field.get_accessor_name()` is `"samples"`; `Specimen.rock_type` is `null=False`/
+  `blank=False`, `Sample.mineral` is `null=True`/`blank=True`; `verbose_name`/`help_text` read back
+  exactly as declared; `db_index is True` on the FK, matching a plain `ForeignKey`'s default
+  (confirmed against the installed Django 5.2.16 field, not assumed). No production code touched —
+  `fields.py` is unmodified, per T004's nature ("T001 implements `validate()`; T004 proves" the
+  construction mechanism is already complete) — so there was no RED step to observe against new
+  behaviour; all 8 new tests passed on first run, proving Phase F's mechanism rather than driving new
+  code. No deviation from `tasks.md`; no new `decisions.md` entry. Verified: `poetry run pytest -q
+  tests/test_fields.py` — 31 passed. Full suite: `poetry run pytest -q` — 1037 passed (1029 + 8).
+  `poetry run pre-commit run --all-files` — all hooks green (trim-whitespace, end-of-file, check-yaml,
+  poetry-check, ruff lint, ruff format, mypy, deptry). `DJANGO_SETTINGS_MODULE=tests.settings poetry
+  run django-admin makemigrations --check --dry-run` — "No changes detected", exit 0. Diff scope:
+  `tests/test_fields.py` only. Next: US-2 (T005).
