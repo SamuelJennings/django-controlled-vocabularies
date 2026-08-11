@@ -9,6 +9,7 @@ useful.
 
 from django.apps import apps
 from django.core import checks
+from django.db import DatabaseError
 from django.utils.translation import gettext_lazy as _
 
 from .fields import ConceptField
@@ -22,6 +23,12 @@ def check_concept_field_vocabularies(app_configs, **kwargs):
 
     Walks every installed model for declared ``ConceptField`` instances and resolves the
     distinct vocabulary slugs those fields name in **one** query, rather than one per field.
+
+    The check runs before ``migrate`` (``BaseCommand.requires_system_checks`` defaults to
+    ``"__all__"``), so on a fresh install it runs against a database with no tables yet. A
+    missing table is not evidence that a vocabulary is absent, so that state — surfaced as
+    ``ProgrammingError``, ``OperationalError`` or an unreachable database, all subclasses of
+    ``DatabaseError`` — yields no warnings rather than raising (FR-003, ``research.md`` R3).
     """
     concept_fields = [
         field for model in apps.get_models() for field in model._meta.get_fields() if isinstance(field, ConceptField)
@@ -30,7 +37,10 @@ def check_concept_field_vocabularies(app_configs, **kwargs):
         return []
 
     slugs = {field.vocabulary for field in concept_fields}
-    existing = set(ConceptScheme.objects.filter(slug__in=slugs).values_list("slug", flat=True))
+    try:
+        existing = set(ConceptScheme.objects.filter(slug__in=slugs).values_list("slug", flat=True))
+    except DatabaseError:
+        return []
 
     return [
         checks.Warning(

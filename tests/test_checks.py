@@ -102,14 +102,14 @@ class TestCheckSurvivesUnmigratedDatabase:
 
     @pytest.mark.django_db
     def test_silencing_the_check_id_suppresses_it(self):
-        stdout = io.StringIO()
-        call_command("check", stdout=stdout)
-        assert CHECK_ID in stdout.getvalue()
+        stderr = io.StringIO()
+        call_command("check", stderr=stderr)
+        assert CHECK_ID in stderr.getvalue()
 
-        stdout = io.StringIO()
+        stderr = io.StringIO()
         with override_settings(SILENCED_SYSTEM_CHECKS=[CHECK_ID]):
-            call_command("check", stdout=stdout)
-        assert CHECK_ID not in stdout.getvalue()
+            call_command("check", stderr=stderr)
+        assert CHECK_ID not in stderr.getvalue()
 
     @pytest.mark.django_db
     def test_form_offers_no_choices_and_does_not_raise_when_vocabulary_absent(self):
