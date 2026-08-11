@@ -8,6 +8,15 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Added
 
+- `ConceptField`: a `ForeignKey` field a consuming project declares on its own model, naming one
+  vocabulary by its `ConceptScheme` slug. Constrains form choices and `full_clean()` to that
+  vocabulary, refuses deletion of a referenced concept (`on_delete=PROTECT`) whether the delete
+  reaches it directly or cascades down from its scheme, and adds `get_<field>_label()` /
+  `get_<field>_uri()` accessors reading the attached concept's preferred label (falling back to
+  the vocabulary's default language) and URI, without overwriting either name on a model that
+  already defines it. A named vocabulary that has not been imported yet does not stop the field
+  from being declared or the app from starting. Instead, `manage.py check` reports a warning
+  (`controlled_vocabularies.W001`) naming the model, field, and missing slug. See the README.
 - Importing a published SKOS vocabulary: `import_skos(file, *, serialization=None, scheme=None)`
   reads a Turtle, RDF/XML, or JSON-LD file and creates or updates the vocabulary it declares, its
   concepts, their labels and documentary notes, their broader/narrower and related relationships,

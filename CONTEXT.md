@@ -46,7 +46,7 @@ This is a seed — it grows as the code does.
 | **Projection / index column** | A concrete, read-only DB column (`uri`, `pref_label`, `definition`) synced from the document on save, existing purely to be indexed and queried. | Materialised index, not a second source of truth. |
 | **Escrow** | The role the JSON document plays for predicates the schema doesn't model — stored verbatim, re-emitted on export, so round-tripping is lossless. | Nothing imported is ever silently dropped. |
 | **Predicate registry** | A curated map: CURIE → `{value_type: literal\|uri\|typed, cardinality: one\|many, translatable: bool}`. Drives the editor dropdown, per-row widget, validation, shared-vs-translated routing, and import aliases. | `docs/brainstorm.md`. Unregistered predicates still work as free-text escrow. |
-| **ConceptField / ConceptsField** | The consumption API: a model field wrapping a `ForeignKey` / `ManyToMany` to `Concept`, constrained to a scheme, with an autocomplete widget. | Replaces choice-iterable style entirely (`docs/brainstorm.md`). |
+| **ConceptField** | The single-value consumption API: a `ForeignKey` to `Concept` a consuming project declares on its own model, naming one vocabulary by slug and constraining choices to it. The term a consuming project's own `models.py` writes into its code. | Delivered by #86. The many-to-many counterpart, `ConceptsField`, is #87; an autocomplete widget for either is #88. Replaces choice-iterable style entirely (`docs/brainstorm.md`). |
 | **Lifecycle** | A concept's `status`: `draft` → `published` → `deprecated` (`owl:deprecated` on export). Referenced concepts are `PROTECT`ed, not deleted. | `docs/brainstorm.md`. |
 
 ## Importing published vocabularies

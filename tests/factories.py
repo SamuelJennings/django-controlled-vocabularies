@@ -19,6 +19,7 @@ from controlled_vocabularies.models import (
     ConceptRelation,
     ConceptScheme,
 )
+from tests.testapp.models import Artifact, Sample, Specimen
 
 
 class ConceptSchemeFactory(factory.django.DjangoModelFactory):
@@ -208,3 +209,39 @@ def collection_with_members(scheme=None, labels=("Granite", "Basalt", "Gabbro"),
     for concept in members:
         collection.add(concept)
     return collection, members
+
+
+class SpecimenFactory(factory.django.DjangoModelFactory):
+    """Build a saved :class:`~tests.testapp.models.Specimen` (T002), whose
+    ``rock_type`` is required — auto-created via a plain :class:`ConceptFactory`
+    concept, since :class:`ConceptField` places no constraint on a concept's
+    own scheme slug beyond what a consuming record's ``full_clean()`` checks.
+    """
+
+    class Meta:
+        model = Specimen
+
+    name = factory.Sequence(lambda n: f"Specimen {n}")
+    rock_type = factory.SubFactory(ConceptFactory)
+
+
+class SampleFactory(factory.django.DjangoModelFactory):
+    """Build a saved :class:`~tests.testapp.models.Sample` (T002). ``mineral``
+    is optional and left unset by default — pass a concept explicitly where a
+    test needs one attached."""
+
+    class Meta:
+        model = Sample
+
+    name = factory.Sequence(lambda n: f"Sample {n}")
+
+
+class ArtifactFactory(factory.django.DjangoModelFactory):
+    """Build a saved :class:`~tests.testapp.models.Artifact` (T002) — the model
+    whose own ``get_mineral_label()`` T011's collision guard must leave alone.
+    ``mineral`` is optional and left unset by default."""
+
+    class Meta:
+        model = Artifact
+
+    name = factory.Sequence(lambda n: f"Artifact {n}")

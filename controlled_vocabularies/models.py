@@ -17,6 +17,7 @@ from django.core.validators import validate_unicode_slug
 from django.db import models
 from django.db.models import F, Max, Q
 from django.utils.text import Truncator, slugify
+from django.utils.translation import get_language
 from django.utils.translation import gettext_lazy as _
 
 from controlled_vocabularies import conf
@@ -745,6 +746,20 @@ class Concept(StaticUriModel):
             if row.language == language and row.kind == ConceptLabel.Kind.PREFERRED:
                 return row.text
         return None
+
+    def display_label(self) -> str:
+        """Return this concept's preferred label for display (FR-008).
+
+        The active language's preferred label
+        (:func:`django.utils.translation.get_language`), falling back to
+        the scheme's effective default language's — which every concept
+        has (FR-002), so the result is never empty for a concept that
+        exists. Composed from :meth:`preferred_label`, which is unchanged:
+        its ``None`` return for an absent language still answers "does
+        this language have a label?" for import reporting and the future
+        editor.
+        """
+        return self.preferred_label(get_language()) or self.label
 
     def alt_labels(self, language: str) -> list[str]:
         """Return this concept's alternative label texts in ``language``.

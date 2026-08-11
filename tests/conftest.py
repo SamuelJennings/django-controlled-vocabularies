@@ -30,6 +30,30 @@ def concept(db):
     return ConceptFactory()
 
 
+@pytest.fixture
+def multilingual_scheme(db):
+    """A saved :class:`ConceptScheme` with two concepts, one of them carrying
+    preferred labels in more than one language (T002; reused by #87, #88, #89
+    so each does not have to build this shape itself).
+    """
+    scheme = ConceptSchemeFactory()
+    ConceptFactory(scheme=scheme, multilingual=True)
+    ConceptFactory(scheme=scheme)
+    return scheme
+
+
+@pytest.fixture
+def single_language_scheme(db):
+    """A second saved :class:`ConceptScheme`, distinct from
+    :func:`multilingual_scheme`, with two concepts in the default language
+    only (T002; reused by #87, #88, #89).
+    """
+    scheme = ConceptSchemeFactory()
+    ConceptFactory(scheme=scheme)
+    ConceptFactory(scheme=scheme)
+    return scheme
+
+
 class _StubResponse:
     """One configured answer for a path on :class:`HTTPStub` (T006, research.md R8)."""
 
