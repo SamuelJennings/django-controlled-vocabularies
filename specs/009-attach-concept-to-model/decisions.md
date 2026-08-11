@@ -142,6 +142,9 @@ of an existing `from django.db.models import` line, and a new class appended aft
 
 Approved under D4's "a legitimate refactor can be approved by Forge with a decisions.md entry".
 
+**ADR:** none — a one-off triage of a tooling flag on one commit range, not a rule that outlives
+this feature.
+
 ## D8 — T012's on_delete/vocabulary refusals are exempt from the translation sweep
 
 `fields.py` raises two bare `TypeError`s from `ConceptField.__init__()`: a consumer-supplied
@@ -175,3 +178,8 @@ and nothing said so.
 Refused with a `TypeError` at construction, the way `on_delete` already is. Combining the two `Q`
 objects with `&` is the larger design change and is not what the failure demanded — a consumer who
 needs a narrower set can filter the form field's queryset in their own `ModelForm`.
+
+**ADR:** none yet — the same call as D2's. It is a feature-level choice about one field's
+constructor today. If #87's `ConceptsField` and #88's widget reach the same answer, "a field that
+owns a relation option refuses a consumer's override rather than merging it" becomes a standing
+rule for the package's field family and earns an ADR then.

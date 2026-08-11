@@ -3,7 +3,7 @@
   "feature": "009-attach-concept-to-model",
   "branch": "009-attach-concept-to-model",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "IMPLEMENT",
+  "state": "PR_READY",
   "state_history": [
     {
       "state": "INTAKE",
