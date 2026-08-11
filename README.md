@@ -185,8 +185,8 @@ inspect what happened without parsing anything:
   was before the run started.
 
 A run either succeeds in full or changes nothing: every problem in a file is collected before any
-of it is written, and a fatal one rolls the whole run back. There is no command-line or web-facing
-entry point yet — `import_skos()` is a programmatic call only.
+of it is written, and a fatal one rolls the whole run back. The `import_skos` management command
+wraps this for use from a terminal (see below). There is no web-facing entry point yet.
 
 Reading a file never reassigns identity. A concept or collection whose URI is already held by a
 different vocabulary stays where it is. So does one whose URI is held by a record of another kind,
@@ -196,8 +196,10 @@ a record between vocabularies is a curatorial decision, not a side effect of rea
 An imported file is treated as untrusted input. RDF/XML is scanned for entity expansion and
 external references before a parser sees it. A JSON-LD document is refused rather than fetched if
 its `@context` names a remote location, whether that is a plain string reference or an `@import`
-reference tucked inside an inline object context. Importing a file never makes a network request.
-An ordinary inline JSON-LD context, carrying no such reference, imports normally.
+reference tucked inside an inline object context. `import_skos()` itself never makes a network
+request when reading a file — the command's own URL fetch (see below) happens first, and only the
+fetched or local bytes ever reach this scan. An ordinary inline JSON-LD context, carrying no such
+reference, imports normally.
 
 `import_skos()` raises one of two exceptions, both `ValidationError` subclasses carrying a
 translatable message. `SkosImportError` covers every reason a file cannot be turned into usable SKOS
@@ -208,6 +210,38 @@ carries the same `ImportReport` its `fatal` bucket names them in. `UnsafeRdfXmlE
 `UnsafeJsonLdError`, the two exceptions the safety scan itself raises, are exported
 `SkosImportError` subclasses, so code that only catches `(SkosImportError, SkosImportFailed)`
 already catches a file the safety scan refuses too.
+
+## Importing from the command line
+
+The `import_skos` management command wraps `import_skos()` for use from a terminal or a
+deployment script:
+
+```bash
+python manage.py import_skos rocks.ttl
+```
+
+The source can be a local filesystem path or an `http://`/`https://` URL, told apart by the value
+itself rather than by a flag. A URL is fetched under a fixed 30-second read timeout, a fixed 50 MiB
+response ceiling and a fixed ten-minute deadline for the whole transfer, over a connection that
+only ever speaks http and https. The fetched document's identifiers resolve against the address it
+was served from, following any redirect — so a vocabulary published behind a PURL or a `/latest`
+alias is stored under the URIs its publisher assigned, and a re-import updates the same concepts
+the first import created rather than making a second copy.
+
+- `--format` names the source's serialization (`turtle`, `xml`, or `json-ld`), for a source whose
+  extension or `Content-Type` does not.
+- `--dry-run` performs the entire import and reports the outcome exactly as a live run would,
+  then leaves the database exactly as it was beforehand — useful for seeing what a file would set
+  aside before deciding whether to configure a language for it.
+- `--verbosity`, Django's own option, prints bucket counts by default — how many records were
+  created, updated, set aside, normalized, or absent from the source, plus the set-aside account
+  grouped by reason and by language. At `2` or above, every individual set-aside entry prints too.
+  At `0` nothing prints at all, as with any Django command.
+
+A refusal exits non-zero and prints every reason the run was refused. A run that sets values aside
+still exits zero: importing a vocabulary published in more languages than a site is configured for
+always sets some aside, so that outcome is treated as normal rather than as a failure a deployment
+script should stop on.
 
 ## Relationship to other packages
 

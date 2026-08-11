@@ -136,10 +136,18 @@ def _check_context_value(context: Any) -> None:
 
     A plain string ``@context`` names a location for rdflib to fetch and parse
     itself — the first vector this scan closes. An array ``@context`` may
-    freely mix inline objects with string references (refused, the same as a
-    bare string) and dict entries (each checked in turn, below); only the
-    first offending entry is named in the refusal, consistent with
-    :func:`scan_rdf_xml` naming only the first problem it meets.
+    freely mix inline objects with string references, dict entries, and further
+    arrays, so every entry is passed back through this function whatever its
+    type; only the first offending entry is named in the refusal, consistent
+    with :func:`scan_rdf_xml` naming only the first problem it meets.
+
+    That recursion is the point, not tidiness (SEC-701, decisions.md D19). The
+    array branch used to check only ``str`` and ``dict`` entries, and
+    ``Context._prep_sources`` recurses into a nested array and hands each
+    string inside it to ``_fetch_context``. So ``{"@context": [["http://…"]]}``
+    passed the scan and was fetched, as did the same shape wrapping an
+    ``@import`` object, while the flat forms either side of it were correctly
+    refused.
 
     A ``dict`` — an inline, locally-embedded context, the ordinary shape of a
     published file — was previously left alone entirely on the reasoning that
@@ -167,10 +175,7 @@ def _check_context_value(context: Any) -> None:
         _refused_remote_context(context)
     elif isinstance(context, list):
         for entry in context:
-            if isinstance(entry, str):
-                _refused_remote_context(entry)
-            elif isinstance(entry, dict):
-                _check_context_value(entry)
+            _check_context_value(entry)
     elif isinstance(context, dict):
         imports = context.get("@import")
         if isinstance(imports, str):

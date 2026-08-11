@@ -17,6 +17,11 @@ It walks ``_meta`` rather than a hand-listed field set, so a future field is
 held to the same standard automatically.
 """
 
+import ast
+import inspect
+import re
+from pathlib import Path
+
 import pytest
 from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.db.models import Model, UniqueConstraint
@@ -29,6 +34,9 @@ from controlled_vocabularies.exchange.report import (
     SetAsideEntry,
     SetAsideReason,
 )
+from controlled_vocabularies.management import rendering as rendering_module
+from controlled_vocabularies.management import sources as sources_module
+from controlled_vocabularies.management.commands import import_skos as import_skos_command_module
 from controlled_vocabularies.models import (
     Collection,
     CollectionMember,
@@ -530,4 +538,149 @@ class TestStaticUriFieldAttributesAgree:
         )
         assert len({tuple(v) for v in validator_reprs.values()}) == 1, (
             f"static_uri.validators disagrees across models: {validator_reprs}"
+        )
+
+
+# --- FS-008 US-6: the management command package's i18n sweep (Article XII, FR-015, T023) ---
+#
+# By the time a rendered line reaches a terminal, `ReportRenderer` has already %-formatted a
+# translated template into a plain string — the placeholder shape is gone. So this is a static
+# check over the three source files themselves rather than a runtime introspection of rendered
+# output: no string reaching a known output sink (`CommandError`, `self.stdout`/`self.stderr.write`,
+# `parser.add_argument(help=...)`, or a command's own `help = ...`) is a bare literal, and no string
+# passed to a translation call (`_`/`gettext_lazy`/`ngettext_lazy`) carries a positional `%`
+# placeholder rather than a named one.
+
+_MANAGEMENT_I18N_MODULES = [import_skos_command_module, rendering_module, sources_module]
+_TRANSLATION_CALL_NAMES = {"_", "gettext_lazy", "ngettext_lazy"}
+# A `%` not immediately followed by `(` (a named placeholder's opening paren) or another `%`
+# (an escaped literal percent) is positional: %s, %d, %-10.2f, and so on.
+_POSITIONAL_PLACEHOLDER = re.compile(r"%(?!%|\()[-+ 0#]*\d*(?:\.\d+)?[a-zA-Z]")
+
+
+class _ManagementI18nVisitor(ast.NodeVisitor):
+    """Walks one module's AST, recording every positional placeholder passed to a translation
+    call and every bare string literal reaching a known output sink un-translated."""
+
+    def __init__(self) -> None:
+        self.positional_placeholders: list[str] = []
+        self.bare_literals: list[str] = []
+
+    @staticmethod
+    def _call_name(node: ast.Call) -> str | None:
+        func = node.func
+        if isinstance(func, ast.Name):
+            return func.id
+        if isinstance(func, ast.Attribute):
+            return func.attr
+        return None
+
+    @staticmethod
+    def _str_constant(node: ast.expr) -> str | None:
+        return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+    def visit_Call(self, node: ast.Call) -> None:
+        name = self._call_name(node)
+        if name in _TRANSLATION_CALL_NAMES:
+            for arg in node.args:
+                literal = self._str_constant(arg)
+                if literal is not None and _POSITIONAL_PLACEHOLDER.search(literal):
+                    self.positional_placeholders.append(literal)
+        elif name == "CommandError":
+            for arg in node.args:
+                literal = self._str_constant(arg)
+                if literal is not None:
+                    self.bare_literals.append(literal)
+        elif name == "write" and isinstance(node.func, ast.Attribute):
+            owner = node.func.value
+            if isinstance(owner, ast.Attribute) and owner.attr in {"stdout", "stderr"}:
+                for arg in node.args:
+                    literal = self._str_constant(arg)
+                    if literal is not None:
+                        self.bare_literals.append(literal)
+        elif name == "add_argument":
+            for kw in node.keywords:
+                if kw.arg == "help":
+                    literal = self._str_constant(kw.value)
+                    if literal is not None:
+                        self.bare_literals.append(literal)
+        self.generic_visit(node)
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        # A command's own `help = "..."` class attribute (Django reads it as the command's
+        # top-level help text, alongside every argument's own `help=`).
+        if any(isinstance(target, ast.Name) and target.id == "help" for target in node.targets):
+            literal = self._str_constant(node.value)
+            if literal is not None:
+                self.bare_literals.append(literal)
+        self.generic_visit(node)
+
+    def visit_Yield(self, node: ast.Yield) -> None:
+        literal = self._str_constant(node.value) if node.value is not None else None
+        if literal is not None:
+            self.bare_literals.append(literal)
+        self.generic_visit(node)
+
+
+def _visit_source(source: str) -> _ManagementI18nVisitor:
+    visitor = _ManagementI18nVisitor()
+    visitor.visit(ast.parse(source))
+    return visitor
+
+
+class TestManagementI18nSweepVisitorCatchesAViolation:
+    """Proves the checker below is a real gate, not a vacuous one: each of these feeds it a
+    deliberately bad snippet it must flag, before the sweep test trusts it to report a clean
+    management package."""
+
+    def test_catches_a_positional_placeholder_in_a_translation_call(self):
+        visitor = _visit_source('from django.utils.translation import gettext_lazy as _\n_("%s changed")\n')
+        assert visitor.positional_placeholders == ["%s changed"]
+
+    def test_catches_a_bare_literal_raised_as_a_command_error(self):
+        visitor = _visit_source("from django.core.management.base import CommandError\nraise CommandError('boom')\n")
+        assert visitor.bare_literals == ["boom"]
+
+    def test_catches_a_bare_literal_written_to_stdout(self):
+        visitor = _visit_source("self.stdout.write('boom')\n")
+        assert visitor.bare_literals == ["boom"]
+
+    def test_catches_a_bare_literal_as_an_argument_help(self):
+        visitor = _visit_source("parser.add_argument('--x', help='boom')\n")
+        assert visitor.bare_literals == ["boom"]
+
+    def test_catches_a_bare_literal_as_the_command_help_attribute(self):
+        visitor = _visit_source("class Command(BaseCommand):\n    help = 'boom'\n")
+        assert visitor.bare_literals == ["boom"]
+
+    def test_catches_a_bare_literal_yielded_as_a_rendered_line(self):
+        visitor = _visit_source("def render():\n    yield 'boom'\n")
+        assert visitor.bare_literals == ["boom"]
+
+    def test_does_not_flag_a_named_placeholder_or_a_translated_sink(self):
+        visitor = _visit_source(
+            "from django.utils.translation import gettext_lazy as _\n"
+            "from django.core.management.base import CommandError\n"
+            "raise CommandError(str(_(\"'%(file)s' is fine.\")) % {'file': 'x'})\n"
+        )
+        assert visitor.positional_placeholders == []
+        assert visitor.bare_literals == []
+
+
+class TestManagementPackageI18nSweep:
+    """T023 — the sweep itself. Every printed and help string in the management command
+    package (``commands/import_skos.py``, ``rendering.py``, ``sources.py``) is translatable
+    with only named placeholders. Earlier tasks wrapped as they wrote; this asserts the whole
+    package holds, so a later addition that misses one is caught here rather than by review."""
+
+    @pytest.mark.parametrize("module", _MANAGEMENT_I18N_MODULES, ids=lambda m: m.__name__)
+    def test_every_output_string_is_translatable_with_named_placeholders(self, module):
+        source = Path(inspect.getfile(module)).read_text()
+        visitor = _visit_source(source)
+        assert visitor.positional_placeholders == [], (
+            f"{module.__name__} passes a positional placeholder to a translation call: "
+            f"{visitor.positional_placeholders}"
+        )
+        assert visitor.bare_literals == [], (
+            f"{module.__name__} passes a bare, untranslated literal to an output sink: {visitor.bare_literals}"
         )

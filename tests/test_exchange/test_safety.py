@@ -181,6 +181,48 @@ class TestScanJsonLdRefusesContextImport:
         assert scan_json_ld(_read("inline_context.jsonld")) is None
 
 
+class TestScanJsonLdWalksNestedArrayContexts:
+    """SEC-701 (review, security lens, decisions.md D19) — the array branch used
+    to check only ``str`` and ``dict`` entries, so an array nested inside an array
+    was walked into by rdflib and not by the scan.
+
+    ``Context._prep_sources`` (``rdflib/plugins/shared/jsonld/context.py``) ends
+    with ``if isinstance(source, list): self._prep_sources(...)`` — it recurses to
+    any depth and hands every string it reaches to ``_fetch_context``, which is
+    the same ``urlopen``-backed path the flat forms use. Measured on the branch
+    before the fix: ``{"@context": [["http://…"]]}`` passed the scan and was
+    fetched, as did ``[[{"@import": …}]]``, while the flat forms either side of
+    them were correctly refused. This is the first release in which a *remote
+    server* chooses that document, which is why the lens caught it here.
+    """
+
+    def test_a_remote_string_inside_a_nested_array_context_is_refused(self):
+        with pytest.raises(UnsafeJsonLdError) as excinfo:
+            scan_json_ld(_read("remote_context_nested_array.jsonld"))
+        assert excinfo.value.params == {"context": "http://127.0.0.1:1/x.json"}
+        assert excinfo.value.code == "jsonld_remote_context_forbidden"
+
+    def test_a_context_import_inside_a_nested_array_context_is_refused(self):
+        with pytest.raises(UnsafeJsonLdError) as excinfo:
+            scan_json_ld(_read("context_import_nested_array.jsonld"))
+        assert excinfo.value.params == {"context": "exfil_secret.jsonld"}
+        assert excinfo.value.code == "jsonld_context_import_forbidden"
+
+    def test_the_walk_is_total_rather_than_one_level_deeper(self):
+        # The fix is a recursion, not a second hard-coded level: the array branch
+        # now passes every entry back through the same check whatever its type.
+        # Pinning an arbitrary depth is what proves that, and it is why the fix
+        # is not "handle [[x]] too".
+        with pytest.raises(UnsafeJsonLdError) as excinfo:
+            scan_json_ld(b'{"@context": [[[["http://127.0.0.1:1/x.json"]]]]}')
+        assert excinfo.value.code == "jsonld_remote_context_forbidden"
+
+    def test_an_inline_term_map_inside_a_nested_array_still_passes(self):
+        # The negative control for the recursion: making the walk total must not
+        # start refusing a legitimate context, at any nesting depth.
+        assert scan_json_ld(b'{"@context": [[{"skos": "http://www.w3.org/2004/02/skos/core#"}]]}') is None
+
+
 class TestRefusalMessagesUseOnlyNamedPlaceholders:
     """T031 (FR-016, spec User Story 6 Acceptance Scenarios 1 and 4) — the
     "named, not positional" check applied to the messages this module raises

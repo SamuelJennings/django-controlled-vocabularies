@@ -2,7 +2,7 @@
 
 ``ImportReport`` is the feature's public contract alongside the import itself: #51
 groups and counts what was set aside for a curator, and #52 renders a command-line
-summary and a rehearsal preview from it, neither re-reading the file nor parsing
+summary and a dry-run preview from it, neither re-reading the file nor parsing
 prose (spec Acceptance Scenario US1-11). Four buckets, each inspectable as data:
 what was created, what was updated, what was set aside with a reason, and what the
 source no longer mentions.
@@ -17,6 +17,7 @@ language at creation time.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from django.db.models import TextChoices
@@ -31,13 +32,37 @@ from django.utils.translation import gettext_lazy as _
 _NO_LANGUAGE_TAG = _("no language tag")
 
 
+#: SEC-702, decisions.md D22 (review, security lens) — the C0 and C1 control ranges, minus
+#: nothing: no label, URI, language tag or predicate name in a vocabulary has any business
+#: carrying an escape, a carriage return or a backspace. Every value in a report entry is
+#: text the *source document* chose, and since #52 a source document can be a file a remote
+#: server hands over, rendered straight to an operator's terminal. `\x1b[2K\r` erases the
+#: line being written and `\x1b[1A` moves the cursor over the one above it, so a document
+#: could overwrite the account of itself — worst on ``--dry-run``, whose entire product is
+#: the text an operator reads before deciding to commit.
+#:
+#: The range includes newline and tab, which the usual "control characters" carve-out keeps.
+#: A report entry is one line by construction, so an embedded newline breaks the format
+#: whatever its intent, and lets a document fake a whole additional line of the account —
+#: the same failure as the escape sequence, reached with a character nobody screens for.
+_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
 def _render_params(subject: str, params: dict[str, str]) -> dict[str, str]:
     """``params`` merged with ``subject``, substituting :data:`_NO_LANGUAGE_TAG` for an empty
-    ``language`` value (SEC-406, decisions.md D64) — shared by every entry's own ``render()``."""
+    ``language`` value (SEC-406, decisions.md D64) and stripping control characters from every
+    document-supplied value (SEC-702, decisions.md D22) — shared by every entry's ``render()``.
+
+    Both guards live here rather than at each call site for the same reason: this is the one
+    boundary every fatal, set-aside and normalized message passes through on its way to a
+    person.
+    """
     merged = {"subject": subject, **params}
     if merged.get("language") == "":
         merged["language"] = str(_NO_LANGUAGE_TAG)
-    return merged
+    return {
+        key: _CONTROL_CHARACTERS.sub("", value) if isinstance(value, str) else value for key, value in merged.items()
+    }
 
 
 class SetAsideReason(TextChoices):
