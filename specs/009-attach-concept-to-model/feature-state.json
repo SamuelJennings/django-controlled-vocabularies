@@ -49,8 +49,8 @@
       "id": "US0",
       "priority": "P1",
       "issue": null,
-      "worktree": null,
-      "status": "todo",
+      "worktree": "/home/sam/projects/samueljennings/dcv-usF",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
@@ -60,6 +60,19 @@
           "evidence": {
             "tests": [
               "tests/test_fields.py::TestConceptFieldConstruction"
+            ],
+            "commands": [
+              "poetry run pytest -q tests/test_fields.py"
+            ]
+          }
+        },
+        {
+          "id": "T003",
+          "status": "done",
+          "attempts": 2,
+          "evidence": {
+            "tests": [
+              "tests/test_fields.py::TestConceptFieldDeconstruct"
             ],
             "commands": [
               "poetry run pytest -q tests/test_fields.py"
@@ -91,19 +104,6 @@
       "status": "todo",
       "replans": 0,
       "tasks": [
-        {
-          "id": "T003",
-          "status": "done",
-          "attempts": 2,
-          "evidence": {
-            "tests": [
-              "tests/test_fields.py::TestConceptFieldDeconstruct"
-            ],
-            "commands": [
-              "poetry run pytest -q tests/test_fields.py"
-            ]
-          }
-        },
         {
           "id": "T004",
           "status": "todo",

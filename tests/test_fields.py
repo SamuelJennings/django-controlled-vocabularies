@@ -16,6 +16,12 @@ cannot run ``validate()`` at all.
   rejections, that building the field issues no query (FR-003's mechanism),
   and that ``error_messages["invalid"]`` carries the named placeholder
   ``validate()`` needs (proved bound in T005).
+- ``TestConceptFieldMigrations`` — a model carrying the field migrates from
+  zero and stays ``makemigrations --check`` clean, which is what the string
+  ``to`` and ``deconstruct()`` together exist to make possible.
+- ``TestConceptFieldFactories`` and ``TestConceptVocabularyFixtures`` — the
+  test-app factories and the two scheme fixtures ``conftest.py`` carries for
+  #87, #88 and #89 build the shape their docstrings promise.
 - ``TestConceptFieldDeconstruct`` — ``deconstruct()`` strips the three kwargs
   this field fixes and adds ``vocabulary``, so a field built from the emitted
   path/kwargs round-trips (T003, moved into Phase F because
@@ -24,6 +30,7 @@ cannot run ``validate()`` at all.
 """
 
 import pytest
+from django.core.management import call_command
 from django.db import connection
 from django.db.models import PROTECT, Q
 from django.test.utils import CaptureQueriesContext
@@ -31,6 +38,8 @@ from django.utils.functional import Promise
 from django.utils.module_loading import import_string
 
 from controlled_vocabularies.fields import ConceptField
+from tests.factories import ArtifactFactory, SampleFactory, SpecimenFactory
+from tests.testapp.models import Artifact, Sample, Specimen
 
 
 class TestConceptFieldConstruction:
@@ -123,3 +132,72 @@ class TestConceptFieldDeconstruct:
         field = ConceptField(vocabulary="rock-type")
         cloned = field.clone()
         assert cloned.vocabulary == "rock-type"
+
+
+class TestConceptFieldMigrations:
+    """T002 — the app migrates from zero, and stays ``makemigrations --check`` clean."""
+
+    @pytest.mark.django_db
+    def test_models_are_queryable(self):
+        """Tables exist and are queryable — proof the app's own migration
+        applied. pytest-django builds the test database from every installed
+        app's migrations, run from zero, for the whole session; a query
+        against any of these three tables fails outright if it did not."""
+        assert Specimen.objects.count() == 0
+        assert Sample.objects.count() == 0
+        assert Artifact.objects.count() == 0
+
+    @pytest.mark.django_db
+    def test_makemigrations_check_is_clean(self):
+        """No undeclared model changes: exits normally rather than raising
+        ``SystemExit(1)``, which is ``makemigrations --check``'s failure mode
+        when it detects an unmade migration."""
+        call_command("makemigrations", "--check", "--dry-run", verbosity=0)
+
+
+class TestConceptFieldFactories:
+    """The three model factories T002 adds build valid, saved records."""
+
+    @pytest.mark.django_db
+    def test_specimen_factory_builds_a_required_concept(self):
+        specimen = SpecimenFactory()
+        assert specimen.pk is not None
+        assert specimen.rock_type is not None
+
+    @pytest.mark.django_db
+    def test_sample_factory_leaves_the_optional_field_unset_by_default(self):
+        sample = SampleFactory()
+        assert sample.pk is not None
+        assert sample.mineral is None
+
+    @pytest.mark.django_db
+    def test_artifact_factory_leaves_the_optional_field_unset_by_default(self):
+        artifact = ArtifactFactory()
+        assert artifact.pk is not None
+        assert artifact.mineral is None
+
+    @pytest.mark.django_db
+    def test_artifact_keeps_its_own_get_mineral_label(self):
+        """The pre-existing definition T011's collision guard must leave alone."""
+        artifact = ArtifactFactory()
+        assert artifact.get_mineral_label() == "this artifact's own label, not the field's"
+
+
+class TestConceptVocabularyFixtures:
+    """The scheme/concept fixtures ``conftest.py`` now carries for #87, #88, #89."""
+
+    @pytest.mark.django_db
+    def test_multilingual_scheme_has_one_concept_with_a_second_language_label(self, multilingual_scheme):
+        assert multilingual_scheme.concepts.count() == 2
+        labelled = [c for c in multilingual_scheme.concepts.all() if c.labels.exists()]
+        assert len(labelled) == 1
+        assert labelled[0].labels.filter(language="de").exists()
+
+    @pytest.mark.django_db
+    def test_single_language_scheme_has_no_extra_labels(self, single_language_scheme):
+        assert single_language_scheme.concepts.count() == 2
+        assert not any(c.labels.exists() for c in single_language_scheme.concepts.all())
+
+    @pytest.mark.django_db
+    def test_the_two_schemes_are_distinct(self, multilingual_scheme, single_language_scheme):
+        assert multilingual_scheme.pk != single_language_scheme.pk
