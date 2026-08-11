@@ -644,3 +644,37 @@ Worked in `dcv-us6` on top of all five landed stories (baseline 975 passed).
   `DJANGO_SETTINGS_MODULE=tests.settings poetry run python -m django makemigrations --check
   --dry-run` → "No changes detected" (no model touched this story). `poetry run pre-commit run
   --all-files` clean.
+
+## 2026-08-11 — S5 CONVERGE
+
+Migration consolidation: not applicable, the feature adds no model and no migration.
+
+Cleanup pass (`craft-simplify`) over the feature diff. Two changes, both in
+`management/sources.py`. The retrieval failure message was built twice, once for the connection and
+once for the read, so both now raise through one `_retrieval_error`. The unresolved-serialization
+message joined two clauses with a semicolon, which is not the house style for operator-facing text.
+`ReportRenderer` was read and left alone: the five bucket-count blocks are repetitive but each
+carries its own translatable literal, and folding them into a loop trades clarity and pluralization
+extraction for four saved lines.
+
+Conformance: `line_length:pyproject.toml` recorded in the repo's baseline rather than fixed.
+`line-length = 120` is present on `main` (`git show main:pyproject.toml`), and the org rule reached
+the checker on 2026-08-04, after this repo's baseline was captured on 2026-07-31, so the capture
+could not have held it. Fixing it reformats the whole package, which is align-standards work and
+not a feature PR's. Same disposition as django-literature.
+
+Tamper-check: three flags, all additive. Every test file in the feature diff has zero deleted
+lines, so all three are new classes appended to files this feature did not create.
+
+ADR graduation: 18 decisions verdicted, 4 graduated.
+
+- D2 → `docs/adr/0004-operator-error-is-not-this-packages-to-prevent.md`
+- D4 → `docs/adr/0005-a-preview-is-the-real-operation-rolled-back.md`
+- D10 → `docs/adr/0006-a-document-identity-comes-from-where-it-was-published.md`
+- D15 → `docs/adr/0007-outbound-fetches-are-restricted-by-removing-handlers.md`
+
+The remaining fourteen decline with a reason. D9 folds into 0005 rather than standing alone,
+because "a rehearsal must say it was one" is a consequence of previewing by rollback, not a
+separate decision.
+
+Verified after all of it: conformance, lint, typecheck, build and the full suite green.

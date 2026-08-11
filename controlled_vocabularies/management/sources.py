@@ -137,15 +137,24 @@ class SourceResolver:
         serialization = self._resolve_serialization(fetched)
         return ResolvedSource(path=str(fetched.path), base_uri=self.source, serialization=serialization)
 
+    def _retrieval_error(self, exc: OSError) -> CommandError:
+        """The one message for a retrieval that could not complete (T008, T010, FR-014).
+
+        Opening the connection and reading the body fail the same way from the operator's
+        side — an unreachable host, a non-2xx status, a timed-out read — so both raise
+        through here rather than each building the message itself.
+        """
+        return CommandError(
+            str(_("'%(source)s' could not be retrieved: %(error)s")) % {"source": self.source, "error": exc}
+        )
+
     def _fetch(self) -> _Fetched:
         """Fetch :attr:`source` to a temporary file under a timeout and a byte ceiling
         (T008, research.md R3)."""
         try:
             response = _opener.open(self.source, timeout=_TIMEOUT_SECONDS)
         except OSError as exc:
-            raise CommandError(
-                str(_("'%(source)s' could not be retrieved: %(error)s")) % {"source": self.source, "error": exc}
-            ) from exc
+            raise self._retrieval_error(exc) from exc
         with response:
             content_type = response.headers.get_content_type()
             fd, name = tempfile.mkstemp()
@@ -156,10 +165,7 @@ class SourceResolver:
                     try:
                         chunk = response.read(_CHUNK_SIZE)
                     except OSError as exc:
-                        raise CommandError(
-                            str(_("'%(source)s' could not be retrieved: %(error)s"))
-                            % {"source": self.source, "error": exc}
-                        ) from exc
+                        raise self._retrieval_error(exc) from exc
                     if not chunk:
                         break
                     written += len(chunk)
@@ -190,7 +196,7 @@ class SourceResolver:
             str(
                 _(
                     "'%(source)s' does not name a serialization this application recognises "
-                    "(Turtle, RDF/XML, or JSON-LD); pass --format."
+                    "(Turtle, RDF/XML, or JSON-LD). Pass --format to state it."
                 )
             )
             % {"source": self.source}

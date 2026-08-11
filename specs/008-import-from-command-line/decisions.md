@@ -18,6 +18,8 @@ part of the codebase has: an address that does not resolve, a server that answer
 with a landing page, a redirect chain, a connection that never completes. Those are the substance
 of US-2, and they are why it is a story of its own rather than a second argument shape inside US-1.
 
+**ADR:** none — a scope note about how this feature's boundary was set, not a standing rule anything downstream abides by.
+
 ## D2 — The command offers no way to name a target vocabulary
 
 The issue says the command takes "a target vocabulary", and the programmatic entry point accepts
@@ -46,6 +48,8 @@ omission to a reviewer, and gets filed as a finding.
 Neither entry point changes: `import_skos` keeps its `scheme` parameter for programmatic callers
 who have a genuine reason to use it. What is decided here is what the command exposes.
 
+**ADR:** docs/adr/0004-operator-error-is-not-this-packages-to-prevent.md
+
 ## D3 — A source is a path or a URL, told apart by the value
 
 No flag chooses between the two forms. A value beginning `http://` or `https://` is fetched, and
@@ -65,6 +69,8 @@ value like `ftp://example.org/vocab.ttl` is a clearly stated intention that this
 serve. Handing it to the filesystem produces "no such file or directory: ftp://example.org/vocab.ttl",
 which is true, useless, and points the operator at the wrong problem. Naming the real reason costs
 one branch.
+
+**ADR:** none — the classification rule is sealed inside `SourceResolver.classify`, and the Windows drive-letter trap is recorded at the code that avoids it.
 
 ## D4 — A rehearsal is a real run inside a transaction that is abandoned
 
@@ -89,6 +95,8 @@ The cost is that a rehearsal takes as long as a real import and does the same da
 discarding it. For a vocabulary of any realistic size that is seconds, and an operator who asked
 for a rehearsal has already accepted waiting.
 
+**ADR:** docs/adr/0005-a-preview-is-the-real-operation-rolled-back.md
+
 ## D5 — Set-asides exit zero, and only a refusal exits non-zero
 
 A deployment script needs one bit from the exit status, and the question it can act on is whether
@@ -105,6 +113,8 @@ A strictness flag — exit non-zero if anything was set aside — was also consi
 is a guard against a situation nobody has, and it is the shape of over-specification the maintainer
 ruled against at intake. If a deployment ever genuinely needs to fail on set-asides, the report is
 available programmatically and the caller can decide.
+
+**ADR:** none — a command-line exit-status convention, local to this command and obvious once stated.
 
 ## D6 — Counts by default, entries on request, carried by `--verbosity`
 
@@ -124,6 +134,8 @@ second thing to learn for the same idea.
 rendering reads structured data and parses no rendered message — the constraint `report.py`'s own
 module docstring names for this feature.
 
+**ADR:** none — a rendering default carried by Django's own `--verbosity`, nothing downstream inherits it.
+
 ## D7 — Records the source no longer mentions are reported apart from set-asides
 
 `ImportReport.absent_from_source` and `ImportReport.set_aside` are different kinds of fact and are
@@ -134,6 +146,8 @@ it and retiring a concept properly is deprecation, which arrives with R4.
 Collapsing them into one number would tell an operator that something is wrong with their file when
 nothing is. The distinction is #50's, not this feature's. What is decided here is that the
 rendering preserves it.
+
+**ADR:** none — this feature renders a distinction #50 already established; the decision is upstream, not here.
 
 ## D8 — Retrieval is assumed to need no new runtime dependency
 
@@ -147,6 +161,8 @@ parses them, so handing a URL straight to `rdflib`'s own remote parsing is not a
 would skip the scan `UnsafeRdfXmlError` and `UnsafeJsonLdError` exist to raise. Whatever fetches
 must return bytes to the path a local file already takes.
 
+**ADR:** none — an assumption that held. No dependency was added, so there is nothing for a future engineer to relitigate.
+
 ## D9 — The rehearsal names itself in its own output
 
 A rehearsal's report is, by construction, identical to a live run's. That is the point, and it is
@@ -155,6 +171,8 @@ way to tell which kind of run produced it.
 
 So FR-010 requires the output to say that nothing was kept. It is one line, and it is the only
 difference between the two renderings, which is why it has to be deliberate rather than assumed.
+
+**ADR:** none — folded into 0005, which states it as the consequence of previewing by rollback.
 
 ## D10 — A fetched document's identifiers resolve against the address it came from
 
@@ -195,7 +213,7 @@ identical bytes to produce identical records, which is precisely false for a rel
 and false in the direction where the URL form is the correct one. It now requires the publisher's
 URIs either way, and identical results only where the identifiers are absolute.
 
-**ADR:** pending — assessed at S5 against the ADR bar.
+**ADR:** docs/adr/0006-a-document-identity-comes-from-where-it-was-published.md
 
 ## D11 — T001's relative-URI fixtures are built under `tmp_path`, not committed under `tests/fixtures/skos/`
 
@@ -231,8 +249,7 @@ relative-identifier document). At that point the right fix is a fixtures subdire
 does not walk (or an explicit opt-out on that constant), decided with the story that needs it rather
 than pre-built here on spec.
 
-**ADR:** not proposed — a test-fixture placement choice within one story, not a production-code
-design decision.
+**ADR:** none — a test-fixture placement choice inside one story, not a production-code rule. Nothing outside this feature's own tests inherits it.
 
 ## D12 — US0's tamper flag on `tests/test_exchange/test_skos.py` is approved as additive-only
 
@@ -353,7 +370,7 @@ does not reopen the hole the rest of this decision closes. Final handler set: `H
 `OpenerDirector` + explicit `add_handler` calls has to stay the shape as long as excluding a
 scheme's handler is the control.
 
-**ADR:** pending — assessed at S5 against the ADR bar; corrects a factual claim in `research.md`
+**ADR:** docs/adr/0007-outbound-fetches-are-restricted-by-removing-handlers.md — corrects a factual claim in `research.md`
 R3, `plan.md` "Source resolution" and `tasks.md` T008, which name `build_opener` for this and
 should be corrected alongside.
 
