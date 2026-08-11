@@ -2,7 +2,7 @@
   "feature": "002-multilingual-concepts",
   "branch": "002-multilingual-concepts",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "PR_READY",
+  "state": "MERGED",
   "state_history": [
     {
       "state": "SPECIFY",
@@ -54,6 +54,11 @@
       "state": "PR_READY",
       "at": "2026-07-24T13:25:00Z",
       "note": "review fixes landed + humanized; PR body finalized; marked ready for review"
+    },
+    {
+      "state": "MERGED",
+      "at": "2026-07-24T14:00:54Z",
+      "note": "PR #35 merged; approved by SamuelJennings"
     }
   ],
   "gates": {
@@ -81,8 +86,8 @@
       ]
     },
     "merge": {
-      "approved_by": null,
-      "at": null
+      "approved_by": "SamuelJennings",
+      "at": "2026-07-24T14:00:42Z"
     }
   },
   "stories": [
