@@ -92,3 +92,35 @@ Append-only. One line per stage transition and per gate outcome, written at the 
   left clean. Next: Forge to resolve the phase's task ordering (T003's `deconstruct()` — or an
   equivalent minimal fix — needs to land before or inside Phase F, not after it). Watch: this also
   blocks every one of US-1 through US-6, since Phase F is a hard dependency for all six.
+- **2026-08-11T00:40:00Z · Implementer Phase F · T003.** Forge moved T003 (`deconstruct()`) into
+  Phase F ahead of T002 (`tasks.md`/`plan.md` commits `565724b`, `06d4776`) after verifying the
+  T002 blocked report at both cited source lines. Did: `ConceptField.deconstruct()` strips `to`,
+  `on_delete`, `limit_choices_to` and adds `vocabulary`. First attempt paired it with a `clone()`
+  override that stringified `to` only for that call site; this fixed `makemigrations`
+  (`ModelState.from_model()`'s autodetector path) but not `migrate` — reproduced with the same
+  probe app, this time via `django-admin migrate` against a scratch sqlite DB, which failed at
+  `CreateModel.state_forwards()` building `ModelState` from the migration operation's own,
+  freshly-`__init__`-constructed field (not a `clone()`), hitting the identical
+  `ModelState.fields cannot refer to a model class` `ValueError`. Reported as a new finding per
+  instruction rather than patched further. Directed fix: `to` is the string
+  `"controlled_vocabularies.Concept"`, set unconditionally in `__init__`, `clone()` override
+  removed (the default `Field.clone()` now works unmodified), and the `Concept` import dropped
+  from `fields.py` entirely. Accepted consequence: an unbound field cannot run `validate()`
+  (`remote_field.model` only resolves once `contribute_to_class` binds the field to a real model),
+  so T001's `TestConceptFieldValidate` class (3 tests reading `.messages`/`str()`/`.code` on an
+  unbound field) no longer has anything to construct against and was deleted; `test_fixes_to_concept`
+  now asserts the string form. That behavioural proof is T005's, against a real test-app model —
+  not this task's. `tasks.md` already carries this as the design record (commit `06d4776`).
+  Verified: `poetry run pytest -q tests/test_fields.py` — 14 passed (11 construction/deconstruct +
+  3 removed from validate). End-to-end reproduction against the probe app (never committed, removed
+  after): `django-admin makemigrations` produces a clean migration
+  (`ConceptField(help_text=..., vocabulary='rock-type')`, none of the three stripped kwargs, no
+  `to`); `django-admin migrate` against a scratch sqlite DB applies cleanly; `makemigrations
+  --check --dry-run` reports "No changes detected", exit 0; and a bound `Specimen.full_clean()`
+  against a concept from the wrong vocabulary raises `ValidationError` whose `.messages` reads
+  `"2 is not a valid concept in the 'rock-type' vocabulary."` — the `validate()` override works
+  correctly once bound, exactly as T005 will prove. `ruff check`/`ruff format` clean. Next: T002.
+  Watch: `feature-state.json`'s `US1.tasks` still lists `T003` (not moved to `US0` alongside T001/
+  T002) — the ledger wasn't restructured when the plan moved the task; flagged in `concerns` rather
+  than restructured, since moving a task between story blocks is outside "flip your own tasks'
+  status/attempts/evidence."
