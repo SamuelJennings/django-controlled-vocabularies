@@ -287,3 +287,56 @@ Append-only. One line per stage transition and per gate outcome, written at the 
   "No changes detected", exit 0. No new `decisions.md` entry — no deviation from `tasks.md` beyond the
   one recorded under T008. Diff scope: `controlled_vocabularies/checks.py`, `tests/test_checks.py`.
   US-4 (T008, T009) complete. Next: US-5 (T010) or US-6 (T012), per `tasks.md`'s sequencing.
+- **2026-08-11 — Implementer US-5 · T010.** Did: added `Concept.display_label()` to
+  `controlled_vocabularies/models.py`, beside `preferred_label()` and composed from it —
+  `self.preferred_label(get_language()) or self.label`. `preferred_label(None)` already returns
+  `self.label` when the active language equals the scheme's effective default (or when
+  `get_language()` returns `None`), so the fallback to the default-language label falls out of
+  `preferred_label()`'s own behaviour rather than needing a second branch. `preferred_label()`
+  itself is unmodified. New `TestConceptDisplayLabel` in `tests/test_models.py`, beside
+  `TestConceptPreferredLabels`: the active language's label under `translation.override("de")`;
+  the default-language fallback under `translation.override("fr")` for a concept with no French
+  label; never empty across all three configured languages. No new test duplicating
+  `test_preferred_label_absent_language_returns_none` — the existing `TestConceptPreferredLabels`
+  class passing unmodified is itself tasks.md's named regression proof. RED observed for the right
+  reason: all three new tests failed with `AttributeError: 'Concept' object has no attribute
+  'display_label'` before the method existed. No deviation from `tasks.md`; no new `decisions.md`
+  entry. Verified: `poetry run pytest -q tests/test_models.py::TestConceptDisplayLabel
+  tests/test_models.py::TestConceptPreferredLabels` — 10 passed. `poetry run pytest -q
+  tests/test_models.py` — 225 passed. `ruff check`/`ruff format` clean (ruff's own import-sort fix
+  applied to the added `get_language` import, reviewed and correct). Diff scope:
+  `controlled_vocabularies/models.py`, `tests/test_models.py`. Next: T011.
+- **2026-08-11 — Implementer US-5 · T011.** Did: added `ConceptField.contribute_to_class()` to
+  `controlled_vocabularies/fields.py` — after calling `super().contribute_to_class()`, sets
+  `get_<name>_label()` and `get_<name>_uri()` on the consuming model, each a closure over the
+  field's own `name` reading `getattr(instance, name)` for the attached concept (or `None`). The
+  label closure delegates to T010's `display_label()`; the URI closure returns `concept.uri`
+  unchanged. Each `setattr` is guarded by `hasattr(cls, attr_name)` first, so a model's own
+  pre-existing definition survives — confirmed the guard is reachable before `contribute_to_class`
+  runs for the field: `ModelBase.__new__` (`django/db/models/base.py`) sets every plain (non-field)
+  class-body attribute directly via `new_attrs`/`super_new` *before* iterating `contributable_attrs`
+  and calling each field's `add_to_class`/`contribute_to_class`, regardless of source-order within
+  the class body — verified against the installed Django 5.2.16 source rather than assumed, since
+  `Artifact.mineral` is declared before `Artifact.get_mineral_label()` in `tests/testapp/models.py`.
+  New `TestConceptFieldLabelAndUriAccessors` in `tests/test_fields.py`, appended after
+  `TestConceptFieldDeleteGuard`: the label accessor returns the active language's label
+  (`translation.override("de")`) and falls back to the vocabulary default under a language the
+  concept carries no label in (`translation.override("fr")`); the URI accessor matches the
+  concept's own `uri`; both return `None` on `Sample` with nothing attached; `Artifact`'s own
+  `get_mineral_label()` (T002's pre-built collision fixture) survives the guard untouched — this
+  last test passed before any implementation, since it only exercises `Artifact`'s existing method,
+  and served as the guard's specification rather than a RED step. RED observed for the right reason
+  on the other four: `AttributeError: 'Specimen' object has no attribute 'get_rock_type_label'` /
+  `'get_rock_type_uri'` / `'Sample' object has no attribute 'get_mineral_label'` before
+  `contribute_to_class` existed. No model field added, no migration touched — `contribute_to_class`
+  only sets plain methods. No deviation from `tasks.md`; no new `decisions.md` entry. Verified:
+  `poetry run pytest -q tests/test_fields.py::TestConceptFieldLabelAndUriAccessors` — 5 passed.
+  `poetry run pytest -q tests/test_fields.py` — 46 passed. `ruff check`/`ruff format` clean (ruff's
+  own import-sort fix applied to the added `ConceptLabel`/`translation` imports, reviewed and
+  correct). Diff scope: `controlled_vocabularies/fields.py`, `tests/test_fields.py`.
+
+  US-5 (T010, T011) complete. Full suite: `poetry run pytest -q` — 1064 passed (1056 + 8: 3 T010 +
+  5 T011). `poetry run pre-commit run --all-files` — all hooks green (trim-whitespace, end-of-file,
+  check-yaml, poetry-check, ruff lint, ruff format, mypy, deptry). `DJANGO_SETTINGS_MODULE=tests.settings
+  poetry run django-admin makemigrations --check --dry-run` — "No changes detected", exit 0. Next:
+  US-6 (T012, T013), the only story left.
