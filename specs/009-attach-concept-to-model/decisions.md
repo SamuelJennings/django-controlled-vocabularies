@@ -127,3 +127,17 @@ inconsistency rather than a surprise found during R4.
 
 **ADR:** none from this feature. R4 should amend Article IX and the `CONTEXT.md` Lifecycle row
 together.
+
+## D7 — US-5's tamper flags are import lines, approved
+
+`tamper-check` flagged `tests/test_fields.py` and `tests/test_models.py` as modified pre-existing
+test files across `d07c48c..86227e4`. The check works at file granularity, so an append to a file
+that also gains an import reads the same as a rewritten assertion.
+
+The diff carries no change to any pre-existing test function. In `test_models.py` the modification
+is one added import (`django.utils.translation`) and a new class inserted between two existing ones.
+In `test_fields.py` it is two added imports (`ConceptLabel`, `translation`), an alphabetical reorder
+of an existing `from django.db.models import` line, and a new class appended after the last test.
+`TestConceptPreferredLabels` is untouched, which is what T010 relies on as its regression proof.
+
+Approved under D4's "a legitimate refactor can be approved by Forge with a decisions.md entry".
