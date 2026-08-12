@@ -42,3 +42,13 @@ Append-only. One line per stage transition and per gate outcome, written at the 
     require the hidden `related_name` branch that skip drops to be replicated (FR-011 accepts
     `related_name="+"`), and add a test asserting the registry warning is absent.
   No wording-drift notes returned. No finding fell on `spec.md`, so no delta brief and no re-gate.
+- **2026-08-12 — SPEC AMENDMENT, re-gated and APPROVED by Sam.** Raised by the maintainer after the
+  design review and before any code existed: requiring a non-empty `vocabulary` was too restrictive,
+  because keywords drawn from several vocabularies — or from whatever a project has imported — are a
+  standard shape in research metadata. The declaration now names one vocabulary, several, or none.
+  Delta brief given in session and approved there. `spec.md` refined in place (FR-002, FR-004,
+  FR-005, FR-006, FR-013, SC-002, User Story 2, new User Story 8, four new edge cases, one new
+  assumption); `decisions.md` D9; propagated to `plan.md` (Summary, Approach 1, 4 and 7) and
+  `tasks.md` (T001, T002, T005, T006, T010, T011, new T012). Story issue #110 created and linked,
+  epic body and PR #109 `Closes` block re-synced, ledger carries US8/T012. Nothing was implemented
+  against the superseded wording, so no code was reverted.

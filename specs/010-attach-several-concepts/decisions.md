@@ -183,3 +183,39 @@ price of `full_clean()` meaning what the spec says it means. A consuming model t
 **ADR:** none — a mechanism internal to this field, not a rule anything else inherits. It becomes
 ADR-worthy only if a second feature needs the same installation trick, at which point the pattern is
 the decision rather than this instance of it.
+
+## D9 — A declaration names zero, one, or several vocabularies
+
+Raised by the maintainer on 2026-08-12, after the design review and before any code existed. It
+supersedes the part of D2's context that assumed exactly one vocabulary, and it replaces FR-002's
+refusal of an unnamed one.
+
+The original requirement was written from the single-value field's shape, where naming exactly one
+vocabulary is the whole point, and it carried that assumption across without re-examining it. The
+argument for refusing an unnamed vocabulary — that an unconstrained field is a plain many-to-many
+and offers none of this field's guarantees — turns out to be wrong on its own terms. An
+unconstrained `ConceptsField` still protects its references from deletion, still reads back labels
+and identifiers, and still enforces the required-set rule. Those are three of the five guarantees,
+and they are the three a plain many-to-many does not give you.
+
+The use case is ordinary rather than exotic. Research metadata routinely carries keywords drawn
+from whatever the project has imported, and more often from a named handful of published schemes
+than from exactly one. A field that cannot express either shape sends those projects back to the
+hand-rolled relation this package exists to remove.
+
+**Three shapes, one parameter.** `vocabulary="rock-type"` restricts to one. `vocabulary=["gcmd",
+"agu-index"]` restricts to the union. Omitting it restricts nothing. All three are the same `Q`
+construction — `scheme__slug`, `scheme__slug__in`, or no filter at all — so the list form costs
+almost nothing beyond the bare omission, and it is the form most research profiles actually want:
+"keywords from GCMD or AGU" is a boundary, and without a list the only way to name two vocabularies
+would be to accept every vocabulary.
+
+**What is given up, stated rather than implied.** A field naming no vocabulary makes no promise
+about which concepts land in it. The write-path refusal has nothing to enforce, the form offers
+every concept, and the system check has no vocabulary that could be missing so it reports nothing.
+The README says this in as many words. A field that quietly offers a weaker guarantee than its
+siblings is worse than one that says what it does not do.
+
+**ADR:** none — a decision about this field's declaration options, taken before release, with no
+existing behaviour to supersede. Article VIII's data contract is untouched: nothing here changes a
+concept's URI or its serialized form.

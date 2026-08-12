@@ -6,9 +6,14 @@
 ## Summary
 
 Ship `ConceptsField`, a `ManyToManyField` subclass a consuming project declares on its own model,
-naming one vocabulary by slug. It fixes what the consumer does not supply — the target, the
-membership model, and the choice restriction — and adds the two guarantees a many-valued relation
-does not provide on its own.
+naming by slug the vocabulary its concepts come from — one, several, or none. It fixes what the
+consumer does not supply — the target, the membership model, and the choice restriction — and adds
+the two guarantees a many-valued relation does not provide on its own.
+
+*Refined 2026-08-12 (spec `## Clarifications`, `decisions.md` D9): naming a vocabulary became
+optional, so a project can carry a keywords field drawing on several imported vocabularies or on all
+of them. Propagated through Approach 1, 4 and 7, and through `tasks.md` T001, T002, T005, T006, T010
+and the new T012.*
 
 The shape of the work is set by `research.md`, and it is not the shape FS-009 had. The single-value
 field was a `ForeignKey` that filled in three arguments and got its constraint, its validation and
@@ -103,14 +108,33 @@ tests/
 
 ## Approach
 
-**1. The field, and what it fixes.** `ConceptsField(ManyToManyField)` requires a non-empty
-`vocabulary` (the `ConceptScheme` slug) and fixes three things the consumer may not supply:
-`to="controlled_vocabularies.Concept"`, `limit_choices_to=Q(scheme__slug=vocabulary)`, and
-`through`. `to` and `limit_choices_to` are overwritten; `through` is refused outright with a
-`TypeError`, because a consumer-supplied membership model would silently drop the delete guarantee —
-the same reasoning that makes `on_delete` non-overridable on `ConceptField`. `to` stays the *string*
-form, never the imported class, for the migration-state reason recorded in `ConceptField`'s
-docstring.
+**1. The field, and what it fixes.** *(Propagated 2026-08-12 from the spec refinement, D9.)*
+`ConceptsField(ManyToManyField)` takes an **optional** `vocabulary` and fixes three things the
+consumer may not supply: `to="controlled_vocabularies.Concept"`, `limit_choices_to`, and `through`.
+
+`vocabulary` accepts three shapes, normalised once in `__init__` to a tuple of slugs:
+
+| Declaration | Normalised | `limit_choices_to` |
+|---|---|---|
+| `vocabulary="rock-type"` | `("rock-type",)` | `Q(scheme__slug__in=("rock-type",))` |
+| `vocabulary=["gcmd", "agu-index"]` | `("gcmd", "agu-index")` | `Q(scheme__slug__in=(…))` |
+| omitted | `()` | not set at all |
+
+One code path, not three: a single slug is a one-element tuple, so `__in` covers both the one-and
+several cases and there is no separate branch to test or to get wrong. Duplicates collapse and order
+does not matter, because a set of slugs is what the restriction means. The empty tuple is the only
+genuine branch, and it is an absence — no `limit_choices_to`, no receiver, no check entry — rather
+than a second mechanism.
+
+`to` and `limit_choices_to` are overwritten; `through` is refused outright with a `TypeError`,
+because a consumer-supplied membership model would silently drop the delete guarantee — the same
+reasoning that makes `on_delete` non-overridable on `ConceptField`. `to` stays the *string* form,
+never the imported class, for the migration-state reason recorded in `ConceptField`'s docstring.
+
+**A field naming no vocabulary is not a degenerate case to tolerate; it is a supported shape.** It
+keeps the delete protection, the readback and the required-set rule, and it gives up only the
+restriction. What matters for the code is that every mechanism below asks "did this declaration name
+any vocabulary?" and does nothing rather than something weaker when the answer is no.
 
 **2. Deconstruction.** `deconstruct()` strips `to` and `limit_choices_to` and records `vocabulary`.
 Both are emitted by Django and both would be passed back to `__init__` by `Field.clone()`, which runs
@@ -140,9 +164,12 @@ call. The symmetrical branch is dead for this field, because the target is alway
 the owner, so replicating it would be writing code for a state that cannot occur.
 
 **4. The vocabulary check on the write path.** In the same `contribute_to_class`, connect an
-`m2m_changed` receiver to the through model just generated. On `pre_add` it resolves the incoming
-primary keys in one query and raises `ValidationError` naming the expected vocabulary if any concept
-falls outside it, which aborts the whole write before a row is inserted (FR-005). **Connecting the
+`m2m_changed` receiver to the through model just generated — **only when the declaration named at
+least one vocabulary.** A field naming none has nothing to enforce, and not connecting a receiver is
+better than connecting one that returns immediately: Django's fast path is then available and the
+field costs exactly what a stock relation costs (R6). On `pre_add` the receiver resolves the incoming
+primary keys in one query and raises `ValidationError` naming the expected vocabularies if any
+concept falls outside them, which aborts the whole write before a row is inserted (FR-005). **Connecting the
 receiver here, rather than in `AppConfig.ready()` or on import of some other module, is
 load-bearing:** R6 found that a truthy `auto_created` re-enables Django's `bulk_create` fast path,
 which skips `m2m_changed` entirely when no receiver is connected for that through model. Binding the
@@ -181,6 +208,12 @@ a model that already defines either name keeps its own.
 `model._meta.get_fields()`. Widen the filter to both field types and keep everything else — the same
 warning id, the same single query for the distinct slugs, the same silence on a `DatabaseError`. The
 existing tests continue to cover the single-value case.
+
+Two things the refinement changes here. A `ConceptsField` contributes **each** of the slugs it names
+to the distinct set, not one, and a field naming none contributes nothing and can never be warned
+about (FR-004). A field naming three vocabularies of which one is absent warns about that one and
+stays quiet about the other two, so the warning names the missing slug rather than the field's whole
+declaration.
 
 **8. Documentation.** README, `CONTEXT.md` and CHANGELOG per Articles VI and XII. The README states
 the delete guarantee's real boundary rather than overstating it: it holds for anything going through

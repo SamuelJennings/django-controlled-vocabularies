@@ -16,7 +16,9 @@ Anything below that cites an R-number is citing a verified finding, not a hypoth
 
 **Sequencing.** Phase F blocks everything, and its three tasks are strictly ordered. After it, US-1,
 US-2 and US-5 all work on `fields.py` and are sequenced together. US-3, US-4 and US-6 are independent
-of one another once Phase F lands. US-7 is last, because it documents what the others built.
+of one another once Phase F lands. US-8 depends on US-2 and US-6 having landed, because it asserts
+the behaviour of mechanisms those two build. US-7 is last, because it documents what the others
+built — including the three vocabulary shapes, so it follows US-8.
 
 ## Phase F — Foundational (blocks every story)
 
@@ -33,7 +35,10 @@ of one another once Phase F lands. US-7 is last, because it documents what the o
     case exists to catch, and it needs a model with two of them to be visible at all;
   - a model carrying **both** a `ConceptField` and a `ConceptsField` against the same vocabulary,
     which is the collision case the plan's Risks section refuses to assume away — two declarations on
-    one model must generate distinct membership tables and non-clashing reverse accessors.
+    one model must generate distinct membership tables and non-clashing reverse accessors;
+  - a model carrying a `ConceptsField` naming **two** vocabularies, for T012 *(added 2026-08-12, D9)*;
+  - a model carrying a `ConceptsField` naming **no** vocabulary — the keywords shape — for T012, and
+    for T012's assertion that the delete protection holds without a restriction.
 
   Every field gets `verbose_name` and `help_text` wrapped in `gettext_lazy` (Article XII makes
   `help_text` mandatory). Generate the migration for the test app in the same task and confirm
@@ -49,23 +54,42 @@ of one another once Phase F lands. US-7 is last, because it documents what the o
   `ConceptsField(ManyToManyField)` in `controlled_vocabularies/fields.py`, alongside `ConceptField`.
   Article VIII already names this class, so the name is fixed by the constitution.
 
-  `__init__` takes `vocabulary` (the `ConceptScheme` slug) and fixes what the consumer may not
-  supply:
+  **`vocabulary` is optional and takes three shapes** *(propagated 2026-08-12 from the spec
+  refinement; see `decisions.md` D9 and FR-002)*. Normalise it **once, in `__init__`, to a tuple of
+  slugs**, and let every other mechanism read that tuple rather than re-deriving the shape:
+
+  | Declaration | Normalised | Meaning |
+  |---|---|---|
+  | `vocabulary="rock-type"` | `("rock-type",)` | one vocabulary |
+  | `vocabulary=["gcmd", "agu-index"]` | `("gcmd", "agu-index")` | either vocabulary |
+  | omitted | `()` | no restriction |
+
+  A single slug normalises to a one-element tuple so `__in` serves both the one and the several
+  cases — do not write a separate branch for a single vocabulary. Duplicate slugs collapse; order is
+  not significant. Reject a non-string element with `TypeError`. The empty tuple is the only real
+  branch in the class, and everywhere it appears the answer is to do *nothing* rather than something
+  weaker: no `limit_choices_to`, no signal receiver (T005), no check entry (T010).
+
+  `__init__` then fixes what the consumer may not supply:
 
   - `to = "controlled_vocabularies.Concept"` — **the string form, always, never the imported class.**
     The reasoning is `ConceptField`'s and is written out in its docstring: migration state cannot
     hold a resolved model class. Read it before deviating.
-  - `limit_choices_to = Q(scheme__slug=vocabulary)` — constructed, never evaluated, so nothing
-    queries the database while the declaration is read (FR-003). Assert that with
-    `django.test.utils.CaptureQueriesContext` around the field's construction rather than assuming it.
+  - `limit_choices_to = Q(scheme__slug__in=<the named slugs>)`, set **only when the declaration named
+    at least one vocabulary** — constructed, never evaluated, so nothing queries the database while
+    the declaration is read (FR-003). Assert that with `django.test.utils.CaptureQueriesContext`
+    around the field's construction rather than assuming it.
   - `help_text` defaults to a translatable string the consumer can override. Do **not** interpolate
     `vocabulary` into it: `%` on a `gettext_lazy()` proxy evaluates it immediately and defeats the
     laziness the default exists to keep. `ConceptField` carries a comment saying so.
 
   Rejections, all at construction time, all `TypeError` naming the reason:
 
-  - `vocabulary` absent or empty — an unconstrained field is a plain `ManyToManyField` and offers
-    none of this field's guarantees (FR-002).
+  - ~~`vocabulary` absent or empty — an unconstrained field is a plain `ManyToManyField` and offers
+    none of this field's guarantees (FR-002).~~ **Removed 2026-08-12 by the spec refinement (D9).** A
+    declaration naming no vocabulary is now a supported shape, not an error: it keeps the delete
+    protection, the readback and the required-set rule, and gives up only the restriction. Nothing
+    about an absent `vocabulary` raises.
   - `limit_choices_to` passed by the consumer — it is what constrains the field.
   - `through` passed by the consumer — a consumer-supplied membership model silently drops the
     delete guarantee T003 exists to provide. Refusing loudly keeps FR-011's "never silently
@@ -81,7 +105,11 @@ of one another once Phase F lands. US-7 is last, because it documents what the o
   never emitted, for the reason in T003.
 
   Tests: construction with and without each rejected kwarg; the no-query assertion; a
-  deconstruct/reconstruct round trip that rebuilds the field from its own output.
+  deconstruct/reconstruct round trip that rebuilds the field from its own output. Add the three
+  shapes: a single slug normalises to a one-element tuple, a list normalises with duplicates
+  collapsed, an omitted `vocabulary` normalises to empty and sets no `limit_choices_to` at all, and
+  each of the three survives the deconstruct/reconstruct round trip unchanged — the round trip is
+  where a shape that normalises on the way in but not on the way out shows up.
 
 - **T003** — The membership model, generated with `PROTECT` (FR-007, US-3, R4, R6).
 
@@ -150,17 +178,21 @@ of one another once Phase F lands. US-7 is last, because it documents what the o
 - **T005** — The `pre_add` receiver (FR-005, D2, R1, R3, R6).
 
   Connect an `m2m_changed` receiver to the through model **inside `contribute_to_class`, at the
-  moment that model is generated** — not in `AppConfig.ready()`, not at module import of anything
-  else. This is load-bearing and R6 is the reason: a truthy `auto_created` re-enables Django's
+  moment that model is generated, and only when the declaration named at least one vocabulary**
+  *(propagated 2026-08-12, D9)* — not in `AppConfig.ready()`, not at module import of anything
+  else. A field naming none has nothing to enforce, so connect nothing: an always-connected receiver
+  that returns immediately would keep Django's fast path permanently disabled for a field that gains
+  no guarantee from it. This is load-bearing and R6 is the reason: a truthy `auto_created` re-enables Django's
   `bulk_create(ignore_conflicts)` fast path, and that path skips `m2m_changed` entirely **when no
   receiver is connected for that through model**. Binding the receiver to the model it guards, at
   creation, means a declaration cannot exist without its guard. Connect with `sender=<the generated
   through model>`; there is no module-level model to name.
 
   On `action="pre_add"`, resolve the incoming primary keys in **one** query and raise
-  `ValidationError` if any concept falls outside the named vocabulary. The message is translatable
-  with named placeholders (Article XII) and names the expected vocabulary — `ConceptField`'s
-  `invalid` message is the wording to follow. Raising from `pre_add` aborts before any row is
+  `ValidationError` if any concept falls outside the named vocabularies. The message is translatable
+  with named placeholders (Article XII) and names the expected vocabularies — `ConceptField`'s
+  `invalid` message is the wording to follow, with the slugs joined into one placeholder so the
+  message identifier stays static whether one vocabulary is named or three. Raising from `pre_add` aborts before any row is
   inserted, which is what FR-005 means by a mixed write being refused whole.
 
   Ignore every other action. `post_add`, `pre_remove`, `post_remove`, `pre_clear` and `post_clear`
@@ -170,11 +202,13 @@ of one another once Phase F lands. US-7 is last, because it documents what the o
   that calls the receiver would pass even if the fast path were skipping it, which is precisely the
   failure this task guards against:
 
-  - `.add()` of a concept from another vocabulary is refused and the record's set is unchanged;
+  - `.add()` of a concept from an unnamed vocabulary is refused and the record's set is unchanged;
   - `.set()` carrying a mix is refused whole, and the record's set is unchanged — assert the set
     *after* the failed write, not just that it raised;
   - `.add()` of several valid concepts succeeds;
-  - the refusal message names the expected vocabulary.
+  - the refusal message names the expected vocabularies.
+
+  The two other shapes belong to T012 and are tested there, not here.
 
 - **T006** — Form choices (FR-006, R1).
 
@@ -183,8 +217,10 @@ of one another once Phase F lands. US-7 is last, because it documents what the o
   task is tests, not code, unless they show otherwise:
 
   - a form generated from the consuming model offers only the named vocabulary's concepts;
-  - a submission carrying a concept from another vocabulary is rejected rather than saved;
+  - a submission carrying a concept from an unnamed vocabulary is rejected rather than saved;
   - a valid submission saves and the memberships appear.
+
+  The several-vocabulary and no-vocabulary form cases belong to T012.
 
 ## US-3 — A concept anyone holds cannot vanish (#104, P1)
 
@@ -267,12 +303,20 @@ of one another once Phase F lands. US-7 is last, because it documents what the o
   cover both field types and change nothing else: same warning id, same single query for the distinct
   slugs, same silence on `DatabaseError`, same hint.
 
+  Two adjustments from the 2026-08-12 refinement (D9, FR-004). A `ConceptsField` contributes **each**
+  slug it names to the distinct set rather than one, so the existing single-query shape holds but the
+  set is built from a flattened collection. And a field naming **no** vocabulary contributes nothing
+  and can never be warned about — it names nothing that could be missing. Where a field names several
+  and only one is absent, the warning names the absent slug rather than the field's whole
+  declaration, so a developer reading `manage.py check` learns which vocabulary to import.
+
   This is the one task permitted to touch existing tests, and only to **extend** them —
   `tests/test_checks.py` keeps every assertion it has, and gains the multiple-value cases: a
   `ConceptsField` naming an absent vocabulary is reported; one naming a present vocabulary is not;
-  a model carrying both field types against one absent vocabulary reports both fields; the
-  unmigrated-database path stays silent. Assert the real condition, not a mock — the existing tests
-  show how.
+  a model carrying both field types against one absent vocabulary reports both fields; a field naming
+  three vocabularies of which one is absent reports that one and not the others; **a field naming no
+  vocabulary is never reported**; the unmigrated-database path stays silent. Assert the real
+  condition, not a mock — the existing tests show how.
 
   Also assert here that `makemigrations`, `migrate` and the suite all succeed against a model naming
   a vocabulary no fixture creates, which is US-6's first scenario and the whole reason the check is a
@@ -289,7 +333,15 @@ of one another once Phase F lands. US-7 is last, because it documents what the o
 
   README gains the multiple-value declaration, the readback of labels and identifiers, what required
   and optional mean for it, and a query-cost note pointing at `prefetch_related` — the plural
-  accessors will issue a query per record without it. **State the delete guarantee's real boundary
+  accessors will issue a query per record without it.
+
+  **Document all three vocabulary shapes** *(2026-08-12, D9, FR-013)*: one vocabulary, several, and
+  none. Say plainly what a field naming none does not promise — no restriction on which concepts are
+  attached, a form offering every concept, and nothing for the system check to report — and what it
+  still does: the references cannot be deleted out from under it, the labels and identifiers read
+  back, and required still means at least one. A reader should not have to infer which guarantees
+  survive. Note the scale consequence too: an unrestricted field's form choices are every concept in
+  the database, so it meets #88's problem sooner than a restricted one. **State the delete guarantee's real boundary
   rather than overstating it:** it holds for anything going through the ORM, including a bulk
   queryset delete, and not for SQL issued outside Django, because Django emits no `ON DELETE` clause
   for any relation (R6). Add the sentence about a consuming model that overrides `full_clean` after
@@ -300,3 +352,33 @@ of one another once Phase F lands. US-7 is last, because it documents what the o
 
   Public markdown is humanized before it lands, per the repo's documentation standard, and carries no
   internal process vocabulary.
+
+## US-8 — A field that draws on more than one vocabulary (#110, P2)
+
+*Added 2026-08-12 by the spec refinement (D9). Every mechanism it exercises is built in Phase F,
+T005, T006 and T010 — this story owns proving that all three vocabulary shapes behave, which is the
+thing no other story asserts.*
+
+- **T012** — The several-vocabulary and no-vocabulary shapes (FR-002, FR-004, FR-005, FR-006, D9).
+
+  Mostly tests. Write code here only if the tests show T002's normalisation, T005's conditional
+  receiver or T010's flattened slug set does not hold — and if they do show it, fix it in the task
+  that owns the mechanism rather than patching around it here.
+
+  Against the models T001 adds for this story:
+
+  - a concept from either named vocabulary attaches to a two-vocabulary field;
+  - a concept from a third vocabulary is refused, and the message names both expected vocabularies;
+  - a form built from that model offers the concepts of both named vocabularies and no others;
+  - a concept from any vocabulary attaches to a field naming none, and none is refused;
+  - a form built from that model offers every concept in the database;
+  - `manage.py check` reports nothing for a field naming no vocabulary, and reports only the absent
+    slug for a field naming three of which one is absent;
+  - deleting a concept held by a field naming no vocabulary is still refused — the delete protection
+    does not depend on the restriction, and this is the assertion that proves the unconstrained shape
+    is a real member of the family rather than a plain many-to-many wearing the same name.
+
+  One test worth writing deliberately: a field naming no vocabulary must not have an `m2m_changed`
+  receiver connected for its through model. Assert the absence, because an always-connected receiver
+  that returns immediately would pass every behavioural test above while quietly disabling Django's
+  fast path for the field (R6).
