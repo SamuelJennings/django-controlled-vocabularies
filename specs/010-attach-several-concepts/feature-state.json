@@ -44,12 +44,17 @@
       ]
     },
     "plan": {
-      "approved_by": null,
-      "at": null
+      "approved_by": "notified",
+      "at": "2026-08-12T09:45:00Z"
     },
     "merge": {
       "approved_by": null,
       "at": null
+    },
+    "design_review": {
+      "approved_by": "design-panel",
+      "at": "2026-08-12T09:39:44Z",
+      "self_resolved": []
     }
   },
   "stories": [
