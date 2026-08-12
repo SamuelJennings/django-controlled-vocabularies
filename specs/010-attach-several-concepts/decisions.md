@@ -263,3 +263,33 @@ about the field.
 
 **ADR:** none — a Django transaction mechanic, not a decision about this feature's behaviour or
 public surface.
+
+## D12 — T010's "three vocabularies" scenario is tested against the existing two-vocabulary `FieldNote`, not a new fixture (Implementer, US6)
+
+`tasks.md`'s T010 acceptance describes "a field naming three vocabularies of which one is absent"
+as the case that proves the warning names only the absent slug, not the field's whole declaration.
+The test app's only multi-vocabulary field is `FieldNote.keywords`, which T001 declared naming
+two (`"rock-type"`, `"mineral"`), not three.
+
+Adding a third vocabulary to `FieldNote` was rejected: US-8/T012's own acceptance criteria need a
+concept from a vocabulary `FieldNote` does *not* name, to prove the write-path refusal, and widening
+`FieldNote` to three named vocabularies would either remove that third, unnamed vocabulary or force
+a fourth — changing a shared fixture another story's not-yet-landed task depends on. Adding a
+wholly new model was rejected too: T001 already enumerated, deliberately, the one model per shape
+`tasks.md` lists, and `craft-increments`' scope containment favours reusing what Phase F already
+built over expanding shared test infrastructure for a scenario a smaller fixture already proves.
+
+`test_reports_only_the_absent_vocabulary_when_a_field_names_several` uses `FieldNote` with only
+`"Rock Type"` created, `"mineral"` left absent: the assertion is on the *mechanism* (iterate the
+field's every named slug, warn only for the ones absent from the database), and two named
+vocabularies with one absent exercises exactly the same code path three would — the only thing three
+would additionally prove is that a second *present* vocabulary is also correctly excluded, which
+`test_reports_nothing_once_the_concepts_fields_vocabulary_exists` and the pre-existing
+`test_reports_nothing_once_every_named_vocabulary_exists` already exercise for `FieldNote` once both
+its vocabularies exist.
+
+**Revisit if:** a future story needs a genuine three-vocabulary fixture for its own reasons; this
+test can then move onto it without weakening in the meantime.
+
+**ADR:** none — a test-authoring scope decision, not a change to this feature's behaviour or public
+surface.

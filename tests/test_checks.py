@@ -69,8 +69,74 @@ class TestCheckConceptFieldVocabularies:
             assert warning.id == CHECK_ID
 
     def test_costs_one_query_however_many_fields_are_declared(self):
-        # The test app declares three ConceptFields (Specimen.rock_type,
-        # Sample.mineral, Artifact.mineral) across two distinct vocabularies.
+        # The test app declares several ConceptField and ConceptsField
+        # instances (T010 widens the check to cover both) across a handful
+        # of distinct vocabularies. However many slugs those fields name
+        # between them, the distinct set is still resolved in one query.
+        with CaptureQueriesContext(connection) as ctx:
+            check_concept_field_vocabularies(None)
+
+        assert len(ctx.captured_queries) == 1
+
+
+@pytest.mark.django_db
+class TestCheckConceptsFieldVocabularies:
+    """T010 — the check widens to cover ``ConceptsField`` too (US-6, FR-003,
+    FR-004, D9): a field naming several vocabularies contributes each slug it
+    names, and a field naming none contributes nothing and is never warned
+    about."""
+
+    def test_warns_about_a_concepts_field_whose_vocabulary_is_absent(self):
+        warnings = check_concept_field_vocabularies(None)
+
+        matches = [w for w in warnings if w.obj.model._meta.label == "testapp.Deposit" and w.obj.name == "rock_types"]
+        assert len(matches) == 1
+        message = str(matches[0].msg)
+        assert "testapp.Deposit" in message
+        assert "rock_types" in message
+        assert "rock-type" in message
+
+    def test_reports_nothing_once_the_concepts_fields_vocabulary_exists(self):
+        ConceptSchemeFactory(name="Rock Type")
+
+        warnings = check_concept_field_vocabularies(None)
+
+        matches = [w for w in warnings if w.obj.model._meta.label == "testapp.Deposit" and w.obj.name == "rock_types"]
+        assert matches == []
+
+    def test_reports_both_field_types_when_one_model_declares_both_against_one_absent_vocabulary(self):
+        warnings = check_concept_field_vocabularies(None)
+
+        matches = {w.obj.name for w in warnings if w.obj.model._meta.label == "testapp.RockSample"}
+        assert matches == {"primary_mineral", "associated_minerals"}
+
+    def test_reports_only_the_absent_vocabulary_when_a_field_names_several(self):
+        ConceptSchemeFactory(name="Rock Type")
+
+        warnings = check_concept_field_vocabularies(None)
+
+        matches = [w for w in warnings if w.obj.model._meta.label == "testapp.FieldNote" and w.obj.name == "keywords"]
+        assert len(matches) == 1
+        message = str(matches[0].msg)
+        assert "mineral" in message
+        assert "rock-type" not in message
+
+    def test_never_reports_a_field_naming_no_vocabulary(self):
+        warnings = check_concept_field_vocabularies(None)
+
+        matches = [w for w in warnings if w.obj.model._meta.label == "testapp.Photograph"]
+        assert matches == []
+
+    def test_never_reports_a_field_naming_no_vocabulary_even_once_others_exist(self):
+        ConceptSchemeFactory(name="Rock Type")
+        ConceptSchemeFactory(name="Mineral")
+
+        warnings = check_concept_field_vocabularies(None)
+
+        matches = [w for w in warnings if w.obj.model._meta.label == "testapp.Photograph"]
+        assert matches == []
+
+    def test_costs_one_query_when_a_field_names_several_vocabularies(self):
         with CaptureQueriesContext(connection) as ctx:
             check_concept_field_vocabularies(None)
 
