@@ -68,6 +68,14 @@ cannot run ``validate()`` at all.
   ``limit_choices_to`` from T002 already restricts a ``ModelForm``'s
   ``ModelMultipleChoiceField`` queryset and rejects an out-of-vocabulary
   submission, the same way T006 (FS-009) already proved for ``ConceptField``.
+- ``TestConceptsFieldDeleteGuard`` — FS-010 T007 (US-3): no new code —
+  ``PROTECT`` on the membership model's foreign key to ``Concept`` (T003)
+  already refuses any delete path that would strand a reference. This class
+  is the proof, the ``ConceptsField`` counterpart of
+  ``TestConceptFieldDeleteGuard``: a held concept survives both a
+  single-instance and a bulk queryset delete, the scheme holding it survives
+  too, an unheld concept deletes normally, and deleting the consuming record
+  removes only its membership rows and leaves every concept in place (D5).
 """
 
 import warnings
@@ -681,6 +689,101 @@ class TestConceptsFieldFormChoices:
         deposit = form.save()
 
         assert concept in deposit.rock_types.all()
+
+
+class TestConceptsFieldDeleteGuard:
+    """T007 (US-3, FR-007, D5, R4) — no new code: T003 already generates the
+    membership model with ``PROTECT`` on its foreign key to ``Concept`` and
+    ``CASCADE`` on the one to the owner. This class is the proof, against a
+    real :class:`~tests.testapp.models.Deposit` and real deletes, never a
+    mocked collector."""
+
+    @pytest.mark.django_db
+    def test_deleting_a_held_concept_is_refused(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        concept = ConceptFactory(scheme=scheme)
+        deposit = DepositFactory()
+        deposit.rock_types.add(concept)
+
+        with pytest.raises(ProtectedError):
+            concept.delete()
+
+        assert Concept.objects.filter(pk=concept.pk).exists()
+        assert Deposit.objects.filter(pk=deposit.pk).exists()
+        assert concept in deposit.rock_types.all()
+
+    @pytest.mark.django_db
+    def test_bulk_queryset_delete_of_a_held_concept_is_refused(self):
+        """The protection lives in the relation rather than in model
+        validation, so a bulk ``QuerySet.delete()`` is refused exactly like a
+        single-instance delete — the queryset path builds the same collector,
+        since ``can_fast_delete`` returns ``False`` whenever a related
+        ``on_delete`` is not ``DO_NOTHING``, rather than skipping it."""
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        concept = ConceptFactory(scheme=scheme)
+        deposit = DepositFactory()
+        deposit.rock_types.add(concept)
+
+        with pytest.raises(ProtectedError):
+            Concept.objects.filter(pk=concept.pk).delete()
+
+        assert Concept.objects.filter(pk=concept.pk).exists()
+        assert concept in deposit.rock_types.all()
+
+    @pytest.mark.django_db
+    def test_deleting_the_scheme_holding_a_held_concept_is_refused(self):
+        """``Concept.scheme`` cascades, so deleting the scheme tries to
+        cascade-delete the concept — and meets the same ``PROTECT`` on the
+        way down. Nothing in the vocabulary is removed."""
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        concept = ConceptFactory(scheme=scheme)
+        deposit = DepositFactory()
+        deposit.rock_types.add(concept)
+
+        with pytest.raises(ProtectedError):
+            scheme.delete()
+
+        assert ConceptScheme.objects.filter(pk=scheme.pk).exists()
+        assert Concept.objects.filter(pk=concept.pk).exists()
+        assert concept in deposit.rock_types.all()
+
+    @pytest.mark.django_db
+    def test_a_concept_no_record_holds_deletes_cleanly(self):
+        concept = ConceptFactory()
+
+        concept.delete()
+
+        assert not Concept.objects.filter(pk=concept.pk).exists()
+
+    @pytest.mark.django_db
+    def test_deleting_the_consuming_record_removes_only_its_memberships_and_every_concept_survives(self):
+        """D5 — deleting a consuming record keeps its concepts. The owning
+        foreign key is ``CASCADE``, so only the membership rows go."""
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        first = ConceptFactory(scheme=scheme)
+        second = ConceptFactory(scheme=scheme)
+        deposit = DepositFactory()
+        deposit.rock_types.add(first, second)
+        through = Deposit._meta.get_field("rock_types").remote_field.through
+
+        deposit.delete()
+
+        assert not Deposit.objects.filter(pk=deposit.pk).exists()
+        assert not through.objects.filter(concept__in=[first, second]).exists()
+        assert Concept.objects.filter(pk=first.pk).exists()
+        assert Concept.objects.filter(pk=second.pk).exists()
+
+    @pytest.mark.django_db
+    def test_a_concept_detached_from_every_record_that_held_it_then_deletes_cleanly(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        concept = ConceptFactory(scheme=scheme)
+        deposit = DepositFactory()
+        deposit.rock_types.add(concept)
+
+        deposit.rock_types.remove(concept)
+        concept.delete()
+
+        assert not Concept.objects.filter(pk=concept.pk).exists()
 
 
 class TestConceptFieldMigrations:
