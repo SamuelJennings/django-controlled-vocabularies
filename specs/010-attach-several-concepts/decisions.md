@@ -330,3 +330,29 @@ proves it against `Deposit`, the required `ConceptsField`.
 **ADR:** none — a test-authoring scope decision and a direct reading of FR-008/FR-009's own words,
 not a change to this feature's behaviour or public surface beyond what those requirements already
 state.
+
+## D14 — the required-set wrapper is guarded on the method, not on a class flag
+
+**Context.** T009 installs a `full_clean` wrapper once per consuming class. The design review's
+correction to D8 made the wrapper resolve the class's required `ConceptsField`s from
+`type(self)._meta.get_fields()` at call time, so that a model declaring two required fields has both
+enforced. tasks.md also carried the earlier instruction to guard the install on `cls.__dict__`
+rather than `getattr`, on the reasoning that a subclass inheriting the flag would lose the check.
+
+**Problem.** The two instructions interact. With call-time resolution the inherited wrapper already
+covers a subclass's own fields, so the `__dict__` guard does not preserve a check — it installs a
+second wrapper around the first. Verified structurally on a multi-table pair: the parent carries one
+wrapper, the child carries a second nested around it, and each enumerates the same fields, so every
+empty required field on the child is reported twice.
+
+**Decision.** Guard on the resolved method instead. `_install_required_set_check` tags its wrapper
+with `_concepts_field_required_set_check` and returns early when `cls.full_clean` already carries
+that tag. A subclass that inherits the wrapper installs nothing; a subclass that overrides
+`full_clean` itself gets an untagged method and is wrapped normally. The `__dict__` guard's original
+purpose is served by call-time resolution, which is the mechanism that made it unnecessary.
+
+**Verified.** `TestConceptsFieldRequiredSet::test_an_inheriting_model_does_not_get_a_second_wrapper`
+fails against the `__dict__` guard and passes against the tag.
+
+**Author.** Applied at convergence rather than by the story's implementer: the interaction was
+visible only once T009's code and the review's correction were both in front of the same reader.

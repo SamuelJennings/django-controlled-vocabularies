@@ -311,14 +311,20 @@ def _install_required_set_check(cls):
     excludes ``ManyToManyField`` by an explicit filter (R2), so a required
     :class:`ConceptsField` has no hook into model validation without this.
 
-    Guarded on the class's own ``__dict__`` rather than ``getattr``: a
-    subclass would otherwise see the flag through inherited attribute
-    lookup and skip installing its own wrapper. The wrapper resolves the
-    required ``ConceptsField``s from ``type(self)._meta.get_fields()`` *at
-    call time* rather than closing over the field instance that triggered
-    this install — the install runs once per class, so a wrapper bound to
-    one field would leave a second required ``ConceptsField`` on the same
-    class silently unenforced, with nothing raising and no test failing.
+    The wrapper resolves the required ``ConceptsField``s from
+    ``type(self)._meta.get_fields()`` *at call time* rather than closing
+    over the field instance that triggered this install — the install runs
+    once per class, so a wrapper bound to one field would leave a second
+    required ``ConceptsField`` on the same class silently unenforced, with
+    nothing raising and no test failing.
+
+    That call-time resolution is also why the guard tests the resolved
+    ``full_clean`` itself rather than a flag on the class. A subclass
+    inherits a wrapper that already enumerates ``type(self)``'s fields, so
+    it needs no wrapper of its own, and installing a second one around the
+    first would report every empty required field twice on a multi-table
+    child. A subclass that overrides ``full_clean`` itself gets an untagged
+    method and is wrapped normally.
 
     An unsaved record (``pk`` is ``None``) is skipped outright: touching a
     many-to-many manager before the instance has a primary key raises
@@ -328,9 +334,8 @@ def _install_required_set_check(cls):
     dictionary it raises, under each empty required field's own name, and
     re-raises the merged whole.
     """
-    if "_concepts_field_full_clean_installed" in cls.__dict__:
+    if getattr(cls.full_clean, "_concepts_field_required_set_check", False):
         return
-    cls._concepts_field_full_clean_installed = True
     original_full_clean = cls.full_clean
 
     def full_clean(self, *args, **kwargs):
@@ -355,6 +360,7 @@ def _install_required_set_check(cls):
         if errors:
             raise ValidationError(errors)
 
+    full_clean._concepts_field_required_set_check = True
     cls.full_clean = full_clean
 
 

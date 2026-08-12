@@ -991,6 +991,35 @@ class TestConceptsFieldRequiredSet:
 
         assert form.is_valid(), form.errors
 
+    @isolate_apps("tests.testapp")
+    def test_an_inheriting_model_does_not_get_a_second_wrapper(self):
+        # The wrapper resolves the instance's own class at call time, so a
+        # subclass is already covered by the one it inherits. Installing a
+        # second around it would report every empty required field twice.
+        class Parent(models.Model):
+            firsts = ConceptsField(
+                vocabulary="rock-type", verbose_name="firsts", help_text="the first set"
+            )
+
+            class Meta:
+                app_label = "testapp"
+
+        class Child(Parent):
+            seconds = ConceptsField(
+                vocabulary="rock-type", verbose_name="seconds", help_text="the second set"
+            )
+
+            class Meta:
+                app_label = "testapp"
+
+        assert Parent.__dict__["full_clean"]._concepts_field_required_set_check
+        assert "full_clean" not in Child.__dict__
+        # And the inherited wrapper does cover the subclass's own field.
+        assert {field.name for field in Child._meta.get_fields() if isinstance(field, ConceptsField)} == {
+            "firsts",
+            "seconds",
+        }
+
 
 class TestConceptFieldMigrations:
     """T002 — the app migrates from zero, and stays ``makemigrations --check`` clean."""
