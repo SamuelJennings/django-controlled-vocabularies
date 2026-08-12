@@ -132,3 +132,23 @@ pre-commit run --all-files`, completion report. Phase F (T001–T003) is then co
 later US0 story can build on it.
 
 Watch: none.
+
+## 2026-08-12T13:20+02:00 · Implementer US0 · Phase F (T001, T002, T003)
+
+Did: Phase F complete — `ConceptsField` (T002), its generated `PROTECT` membership model (T003),
+and the six consuming test-app models (T003 + T001) all committed, three commits, task ID in each
+subject. Worktree clean.
+
+Verified (story-level, run once per `craft-tdd`): `poetry run pytest -q` — **1121 passed** (1080
+baseline + 41 new: 16 in T002, 10 in T003, 15 in T001). `poetry run pre-commit run --all-files` —
+all eight hooks passed (trailing-whitespace, end-of-file-fixer, check-yaml, poetry-check, ruff
+lint, ruff format, mypy, deptry). `DJANGO_SETTINGS_MODULE=tests.settings poetry run python -m
+django makemigrations --check --dry-run` — "No changes detected". `git status --short` — clean.
+
+Next: Forge re-verifies independently and gates. US-1 through US-8 (T004–T012) can now build on a
+real `ConceptsField`.
+
+Watch: `decisions.md` D10 records that `Deposit`/`Survey` (T003) and the remaining four models
+(T001) landed across two migrations rather than one — Forge squashes at convergence, so this is not
+expected to need attention, but naming it in case a reviewer diffs the two migration files
+separately and wonders why.
