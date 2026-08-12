@@ -1,8 +1,8 @@
 """Models exercising :class:`~controlled_vocabularies.fields.ConceptField`'s
-public API (T002).
+and :class:`~controlled_vocabularies.fields.ConceptsField`'s public APIs.
 
-Three models, each carrying the field a different way US-1 through US-5 need
-to test against:
+Three models carry ``ConceptField`` (FS-009, T002), a different way US-1
+through US-5 there need to test against:
 
 - :class:`Specimen` — a required ``ConceptField``.
 - :class:`Sample` — an optional ``ConceptField`` with a ``related_name``.
@@ -10,12 +10,32 @@ to test against:
   defines ``get_mineral_label`` itself, so US-5's ``contribute_to_class()``
   collision guard (T011) has a real pre-existing definition to leave alone
   rather than a synthetic one.
+
+Six more models carry ``ConceptsField`` (FS-010 Phase F), one per shape
+`tasks.md` T001 lists:
+
+- :class:`Deposit` — a required ``ConceptsField`` (T003, T009's enforced
+  half).
+- :class:`Survey` — two required ``ConceptsField``s against the same
+  vocabulary, both ``related_name="+"`` (T003, T009's enumeration case).
+- :class:`Outcrop` — an optional ``ConceptsField`` with a ``related_name``
+  (US-1's reverse accessor, US-5's permissive half).
+- :class:`RockSample` — both a ``ConceptField`` and a ``ConceptsField``
+  against the same vocabulary on one model, the collision case `plan.md`'s
+  Risks section refuses to assume away.
+- :class:`FieldNote` — a ``ConceptsField`` naming two vocabularies (T012).
+- :class:`Photograph` — a ``ConceptsField`` naming no vocabulary at all — the
+  keywords shape (T012).
+
+:class:`Deposit` and :class:`Survey` were added in T003, since T003's own
+acceptance needs a real declaration to test the generated membership model
+against (`decisions.md` D10). The remaining four are T001's.
 """
 
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
-from controlled_vocabularies.fields import ConceptField
+from controlled_vocabularies.fields import ConceptField, ConceptsField
 
 
 class Specimen(models.Model):
@@ -85,3 +105,147 @@ class Artifact(models.Model):
     def get_mineral_label(self) -> str:
         """Pre-existing — must survive T011's ``contribute_to_class()`` guard untouched."""
         return "this artifact's own label, not the field's"
+
+
+class Deposit(models.Model):
+    """Carries a required ``ConceptsField`` against the "rock-type" vocabulary
+    (T003, T009's enforced half)."""
+
+    name = models.CharField(
+        max_length=255,
+        verbose_name=_("name"),
+        help_text=_("The deposit's catalogue name."),
+    )
+    rock_types = ConceptsField(
+        vocabulary="rock-type",
+        verbose_name=_("rock types"),
+        help_text=_("The rock types present at this deposit."),
+    )
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class Survey(models.Model):
+    """Carries two required ``ConceptsField``s against the same vocabulary
+    (T003, T009): one required field enforced and the other silently skipped
+    is the failure T009's enumeration case exists to catch, and it needs two
+    of them on one model to be visible at all. Both declare
+    ``related_name="+"`` so T003's hidden related_name rewrite has two live
+    fields that would otherwise clash to prove itself against."""
+
+    name = models.CharField(
+        max_length=255,
+        verbose_name=_("name"),
+        help_text=_("The survey's catalogue name."),
+    )
+    primary_minerals = ConceptsField(
+        vocabulary="mineral",
+        related_name="+",
+        verbose_name=_("primary minerals"),
+        help_text=_("The minerals this survey primarily targets."),
+    )
+    secondary_minerals = ConceptsField(
+        vocabulary="mineral",
+        related_name="+",
+        verbose_name=_("secondary minerals"),
+        help_text=_("The minerals this survey secondarily targets."),
+    )
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class Outcrop(models.Model):
+    """Carries an optional ``ConceptsField`` against the "mineral" vocabulary,
+    with a reverse accessor (``mineral.outcrops``) — US-1's reverse accessor
+    and US-5's permissive half."""
+
+    name = models.CharField(
+        max_length=255,
+        verbose_name=_("name"),
+        help_text=_("The outcrop's catalogue name."),
+    )
+    minerals = ConceptsField(
+        vocabulary="mineral",
+        blank=True,
+        related_name="outcrops",
+        verbose_name=_("minerals"),
+        help_text=_("The minerals observed at this outcrop, if any."),
+    )
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class RockSample(models.Model):
+    """Carries both a ``ConceptField`` and a ``ConceptsField`` against the
+    same "mineral" vocabulary — the collision case `plan.md`'s Risks section
+    refuses to assume away: two declarations on one model must generate
+    distinct membership tables and non-clashing reverse accessors."""
+
+    name = models.CharField(
+        max_length=255,
+        verbose_name=_("name"),
+        help_text=_("The rock sample's catalogue name."),
+    )
+    primary_mineral = ConceptField(
+        vocabulary="mineral",
+        null=True,
+        blank=True,
+        verbose_name=_("primary mineral"),
+        help_text=_("The single mineral this sample is primarily classified as, if known."),
+    )
+    associated_minerals = ConceptsField(
+        vocabulary="mineral",
+        blank=True,
+        related_name="+",
+        verbose_name=_("associated minerals"),
+        help_text=_("Any additional minerals observed in this sample."),
+    )
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class FieldNote(models.Model):
+    """Carries a ``ConceptsField`` naming two vocabularies — "keywords from
+    GCMD or AGU" is a boundary (`decisions.md` D9); here "rock-type" or
+    "mineral" (T012)."""
+
+    name = models.CharField(
+        max_length=255,
+        verbose_name=_("name"),
+        help_text=_("The field note's catalogue name."),
+    )
+    keywords = ConceptsField(
+        vocabulary=["rock-type", "mineral"],
+        blank=True,
+        related_name="+",
+        verbose_name=_("keywords"),
+        help_text=_("Keywords drawn from either the rock-type or the mineral vocabulary."),
+    )
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class Photograph(models.Model):
+    """Carries a ``ConceptsField`` naming no vocabulary at all — the keywords
+    shape (T012, `decisions.md` D9): the restriction is given up, but the
+    delete protection, the readback, and the required-set rule are not."""
+
+    name = models.CharField(
+        max_length=255,
+        verbose_name=_("name"),
+        help_text=_("The photograph's catalogue name."),
+    )
+    keywords = ConceptsField(
+        blank=True,
+        related_name="+",
+        verbose_name=_("keywords"),
+        help_text=_("Keywords drawn from any vocabulary; this field names none in particular."),
+    )
+
+    def __str__(self) -> str:
+        return self.name
