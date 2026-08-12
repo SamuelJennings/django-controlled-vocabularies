@@ -69,7 +69,7 @@ from django.utils import translation
 from django.utils.functional import Promise
 from django.utils.module_loading import import_string
 
-from controlled_vocabularies.fields import ConceptField
+from controlled_vocabularies.fields import ConceptField, ConceptsField
 from controlled_vocabularies.models import Concept, ConceptLabel, ConceptScheme
 from tests.factories import (
     ArtifactFactory,
@@ -178,6 +178,102 @@ class TestConceptFieldDeconstruct:
         field = ConceptField(vocabulary="rock-type")
         cloned = field.clone()
         assert cloned.vocabulary == "rock-type"
+
+
+class TestConceptsFieldConstruction:
+    """FS-010 T002 (FR-001, FR-002, FR-003, FR-011) — ``vocabulary`` is optional
+    and takes three shapes, normalised once in ``__init__`` to a tuple of
+    slugs; the two kwargs a consumer does not supply (``limit_choices_to``,
+    ``through``); construction issues no query."""
+
+    def test_single_slug_normalises_to_a_one_element_tuple(self):
+        field = ConceptsField(vocabulary="rock-type")
+        assert field.vocabulary == ("rock-type",)
+        assert field.get_limit_choices_to() == Q(scheme__slug__in=("rock-type",))
+
+    def test_list_normalises_with_duplicates_collapsed_and_order_not_significant(self):
+        field = ConceptsField(vocabulary=["gcmd", "agu-index", "gcmd"])
+        assert set(field.vocabulary) == {"gcmd", "agu-index"}
+        assert len(field.vocabulary) == 2
+        assert field.get_limit_choices_to() == Q(scheme__slug__in=field.vocabulary)
+
+    def test_omitted_vocabulary_normalises_to_empty_and_sets_no_restriction(self):
+        field = ConceptsField()
+        assert field.vocabulary == ()
+        assert field.get_limit_choices_to() == {}
+
+    def test_fixes_to_concept(self):
+        field = ConceptsField(vocabulary="rock-type")
+        assert field.remote_field.model == "controlled_vocabularies.Concept"
+
+    @pytest.mark.django_db
+    def test_construction_issues_no_queries(self):
+        """FR-003's mechanism, for all three shapes: the ``Q`` is constructed,
+        never evaluated, and an omitted vocabulary sets nothing to evaluate."""
+        with CaptureQueriesContext(connection) as ctx:
+            ConceptsField(vocabulary="rock-type")
+            ConceptsField(vocabulary=["gcmd", "agu-index"])
+            ConceptsField()
+        assert len(ctx.captured_queries) == 0
+
+    def test_rejects_consumer_supplied_limit_choices_to(self):
+        with pytest.raises(TypeError, match="limit_choices_to"):
+            ConceptsField(vocabulary="rock-type", limit_choices_to=Q(label="Granite"))
+
+    def test_rejects_consumer_supplied_through(self):
+        # A consumer-supplied through model would silently drop T003's delete
+        # guarantee, the same reasoning that refuses on_delete on ConceptField.
+        with pytest.raises(TypeError, match="through"):
+            ConceptsField(vocabulary="rock-type", through="controlled_vocabularies.Concept")
+
+    def test_rejects_non_string_vocabulary_element(self):
+        with pytest.raises(TypeError, match="vocabulary"):
+            ConceptsField(vocabulary=["mineral", 42])
+
+    def test_help_text_has_a_translatable_default(self):
+        field = ConceptsField(vocabulary="rock-type")
+        assert isinstance(field.help_text, Promise)
+        assert str(field.help_text)
+
+    def test_help_text_default_is_overridable(self):
+        field = ConceptsField(vocabulary="rock-type", help_text="Pick some rock types.")
+        assert field.help_text == "Pick some rock types."
+
+
+class TestConceptsFieldDeconstruct:
+    """FS-010 T002 — ``deconstruct()`` strips ``to`` and ``limit_choices_to``
+    and records ``vocabulary`` instead, for the same ``Field.clone()`` reason
+    documented on :class:`~controlled_vocabularies.fields.ConceptField`.
+    ``through`` is never emitted (T003) so there is nothing to strip."""
+
+    def test_deconstruct_omits_to_and_limit_choices_to(self):
+        field = ConceptsField(vocabulary="rock-type")
+        _name, _path, _args, kwargs = field.deconstruct()
+        assert "to" not in kwargs
+        assert "limit_choices_to" not in kwargs
+        assert "through" not in kwargs
+
+    def test_deconstruct_adds_vocabulary(self):
+        field = ConceptsField(vocabulary=["gcmd", "agu-index"])
+        _name, _path, _args, kwargs = field.deconstruct()
+        assert set(kwargs["vocabulary"]) == {"gcmd", "agu-index"}
+
+    @pytest.mark.parametrize("vocabulary", ["rock-type", ["gcmd", "agu-index"], None])
+    def test_round_trip_rebuilds_an_equivalent_field(self, vocabulary):
+        """Deconstruct, rebuild from the emitted path and kwargs — exactly what
+        ``Field.clone()`` and a replayed migration file both do — for each of
+        the three shapes."""
+        field = ConceptsField(vocabulary=vocabulary)
+        _name, path, args, kwargs = field.deconstruct()
+        field_class = import_string(path)
+        rebuilt = field_class(*args, **kwargs)
+        assert rebuilt.vocabulary == field.vocabulary
+        assert rebuilt.get_limit_choices_to() == field.get_limit_choices_to()
+
+    def test_clone_rebuilds_without_error(self):
+        field = ConceptsField(vocabulary="rock-type")
+        cloned = field.clone()
+        assert cloned.vocabulary == ("rock-type",)
 
 
 class TestConceptFieldMigrations:

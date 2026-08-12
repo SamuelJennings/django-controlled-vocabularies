@@ -10,7 +10,7 @@ never queries the database while the declaration is only being read (FR-003).
 """
 
 from django.core.exceptions import ValidationError
-from django.db.models import PROTECT, ForeignKey, Q
+from django.db.models import PROTECT, ForeignKey, ManyToManyField, Q
 from django.utils.translation import gettext_lazy as _
 
 
@@ -158,6 +158,92 @@ class ConceptField(ForeignKey):
         name, path, args, kwargs = super().deconstruct()
         kwargs.pop("to", None)
         kwargs.pop("on_delete", None)
+        kwargs.pop("limit_choices_to", None)
+        kwargs["vocabulary"] = self.vocabulary
+        return name, path, args, kwargs
+
+
+def _normalise_vocabulary(vocabulary):
+    """Normalise ``ConceptsField``'s ``vocabulary`` argument to a tuple of slugs.
+
+    One code path for all three shapes (FR-002, ``decisions.md`` D9): a single
+    slug becomes a one-element tuple so ``__in`` serves both the one- and
+    several-vocabulary cases, a list collapses duplicates with order left
+    insignificant, and an omitted (``None``) vocabulary normalises to the
+    empty tuple — the field's only real branch, and everywhere it appears the
+    answer is to do nothing rather than something weaker.
+    """
+    if vocabulary is None:
+        slugs = ()
+    elif isinstance(vocabulary, str):
+        slugs = (vocabulary,)
+    else:
+        slugs = tuple(vocabulary)
+    for slug in slugs:
+        if not isinstance(slug, str):
+            raise TypeError(f"ConceptsField() vocabulary elements must be strings; got {slug!r}.")
+    return tuple(dict.fromkeys(slugs))
+
+
+class ConceptsField(ManyToManyField):
+    """A ``ManyToManyField`` to ``controlled_vocabularies.Concept``, optionally
+    constrained to one or more named vocabularies.
+
+    ``vocabulary`` is optional (FR-002, ``decisions.md`` D9) and takes three
+    shapes, normalised once by :func:`_normalise_vocabulary`: a single slug, a
+    list of slugs, or omitted entirely. A declaration naming no vocabulary is
+    a supported shape rather than an error — it keeps the delete protection
+    T003 builds, the label/URI readback, and the required-set rule, and gives
+    up only the restriction.
+
+    ``to`` and ``limit_choices_to`` are not the consumer's to supply: ``to``
+    is fixed and ``limit_choices_to`` is derived from ``vocabulary``, set only
+    when the declaration named at least one (an empty restriction is not set
+    at all, rather than a restriction that matches everything by accident).
+    ``through`` is refused outright, for the same reason ``ConceptField``
+    refuses ``on_delete`` — a consumer-supplied membership model would
+    silently drop the delete guarantee T003 provides.
+
+    ``to`` stays the *string* ``"controlled_vocabularies.Concept"``, never the
+    imported class — see :class:`ConceptField`'s docstring for why.
+    """
+
+    def __init__(self, vocabulary=None, **kwargs):
+        if "limit_choices_to" in kwargs:
+            raise TypeError(
+                "ConceptsField() sets limit_choices_to itself to constrain choices to "
+                "'vocabulary'; a consumer may not override it."
+            )
+        if "through" in kwargs:
+            raise TypeError(
+                "ConceptsField() generates its own through model with PROTECT on the "
+                "foreign key to Concept; a consumer may not override it."
+            )
+        self.vocabulary = _normalise_vocabulary(vocabulary)
+        kwargs["to"] = "controlled_vocabularies.Concept"
+        if self.vocabulary:
+            kwargs["limit_choices_to"] = Q(scheme__slug__in=self.vocabulary)
+        # A static message, not one interpolating `vocabulary`: `%` on a
+        # gettext_lazy() proxy evaluates it immediately, which would defeat
+        # the laziness this default exists to keep (translation happens at
+        # access time, per request).
+        kwargs.setdefault("help_text", _("Concepts from this field's configured vocabulary or vocabularies."))
+        super().__init__(**kwargs)
+
+    def deconstruct(self):
+        """Strip ``to`` and ``limit_choices_to`` and record ``vocabulary`` instead.
+
+        ``through`` is never emitted here to begin with: T003 marks the
+        generated membership model ``auto_created``, and
+        ``ManyToManyField.deconstruct()`` only emits ``through`` when it is
+        not. Left alone otherwise, ``Field.clone()`` — called on every
+        ``makemigrations``, ``makemigrations --check``, ``migrate`` and
+        pytest-django test-database build — would receive a ``to`` and
+        ``limit_choices_to`` that reconstruct a plain relation, with no
+        ``vocabulary`` to rebuild this field's own restriction from.
+        """
+        name, path, args, kwargs = super().deconstruct()
+        kwargs.pop("to", None)
         kwargs.pop("limit_choices_to", None)
         kwargs["vocabulary"] = self.vocabulary
         return name, path, args, kwargs

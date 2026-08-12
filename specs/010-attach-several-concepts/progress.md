@@ -52,3 +52,26 @@ Append-only. One line per stage transition and per gate outcome, written at the 
   `tasks.md` (T001, T002, T005, T006, T010, T011, new T012). Story issue #110 created and linked,
   epic body and PR #109 `Closes` block re-synced, ledger carries US8/T012. Nothing was implemented
   against the superseded wording, so no code was reverted.
+
+## 2026-08-12T12:20+02:00 · Implementer US0 · T002
+
+Did: added `ConceptsField(ManyToManyField)` to `controlled_vocabularies/fields.py`, alongside
+`ConceptField`. `vocabulary` is optional and normalised once in `__init__` (`_normalise_vocabulary`)
+to a tuple of slugs — single slug, list (duplicates collapsed), or omitted → `()`. `limit_choices_to`
+is set only when the tuple is non-empty; `to` is fixed to the string
+`"controlled_vocabularies.Concept"`; `limit_choices_to` and `through` are refused with `TypeError`
+naming the reason. `deconstruct()` strips `to`/`limit_choices_to` and records `vocabulary`.
+`contribute_to_class` is not yet overridden — T003's task — so at this stage the field's through
+model is still Django's stock CASCADE-on-both-sides one; no consuming model declares the field yet,
+so nothing observes that.
+
+Verified: `poetry run pytest tests/test_fields.py -k "TestConceptsFieldConstruction or
+TestConceptsFieldDeconstruct"` — 16 passed. Full file `poetry run pytest tests/test_fields.py` — 65
+passed (49 pre-existing + 16 new). `poetry run ruff check` and `poetry run ruff format --check` on
+both touched files — clean.
+
+Next: T003 — `contribute_to_class` generating the `PROTECT` membership model, against a real
+test-app model (some of T001's models land alongside it, since T003's own acceptance needs a real
+model to attach the field to — tasks.md sanctions either ordering).
+
+Watch: none.
