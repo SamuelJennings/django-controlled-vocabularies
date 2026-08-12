@@ -3,7 +3,7 @@
   "feature": "010-attach-several-concepts",
   "branch": "010-attach-several-concepts",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "IMPLEMENT",
+  "state": "REVIEW",
   "state_history": [
     {
       "state": "INTAKE",
@@ -39,6 +39,11 @@
       "state": "IMPLEMENT",
       "at": "2026-08-12T10:35:27Z",
       "note": "Phase F (T001-T003) landed and merged to the feature branch; forge verify green (1121 passed), makemigrations --check clean, tamper flags triaged as additions-only, receipts verified"
+    },
+    {
+      "state": "REVIEW",
+      "at": "2026-08-12T13:20:00Z",
+      "note": "all stories converged; review panel run, F1 critical and F2 medium fixed on the branch; review verdict request-changes, F1 critical + F2 medium both fixed on the branch"
     }
   ],
   "gates": {

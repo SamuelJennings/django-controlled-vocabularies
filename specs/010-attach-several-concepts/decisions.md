@@ -96,7 +96,8 @@ attached again.
 Refusing the second attachment would mean every caller checks membership before every write, which
 is work for no benefit and a race in any concurrent path.
 
-**ADR:** none.
+**ADR:** none — this is what a set means, not a rule this project chose and could have chosen
+differently, so there is nothing for a standing record to carry.
 
 ## D5 — Deleting a consuming record removes its memberships and keeps the concepts
 
@@ -108,7 +109,8 @@ This matches the single-value field exactly, where deleting the record leaves th
 and it is the only reading consistent with what the concepts are — shared reference data that
 outlives any particular consumer of it.
 
-**ADR:** none.
+**ADR:** none — it restates Article IX's existing one-way protection for a second field type and
+matches the single-value field exactly, so it adds no standing rule.
 
 ## D6 — Whether the two fields share an implementation is a design question, not a spec one
 
@@ -238,8 +240,11 @@ related_name rewrite and the absence of a double-registration warning) — as pa
 with their own migration. T001 adds the remaining four models and a second migration.
 
 **Revisit if:** a later story finds the two-migration split (0002 under T003, 0003 under T001)
-awkward to review; Forge squashes migrations at convergence regardless, so this is not expected to
+awkward to review. Migrations are squashed at convergence regardless, so this is not expected to
 matter past this branch.
+
+**ADR:** none — a sequencing choice inside one phase of one branch, with no consequence that
+survives the squash.
 
 ## D11 — Two T005 tests wrap the refused write in its own `transaction.atomic()` (Implementer, US2)
 
@@ -357,6 +362,10 @@ fails against the `__dict__` guard and passes against the tag.
 **Author.** Applied at convergence rather than by the story's implementer: the interaction was
 visible only once T009's code and the review's correction were both in front of the same reader.
 
+**ADR:** none — a mechanism internal to this field's own installation, the same class of decision as
+D8, which it corrects. It becomes ADR-worthy only if a second feature installs a validation wrapper
+the same way, at which point the pattern is the decision rather than this instance of it.
+
 ## D15 — The i18n sweep recognises a metadata key in any dict literal, not only `error_messages`
 
 **Context.** T011 audits every string this feature's code puts in front of a person. T003's
@@ -414,3 +423,8 @@ one, and a valid reverse attach that must still succeed. The two refusal tests f
 `reverse` early return and pass against the fix.
 
 **Author.** Found by the review panel as F1 (critical) and applied at convergence.
+
+**ADR:** none — it closes a hole in an existing feature-level rule (D2) rather than adding a standing
+one. The generalisation worth keeping is about testing rather than architecture: a guarantee stated
+over "the relation" has to be exercised from both of the relation's ends, because Django gives every
+relation a reverse accessor whether or not the declaration mentions one.
