@@ -96,7 +96,8 @@ A stored identifier is later rendered as a link, so schemes that can carry execu
 
 ## Attaching a concept to your model
 
-`ConceptField` is a `ForeignKey` to `Concept`, constrained to one named vocabulary:
+`ConceptField` is a `ForeignKey` to `Concept`, optionally restricted to the vocabularies you name.
+`vocabulary` takes three shapes:
 
 ```python
 from django.db import models
@@ -106,14 +107,23 @@ from controlled_vocabularies.fields import ConceptField
 
 class Specimen(models.Model):
     name = models.CharField(max_length=200)
-    rock_type = ConceptField(vocabulary="rock-type")
+    rock_type = ConceptField(vocabulary="rock-type")                     # one vocabulary
+    dominant_material = ConceptField(vocabulary=["igneous", "mineral"])  # several
+    keyword = ConceptField(null=True, blank=True)                        # no vocabulary named
 ```
 
 `vocabulary` names the owning `ConceptScheme` by its slug rather than by a database relation. A
 field declaration is read when Python imports the module, and a vocabulary is rows in a table that
-may not exist yet, so the slug is all the field can carry. Only a concept whose `scheme.slug`
-matches is offered as a form choice or accepted by `full_clean()`. A concept from another
-vocabulary is refused, and so is deleting a concept a record still references
+may not exist yet, so the slug is all the field can carry.
+
+`vocabulary="rock-type"` restricts to one vocabulary. A list restricts to the union of the named
+vocabularies, and the refusal names every vocabulary the field accepts. Leaving `vocabulary` out
+entirely restricts nothing: any concept in the database is a valid choice. That last shape is for a
+field drawing on whatever a project has imported rather than one fixed list.
+
+When the field names at least one vocabulary, only a concept whose `scheme.slug` matches is offered
+as a form choice or accepted by `full_clean()`. A concept from any other vocabulary is refused.
+Deleting a concept a record still references is refused whichever shape you declare
 (`on_delete=PROTECT`), whether the delete reaches it directly or cascades down from its scheme.
 
 Reading a concept back:
@@ -139,7 +149,8 @@ back to a fixed number of queries for the whole list.
 ## Attaching several concepts to your model
 
 `ConceptsField` is the many-to-many counterpart: several concepts on one record instead of one.
-`vocabulary` takes three shapes:
+`vocabulary` takes the same three shapes it takes on `ConceptField`, and means the same thing by
+each:
 
 ```python
 from django.db import models
@@ -153,12 +164,9 @@ class Sample(models.Model):
     keywords = ConceptsField(blank=True)  # no vocabulary named
 ```
 
-`vocabulary="rock-type"` restricts to one vocabulary, the same as `ConceptField`. A list,
-`vocabulary=["igneous", "sedimentary"]`, restricts to the union of the named vocabularies — a
-concept from any other is refused, and the refusal names every vocabulary the field accepts.
-Leaving `vocabulary` out entirely, as `keywords` does above, restricts nothing: any concept in the
-database is a valid choice. This last shape is for a plain keywords field, drawing on whatever a
-project has imported rather than one fixed list.
+One slug restricts to that vocabulary, a list restricts to the union of the named vocabularies, and
+leaving `vocabulary` out — as `keywords` does above — restricts nothing. A concept outside the
+named vocabularies is refused, and the refusal names every vocabulary the field accepts.
 
 Reading concepts back:
 

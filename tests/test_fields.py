@@ -124,10 +124,11 @@ from django.utils import translation
 from django.utils.functional import Promise
 from django.utils.module_loading import import_string
 
-from controlled_vocabularies.fields import ConceptField, ConceptsField
+from controlled_vocabularies.fields import ConceptField, ConceptFieldMixin, ConceptsField
 from controlled_vocabularies.models import Concept, ConceptLabel, ConceptScheme
 from tests.factories import (
     ArtifactFactory,
+    BoreholeFactory,
     ConceptFactory,
     ConceptSchemeFactory,
     DepositFactory,
@@ -136,20 +137,93 @@ from tests.factories import (
     PhotographFactory,
     RockSampleFactory,
     SampleFactory,
+    SketchFactory,
     SpecimenFactory,
     SurveyFactory,
 )
 from tests.testapp.models import (
     Artifact,
+    Borehole,
     Deposit,
     FieldNote,
     Outcrop,
     Photograph,
     RockSample,
     Sample,
+    Sketch,
     Specimen,
     Survey,
 )
+
+
+@pytest.mark.parametrize("field_class", [ConceptField, ConceptsField])
+class TestSharedVocabularyContract:
+    """#111 — the two fields agree on what ``vocabulary`` accepts and what it
+    means, asserted against both from one place.
+
+    The defect #111 reported was the two fields disagreeing, and the reason
+    they could was that each implemented the contract itself. They now inherit
+    it from :class:`ConceptFieldMixin`. This class is the guard against a
+    future change reintroducing the divergence: every assertion runs against
+    both fields, so a shape supported on one and not the other fails here
+    rather than reaching a consumer.
+    """
+
+    def test_inherits_the_shared_contract(self, field_class):
+        assert issubclass(field_class, ConceptFieldMixin)
+
+    def test_one_slug_normalises_to_a_one_element_tuple(self, field_class):
+        field = field_class(vocabulary="rock-type")
+        assert field.vocabulary == ("rock-type",)
+        assert field.get_limit_choices_to() == Q(scheme__slug__in=("rock-type",))
+
+    def test_several_slugs_normalise_to_their_union_with_duplicates_collapsed(self, field_class):
+        field = field_class(vocabulary=["rock-type", "mineral", "rock-type"])
+        assert field.vocabulary == ("rock-type", "mineral")
+        assert field.get_limit_choices_to() == Q(scheme__slug__in=("rock-type", "mineral"))
+
+    def test_an_omitted_vocabulary_sets_no_restriction_at_all(self, field_class):
+        field = field_class()
+        assert field.vocabulary == ()
+        assert field.get_limit_choices_to() == {}
+
+    def test_an_empty_slug_is_refused_by_name(self, field_class):
+        with pytest.raises(TypeError, match=field_class.__name__):
+            field_class(vocabulary="")
+
+    def test_a_non_string_slug_is_refused_by_name(self, field_class):
+        with pytest.raises(TypeError, match=field_class.__name__):
+            field_class(vocabulary=["mineral", 42])
+
+    def test_a_consumer_supplied_limit_choices_to_is_refused(self, field_class):
+        with pytest.raises(TypeError, match="limit_choices_to"):
+            field_class(vocabulary="rock-type", limit_choices_to=Q(label="Granite"))
+
+    def test_help_text_defaults_to_a_translatable_string_and_stays_overridable(self, field_class):
+        assert isinstance(field_class(vocabulary="rock-type").help_text, Promise)
+        assert field_class(vocabulary="rock-type", help_text="Pick one.").help_text == "Pick one."
+
+    @pytest.mark.parametrize("vocabulary", [None, "rock-type", ["rock-type", "mineral"]])
+    def test_deconstruct_records_the_normalised_vocabulary_and_strips_the_fixed_kwargs(self, field_class, vocabulary):
+        field = field_class(vocabulary=vocabulary)
+        _name, path, args, kwargs = field.deconstruct()
+
+        assert kwargs["vocabulary"] == field.vocabulary
+        assert "to" not in kwargs
+        assert "limit_choices_to" not in kwargs
+        assert "on_delete" not in kwargs
+        assert "through" not in kwargs
+
+        rebuilt = import_string(path)(*args, **kwargs)
+        assert rebuilt.vocabulary == field.vocabulary
+        assert rebuilt.get_limit_choices_to() == field.get_limit_choices_to()
+
+    def test_clone_rebuilds_an_equivalent_field(self, field_class):
+        """``clone()`` is what ``ModelState.from_model()`` calls on every local
+        field, so a contract that does not survive it breaks every
+        ``makemigrations`` and every test-database build."""
+        field = field_class(vocabulary=["rock-type", "mineral"])
+        assert field.clone().vocabulary == ("rock-type", "mineral")
 
 
 class TestConceptFieldConstruction:
@@ -163,9 +237,23 @@ class TestConceptFieldConstruction:
         field = ConceptField(vocabulary="rock-type")
         assert field.remote_field.on_delete is PROTECT
 
-    def test_fixes_limit_choices_to_the_named_vocabulary(self):
+    def test_single_slug_normalises_to_a_one_element_tuple(self):
         field = ConceptField(vocabulary="rock-type")
-        assert field.get_limit_choices_to() == Q(scheme__slug="rock-type")
+        assert field.vocabulary == ("rock-type",)
+        assert field.get_limit_choices_to() == Q(scheme__slug__in=("rock-type",))
+
+    def test_list_normalises_with_duplicates_collapsed_and_order_not_significant(self):
+        field = ConceptField(vocabulary=["rock-type", "mineral", "rock-type"])
+        assert field.vocabulary == ("rock-type", "mineral")
+        assert field.get_limit_choices_to() == Q(scheme__slug__in=("rock-type", "mineral"))
+
+    def test_omitted_vocabulary_normalises_to_empty_and_sets_no_restriction(self):
+        """The shape #111 aligns with ``ConceptsField``: naming no vocabulary is
+        a supported declaration, not an error, and sets no restriction at all
+        rather than one that happens to match everything."""
+        field = ConceptField()
+        assert field.vocabulary == ()
+        assert field.get_limit_choices_to() == {}
 
     @pytest.mark.django_db
     def test_construction_issues_no_queries(self):
@@ -185,12 +273,15 @@ class TestConceptFieldConstruction:
         with pytest.raises(TypeError, match="limit_choices_to"):
             ConceptField(vocabulary="rock-type", limit_choices_to=Q(label="Granite"))
 
-    def test_rejects_missing_vocabulary(self):
-        with pytest.raises(TypeError, match="vocabulary"):
-            ConceptField()
+    def test_rejects_non_string_vocabulary_element(self):
+        with pytest.raises(TypeError, match="ConceptField"):
+            ConceptField(vocabulary=["rock-type", 7])
 
-    def test_rejects_empty_vocabulary(self):
-        with pytest.raises(TypeError, match="vocabulary"):
+    def test_rejects_an_empty_slug(self):
+        """An empty string is not a slug any scheme can carry, so a field
+        declaring one would offer no choices at all while looking restricted.
+        Refused for both fields rather than normalised away."""
+        with pytest.raises(TypeError, match="ConceptField"):
             ConceptField(vocabulary="")
 
     def test_help_text_has_a_translatable_default(self):
@@ -205,6 +296,12 @@ class TestConceptFieldConstruction:
     def test_error_messages_invalid_carries_named_vocabulary_placeholder(self):
         field = ConceptField(vocabulary="rock-type")
         assert "%(vocabulary)s" in field.error_messages["invalid"]
+
+    def test_error_messages_carry_a_second_message_for_the_unrestricted_shape(self):
+        """A field naming no vocabulary has no vocabulary to name in a refusal,
+        so the message that would interpolate one is not the message it uses."""
+        field = ConceptField()
+        assert "%(vocabulary)s" not in field.error_messages["invalid_unrestricted"]
 
 
 class TestConceptFieldDeconstruct:
@@ -228,19 +325,22 @@ class TestConceptFieldDeconstruct:
     def test_deconstruct_adds_vocabulary(self):
         field = ConceptField(vocabulary="rock-type")
         _name, _path, _args, kwargs = field.deconstruct()
-        assert kwargs["vocabulary"] == "rock-type"
+        assert kwargs["vocabulary"] == ("rock-type",)
 
-    def test_round_trip_rebuilds_an_equivalent_field(self):
+    @pytest.mark.parametrize("vocabulary", [None, "rock-type", ["rock-type", "mineral"]])
+    def test_round_trip_rebuilds_an_equivalent_field(self, vocabulary):
         """Deconstruct, rebuild from the emitted path and kwargs — exactly what
         ``Field.clone()`` and a replayed migration file both do — and the
         rebuilt field carries the same vocabulary, the same ``limit_choices_to``,
-        and ``PROTECT``."""
-        field = ConceptField(vocabulary="rock-type")
+        and ``PROTECT``. Run over all three shapes, since a migration written
+        before #111 records ``vocabulary`` as a bare string and has to keep
+        replaying."""
+        field = ConceptField(vocabulary=vocabulary)
         _name, path, args, kwargs = field.deconstruct()
         field_class = import_string(path)
         rebuilt = field_class(*args, **kwargs)
-        assert rebuilt.vocabulary == "rock-type"
-        assert rebuilt.get_limit_choices_to() == Q(scheme__slug="rock-type")
+        assert rebuilt.vocabulary == field.vocabulary
+        assert rebuilt.get_limit_choices_to() == field.get_limit_choices_to()
         assert rebuilt.remote_field.on_delete is PROTECT
 
     def test_clone_rebuilds_without_error(self):
@@ -248,7 +348,7 @@ class TestConceptFieldDeconstruct:
         local field (``db/migrations/state.py``) — the failure T002 actually hit."""
         field = ConceptField(vocabulary="rock-type")
         cloned = field.clone()
-        assert cloned.vocabulary == "rock-type"
+        assert cloned.vocabulary == ("rock-type",)
 
 
 class TestConceptsFieldConstruction:
@@ -298,8 +398,15 @@ class TestConceptsFieldConstruction:
             ConceptsField(vocabulary="rock-type", through="controlled_vocabularies.Concept")
 
     def test_rejects_non_string_vocabulary_element(self):
-        with pytest.raises(TypeError, match="vocabulary"):
+        with pytest.raises(TypeError, match="ConceptsField"):
             ConceptsField(vocabulary=["mineral", 42])
+
+    def test_rejects_an_empty_slug(self):
+        """Refused rather than normalised away, for both fields: a declaration
+        carrying one would restrict to a slug no scheme can hold and offer no
+        choices at all, while reading as a restricted field."""
+        with pytest.raises(TypeError, match="ConceptsField"):
+            ConceptsField(vocabulary=["mineral", ""])
 
     def test_help_text_has_a_translatable_default(self):
         field = ConceptsField(vocabulary="rock-type")
@@ -1023,9 +1130,7 @@ class TestConceptsFieldLabelAndUriAccessors:
     without tripping T005's write-path vocabulary check."""
 
     @pytest.mark.django_db
-    def test_labels_accessor_returns_the_active_languages_label_for_each_attached_concept(
-        self, multilingual_scheme
-    ):
+    def test_labels_accessor_returns_the_active_languages_label_for_each_attached_concept(self, multilingual_scheme):
         concepts = list(multilingual_scheme.concepts.all())
         multilingual_concept = next(c for c in concepts if c.labels.filter(language="de").exists())
         other_concept = next(c for c in concepts if c.pk != multilingual_concept.pk)
@@ -1205,17 +1310,13 @@ class TestConceptsFieldRequiredSet:
         # subclass is already covered by the one it inherits. Installing a
         # second around it would report every empty required field twice.
         class Parent(models.Model):
-            firsts = ConceptsField(
-                vocabulary="rock-type", verbose_name="firsts", help_text="the first set"
-            )
+            firsts = ConceptsField(vocabulary="rock-type", verbose_name="firsts", help_text="the first set")
 
             class Meta:
                 app_label = "testapp"
 
         class Child(Parent):
-            seconds = ConceptsField(
-                vocabulary="rock-type", verbose_name="seconds", help_text="the second set"
-            )
+            seconds = ConceptsField(vocabulary="rock-type", verbose_name="seconds", help_text="the second set")
 
             class Meta:
                 app_label = "testapp"
@@ -1251,7 +1352,20 @@ class TestConceptFieldMigrations:
 
 
 class TestConceptFieldFactories:
-    """The three model factories T002 adds build valid, saved records."""
+    """The three model factories T002 adds, and the two #111 adds for the
+    several- and no-vocabulary shapes, build valid, saved records."""
+
+    @pytest.mark.django_db
+    def test_borehole_factory_leaves_the_optional_field_unset_by_default(self):
+        borehole = BoreholeFactory()
+        assert borehole.pk is not None
+        assert borehole.dominant_material is None
+
+    @pytest.mark.django_db
+    def test_sketch_factory_leaves_the_optional_field_unset_by_default(self):
+        sketch = SketchFactory()
+        assert sketch.pk is not None
+        assert sketch.subject is None
 
     @pytest.mark.django_db
     def test_specimen_factory_builds_a_required_concept(self):
@@ -1581,3 +1695,122 @@ class TestConceptFieldLabelAndUriAccessors:
         artifact = ArtifactFactory()
 
         assert artifact.get_mineral_label() == "this artifact's own label, not the field's"
+
+
+class BoreholeForm(forms.ModelForm):
+    """Test-only — the plain ``ModelForm`` Django would auto-generate from
+    :class:`~tests.testapp.models.Borehole`, for the several-vocabulary shape
+    #111 added to ``ConceptField``."""
+
+    class Meta:
+        model = Borehole
+        fields = ["name", "dominant_material"]
+
+
+class SketchForm(forms.ModelForm):
+    """Test-only — the plain ``ModelForm`` Django would auto-generate from
+    :class:`~tests.testapp.models.Sketch`, for the no-vocabulary shape #111
+    added to ``ConceptField``."""
+
+    class Meta:
+        model = Sketch
+        fields = ["name", "subject"]
+
+
+class TestConceptFieldSeveralVocabularies:
+    """#111 — a ``ConceptField`` naming two vocabularies accepts a concept from
+    either and refuses one from a third, naming both expected vocabularies in
+    the refusal. The ``ConceptsField`` counterpart is
+    ``TestConceptsFieldSeveralVocabulariesWritePath``.
+    """
+
+    @pytest.mark.django_db
+    def test_a_concept_from_either_named_vocabulary_validates(self):
+        rock_concept = ConceptFactory(scheme=ConceptSchemeFactory(name="Rock Type"))
+        mineral_concept = ConceptFactory(scheme=ConceptSchemeFactory(name="Mineral"))
+
+        Borehole(name="From rock-type", dominant_material=rock_concept).full_clean()
+        Borehole(name="From mineral", dominant_material=mineral_concept).full_clean()
+
+    @pytest.mark.django_db
+    def test_a_concept_from_a_third_vocabulary_is_refused_naming_both_expected(self):
+        ConceptSchemeFactory(name="Rock Type")
+        ConceptSchemeFactory(name="Mineral")
+        outsider = ConceptFactory(scheme=ConceptSchemeFactory(name="Geologic Age"))
+
+        with pytest.raises(ValidationError) as excinfo:
+            Borehole(name="Wrong vocabulary", dominant_material=outsider).full_clean()
+
+        message = " ".join(excinfo.value.messages)
+        assert "rock-type" in message
+        assert "mineral" in message
+
+    @pytest.mark.django_db
+    def test_form_field_offers_only_the_two_named_vocabularies_concepts(self):
+        rock_concept = ConceptFactory(scheme=ConceptSchemeFactory(name="Rock Type"))
+        mineral_concept = ConceptFactory(scheme=ConceptSchemeFactory(name="Mineral"))
+        outsider = ConceptFactory(scheme=ConceptSchemeFactory(name="Geologic Age"))
+
+        choices = list(BoreholeForm().fields["dominant_material"].queryset)
+
+        assert rock_concept in choices
+        assert mineral_concept in choices
+        assert outsider not in choices
+
+
+class TestConceptFieldNoVocabulary:
+    """#111 — a ``ConceptField`` naming no vocabulary restricts nothing, and
+    keeps everything else the field is worth declaring for: the reference
+    cannot be deleted out from under the record, and the label and identifier
+    still read back. The ``ConceptsField`` counterpart is
+    ``TestConceptsFieldNoVocabularyWritePath``.
+    """
+
+    @pytest.mark.django_db
+    def test_a_concept_from_any_vocabulary_validates(self):
+        first = ConceptFactory(scheme=ConceptSchemeFactory(name="Rock Type"))
+        second = ConceptFactory(scheme=ConceptSchemeFactory(name="Geologic Age"))
+
+        Sketch(name="Rock", subject=first).full_clean()
+        Sketch(name="Age", subject=second).full_clean()
+
+    @pytest.mark.django_db
+    def test_form_field_offers_every_concept_in_the_database(self):
+        first = ConceptFactory(scheme=ConceptSchemeFactory(name="Rock Type"))
+        second = ConceptFactory(scheme=ConceptSchemeFactory(name="Geologic Age"))
+
+        choices = list(SketchForm().fields["subject"].queryset)
+
+        assert first in choices
+        assert second in choices
+
+    @pytest.mark.django_db
+    def test_a_missing_concept_is_still_refused_without_naming_an_empty_vocabulary(self):
+        """``ForeignKey.validate()`` still refuses a primary key no concept
+        carries. Reading ``.messages`` is the assertion that matters: the
+        vocabulary-naming message would raise ``KeyError`` here, and a message
+        naming ``''`` would be worse than useless."""
+        sketch = Sketch(name="Dangling", subject_id=987654)
+
+        with pytest.raises(ValidationError) as excinfo:
+            sketch.full_clean()
+
+        message = " ".join(excinfo.value.messages)
+        assert "987654" in message
+        assert "''" not in message
+
+    @pytest.mark.django_db
+    def test_a_held_concept_cannot_be_deleted(self):
+        concept = ConceptFactory(scheme=ConceptSchemeFactory(name="Rock Type"))
+        SketchFactory(subject=concept)
+
+        with pytest.raises(ProtectedError):
+            concept.delete()
+
+    @pytest.mark.django_db
+    def test_label_and_uri_read_back(self):
+        concept = ConceptFactory(scheme=ConceptSchemeFactory(name="Rock Type"))
+        sketch = SketchFactory(subject=concept)
+
+        assert sketch.get_subject_label() == concept.display_label()
+        assert sketch.get_subject_uri() == concept.uri

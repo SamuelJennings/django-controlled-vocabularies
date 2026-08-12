@@ -24,13 +24,13 @@ def check_concept_field_vocabularies(app_configs, **kwargs):
 
     Walks every installed model for declared ``ConceptField`` and ``ConceptsField`` instances
     and resolves the distinct vocabulary slugs those fields name in **one** query, rather than
-    one per field. ``ConceptField.vocabulary`` is always a single slug; ``ConceptsField.vocabulary``
-    is a tuple naming zero, one or several (``decisions.md`` D9), so each field contributes every
-    slug it names to the flattened distinct set rather than one. A field naming no vocabulary
-    (the empty tuple) names nothing that could be missing, so it contributes nothing and is never
-    warned about. Where a field names several and only one is absent, the warning names that slug
-    rather than the field's whole declaration, so a developer reading ``manage.py check`` learns
-    which vocabulary to import.
+    one per field. Both fields hold ``vocabulary`` as a tuple naming zero, one or several
+    (``decisions.md`` D9, #111), so each contributes every slug it names to the flattened
+    distinct set rather than one. A field naming no vocabulary (the empty tuple) names nothing
+    that could be missing, so it contributes nothing and is never warned about. Where a field
+    names several and only one is absent, the warning names that slug rather than the field's
+    whole declaration, so a developer reading ``manage.py check`` learns which vocabulary to
+    import.
 
     The check runs before ``migrate`` (``BaseCommand.requires_system_checks`` defaults to
     ``"__all__"``), so on a fresh install it runs against a database with no tables yet. A
@@ -38,16 +38,16 @@ def check_concept_field_vocabularies(app_configs, **kwargs):
     ``ProgrammingError``, ``OperationalError`` or an unreachable database, all subclasses of
     ``DatabaseError`` — yields no warnings rather than raising (FR-003, ``research.md`` R3).
     """
-    fields_with_slugs = [
-        (field, (field.vocabulary,) if isinstance(field, ConceptField) else field.vocabulary)
+    fields = [
+        field
         for model in apps.get_models()
         for field in model._meta.get_fields()
         if isinstance(field, (ConceptField, ConceptsField))
     ]
-    if not fields_with_slugs:
+    slugs = {slug for field in fields for slug in field.vocabulary}
+    if not slugs:
         return []
 
-    slugs = {slug for _field, named in fields_with_slugs for slug in named}
     try:
         existing = set(ConceptScheme.objects.filter(slug__in=slugs).values_list("slug", flat=True))
     except DatabaseError:
@@ -61,7 +61,7 @@ def check_concept_field_vocabularies(app_configs, **kwargs):
             obj=field,
             id=CHECK_ID,
         )
-        for field, named in fields_with_slugs
-        for slug in named
+        for field in fields
+        for slug in field.vocabulary
         if slug not in existing
     ]

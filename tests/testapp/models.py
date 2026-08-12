@@ -11,6 +11,12 @@ through US-5 there need to test against:
   collision guard (T011) has a real pre-existing definition to leave alone
   rather than a synthetic one.
 
+Two more carry ``ConceptField`` in the shapes #111 added to it, mirroring
+``ConceptsField``'s own:
+
+- :class:`Borehole` — a ``ConceptField`` naming two vocabularies.
+- :class:`Sketch` — a ``ConceptField`` naming no vocabulary at all.
+
 Six more models carry ``ConceptsField`` (FS-010 Phase F), one per shape
 `tasks.md` T001 lists:
 
@@ -224,6 +230,51 @@ class FieldNote(models.Model):
         related_name="+",
         verbose_name=_("keywords"),
         help_text=_("Keywords drawn from either the rock-type or the mineral vocabulary."),
+    )
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class Borehole(models.Model):
+    """Carries a ``ConceptField`` naming two vocabularies (#111) — the
+    single-value counterpart of :class:`FieldNote`: one concept drawn from
+    either of the schemes the project accepts."""
+
+    name = models.CharField(
+        max_length=255,
+        verbose_name=_("name"),
+        help_text=_("The borehole's catalogue name."),
+    )
+    dominant_material = ConceptField(
+        vocabulary=["rock-type", "mineral"],
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name=_("dominant material"),
+        help_text=_("The material logged as dominant, from either the rock-type or the mineral vocabulary."),
+    )
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class Sketch(models.Model):
+    """Carries a ``ConceptField`` naming no vocabulary at all (#111) — the
+    single-value counterpart of :class:`Photograph`: the restriction is given
+    up, the delete protection and the label/URI readback are not."""
+
+    name = models.CharField(
+        max_length=255,
+        verbose_name=_("name"),
+        help_text=_("The sketch's catalogue name."),
+    )
+    subject = ConceptField(
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name=_("subject"),
+        help_text=_("The sketch's subject, drawn from any vocabulary; this field names none in particular."),
     )
 
     def __str__(self) -> str:

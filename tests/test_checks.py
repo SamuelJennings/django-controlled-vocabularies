@@ -68,6 +68,32 @@ class TestCheckConceptFieldVocabularies:
             assert isinstance(warning, django_checks.Warning)
             assert warning.id == CHECK_ID
 
+    def test_reports_only_the_absent_vocabulary_when_a_concept_field_names_several(self):
+        """#111 — the single-value field reaches the check the same way the
+        many-valued one does, one warning per absent slug it names."""
+        ConceptSchemeFactory(name="Rock Type")
+
+        warnings = check_concept_field_vocabularies(None)
+
+        matches = [
+            w for w in warnings if w.obj.model._meta.label == "testapp.Borehole" and w.obj.name == "dominant_material"
+        ]
+        assert len(matches) == 1
+        message = str(matches[0].msg)
+        assert "mineral" in message
+        assert "rock-type" not in message
+
+    def test_never_reports_a_concept_field_naming_no_vocabulary(self):
+        """#111 — a single-value field naming none names nothing that could be
+        missing, so the check has nothing to say about it, before or after any
+        vocabulary is imported."""
+        assert [w for w in check_concept_field_vocabularies(None) if w.obj.model._meta.label == "testapp.Sketch"] == []
+
+        ConceptSchemeFactory(name="Rock Type")
+        ConceptSchemeFactory(name="Mineral")
+
+        assert [w for w in check_concept_field_vocabularies(None) if w.obj.model._meta.label == "testapp.Sketch"] == []
+
     def test_costs_one_query_however_many_fields_are_declared(self):
         # The test app declares several ConceptField and ConceptsField
         # instances (T010 widens the check to cover both) across a handful
