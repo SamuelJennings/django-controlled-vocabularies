@@ -310,3 +310,39 @@ covered by the wrapper it inherits, so the `__dict__` guard installed a second w
 first and reported every empty required field on a multi-table child twice. The guard now tests the
 resolved method for its own tag. Proved by reinstating the `__dict__` guard and watching the new test
 fail.
+
+## T012 — the several- and no-vocabulary shapes (US-8)
+
+Did: tests only, no production code. Every mechanism the story exercises was already built and held
+on first run: the normalisation to a tuple, the receiver connected only when a vocabulary is named,
+and the check's flattened slug set. Six tests across the two-vocabulary and no-vocabulary models —
+either named vocabulary attaches, a third is refused with both slugs in the message, a form on the
+two-vocabulary model offers exactly those two vocabularies, concepts from several vocabularies all
+attach to a field naming none in one write, a form on that model offers every concept in the
+database, and deleting a concept held by a field naming none is still refused.
+
+That last one is the assertion that matters most: it proves the unconstrained shape is a real member
+of the family rather than a plain many-to-many wearing the same name.
+
+Verified: full suite 1168 passed, `pre-commit run --all-files` green, `makemigrations --check` clean.
+
+Watch: two of the story's acceptance bullets were already covered by T005 and T010 and were not
+duplicated — reported rather than silently re-asserted.
+
+## T011 — i18n audit and documentation (US-7)
+
+Did: the audit found every string this feature added already wrapped with named placeholders, and
+one real gap in the sweep that checks it. The through model's generated `Meta` is built from a dict
+literal, which the sweep's keyword-only visitor could not see, so a bare `verbose_name` there would
+have passed unnoticed. The sweep now visits dict literals too. Proved against a reinstated defect in
+both modules it covers, with the production files unchanged afterwards.
+
+README gains the multiple-value declaration, all three vocabulary shapes, the label and identifier
+readback, what required and optional mean, the `prefetch_related` note, and — stated as plainly as
+the guarantees that survive — what a field naming no vocabulary does not promise. The delete
+guarantee is documented at its real boundary: it holds through the ORM including a bulk queryset
+delete, and not for SQL issued outside Django. `CONTEXT.md` and `CHANGELOG.md` updated, and the
+humanizer pass ran over all three.
+
+Verified: full suite 1169 passed, `pre-commit run --all-files` green. D15 records the sweep's design
+choice.

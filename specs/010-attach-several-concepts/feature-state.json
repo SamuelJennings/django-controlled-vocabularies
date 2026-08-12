@@ -300,13 +300,23 @@
       "id": "US7",
       "priority": "P3",
       "issue": 108,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T011",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_standards.py::TestFieldsChecksI18nSweep"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_standards.py -q",
+              "poetry run pytest -q",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
         }
       ]
     },
@@ -314,13 +324,25 @@
       "id": "US8",
       "priority": "P2",
       "issue": 110,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T012",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_fields.py::TestConceptsFieldSeveralVocabularies",
+              "tests/test_fields.py::TestConceptsFieldNoVocabulary"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_fields.py -q",
+              "poetry run pytest -q",
+              "DJANGO_SETTINGS_MODULE=tests.settings poetry run python -m django makemigrations --check --dry-run",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
         }
       ]
     }
