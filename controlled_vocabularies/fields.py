@@ -303,6 +303,61 @@ def _normalise_vocabulary(vocabulary):
     return tuple(dict.fromkeys(slugs))
 
 
+def _install_required_set_check(cls):
+    """Install the required-set rule onto ``cls.full_clean`` (FR-010, D3, D8,
+    R2, R5), once per class.
+
+    ``full_clean()``'s own ``clean_fields()`` walks ``_meta.fields``, which
+    excludes ``ManyToManyField`` by an explicit filter (R2), so a required
+    :class:`ConceptsField` has no hook into model validation without this.
+
+    Guarded on the class's own ``__dict__`` rather than ``getattr``: a
+    subclass would otherwise see the flag through inherited attribute
+    lookup and skip installing its own wrapper. The wrapper resolves the
+    required ``ConceptsField``s from ``type(self)._meta.get_fields()`` *at
+    call time* rather than closing over the field instance that triggered
+    this install — the install runs once per class, so a wrapper bound to
+    one field would leave a second required ``ConceptsField`` on the same
+    class silently unenforced, with nothing raising and no test failing.
+
+    An unsaved record (``pk`` is ``None``) is skipped outright: touching a
+    many-to-many manager before the instance has a primary key raises
+    ``ValueError``, which ``full_clean`` does not catch, and a record's
+    memberships cannot exist before the record does (D3). The wrapped
+    ``full_clean``'s own errors survive — this only adds to the error
+    dictionary it raises, under each empty required field's own name, and
+    re-raises the merged whole.
+    """
+    if "_concepts_field_full_clean_installed" in cls.__dict__:
+        return
+    cls._concepts_field_full_clean_installed = True
+    original_full_clean = cls.full_clean
+
+    def full_clean(self, *args, **kwargs):
+        try:
+            original_full_clean(self, *args, **kwargs)
+        except ValidationError as exc:
+            errors = exc.update_error_dict({})
+        else:
+            errors = {}
+
+        if self.pk is not None:
+            for field in type(self)._meta.get_fields():
+                if isinstance(field, ConceptsField) and not field.blank and not getattr(self, field.name).exists():
+                    errors.setdefault(field.name, []).append(
+                        ValidationError(
+                            _("%(field)s requires at least one concept."),
+                            code="required",
+                            params={"field": field.verbose_name},
+                        )
+                    )
+
+        if errors:
+            raise ValidationError(errors)
+
+    cls.full_clean = full_clean
+
+
 class ConceptsField(ManyToManyField):
     """A ``ManyToManyField`` to ``controlled_vocabularies.Concept``, optionally
     constrained to one or more named vocabularies.
@@ -409,6 +464,7 @@ class ConceptsField(ManyToManyField):
 
         if not cls._meta.abstract and not cls._meta.swapped:
             self.remote_field.through = _create_membership_model(self, cls)
+            _install_required_set_check(cls)
             if self.vocabulary:
                 m2m_changed.connect(
                     partial(_refuse_concepts_outside_vocabulary, vocabulary=self.vocabulary),

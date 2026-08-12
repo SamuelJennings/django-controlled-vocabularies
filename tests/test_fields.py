@@ -878,6 +878,120 @@ class TestConceptsFieldLabelAndUriAccessors:
         assert instance.get_keywords_labels() == ["this model's own labels, not the field's"]
 
 
+class OutcropForm(forms.ModelForm):
+    """Test-only — the plain ``ModelForm`` Django would auto-generate from
+    ``Outcrop``, used by ``TestConceptsFieldRequiredSet`` to prove the
+    optional half of FR-010's form behaviour: ``blank=True`` leaves
+    ``ModelMultipleChoiceField`` non-required, so an empty selection is a
+    valid submission, the counterpart of ``DepositForm``'s required half."""
+
+    class Meta:
+        model = Outcrop
+        fields = ["name", "minerals"]
+
+
+class TestConceptsFieldRequiredSet:
+    """FS-010 T009 (US-5, FR-010, D3, D8, R2, R5) — ``full_clean()`` refuses a
+    required ``ConceptsField`` left holding no concepts. ``clean_fields()``
+    never looks at ``_meta.many_to_many`` (R2), so the rule has no hook
+    without ``ConceptsField`` installing one onto the consuming class's own
+    ``full_clean``, once per class (D8). The installed wrapper resolves
+    every required ``ConceptsField`` on the *instance's* class from
+    ``_meta.get_fields()`` at call time, never the one field instance that
+    triggered the install — :class:`~tests.testapp.models.Survey`'s two
+    required fields only trigger one install between them, so a wrapper
+    closed over the triggering field would leave the other silently
+    unenforced, which the three ``test_two_required_fields_*`` tests below
+    exist to catch. An unsaved record is skipped outright, because touching
+    a many-to-many manager before the instance has a primary key raises
+    ``ValueError`` rather than ``ValidationError`` (R5), and the wrapped
+    ``full_clean``'s own errors survive rather than being replaced."""
+
+    @pytest.mark.django_db
+    def test_an_optional_field_with_an_empty_set_validates(self):
+        outcrop = OutcropFactory()
+
+        outcrop.full_clean()
+
+    @pytest.mark.django_db
+    def test_a_required_field_with_an_empty_set_is_refused_naming_the_field(self):
+        deposit = DepositFactory()
+
+        with pytest.raises(ValidationError) as excinfo:
+            deposit.full_clean()
+
+        assert "rock_types" in excinfo.value.message_dict
+        assert any("rock types" in message for message in excinfo.value.message_dict["rock_types"])
+
+    @pytest.mark.django_db
+    def test_two_required_fields_both_empty_report_both(self):
+        survey = SurveyFactory()
+
+        with pytest.raises(ValidationError) as excinfo:
+            survey.full_clean()
+
+        assert set(excinfo.value.message_dict) >= {"primary_minerals", "secondary_minerals"}
+
+    @pytest.mark.django_db
+    def test_two_required_fields_the_first_empty_the_second_populated_reports_only_the_first(self):
+        scheme = ConceptSchemeFactory(name="Mineral")
+        concept = ConceptFactory(scheme=scheme)
+        survey = SurveyFactory()
+        survey.secondary_minerals.add(concept)
+
+        with pytest.raises(ValidationError) as excinfo:
+            survey.full_clean()
+
+        assert "primary_minerals" in excinfo.value.message_dict
+        assert "secondary_minerals" not in excinfo.value.message_dict
+
+    @pytest.mark.django_db
+    def test_two_required_fields_the_second_empty_the_first_populated_reports_only_the_second(self):
+        scheme = ConceptSchemeFactory(name="Mineral")
+        concept = ConceptFactory(scheme=scheme)
+        survey = SurveyFactory()
+        survey.primary_minerals.add(concept)
+
+        with pytest.raises(ValidationError) as excinfo:
+            survey.full_clean()
+
+        assert "secondary_minerals" in excinfo.value.message_dict
+        assert "primary_minerals" not in excinfo.value.message_dict
+
+    def test_an_unsaved_instance_passes_full_clean_without_raising_value_error(self):
+        # Touching Deposit.rock_types before the instance has a primary key
+        # raises ValueError, which full_clean() does not catch (R5); the
+        # required-set check must not reach it, and a record's memberships
+        # cannot exist before the record does (D3).
+        deposit = Deposit(name="not yet surveyed")
+
+        deposit.full_clean()
+
+    @pytest.mark.django_db
+    def test_a_bad_character_field_and_an_empty_required_set_report_both_errors(self):
+        deposit = Deposit(name="")
+        deposit.save()
+
+        with pytest.raises(ValidationError) as excinfo:
+            deposit.full_clean()
+
+        assert "name" in excinfo.value.message_dict
+        assert "rock_types" in excinfo.value.message_dict
+
+    @pytest.mark.django_db
+    def test_a_required_fields_form_half_rejects_an_empty_selection(self):
+        form = DepositForm(data={"name": "Granite deposit", "rock_types": []})
+
+        assert not form.is_valid()
+        assert "rock_types" in form.errors
+
+    @pytest.mark.django_db
+    def test_an_optional_fields_form_half_accepts_an_empty_selection(self):
+        form = OutcropForm(data={"name": "Bare outcrop", "minerals": []})
+
+        assert form.is_valid(), form.errors
+
+
 class TestConceptFieldMigrations:
     """T002 — the app migrates from zero, and stays ``makemigrations --check`` clean."""
 
