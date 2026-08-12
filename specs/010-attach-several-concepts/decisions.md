@@ -356,3 +356,35 @@ fails against the `__dict__` guard and passes against the tag.
 
 **Author.** Applied at convergence rather than by the story's implementer: the interaction was
 visible only once T009's code and the review's correction were both in front of the same reader.
+
+## D15 — The i18n sweep recognises a metadata key in any dict literal, not only `error_messages`
+
+**Context.** T011 audits every string this feature's code puts in front of a person. T003's
+generated through model builds its `Meta` as a plain dict passed to `type("Meta", (), {...})`,
+carrying `verbose_name` and `verbose_name_plural` — both already wrapped in `gettext_lazy` in the
+real code, but a shape the sweep's existing keyword-argument checks (`ForeignKey(verbose_name=…)`,
+`kwargs.setdefault("verbose_name", …)`) cannot see, because the dict is a positional argument to
+`type(...)`, not a keyword.
+
+**Decision.** Rather than add a third special case gated on the variable name `meta` (mirroring how
+`error_messages`/`default_error_messages` are matched by name), `_FieldsChecksI18nVisitor` gained a
+`visit_Dict` that flags any dict literal's value under a `help_text`/`verbose_name`/
+`verbose_name_plural` key, wherever that dict appears. This is strictly broader than the one shape
+T003 actually uses, but it costs nothing extra to check and it means a future dict-shaped `Meta` —
+or any other dict carrying one of these keys — is covered without a fourth special case.
+`verbose_name_plural` was added to `_FIELD_METADATA_KEYWORDS` for this, since the through model's
+`Meta` carries both.
+
+**Verified.** `TestFieldsChecksI18nVisitorCatchesAViolation::test_catches_a_bare_verbose_name_dict_literal_value`
+proves the new visitor method against a synthetic snippet. Separately, `verbose_name` in the real
+`fields.py` and `hint` in the real `checks.py` were each unwrapped by hand, in turn, and
+`TestFieldsChecksI18nSweep`'s parametrized test against the real files was watched to fail on each
+before being restored — proving the sweep catches a real regression in both modules it covers, not
+only the synthetic snippets `TestFieldsChecksI18nVisitorCatchesAViolation` feeds it.
+
+**Revisit if:** a third dict-literal shape needs a different key set than
+`_FIELD_METADATA_KEYWORDS` covers; this generic match can then narrow back to a name-gated check
+for that one shape instead.
+
+**ADR:** none — a test-tooling decision internal to this file's own AST sweep, not a change to any
+shipped behaviour or public surface.

@@ -136,6 +136,82 @@ scheme, plus one for its labels when the active language is not the vocabulary's
 `select_related("rock_type__scheme")` and `prefetch_related("rock_type__labels")` collapse that
 back to a fixed number of queries for the whole list.
 
+## Attaching several concepts to your model
+
+`ConceptsField` is the many-to-many counterpart: several concepts on one record instead of one.
+`vocabulary` takes three shapes:
+
+```python
+from django.db import models
+
+from controlled_vocabularies.fields import ConceptsField
+
+
+class Sample(models.Model):
+    name = models.CharField(max_length=200)
+    rock_types = ConceptsField(vocabulary=["igneous", "sedimentary"])  # several vocabularies
+    keywords = ConceptsField(blank=True)  # no vocabulary named
+```
+
+`vocabulary="rock-type"` restricts to one vocabulary, the same as `ConceptField`. A list,
+`vocabulary=["igneous", "sedimentary"]`, restricts to the union of the named vocabularies — a
+concept from any other is refused, and the refusal names every vocabulary the field accepts.
+Leaving `vocabulary` out entirely, as `keywords` does above, restricts nothing: any concept in the
+database is a valid choice. This last shape is for a plain keywords field, drawing on whatever a
+project has imported rather than one fixed list.
+
+Reading concepts back:
+
+```python
+sample.rock_types                    # the many-to-many manager
+sample.get_rock_types_labels()       # a list of preferred labels, active language with fallback
+sample.get_rock_types_uris()         # a list of URIs, same order
+```
+
+Both accessors return an empty list for a record holding nothing, including one that has not been
+saved yet, rather than raising.
+
+**Required and optional.** `blank=True`, as on `keywords` above, makes the field optional: a record
+can hold zero concepts. Without it, as on `rock_types`, the field is required, and required means at
+least one concept attached. Django gives a many-to-many field no hook into ordinary field
+validation, so this is enforced when `full_clean()` runs rather than by the database — a
+`ModelForm` or an explicit `full_clean()` call catches an empty required field, a plain `.save()`
+does not. A record cannot hold any concepts before it has a primary key, so the check is skipped on
+an unsaved instance. If your own model overrides `full_clean()` after declaring the field, your
+override shadows this check, and you'll need to call it yourself or reproduce it.
+
+**Query cost.** `get_<field>_labels()` and `get_<field>_uris()` issue a query for the field's
+concepts, and a further query per concept for its scheme and its labels — the same per-concept cost
+`ConceptField`'s singular accessors carry, multiplied by however many concepts a record holds. Over
+a list of records that's at least one query per record. `prefetch_related("rock_types__scheme",
+"rock_types__labels")` collapses that back to a fixed number of queries for the whole list.
+
+**What every shape guarantees, and what the unrestricted one gives up.** Naming one vocabulary,
+several, or none all give a record the same three things: a concept it already holds cannot be
+deleted out from under it, its attached concepts read back by label and by URI, and required still
+means at least one. Naming one or several vocabularies adds a fourth guarantee on top — a concept
+outside those vocabularies is refused, at both the form and the `full_clean()` level.
+
+A field naming no vocabulary gives up only that fourth guarantee, and nothing else. Said plainly, so
+it needn't be inferred:
+
+- It places **no restriction** on which concepts a record can hold — any concept in the database is
+  accepted.
+- A form built from the model offers **every concept in the database** as a choice, not a filtered
+  subset. On an installation with several vocabularies imported, that can be a genuinely long list
+  of choices in an ordinary select widget — sooner than a restricted field would ever reach.
+- `manage.py check` has no named vocabulary that could be missing, so it reports **nothing** for
+  this field.
+
+It still deletes-protects, reads back, and enforces "required" exactly as a restricted field does.
+
+**The delete guarantee's real boundary.** "Cannot be deleted out from under it" holds for anything
+that goes through the Django ORM — a single instance, and a bulk queryset `.delete()` alike, since
+Django applies `on_delete=PROTECT` to both the same way. It does not hold for a `DELETE` issued
+directly against the database outside Django — raw SQL, a database console, a migration that drops
+rows without going through the ORM — because Django never writes an `ON DELETE` clause into the
+schema for any relation. The protection lives in application code, not in a database constraint.
+
 ## Importing a published vocabulary
 
 `import_skos()` reads a SKOS file — Turtle, RDF/XML, or JSON-LD — and creates or updates the
