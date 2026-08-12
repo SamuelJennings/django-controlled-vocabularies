@@ -58,13 +58,15 @@ cannot run ``validate()`` at all.
   in place.
 """
 
+import warnings
+
 import pytest
 from django import forms
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
-from django.db import connection
-from django.db.models import PROTECT, ProtectedError, Q
-from django.test.utils import CaptureQueriesContext
+from django.db import connection, models
+from django.db.models import CASCADE, PROTECT, ProtectedError, Q
+from django.test.utils import CaptureQueriesContext, isolate_apps
 from django.utils import translation
 from django.utils.functional import Promise
 from django.utils.module_loading import import_string
@@ -78,7 +80,7 @@ from tests.factories import (
     SampleFactory,
     SpecimenFactory,
 )
-from tests.testapp.models import Artifact, Sample, Specimen
+from tests.testapp.models import Artifact, Deposit, Sample, Specimen, Survey
 
 
 class TestConceptFieldConstruction:
@@ -274,6 +276,95 @@ class TestConceptsFieldDeconstruct:
         field = ConceptsField(vocabulary="rock-type")
         cloned = field.clone()
         assert cloned.vocabulary == ("rock-type",)
+
+
+class TestConceptsFieldMembershipModel:
+    """FS-010 T003 (FR-007, FR-011, US-3, R4, R6) — ``contribute_to_class``
+    skips ``ManyToManyField``'s own through generation and substitutes one
+    whose foreign key to ``Concept`` is ``PROTECT`` rather than ``CASCADE``,
+    following Django's own ``create_many_to_many_intermediary_model`` closely
+    otherwise. Against :class:`~tests.testapp.models.Deposit` (one
+    ``ConceptsField``) and :class:`~tests.testapp.models.Survey` (two, both
+    ``related_name="+"``), never against the generation helper in isolation.
+    """
+
+    def test_membership_model_is_named_owner_fieldname(self):
+        field = Deposit._meta.get_field("rock_types")
+        assert field.remote_field.through._meta.object_name == "Deposit_rock_types"
+
+    def test_membership_models_concept_fk_is_protect(self):
+        field = Deposit._meta.get_field("rock_types")
+        concept_fk = field.remote_field.through._meta.get_field("concept")
+        assert concept_fk.remote_field.on_delete is PROTECT
+
+    def test_membership_models_owner_fk_is_cascade(self):
+        field = Deposit._meta.get_field("rock_types")
+        owner_fk = field.remote_field.through._meta.get_field("deposit")
+        assert owner_fk.remote_field.on_delete is CASCADE
+
+    def test_deconstruct_still_emits_no_through_once_bound(self):
+        """Unbound, T002 already proves this by never setting ``through`` at
+        all. Bound, ``through`` is real and ``Meta.auto_created`` is what
+        keeps ``ManyToManyField.deconstruct()`` from emitting it — this is
+        the test that would fail if that attribute were ever dropped."""
+        field = Deposit._meta.get_field("rock_types")
+        _name, _path, _args, kwargs = field.deconstruct()
+        assert "through" not in kwargs
+
+    def test_two_declarations_on_one_model_produce_two_distinct_tables(self):
+        primary = Survey._meta.get_field("primary_minerals")
+        secondary = Survey._meta.get_field("secondary_minerals")
+        assert primary.remote_field.through is not secondary.remote_field.through
+        assert primary.remote_field.through._meta.db_table != secondary.remote_field.through._meta.db_table
+
+    def test_two_hidden_related_names_are_rewritten_distinctly(self):
+        """Without the hidden ``related_name`` rewrite this task replicates
+        before its ``super(ManyToManyField, self).contribute_to_class()``
+        call, both fields would keep the literal ``related_name="+"`` — proved
+        failing directly below by the reverse-query-name-clash check."""
+        primary = Survey._meta.get_field("primary_minerals")
+        secondary = Survey._meta.get_field("secondary_minerals")
+        assert primary.remote_field.related_name != "+"
+        assert secondary.remote_field.related_name != "+"
+        assert primary.remote_field.related_name != secondary.remote_field.related_name
+
+    def test_two_declarations_on_one_model_do_not_clash_reverse_accessors(self):
+        errors = Survey.check()
+        assert not any(error.id in {"fields.E304", "fields.E305"} for error in errors)
+
+    @isolate_apps("tests.testapp")
+    def test_declaring_two_concepts_fields_on_one_model_warns_of_nothing(self):
+        """ARC-001 (design review) — the MRO skip
+        (``super(ManyToManyField, self).contribute_to_class(...)``) must skip
+        ``ManyToManyField``'s own through generation, not merely call it and
+        then generate again: doing both registers the through model under the
+        same name twice and Django warns ``Model ... was already
+        registered``, on every consuming declaration."""
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+
+            class DoubleConceptsField(models.Model):
+                a = ConceptsField(vocabulary="mineral", related_name="+")
+                b = ConceptsField(vocabulary="mineral", related_name="+")
+
+                class Meta:
+                    app_label = "testapp"
+
+        assert not any("was already registered" in str(warning.message) for warning in caught)
+
+
+class TestConceptsFieldMigrations:
+    """FS-010 T003 — ``Deposit`` and ``Survey`` migrate cleanly with the
+    generated membership models, and stay ``makemigrations --check`` clean."""
+
+    @pytest.mark.django_db
+    def test_models_are_queryable(self):
+        assert Deposit.objects.count() == 0
+        assert Survey.objects.count() == 0
+
+    @pytest.mark.django_db
+    def test_makemigrations_check_is_clean(self):
+        call_command("makemigrations", "--check", "--dry-run", verbosity=0)
 
 
 class TestConceptFieldMigrations:

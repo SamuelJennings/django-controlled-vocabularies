@@ -9,8 +9,13 @@ what ``ForeignKey.validate()`` applies, and it is a ``Q``, so it is lazy and
 never queries the database while the declaration is only being read (FR-003).
 """
 
+from functools import partial
+
 from django.core.exceptions import ValidationError
-from django.db.models import PROTECT, ForeignKey, ManyToManyField, Q
+from django.db.models import CASCADE, PROTECT, ForeignKey, ManyToManyField, Model, Q
+from django.db.models.fields.related import lazy_related_operation, resolve_relation
+from django.db.models.fields.related_descriptors import ManyToManyDescriptor
+from django.db.models.utils import make_model_tuple
 from django.utils.translation import gettext_lazy as _
 
 
@@ -163,6 +168,78 @@ class ConceptField(ForeignKey):
         return name, path, args, kwargs
 
 
+def _create_membership_model(field, cls):
+    """Build the through model for a :class:`ConceptsField`, generated the way
+    ``django.db.models.fields.related.create_many_to_many_intermediary_model``
+    generates ``ManyToManyField``'s own — same ``<Owner>_<fieldname>`` naming,
+    same ``unique_together``, same hidden ``related_name="…+"`` accessors,
+    same ``Meta.apps``, same ``db_table`` — with one change: the foreign key
+    to ``Concept`` is ``on_delete=PROTECT`` rather than ``CASCADE`` (FR-007,
+    T003, US-3), so a concept some record holds cannot be deleted out from
+    under it. The foreign key to the owning model stays ``CASCADE``: deleting
+    the consuming record removes its own memberships and leaves every concept
+    it held intact (FR-007).
+
+    ``Meta.auto_created`` is set to the owning model class, exactly as
+    Django's own factory sets it — that one attribute is what keeps the model
+    out of migration state (``ProjectState.from_apps`` calls
+    ``apps.get_models()``, which excludes auto-created models) and out of
+    ``deconstruct()`` (``ManyToManyField.deconstruct()`` emits ``through``
+    only when ``not …auto_created``), while still having its table created
+    and dropped with the owner by the schema editor.
+    """
+
+    def set_managed(model, related, through):
+        through._meta.managed = model._meta.managed or related._meta.managed
+
+    to_model = resolve_relation(cls, field.remote_field.model)
+    name = f"{cls._meta.object_name}_{field.name}"
+    lazy_related_operation(set_managed, cls, to_model, name)
+
+    to = make_model_tuple(to_model)[1]
+    from_ = cls._meta.model_name
+    if to == from_:
+        to = f"to_{to}"
+        from_ = f"from_{from_}"
+
+    meta = type(
+        "Meta",
+        (),
+        {
+            "db_table": field._get_m2m_db_table(cls._meta),
+            "auto_created": cls,
+            "app_label": cls._meta.app_label,
+            "db_tablespace": cls._meta.db_tablespace,
+            "unique_together": (from_, to),
+            "verbose_name": _("%(from)s-%(to)s relationship") % {"from": from_, "to": to},
+            "verbose_name_plural": _("%(from)s-%(to)s relationships") % {"from": from_, "to": to},
+            "apps": field.model._meta.apps,
+        },
+    )
+    return type(
+        name,
+        (Model,),
+        {
+            "Meta": meta,
+            "__module__": cls.__module__,
+            from_: ForeignKey(
+                cls,
+                related_name=f"{name}+",
+                db_tablespace=field.db_tablespace,
+                db_constraint=field.remote_field.db_constraint,
+                on_delete=CASCADE,
+            ),
+            to: ForeignKey(
+                to_model,
+                related_name=f"{name}+",
+                db_tablespace=field.db_tablespace,
+                db_constraint=field.remote_field.db_constraint,
+                on_delete=PROTECT,
+            ),
+        },
+    )
+
+
 def _normalise_vocabulary(vocabulary):
     """Normalise ``ConceptsField``'s ``vocabulary`` argument to a tuple of slugs.
 
@@ -229,6 +306,39 @@ class ConceptsField(ManyToManyField):
         # access time, per request).
         kwargs.setdefault("help_text", _("Concepts from this field's configured vocabulary or vocabularies."))
         super().__init__(**kwargs)
+
+    def contribute_to_class(self, cls, name, **kwargs):
+        """Attach the field, then generate the ``PROTECT`` membership model in
+        place of ``ManyToManyField``'s own ``CASCADE`` one (T003, FR-007).
+
+        ``ManyToManyField.contribute_to_class`` generates and registers its
+        own through model inside its own body, after its ``super()`` call and
+        before returning — there is no seam an ordinary ``super()`` call
+        leaves open to substitute a different one. Calling it and then
+        generating a second model of the same name registers that name twice,
+        and Django's app registry warns ``Model … was already registered`` on
+        every consuming declaration. The way through is entering the MRO one
+        class higher,
+        ``super(ManyToManyField, self).contribute_to_class(cls, name,
+        **kwargs)``, which attaches the field without generating anything.
+
+        That skip drops ``ManyToManyField.contribute_to_class``'s own hidden
+        ``related_name`` rewrite (the branch that keeps
+        ``related_name="+"`` from clashing between two such fields on one
+        model, FR-011), so it is replicated here, before the ``super()``
+        call. The symmetrical branch (self-referential relations) is not
+        replicated: the target is always ``Concept`` and never the owner, so
+        that condition can never hold for this field.
+        """
+        if self.remote_field.hidden:
+            self.remote_field.related_name = f"_{cls._meta.app_label}_{cls.__name__.lower()}_{name}_+"
+        super(ManyToManyField, self).contribute_to_class(cls, name, **kwargs)
+
+        if not cls._meta.abstract and not cls._meta.swapped:
+            self.remote_field.through = _create_membership_model(self, cls)
+
+        setattr(cls, self.name, ManyToManyDescriptor(self.remote_field, reverse=False))
+        self.m2m_db_table = partial(self._get_m2m_db_table, cls._meta)
 
     def deconstruct(self):
         """Strip ``to`` and ``limit_choices_to`` and record ``vocabulary`` instead.

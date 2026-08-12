@@ -75,3 +75,33 @@ test-app model (some of T001's models land alongside it, since T003's own accept
 model to attach the field to — tasks.md sanctions either ordering).
 
 Watch: none.
+
+## 2026-08-12T12:45+02:00 · Implementer US0 · T003
+
+Did: added `ConceptsField.contribute_to_class`, entering the MRO one class higher
+(`super(ManyToManyField, self).contribute_to_class(...)`) so `ManyToManyField`'s own through
+generation is skipped rather than run and then overridden — the ARC-001 correction. Replicated the
+hidden `related_name` rewrite before that call. Added `_create_membership_model`, following
+`django.db.models.fields.related.create_many_to_many_intermediary_model` (installed 5.2.16,
+`related.py:1308-1361`) with one change: `PROTECT` on the foreign key to `Concept`, `CASCADE` on
+the one to the owner, `Meta.auto_created` set to the owning class. Added the two test-app models
+T003's own acceptance needs a real declaration to test against — `Deposit` (one required
+`ConceptsField`) and `Survey` (two, both `related_name="+"`, for T009's enumeration case and for
+the hidden-related-name-rewrite proof) — plus `DepositFactory`/`SurveyFactory`, and generated
+`tests/testapp/migrations/0002_concepts_field_deposit_survey.py`. See `decisions.md` D10 for why
+these two models land in this task rather than waiting for T001.
+
+Verified: `poetry run pytest tests/test_fields.py -k "TestConceptsFieldMembershipModel or
+TestConceptsFieldMigrations"` — 10 passed (including the PROTECT/CASCADE FK check, the two-distinct-
+tables check, the hidden-related-name-rewrite check via `Survey.check()` returning no `E304`/`E305`,
+and the `warnings.catch_warnings` proof that no `Model ... was already registered` warning fires).
+Full file `poetry run pytest tests/test_fields.py` — 75 passed. `poetry run pytest tests/test_checks.py`
+— 9 passed (System check untouched by this task still passes with the new models present).
+`DJANGO_SETTINGS_MODULE=tests.settings poetry run python -m django makemigrations testapp --check
+--dry-run` — clean. `poetry run ruff check` / `ruff format --check` on all touched files — clean
+after converting the `%`-formatted strings copied from Django's own factory to f-strings (`UP031`).
+
+Next: T001 — the remaining four consuming models (optional-with-related_name, both field types on
+one model, two-vocabulary, no-vocabulary), their factories, and the final migration for the phase.
+
+Watch: none.

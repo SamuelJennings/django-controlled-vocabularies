@@ -219,3 +219,24 @@ siblings is worse than one that says what it does not do.
 **ADR:** none — a decision about this field's declaration options, taken before release, with no
 existing behaviour to supersede. Article VIII's data contract is untouched: nothing here changes a
 concept's URI or its serialized form.
+
+## D10 — Two of T001's six consuming models land with T003, not held for T001 (Implementer, US0)
+
+`tasks.md` lists the brief order T002, T003, T001, and T001 itself says its models can be written
+either before or after T002/T003, "either way the phase is one sequential unit and exits green as a
+whole." T003's own acceptance criteria say its tests run "against a real model from T001, none
+against the helper in isolation" — so T003 cannot be proven without at least one consuming model
+existing first, and its "two declarations on one model" case needs a second.
+
+Rather than build all six of T001's models ahead of T003 (which would generate a throwaway
+migration under the stock `CASCADE` through model, replaced the moment T003's `PROTECT` override
+lands), or write T003 against a synthetic helper call the task explicitly rules out, this
+Implementer added exactly the two models T003's own acceptance scenarios require —
+`Deposit` (one required `ConceptsField`, proves the generated membership model's `PROTECT`/`CASCADE`
+split) and `Survey` (two `ConceptsField`s with `related_name="+"` on one model, proves the hidden
+related_name rewrite and the absence of a double-registration warning) — as part of the T003 commit,
+with their own migration. T001 adds the remaining four models and a second migration.
+
+**Revisit if:** a later story finds the two-migration split (0002 under T003, 0003 under T001)
+awkward to review; Forge squashes migrations at convergence regardless, so this is not expected to
+matter past this branch.

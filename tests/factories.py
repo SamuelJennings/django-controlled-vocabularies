@@ -19,7 +19,7 @@ from controlled_vocabularies.models import (
     ConceptRelation,
     ConceptScheme,
 )
-from tests.testapp.models import Artifact, Sample, Specimen
+from tests.testapp.models import Artifact, Deposit, Sample, Specimen, Survey
 
 
 class ConceptSchemeFactory(factory.django.DjangoModelFactory):
@@ -245,3 +245,27 @@ class ArtifactFactory(factory.django.DjangoModelFactory):
         model = Artifact
 
     name = factory.Sequence(lambda n: f"Artifact {n}")
+
+
+class DepositFactory(factory.django.DjangoModelFactory):
+    """Build a saved :class:`~tests.testapp.models.Deposit` (FS-010 T003).
+    ``rock_types`` is a many-valued relation and cannot be set at
+    construction — attach concepts with ``.add()`` after the instance
+    exists, as :class:`~tests.testapp.models.Deposit`'s own tests do."""
+
+    class Meta:
+        model = Deposit
+
+    name = factory.Sequence(lambda n: f"Deposit {n}")
+
+
+class SurveyFactory(factory.django.DjangoModelFactory):
+    """Build a saved :class:`~tests.testapp.models.Survey` (FS-010 T003), whose
+    two ``ConceptsField``s (``primary_minerals``, ``secondary_minerals``) are
+    both left unset by default, for the same reason as
+    :class:`DepositFactory`."""
+
+    class Meta:
+        model = Survey
+
+    name = factory.Sequence(lambda n: f"Survey {n}")
