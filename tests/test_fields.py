@@ -87,6 +87,27 @@ cannot run ``validate()`` at all.
   the many-to-many manager raises ``ValueError`` the moment it is touched
   before a primary key exists. The ``setattr`` is guarded exactly like
   ``ConceptField``'s.
+- ``TestConceptsFieldSeveralVocabulariesWritePath`` and
+  ``TestConceptsFieldSeveralVocabulariesFormChoices`` — FS-010 T012 (US-8,
+  FR-002, FR-005, FR-006, D9): the several-vocabulary shape against
+  :class:`~tests.testapp.models.FieldNote` — a concept from either named
+  vocabulary attaches, a concept from a third is refused with both expected
+  vocabularies named in the message, and a form built from the model offers
+  only the two named vocabularies' concepts.
+- ``TestConceptsFieldNoVocabularyWritePath``,
+  ``TestConceptsFieldNoVocabularyFormChoices`` and
+  ``TestConceptsFieldNoVocabularyDeleteGuard`` — FS-010 T012 (US-8, FR-002,
+  FR-005, FR-006, FR-007, D9): the no-vocabulary shape against
+  :class:`~tests.testapp.models.Photograph` — concepts from several distinct
+  vocabularies all attach in one write with none refused, a form built from
+  the model offers every concept in the database, and the delete guard holds
+  without a restriction to enforce, proving the unconstrained shape is a real
+  member of the family rather than a plain many-to-many wearing the same
+  name. The receiver-absence assertion this shape also needs already lives
+  on ``TestConceptsFieldWritePathVocabularyCheck`` (T005) and the several-
+  vocabulary system-check coverage already lives on
+  ``TestCheckConceptsFieldVocabularies`` (T010, ``test_checks.py``) — neither
+  is duplicated here.
 """
 
 import warnings
@@ -647,6 +668,71 @@ class TestConceptsFieldWritePathVocabularyCheck:
         assert not m2m_changed.has_listeners(sender=through)
 
 
+class TestConceptsFieldSeveralVocabulariesWritePath:
+    """FS-010 T012 (US-8, FR-002, FR-005, D9) — a field naming several
+    vocabularies accepts a concept from either, and refuses one from a third,
+    naming both expected vocabularies in the refusal. Driven through
+    :class:`~tests.testapp.models.FieldNote`'s real relation manager, the
+    several-vocabulary counterpart of
+    ``TestConceptsFieldWritePathVocabularyCheck``'s single-vocabulary proof
+    against ``Deposit``."""
+
+    @pytest.mark.django_db
+    def test_a_concept_from_either_named_vocabulary_attaches(self):
+        rock_scheme = ConceptSchemeFactory(name="Rock Type")
+        mineral_scheme = ConceptSchemeFactory(name="Mineral")
+        rock_concept = ConceptFactory(scheme=rock_scheme)
+        mineral_concept = ConceptFactory(scheme=mineral_scheme)
+        field_note = FieldNoteFactory()
+
+        field_note.keywords.add(rock_concept, mineral_concept)
+
+        assert set(field_note.keywords.all()) == {rock_concept, mineral_concept}
+
+    @pytest.mark.django_db
+    def test_a_concept_from_an_unnamed_third_vocabulary_is_refused_naming_both_expected_vocabularies(self):
+        other_scheme = ConceptSchemeFactory(name="Fossil")
+        other_concept = ConceptFactory(scheme=other_scheme)
+        field_note = FieldNoteFactory()
+
+        # ManyRelatedManager.add() runs inside transaction.atomic(savepoint=False),
+        # so a propagating exception poisons pytest-django's own enclosing
+        # transaction unless the call is given its own savepoint to roll
+        # back to (D11) — the same pattern
+        # ``TestConceptsFieldWritePathVocabularyCheck`` already uses.
+        with pytest.raises(ValidationError) as excinfo, transaction.atomic():
+            field_note.keywords.add(other_concept)
+
+        message = " ".join(excinfo.value.messages)
+        assert "rock-type" in message
+        assert "mineral" in message
+        assert list(field_note.keywords.all()) == []
+
+
+class TestConceptsFieldNoVocabularyWritePath:
+    """FS-010 T012 (US-8, FR-002, FR-005, D9) — the extension
+    ``TestConceptsFieldConsumingModels.test_field_naming_no_vocabulary_still_attaches_a_concept_from_any_scheme``
+    (T001) does not make: attaching concepts drawn from *several distinct*
+    vocabularies in one write to a field naming none, none refused. The
+    receiver-absence assertion this shape also needs already lives on
+    ``TestConceptsFieldWritePathVocabularyCheck.test_a_field_naming_no_vocabulary_connects_no_receiver_for_its_through_model``
+    and is not repeated here."""
+
+    @pytest.mark.django_db
+    def test_concepts_from_several_distinct_vocabularies_all_attach_and_none_is_refused(self):
+        rock_scheme = ConceptSchemeFactory(name="Rock Type")
+        mineral_scheme = ConceptSchemeFactory(name="Mineral")
+        fossil_scheme = ConceptSchemeFactory(name="Fossil")
+        rock_concept = ConceptFactory(scheme=rock_scheme)
+        mineral_concept = ConceptFactory(scheme=mineral_scheme)
+        fossil_concept = ConceptFactory(scheme=fossil_scheme)
+        photograph = PhotographFactory()
+
+        photograph.keywords.add(rock_concept, mineral_concept, fossil_concept)
+
+        assert set(photograph.keywords.all()) == {rock_concept, mineral_concept, fossil_concept}
+
+
 class DepositForm(forms.ModelForm):
     """Test-only — the plain ``ModelForm`` Django would auto-generate from
     ``Deposit``, used by T006 to prove ``limit_choices_to`` reaches a
@@ -700,6 +786,69 @@ class TestConceptsFieldFormChoices:
         deposit = form.save()
 
         assert concept in deposit.rock_types.all()
+
+
+class FieldNoteForm(forms.ModelForm):
+    """Test-only — the plain ``ModelForm`` Django would auto-generate from
+    ``FieldNote``, used by ``TestConceptsFieldSeveralVocabulariesFormChoices``
+    to prove ``limit_choices_to`` reaches a several-vocabulary
+    ``ConceptsField``'s ``ModelMultipleChoiceField`` choices, the way
+    ``DepositForm`` already proves it for a single-vocabulary field."""
+
+    class Meta:
+        model = FieldNote
+        fields = ["name", "keywords"]
+
+
+class TestConceptsFieldSeveralVocabulariesFormChoices:
+    """FS-010 T012 (US-8, FR-006, D9) — a form built from a model carrying a
+    field naming several vocabularies offers the concepts of both and no
+    others."""
+
+    @pytest.mark.django_db
+    def test_form_field_offers_the_concepts_of_both_named_vocabularies_and_no_others(self):
+        rock_scheme = ConceptSchemeFactory(name="Rock Type")
+        mineral_scheme = ConceptSchemeFactory(name="Mineral")
+        other_scheme = ConceptSchemeFactory(name="Fossil")
+        rock_concept = ConceptFactory(scheme=rock_scheme)
+        mineral_concept = ConceptFactory(scheme=mineral_scheme)
+        other_concept = ConceptFactory(scheme=other_scheme)
+
+        form = FieldNoteForm()
+        choices = list(form.fields["keywords"].queryset)
+
+        assert rock_concept in choices
+        assert mineral_concept in choices
+        assert other_concept not in choices
+
+
+class PhotographForm(forms.ModelForm):
+    """Test-only — the plain ``ModelForm`` Django would auto-generate from
+    ``Photograph``, used by ``TestConceptsFieldNoVocabularyFormChoices`` to
+    prove a field naming no vocabulary sets no ``limit_choices_to`` at all,
+    so its form field offers every concept in the database rather than an
+    empty or partial set."""
+
+    class Meta:
+        model = Photograph
+        fields = ["name", "keywords"]
+
+
+class TestConceptsFieldNoVocabularyFormChoices:
+    """FS-010 T012 (US-8, FR-006, D9) — a form built from a model carrying a
+    field naming no vocabulary offers every concept in the database."""
+
+    @pytest.mark.django_db
+    def test_form_field_offers_every_concept_in_the_database(self):
+        rock_scheme = ConceptSchemeFactory(name="Rock Type")
+        mineral_scheme = ConceptSchemeFactory(name="Mineral")
+        rock_concept = ConceptFactory(scheme=rock_scheme)
+        mineral_concept = ConceptFactory(scheme=mineral_scheme)
+
+        form = PhotographForm()
+        choices = list(form.fields["keywords"].queryset)
+
+        assert set(choices) == {rock_concept, mineral_concept}
 
 
 class TestConceptsFieldDeleteGuard:
@@ -795,6 +944,29 @@ class TestConceptsFieldDeleteGuard:
         concept.delete()
 
         assert not Concept.objects.filter(pk=concept.pk).exists()
+
+
+class TestConceptsFieldNoVocabularyDeleteGuard:
+    """FS-010 T012 (US-8, FR-007, D9) — a concept held by a field naming no
+    vocabulary is still refused a delete: the ``PROTECT`` on the generated
+    through model's foreign key to ``Concept`` (T003) does not depend on the
+    restriction, only on the field being a ``ConceptsField`` at all. This is
+    the assertion that proves the unconstrained shape is a real member of
+    the family rather than a plain many-to-many wearing the same name."""
+
+    @pytest.mark.django_db
+    def test_deleting_a_concept_held_by_a_field_naming_no_vocabulary_is_refused(self):
+        scheme = ConceptSchemeFactory(name="Anything")
+        concept = ConceptFactory(scheme=scheme)
+        photograph = PhotographFactory()
+        photograph.keywords.add(concept)
+
+        with pytest.raises(ProtectedError):
+            concept.delete()
+
+        assert Concept.objects.filter(pk=concept.pk).exists()
+        assert Photograph.objects.filter(pk=photograph.pk).exists()
+        assert concept in photograph.keywords.all()
 
 
 class TestConceptsFieldLabelAndUriAccessors:
