@@ -8,6 +8,20 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Added
 
+- `ConceptsField`: a `ManyToManyField` field a consuming project declares on its own model, naming
+  zero, one, or several vocabularies by their `ConceptScheme` slugs. Naming one or several
+  restricts form choices and the write path to those vocabularies, refusing a concept from any
+  other and naming every accepted vocabulary in the refusal; naming none restricts nothing, for a
+  plain keywords-style field. Every shape refuses deletion of a referenced concept
+  (`on_delete=PROTECT` on the generated through model) whether the delete reaches it directly, via
+  a bulk queryset delete, or cascades down from its scheme — for anything going through the ORM,
+  since Django writes no `ON DELETE` clause into the schema for any relation. `blank=True` makes
+  the field optional; without it, `full_clean()` refuses a record holding zero concepts, because
+  Django's own field validation has no hook for a many-to-many field. Adds
+  `get_<field>_labels()` / `get_<field>_uris()` accessors reading every attached concept's
+  preferred label (falling back to the vocabulary's default language) and URI, returning an empty
+  list rather than raising for a record holding nothing, without overwriting either name on a
+  model that already defines it. See the README.
 - `ConceptField`: a `ForeignKey` field a consuming project declares on its own model, naming one
   vocabulary by its `ConceptScheme` slug. Constrains form choices and `full_clean()` to that
   vocabulary, refuses deletion of a referenced concept (`on_delete=PROTECT`) whether the delete

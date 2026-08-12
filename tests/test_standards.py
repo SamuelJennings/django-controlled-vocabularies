@@ -696,15 +696,19 @@ class TestManagementPackageI18nSweep:
 # would report a clean sweep regardless of what the two modules actually contain — the exact
 # false-green tasks.md warns against. This visitor recognises the sinks a field and a check
 # actually carry: a Field/ForeignKey-style call's `help_text=`/`verbose_name=` keyword literal
-# (including `kwargs.setdefault("help_text", ...)`, the form `ConceptField` uses so a consumer
-# can still override the default), an `error_messages`/`default_error_messages` dict's literal
-# values, and a bare string passed to `ValidationError(...)`, `checks.Warning(...)` or
-# `checks.Error(...)`. `on_delete`/`vocabulary` are rejected via bare `TypeError`s in
-# `fields.py`, deliberately outside every one of these sinks — they are developer-facing,
-# import-time diagnostics, not something an end user ever reads (decisions.md D8).
+# (including `kwargs.setdefault("help_text", ...)`, the form `ConceptField` and `ConceptsField`
+# both use so a consumer can still override the default), an `error_messages`/
+# `default_error_messages` dict's literal values, a bare string passed to `ValidationError(...)`,
+# `checks.Warning(...)` or `checks.Error(...)`, and a `help_text`/`verbose_name`/
+# `verbose_name_plural` key in *any* dict literal — the shape `ConceptsField`'s generated
+# through-model `Meta` uses (`type("Meta", (), {...})`), which a keyword-argument check cannot
+# see at all. `on_delete`/`vocabulary`/`limit_choices_to`/`through` are rejected via bare
+# `TypeError`s in `fields.py`, deliberately outside every one of these sinks — they are
+# developer-facing, import-time diagnostics, not something an end user ever reads (decisions.md
+# D8).
 
 _FIELDS_CHECKS_MODULES = [fields_module, checks_module]
-_FIELD_METADATA_KEYWORDS = {"help_text", "verbose_name"}
+_FIELD_METADATA_KEYWORDS = {"help_text", "verbose_name", "verbose_name_plural"}
 _DIAGNOSTIC_MESSAGE_KEYWORDS = {"msg", "message", "hint"}
 
 
@@ -776,6 +780,20 @@ class _FieldsChecksI18nVisitor(ast.NodeVisitor):
                     self.bare_literals.append(literal)
         self.generic_visit(node)
 
+    def visit_Dict(self, node: ast.Dict) -> None:
+        # A `help_text`/`verbose_name`/`verbose_name_plural` key in *any* dict literal, not only
+        # one assigned to an `error_messages`-named variable. ConceptsField's generated
+        # through-model Meta is built exactly this way — `type("Meta", (), {...})` — so a keyword
+        # check on the enclosing `type(...)` call would never see it: the dict is a positional
+        # argument, not a keyword.
+        for key, value in zip(node.keys, node.values, strict=True):
+            name = self._str_constant(key) if key is not None else None
+            if name in _FIELD_METADATA_KEYWORDS:
+                literal = self._str_constant(value)
+                if literal is not None:
+                    self.bare_literals.append(literal)
+        self.generic_visit(node)
+
 
 def _visit_fields_checks_source(source: str) -> _FieldsChecksI18nVisitor:
     visitor = _FieldsChecksI18nVisitor()
@@ -830,6 +848,15 @@ class TestFieldsChecksI18nVisitorCatchesAViolation:
         visitor = _visit_fields_checks_source("checks.Warning(_('fine'), hint='boom')\n")
         assert visitor.bare_literals == ["boom"]
 
+    def test_catches_a_bare_verbose_name_dict_literal_value(self):
+        # ConceptsField's generated through model builds its Meta as a plain dict passed to
+        # type(), not as ForeignKey(verbose_name=...) or a Meta class body — a shape the
+        # keyword-argument checks above cannot see at all.
+        visitor = _visit_fields_checks_source(
+            "meta = {'verbose_name': 'boom', 'verbose_name_plural': 'booms', 'db_table': 'x'}\n"
+        )
+        assert visitor.bare_literals == ["boom", "booms"]
+
     def test_does_not_flag_a_translated_sink(self):
         visitor = _visit_fields_checks_source(
             "from django.utils.translation import gettext_lazy as _\n"
@@ -837,6 +864,7 @@ class TestFieldsChecksI18nVisitorCatchesAViolation:
             "error_messages = {'invalid': _('fine')}\n"
             "raise ValidationError(_('fine'))\n"
             "checks.Warning(_('fine %(model)s') % {'model': m}, hint=_('fine'))\n"
+            "meta = {'verbose_name': _('fine') % {'x': 1}, 'db_table': 'x'}\n"
         )
         assert visitor.bare_literals == []
 
