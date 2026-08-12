@@ -15,6 +15,7 @@ from django.core.exceptions import ValidationError
 from django.db.models import CASCADE, PROTECT, ForeignKey, ManyToManyField, Model, Q
 from django.db.models.fields.related import lazy_related_operation, resolve_relation
 from django.db.models.fields.related_descriptors import ManyToManyDescriptor
+from django.db.models.signals import m2m_changed
 from django.db.models.utils import make_model_tuple
 from django.utils.translation import gettext_lazy as _
 
@@ -240,6 +241,46 @@ def _create_membership_model(field, cls):
     )
 
 
+def _refuse_concepts_outside_vocabulary(*, vocabulary, action, reverse, model, pk_set, **kwargs):
+    """``m2m_changed`` receiver for a :class:`ConceptsField`'s generated
+    through model (FR-005, D2, R1, R3, R6): refuse the whole write when any
+    incoming concept falls outside the declared ``vocabulary``.
+
+    Connected only against a field whose declaration named at least one
+    vocabulary (:meth:`ConceptsField.contribute_to_class`) — a field naming
+    none has nothing to enforce, and this receiver is never bound to its
+    through model in that case.
+
+    Only ``pre_add`` is checked. ``post_add``, ``pre_remove``, ``post_remove``,
+    ``pre_clear`` and ``post_clear`` all reach this same receiver and are
+    ignored. ``reverse`` writes are ignored too: a reverse-direction write
+    (e.g. ``concept.outcrops.add(an_outcrop)``) carries the *owner* model's
+    primary keys in ``pk_set``, not ``Concept``'s, so checking them against
+    ``vocabulary`` would be meaningless.
+
+    Raising here aborts the whole write before any row is inserted (FR-005).
+    ``QuerySet.set()`` is implemented as ``remove()`` then ``add()``, so the
+    same receiver refuses a mixed write whole, leaving the record's existing
+    set untouched (D2).
+    """
+    if action != "pre_add" or reverse:
+        return
+    invalid = list(model.objects.filter(pk__in=pk_set).exclude(scheme__slug__in=vocabulary))
+    if not invalid:
+        return
+    raise ValidationError(
+        # A static message, with the vocabulary slugs joined into ONE
+        # placeholder (Article XII) so the message identifier stays the same
+        # whether the declaration names one vocabulary or several.
+        _("%(value)s is not a valid concept in the '%(vocabulary)s' vocabulary."),
+        code="invalid",
+        params={
+            "value": ", ".join(str(concept) for concept in invalid),
+            "vocabulary": ", ".join(vocabulary),
+        },
+    )
+
+
 def _normalise_vocabulary(vocabulary):
     """Normalise ``ConceptsField``'s ``vocabulary`` argument to a tuple of slugs.
 
@@ -329,6 +370,22 @@ class ConceptsField(ManyToManyField):
         call. The symmetrical branch (self-referential relations) is not
         replicated: the target is always ``Concept`` and never the owner, so
         that condition can never hold for this field.
+
+        Once the through model exists, an ``m2m_changed`` receiver is
+        connected against it (FR-005, D2, T005) — but only when the
+        declaration named at least one vocabulary; a field naming none has
+        nothing to enforce, and connecting a receiver that would return
+        immediately keeps Django's ``bulk_create`` fast path permanently
+        disabled for no guarantee gained (R6). Connecting it here, rather
+        than in ``AppConfig.ready()`` or on import of some other module, is
+        load-bearing: R6 found that a truthy ``auto_created`` re-enables
+        that fast path, which skips ``m2m_changed`` entirely whenever no
+        receiver is connected for the through model. Binding the receiver
+        at the moment the through model is generated means a declaration
+        cannot exist without its own guard. ``weak=False`` because the
+        receiver is a fresh ``partial`` with no other reference keeping it
+        alive — a weak reference would let it be garbage-collected before
+        any write ever reaches it.
         """
         if self.remote_field.hidden:
             self.remote_field.related_name = f"_{cls._meta.app_label}_{cls.__name__.lower()}_{name}_+"
@@ -336,6 +393,12 @@ class ConceptsField(ManyToManyField):
 
         if not cls._meta.abstract and not cls._meta.swapped:
             self.remote_field.through = _create_membership_model(self, cls)
+            if self.vocabulary:
+                m2m_changed.connect(
+                    partial(_refuse_concepts_outside_vocabulary, vocabulary=self.vocabulary),
+                    sender=self.remote_field.through,
+                    weak=False,
+                )
 
         setattr(cls, self.name, ManyToManyDescriptor(self.remote_field, reverse=False))
         self.m2m_db_table = partial(self._get_m2m_db_table, cls._meta)

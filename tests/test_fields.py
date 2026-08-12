@@ -56,6 +56,14 @@ cannot run ``validate()`` at all.
   concept meets the protection on the way down), an unreferenced concept
   deletes normally, and deleting the referencing record leaves the concept
   in place.
+- ``TestConceptsFieldWritePathVocabularyCheck`` — FS-010 T005 (US-2): the
+  ``pre_add`` receiver connected in ``ConceptsField.contribute_to_class``
+  refuses a concept from an unnamed vocabulary at the point the relation is
+  written (D2), not only at model validation. Driven entirely through
+  :class:`~tests.testapp.models.Deposit`'s real relation manager — never
+  against the receiver directly, since a direct call would pass even if
+  Django's ``bulk_create`` fast path were skipping ``m2m_changed`` entirely
+  (R6), which is precisely the failure this task guards against.
 """
 
 import warnings
@@ -64,8 +72,9 @@ import pytest
 from django import forms
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
-from django.db import connection, models
+from django.db import connection, models, transaction
 from django.db.models import CASCADE, PROTECT, ProtectedError, Q
+from django.db.models.signals import m2m_changed
 from django.test.utils import CaptureQueriesContext, isolate_apps
 from django.utils import translation
 from django.utils.functional import Promise
@@ -542,6 +551,77 @@ class TestConceptsFieldAttachAndReadBack:
 
         assert outcrop in concept.outcrops.all()
         assert outcrop not in other_concept.outcrops.all()
+
+
+class TestConceptsFieldWritePathVocabularyCheck:
+    """FS-010 T005 (US-2, FR-005, D2, R1, R3, R6) — the ``pre_add`` receiver
+    connected in ``contribute_to_class`` refuses a concept from an unnamed
+    vocabulary at the moment the relation is written, not only at
+    validation (D2). Every test drives :class:`~tests.testapp.models.Deposit`'s
+    real relation manager — never the receiver directly, because a direct
+    call would pass even if Django's ``bulk_create`` fast path were skipping
+    ``m2m_changed`` entirely, which is exactly the failure this task guards
+    against (R6). The several-vocabulary and no-vocabulary write-path shapes
+    belong to T012; the one assertion below about a no-vocabulary field is
+    about whether a receiver is connected at all, not about its write-path
+    behaviour."""
+
+    @pytest.mark.django_db
+    def test_add_of_a_concept_from_an_unnamed_vocabulary_is_refused_and_the_set_is_unchanged(self):
+        other_scheme = ConceptSchemeFactory(name="Mineral")
+        other_concept = ConceptFactory(scheme=other_scheme)
+        deposit = DepositFactory()
+
+        # ManyRelatedManager.add() runs inside transaction.atomic(savepoint=False),
+        # so a propagating exception poisons pytest-django's own enclosing
+        # transaction unless the call is given its own savepoint to roll
+        # back to — the documented pattern for asserting a raise from inside
+        # an atomic block.
+        with pytest.raises(ValidationError), transaction.atomic():
+            deposit.rock_types.add(other_concept)
+
+        assert list(deposit.rock_types.all()) == []
+
+    @pytest.mark.django_db
+    def test_refusal_message_names_the_expected_vocabulary(self):
+        other_scheme = ConceptSchemeFactory(name="Mineral")
+        other_concept = ConceptFactory(scheme=other_scheme)
+        deposit = DepositFactory()
+
+        with pytest.raises(ValidationError) as excinfo:
+            deposit.rock_types.add(other_concept)
+
+        assert any("rock-type" in message for message in excinfo.value.messages)
+
+    @pytest.mark.django_db
+    def test_set_carrying_a_mix_is_refused_whole_and_the_set_is_unchanged_afterwards(self):
+        rock_scheme = ConceptSchemeFactory(name="Rock Type")
+        kept = ConceptFactory(scheme=rock_scheme)
+        other_scheme = ConceptSchemeFactory(name="Mineral")
+        other_concept = ConceptFactory(scheme=other_scheme)
+        deposit = DepositFactory()
+        deposit.rock_types.add(kept)
+
+        with pytest.raises(ValidationError), transaction.atomic():
+            deposit.rock_types.set([kept, other_concept])
+
+        # Asserted after the failed write, not merely that it raised (US-2 acceptance).
+        assert set(deposit.rock_types.all()) == {kept}
+
+    @pytest.mark.django_db
+    def test_several_concepts_all_from_the_named_vocabulary_are_attached(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        first = ConceptFactory(scheme=scheme)
+        second = ConceptFactory(scheme=scheme)
+        deposit = DepositFactory()
+
+        deposit.rock_types.add(first, second)
+
+        assert set(deposit.rock_types.all()) == {first, second}
+
+    def test_a_field_naming_no_vocabulary_connects_no_receiver_for_its_through_model(self):
+        through = Photograph._meta.get_field("keywords").remote_field.through
+        assert not m2m_changed.has_listeners(sender=through)
 
 
 class TestConceptFieldMigrations:

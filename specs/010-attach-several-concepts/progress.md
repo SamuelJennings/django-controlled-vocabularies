@@ -174,3 +174,38 @@ Verified: `poetry run pytest tests/test_fields.py -q` — 94 passed (90 baseline
 Next: full-suite verify, completion report. T004 is the whole of US-1's brief scope for this run.
 
 Watch: none.
+
+## 2026-08-12T14:05:00+02:00 · Implementer US-2 · T005
+
+Did: the `pre_add` receiver (FR-005, D2, R1, R3, R6) — `_refuse_concepts_outside_vocabulary` in
+`controlled_vocabularies/fields.py`, connected in `ConceptsField.contribute_to_class` against the
+generated through model, `weak=False`, only when the declaration named at least one vocabulary.
+Refuses on `pre_add` when any incoming concept falls outside the named vocabularies, in one query;
+ignores `reverse` writes (owner pks in `pk_set`, not `Concept`'s) and every action but `pre_add`.
+One new class in `tests/test_fields.py`, `TestConceptsFieldWritePathVocabularyCheck`, five tests,
+all against `Deposit`'s real relation manager: `.add()` of a foreign concept is refused and the set
+stays empty; the refusal message names `rock-type`; a `.set()` mixing a held concept with a foreign
+one is refused whole, asserted by re-reading the set afterwards; several valid concepts attach
+together; and `Photograph` (no vocabulary) has no `m2m_changed` listener for its through model at
+all — proved with `m2m_changed.has_listeners()`, not by calling the receiver. One commit, task ID
+in the subject.
+
+Deviation from `craft-tdd`'s worked example, recorded here rather than in `decisions.md` since it
+is mechanical rather than a design choice: `.add()`/`.set()` run inside
+`transaction.atomic(using=db, savepoint=False)`, so a `ValidationError` propagating out of the two
+tests that read the set back afterwards poisoned pytest-django's own enclosing transaction
+(`TransactionManagementError` on the next query) until the raising call was given its own
+`transaction.atomic()` savepoint to roll back to — the documented Django pattern for asserting a
+raise from inside an atomic block.
+
+Verified: `poetry run pytest tests/test_fields.py -q` — 99 passed (94 baseline + 5 new).
+`poetry run ruff check controlled_vocabularies/fields.py tests/test_fields.py` and
+`poetry run ruff format --check` on the same two files — clean.
+`DJANGO_SETTINGS_MODULE=tests.settings poetry run python -m django makemigrations --check
+--dry-run` — "No changes detected" (no model/field-structure change, so expected). Story-level full
+verify deferred to the completion report per `craft-tdd`.
+
+Next: T006 (form choices) — tests only, per the brief, unless they show `limit_choices_to` does not
+already carry through for a `ConceptsField`.
+
+Watch: none.
