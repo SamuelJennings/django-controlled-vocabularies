@@ -124,7 +124,7 @@ from django.utils import translation
 from django.utils.functional import Promise
 from django.utils.module_loading import import_string
 
-from controlled_vocabularies.fields import ConceptField, ConceptsField, VocabularyRestricted
+from controlled_vocabularies.fields import ConceptField, ConceptFieldMixin, ConceptsField
 from controlled_vocabularies.models import Concept, ConceptLabel, ConceptScheme
 from tests.factories import (
     ArtifactFactory,
@@ -163,14 +163,14 @@ class TestSharedVocabularyContract:
 
     The defect #111 reported was the two fields disagreeing, and the reason
     they could was that each implemented the contract itself. They now inherit
-    it from :class:`VocabularyRestricted`. This class is the guard against a
+    it from :class:`ConceptFieldMixin`. This class is the guard against a
     future change reintroducing the divergence: every assertion runs against
     both fields, so a shape supported on one and not the other fails here
     rather than reaching a consumer.
     """
 
     def test_inherits_the_shared_contract(self, field_class):
-        assert issubclass(field_class, VocabularyRestricted)
+        assert issubclass(field_class, ConceptFieldMixin)
 
     def test_one_slug_normalises_to_a_one_element_tuple(self, field_class):
         field = field_class(vocabulary="rock-type")
@@ -204,9 +204,7 @@ class TestSharedVocabularyContract:
         assert field_class(vocabulary="rock-type", help_text="Pick one.").help_text == "Pick one."
 
     @pytest.mark.parametrize("vocabulary", [None, "rock-type", ["rock-type", "mineral"]])
-    def test_deconstruct_records_the_normalised_vocabulary_and_strips_the_fixed_kwargs(
-        self, field_class, vocabulary
-    ):
+    def test_deconstruct_records_the_normalised_vocabulary_and_strips_the_fixed_kwargs(self, field_class, vocabulary):
         field = field_class(vocabulary=vocabulary)
         _name, path, args, kwargs = field.deconstruct()
 
@@ -1132,9 +1130,7 @@ class TestConceptsFieldLabelAndUriAccessors:
     without tripping T005's write-path vocabulary check."""
 
     @pytest.mark.django_db
-    def test_labels_accessor_returns_the_active_languages_label_for_each_attached_concept(
-        self, multilingual_scheme
-    ):
+    def test_labels_accessor_returns_the_active_languages_label_for_each_attached_concept(self, multilingual_scheme):
         concepts = list(multilingual_scheme.concepts.all())
         multilingual_concept = next(c for c in concepts if c.labels.filter(language="de").exists())
         other_concept = next(c for c in concepts if c.pk != multilingual_concept.pk)
@@ -1314,17 +1310,13 @@ class TestConceptsFieldRequiredSet:
         # subclass is already covered by the one it inherits. Installing a
         # second around it would report every empty required field twice.
         class Parent(models.Model):
-            firsts = ConceptsField(
-                vocabulary="rock-type", verbose_name="firsts", help_text="the first set"
-            )
+            firsts = ConceptsField(vocabulary="rock-type", verbose_name="firsts", help_text="the first set")
 
             class Meta:
                 app_label = "testapp"
 
         class Child(Parent):
-            seconds = ConceptsField(
-                vocabulary="rock-type", verbose_name="seconds", help_text="the second set"
-            )
+            seconds = ConceptsField(vocabulary="rock-type", verbose_name="seconds", help_text="the second set")
 
             class Meta:
                 app_label = "testapp"

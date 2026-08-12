@@ -26,7 +26,7 @@ from django.utils.functional import Promise
 from django.utils.translation import gettext_lazy as _
 
 
-class VocabularyRestricted:
+class ConceptFieldMixin:
     """The ``vocabulary`` contract both concept fields keep, held in one place.
 
     #111 made the two fields take the same three shapes and mean the same thing
@@ -44,7 +44,7 @@ class VocabularyRestricted:
     vocabulary contract is genuinely common, so only the vocabulary contract is
     here, and each ``__init__`` still reads top to bottom.
 
-    Declare it first in the bases (``ConceptField(VocabularyRestricted,
+    Declare it first in the bases (``ConceptField(ConceptFieldMixin,
     ForeignKey)``) so :meth:`deconstruct`'s ``super()`` resolves to the Django
     field's own.
     """
@@ -143,13 +143,13 @@ class VocabularyRestricted:
         return name, path, args, kwargs
 
 
-class ConceptField(VocabularyRestricted, ForeignKey):
+class ConceptField(ConceptFieldMixin, ForeignKey):
     """A ``ForeignKey`` to ``controlled_vocabularies.Concept``, optionally
     constrained to one or more named vocabularies.
 
     ``vocabulary`` is optional (#111) and takes the same three shapes
     :class:`ConceptsField` takes, through the
-    :class:`VocabularyRestricted` contract both fields inherit: a single
+    :class:`ConceptFieldMixin` contract both fields inherit: a single
     :class:`~controlled_vocabularies.models.ConceptScheme` slug, a list of
     slugs, or omitted entirely. A declaration naming no vocabulary is a
     supported shape rather than an error — it keeps the delete protection and
@@ -456,12 +456,12 @@ def _install_required_set_check(cls):
     cls.full_clean = full_clean
 
 
-class ConceptsField(VocabularyRestricted, ManyToManyField):
+class ConceptsField(ConceptFieldMixin, ManyToManyField):
     """A ``ManyToManyField`` to ``controlled_vocabularies.Concept``, optionally
     constrained to one or more named vocabularies.
 
     ``vocabulary`` is optional (FR-002, ``decisions.md`` D9) and takes three
-    shapes, through the :class:`VocabularyRestricted` contract both fields
+    shapes, through the :class:`ConceptFieldMixin` contract both fields
     inherit: a single slug, a list of slugs, or omitted entirely. A declaration naming no vocabulary is
     a supported shape rather than an error — it keeps the delete protection
     T003 builds, the label/URI readback, and the required-set rule, and gives
