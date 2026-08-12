@@ -3,7 +3,7 @@
   "feature": "004-collections-group-concepts",
   "branch": "004-collections-group-concepts",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "PR_READY",
+  "state": "MERGED",
   "state_history": [
     {
       "state": "SPECIFY",
@@ -42,6 +42,11 @@
       "state": "PR_READY",
       "at": "2026-07-25T11:40:00Z",
       "note": "PR #47 body finalized; Closes block reconciled to epic + 5 stories; humanize pass on README/CHANGELOG"
+    },
+    {
+      "state": "MERGED",
+      "at": "2026-07-25T11:34:00Z",
+      "note": "PR #47 merged; approved by SamuelJennings"
     }
   ],
   "gates": {
@@ -66,8 +71,8 @@
       ]
     },
     "merge": {
-      "approved_by": null,
-      "at": null
+      "approved_by": "SamuelJennings",
+      "at": "2026-07-25T11:28:52Z"
     }
   },
   "stories": [
@@ -318,6 +323,6 @@
   },
   "pr": {
     "number": 47,
-    "draft": true
+    "draft": false
   }
 }
