@@ -124,7 +124,7 @@ from django.utils import translation
 from django.utils.functional import Promise
 from django.utils.module_loading import import_string
 
-from controlled_vocabularies.fields import ConceptField, ConceptsField
+from controlled_vocabularies.fields import ConceptField, ConceptsField, VocabularyRestricted
 from controlled_vocabularies.models import Concept, ConceptLabel, ConceptScheme
 from tests.factories import (
     ArtifactFactory,
@@ -154,6 +154,78 @@ from tests.testapp.models import (
     Specimen,
     Survey,
 )
+
+
+@pytest.mark.parametrize("field_class", [ConceptField, ConceptsField])
+class TestSharedVocabularyContract:
+    """#111 — the two fields agree on what ``vocabulary`` accepts and what it
+    means, asserted against both from one place.
+
+    The defect #111 reported was the two fields disagreeing, and the reason
+    they could was that each implemented the contract itself. They now inherit
+    it from :class:`VocabularyRestricted`. This class is the guard against a
+    future change reintroducing the divergence: every assertion runs against
+    both fields, so a shape supported on one and not the other fails here
+    rather than reaching a consumer.
+    """
+
+    def test_inherits_the_shared_contract(self, field_class):
+        assert issubclass(field_class, VocabularyRestricted)
+
+    def test_one_slug_normalises_to_a_one_element_tuple(self, field_class):
+        field = field_class(vocabulary="rock-type")
+        assert field.vocabulary == ("rock-type",)
+        assert field.get_limit_choices_to() == Q(scheme__slug__in=("rock-type",))
+
+    def test_several_slugs_normalise_to_their_union_with_duplicates_collapsed(self, field_class):
+        field = field_class(vocabulary=["rock-type", "mineral", "rock-type"])
+        assert field.vocabulary == ("rock-type", "mineral")
+        assert field.get_limit_choices_to() == Q(scheme__slug__in=("rock-type", "mineral"))
+
+    def test_an_omitted_vocabulary_sets_no_restriction_at_all(self, field_class):
+        field = field_class()
+        assert field.vocabulary == ()
+        assert field.get_limit_choices_to() == {}
+
+    def test_an_empty_slug_is_refused_by_name(self, field_class):
+        with pytest.raises(TypeError, match=field_class.__name__):
+            field_class(vocabulary="")
+
+    def test_a_non_string_slug_is_refused_by_name(self, field_class):
+        with pytest.raises(TypeError, match=field_class.__name__):
+            field_class(vocabulary=["mineral", 42])
+
+    def test_a_consumer_supplied_limit_choices_to_is_refused(self, field_class):
+        with pytest.raises(TypeError, match="limit_choices_to"):
+            field_class(vocabulary="rock-type", limit_choices_to=Q(label="Granite"))
+
+    def test_help_text_defaults_to_a_translatable_string_and_stays_overridable(self, field_class):
+        assert isinstance(field_class(vocabulary="rock-type").help_text, Promise)
+        assert field_class(vocabulary="rock-type", help_text="Pick one.").help_text == "Pick one."
+
+    @pytest.mark.parametrize("vocabulary", [None, "rock-type", ["rock-type", "mineral"]])
+    def test_deconstruct_records_the_normalised_vocabulary_and_strips_the_fixed_kwargs(
+        self, field_class, vocabulary
+    ):
+        field = field_class(vocabulary=vocabulary)
+        _name, path, args, kwargs = field.deconstruct()
+
+        assert kwargs["vocabulary"] == field.vocabulary
+        assert "to" not in kwargs
+        assert "limit_choices_to" not in kwargs
+        assert "on_delete" not in kwargs
+        assert "through" not in kwargs
+
+        rebuilt = import_string(path)(*args, **kwargs)
+        assert rebuilt.vocabulary == field.vocabulary
+        assert rebuilt.get_limit_choices_to() == field.get_limit_choices_to()
+
+    def test_clone_rebuilds_an_equivalent_field(self, field_class):
+        """``clone()`` is what ``ModelState.from_model()`` calls on every local
+        field, so a contract that does not survive it breaks every
+        ``makemigrations`` and every test-database build."""
+        field = field_class(vocabulary=["rock-type", "mineral"])
+        assert field.clone().vocabulary == ("rock-type", "mineral")
 
 
 class TestConceptFieldConstruction:
