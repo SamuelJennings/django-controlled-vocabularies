@@ -28,6 +28,9 @@ of one another once Phase F lands. US-7 is last, because it documents what the o
   - a model carrying a **required** `ConceptsField` (no `blank=True`), for US-5's refusal;
   - a model carrying an **optional** `ConceptsField` (`blank=True`) with a `related_name`, for US-1's
     reverse accessor and US-5's permissive half;
+  - a model carrying **two required** `ConceptsField`s against the same vocabulary, for T009's
+    enumeration case — one required field enforced and the other silently skipped is the failure that
+    case exists to catch, and it needs a model with two of them to be visible at all;
   - a model carrying **both** a `ConceptField` and a `ConceptsField` against the same vocabulary,
     which is the collision case the plan's Risks section refuses to assume away — two declarations on
     one model must generate distinct membership tables and non-clashing reverse accessors.
@@ -100,8 +103,26 @@ of one another once Phase F lands. US-7 is last, because it documents what the o
 
   Ordering inside `contribute_to_class` matters: the generation helper reads
   `field.model._meta.apps` and `field._get_m2m_db_table(...)`, both of which need the field already
-  attached to the model. Django's own sequence is `super().contribute_to_class(...)`, then generate,
-  then install the `ManyToManyDescriptor`. Follow it.
+  attached to the model. So the field must be attached first, then the model generated, then the
+  `ManyToManyDescriptor` installed and `m2m_db_table` curried — the same order Django uses.
+
+  **Attach with `super(ManyToManyField, self).contribute_to_class(cls, name, **kwargs)`, not a plain
+  `super()` call.** `ManyToManyField.contribute_to_class` generates and registers the CASCADE through
+  model inside its own body, after its `super()` call and before it returns, so a plain `super()`
+  leaves no seam between "attached" and "generated". Generating the `PROTECT` replacement after it
+  registers a second model under the same name and Django warns `Model … was already registered` on
+  every consuming declaration — not an edge case, and a warning rather than an error, so it will not
+  fail a test that is not looking for it. Assert its absence: wrap the model declarations in
+  `warnings.catch_warnings(record=True)` and require no `RuntimeWarning` naming the through model.
+
+  The MRO skip drops the `related_name` rewriting at the top of
+  `ManyToManyField.contribute_to_class`, so **replicate the hidden branch before the `super()`
+  call**: when `self.remote_field.hidden`, rewrite `related_name` to
+  `"_%s_%s_%s_+" % (cls._meta.app_label, cls.__name__.lower(), name)`, exactly as Django does. FR-011
+  accepts `related_name="+"`, and two such fields on one model clash without it. Do not replicate the
+  symmetrical branch — the target is always `Concept` and never the owner, so the condition cannot
+  hold. Test with two `ConceptsField`s declared `related_name="+"` on one model: both declare cleanly
+  and the reverse accessors do not collide.
 
   Tests, all against a real model from T001, none against the helper in isolation: `makemigrations`
   produces a migration and `makemigrations --check` is clean afterwards; the field's `deconstruct()`
@@ -210,10 +231,15 @@ of one another once Phase F lands. US-7 is last, because it documents what the o
   empty selection — so that half is a test. The model half has no hook, because `full_clean()` never
   looks at a many-valued relation (R2), so the field installs one on the consuming model class.
 
-  Three constraints, all of them from D8 and none of them stylistic:
+  Four constraints, all of them from D8 and none of them stylistic:
 
   - **Install once per class and delegate.** Guard on the class's own `__dict__`, not `getattr` — a
     subclass would otherwise inherit the flag and lose the check.
+  - **Check every required `ConceptsField` on the class, not the one that installed the wrapper.**
+    Because the install is once per class, a wrapper closing over the triggering field instance
+    leaves a second required `ConceptsField` on the same model unenforced, with nothing raising and
+    no test failing. Resolve the class's required `ConceptsField`s from `cls._meta.get_fields()` at
+    call time and apply FR-010 to each.
   - **Skip an unsaved record.** Touching the relation descriptor when the primary key is `None`
     raises `ValueError`, and `full_clean` catches only `ValidationError`, so an unguarded check turns
     an ordinary `ModelForm.is_valid()` on a new object into an uncaught crash. It is also the correct
@@ -222,10 +248,16 @@ of one another once Phase F lands. US-7 is last, because it documents what the o
     check runs, so catch that `ValidationError`, add the field's message, and re-raise the whole
     thing.
 
-  Tests: optional field with an empty set validates; required field with an empty set is refused with
-  a message naming the field; an unsaved instance passes `full_clean()` without raising `ValueError`;
-  a record with both a bad character field and an empty required set reports **both** errors; the
-  form halves, required and optional, through a real `ModelForm`.
+  Tests:
+
+  - an optional field with an empty set validates;
+  - a required field with an empty set is refused with a message naming the field;
+  - a model carrying **two** required `ConceptsField`s refuses on each of them independently — one
+    empty and the other populated, then the reverse, then both empty reporting both. This is the case
+    the once-per-class install would silently skip, and it fails against a closed-over wrapper;
+  - an unsaved instance passes `full_clean()` without raising `ValueError`;
+  - a record with both a bad character field and an empty required set reports **both** errors;
+  - the form halves, required and optional, through a real `ModelForm`.
 
 ## US-6 — A vocabulary that has not been imported yet (#107, P2)
 

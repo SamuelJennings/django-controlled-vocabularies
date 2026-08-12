@@ -20,3 +20,25 @@ Append-only. One line per stage transition and per gate outcome, written at the 
   (`issuecomment-5264353690`), carrying the four self-resolved decisions and the two open risks
   (whether the two consumption fields share an implementation, left to the plan; and the delete
   guard having to be built rather than inherited, since Django drops a membership silently).
+- **2026-08-12 — S3 PLAN.** `research.md` (R1–R7, all established empirically against the installed
+  Django 5.2.16), `plan.md`, `tasks.md` (T001–T011 across eight stories), `decisions.md` extended
+  with D7 (the two consumption fields do not share an implementation) and D8 (the required-set rule
+  is installed onto `full_clean`). `stage-exit --stage S3` green.
+- **2026-08-12 — S3R DESIGN_REVIEW.** One reviewer, three lenses, one round. Craft-skill receipts
+  verified against the registry on all three findings files. Security: `approve`, no findings.
+  Spec-compliance and architecture: `request_changes`, one verified `high` each, both accepted and
+  applied as plan edits.
+  - **SC-001** — D8's wrapper is installed once per consuming class, and nothing said it must
+    resolve *every* required `ConceptsField` on that class rather than the one that triggered the
+    install, so a second required field would go unenforced with nothing raising. Applied to
+    `decisions.md` D8, `plan.md` Approach 5, `tasks.md` T009 (fourth constraint plus a three-part
+    test case) and T001 (a two-required-field model to make the case declarable).
+  - **ARC-001** — `tasks.md` T003 told the implementer to follow Django's own sequence,
+    `super().contribute_to_class(...)` then generate. Read literally that double-registers the join
+    model, because `ManyToManyField.contribute_to_class` generates and registers the CASCADE through
+    model inside its own body. Confirmed against `django/db/models/fields/related.py:1957-2004` in
+    the installed 5.2.16: there is no seam between attach and generate. `plan.md` Approach 3 and
+    `tasks.md` T003 now specify the MRO skip, `super(ManyToManyField, self).contribute_to_class(...)`,
+    require the hidden `related_name` branch that skip drops to be replicated (FR-011 accepts
+    `related_name="+"`), and add a test asserting the registry warning is absent.
+  No wording-drift notes returned. No finding fell on `spec.md`, so no delta brief and no re-gate.

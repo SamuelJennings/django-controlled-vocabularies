@@ -126,6 +126,19 @@ Django's `create_many_to_many_intermediary_model` exactly otherwise — same nam
 the owning model class, which is what keeps the model out of migration state and out of
 `deconstruct()` while still having its table created and dropped with the owner (R6).
 
+**Skipping means skipping the method, not undoing its effect.** `ManyToManyField.contribute_to_class`
+generates and registers the CASCADE through model inside its own body, after its `super()` call and
+before returning, so there is no seam an ordinary `super().contribute_to_class(...)` leaves open. Call
+it and then generate a second model of the same name and Django's app registry warns
+`Model … was already registered` on every consuming declaration. The way through is
+`super(ManyToManyField, self).contribute_to_class(cls, name, **kwargs)`, which enters the MRO one
+class higher and attaches the field without generating anything. That skip has a price: the
+symmetrical and hidden `related_name` rewriting at the top of `ManyToManyField.contribute_to_class`
+is skipped with it, and the hidden branch is live here — FR-011 accepts `related_name="+"`, and
+without the rewrite two such fields on one model clash. Replicate that branch before the `super()`
+call. The symmetrical branch is dead for this field, because the target is always `Concept` and never
+the owner, so replicating it would be writing code for a state that cannot occur.
+
 **4. The vocabulary check on the write path.** In the same `contribute_to_class`, connect an
 `m2m_changed` receiver to the through model just generated. On `pre_add` it resolves the incoming
 primary keys in one query and raises `ValidationError` naming the expected vocabulary if any concept
@@ -138,8 +151,15 @@ guard, so there is no window in which writes go unchecked.
 
 **5. Required means at least one.** `blank=False` gives the form half for nothing (R5). The model
 half has no hook — `full_clean()` never looks at a many-valued relation (R2) — so the field installs
-one on the consuming model class, once per class, delegating to the original `full_clean`. Two
-constraints on that installation, both from R5 and the probe output:
+one on the consuming model class, once per class, delegating to the original `full_clean`. Three
+constraints on that installation, the first from FR-010 and the other two from R5 and the probe
+output:
+
+- **It checks every required `ConceptsField` on the class, not the one that installed it.** The
+  installation happens once per class, so a wrapper closing over the field instance that triggered it
+  would leave a second required `ConceptsField` on the same model unenforced, silently and with
+  nothing failing. The wrapper resolves the class's required `ConceptsField`s from
+  `cls._meta.get_fields()` when it runs, and FR-010 applies to each of them.
 
 - **It must skip an unsaved record.** Touching the relation descriptor on an instance with no primary
   key raises `ValueError`, and `full_clean` does not catch `ValueError`, so an unguarded check turns

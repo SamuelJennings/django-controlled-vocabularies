@@ -159,7 +159,12 @@ Django gives a field no hook into model validation for a many-valued relation: `
 half unimplementable as approved — or the field installs the check itself. It installs it, once per
 consuming class, delegating to the original.
 
-Two constraints came out of the probe rather than out of taste:
+**One installation, every field.** The wrapper is installed once per class, so it cannot be bound to
+the field that triggered the installation — a second required `ConceptsField` on the same model would
+then go unenforced with nothing raising. It resolves the class's required `ConceptsField`s at call
+time and applies FR-010 to each.
+
+Two further constraints came out of the probe rather than out of taste:
 
 - **An unsaved record is skipped.** Touching the relation descriptor when the primary key is `None`
   raises `ValueError`, and `full_clean` catches only `ValidationError`, so an unguarded check turns
