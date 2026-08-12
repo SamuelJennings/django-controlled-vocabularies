@@ -1,12 +1,18 @@
-"""``ConceptField`` — attach a concept from a named vocabulary to a model.
+"""``ConceptField`` and ``ConceptsField`` — attach concepts to a consuming model.
 
-A ``ForeignKey`` subclass a consuming project declares on its own model, naming
-one vocabulary by its slug. It fixes three things the consumer does not supply
-— ``to="controlled_vocabularies.Concept"``, ``on_delete=PROTECT``, and
-``limit_choices_to`` restricted to that vocabulary — so almost everything
-FR-002/FR-005/FR-006/FR-007 ask for falls out of ``limit_choices_to``: it is
-what ``ForeignKey.validate()`` applies, and it is a ``Q``, so it is lazy and
-never queries the database while the declaration is only being read (FR-003).
+A ``ForeignKey`` subclass and a ``ManyToManyField`` subclass a consuming project
+declares on its own model, each naming its vocabularies by slug. Both fix the
+kwargs the consumer does not supply — ``to="controlled_vocabularies.Concept"``,
+``on_delete=PROTECT``, and ``limit_choices_to`` restricted to the named
+vocabularies — so almost everything FR-002/FR-005/FR-006/FR-007 ask for falls
+out of ``limit_choices_to``: it is what ``ForeignKey.validate()`` applies, and
+it is a ``Q``, so it is lazy and never queries the database while the
+declaration is only being read (FR-003).
+
+Both take the **same** ``vocabulary`` argument, in the same three shapes, and
+mean the same thing by each (#111): one slug, several, or none at all. A
+declaration naming none gives up the restriction and keeps every other
+guarantee.
 """
 
 from functools import partial
@@ -20,16 +26,52 @@ from django.db.models.utils import make_model_tuple
 from django.utils.translation import gettext_lazy as _
 
 
-class ConceptField(ForeignKey):
-    """A ``ForeignKey`` to ``controlled_vocabularies.Concept``, constrained to
-    one named vocabulary.
+def _normalise_vocabulary(vocabulary, declared_by):
+    """Normalise a ``vocabulary`` argument to a tuple of slugs.
 
-    ``vocabulary`` is the owning :class:`~controlled_vocabularies.models.ConceptScheme`'s
-    slug — required and non-empty, since an unconstrained field would be a plain
-    ``ForeignKey`` and offer none of this field's guarantees (FR-002). ``to``,
+    One code path for all three shapes and for both fields (FR-002,
+    ``decisions.md`` D9, #111): a single slug becomes a one-element tuple so
+    ``__in`` serves both the one- and several-vocabulary cases, a list collapses
+    duplicates with order left insignificant, and an omitted (``None``)
+    vocabulary normalises to the empty tuple — the fields' only real branch, and
+    everywhere it appears the answer is to do nothing rather than something
+    weaker.
+
+    An empty slug is refused rather than normalised away. No
+    :class:`~controlled_vocabularies.models.ConceptScheme` can carry one, so a
+    declaration holding it would offer no choices at all while reading as a
+    restricted field — the opposite of the unrestricted shape a consumer who
+    writes ``vocabulary=""`` is reaching for.
+    """
+    if vocabulary is None:
+        slugs = ()
+    elif isinstance(vocabulary, str):
+        slugs = (vocabulary,)
+    else:
+        slugs = tuple(vocabulary)
+    for slug in slugs:
+        if not isinstance(slug, str) or not slug:
+            raise TypeError(f"{declared_by}() vocabulary elements must be non-empty strings; got {slug!r}.")
+    return tuple(dict.fromkeys(slugs))
+
+
+class ConceptField(ForeignKey):
+    """A ``ForeignKey`` to ``controlled_vocabularies.Concept``, optionally
+    constrained to one or more named vocabularies.
+
+    ``vocabulary`` is optional (#111) and takes the same three shapes
+    :class:`ConceptsField` takes, normalised once by
+    :func:`_normalise_vocabulary`: a single
+    :class:`~controlled_vocabularies.models.ConceptScheme` slug, a list of
+    slugs, or omitted entirely. A declaration naming no vocabulary is a
+    supported shape rather than an error — it keeps the delete protection and
+    the label/URI readback, and gives up only the restriction. ``to``,
     ``on_delete`` and ``limit_choices_to`` are not the consumer's to supply:
     ``on_delete`` is refused outright (FR-007's guarantee is not theirs to
-    weaken), while ``to`` and ``limit_choices_to`` are simply overwritten.
+    weaken), while ``to`` is overwritten and ``limit_choices_to`` is derived
+    from ``vocabulary``, set only when the declaration named at least one (an
+    empty restriction is not set at all, rather than a restriction that matches
+    everything by accident).
 
     ``to`` is always the *string* ``"controlled_vocabularies.Concept"``, never
     the imported class — deliberately, not a detail. Migration state rejects a
@@ -51,15 +93,18 @@ class ConceptField(ForeignKey):
     """
 
     default_error_messages = {
+        # The vocabulary slugs join into ONE placeholder (Article XII) so the
+        # message identifier stays the same whether the declaration names one
+        # vocabulary or several — the same shape the many-valued field's own
+        # refusal uses.
         "invalid": _("%(value)s is not a valid concept in the '%(vocabulary)s' vocabulary."),
+        # A declaration naming no vocabulary has none to name in a refusal, so
+        # it needs its own message rather than the one above with an empty
+        # interpolation. Both are overridable through `error_messages`.
+        "invalid_unrestricted": _("%(value)s is not a valid concept."),
     }
 
     def __init__(self, vocabulary=None, **kwargs):
-        if not vocabulary:
-            raise TypeError(
-                "ConceptField() requires a non-empty 'vocabulary' naming the "
-                "ConceptScheme slug to constrain choices to."
-            )
         if "on_delete" in kwargs:
             raise TypeError("ConceptField() sets on_delete=PROTECT itself; a consumer may not override it.")
         if "limit_choices_to" in kwargs:
@@ -67,15 +112,16 @@ class ConceptField(ForeignKey):
                 "ConceptField() sets limit_choices_to itself to constrain choices to "
                 "'vocabulary'; a consumer may not override it."
             )
-        self.vocabulary = vocabulary
+        self.vocabulary = _normalise_vocabulary(vocabulary, type(self).__name__)
         kwargs["to"] = "controlled_vocabularies.Concept"
         kwargs["on_delete"] = PROTECT
-        kwargs["limit_choices_to"] = Q(scheme__slug=vocabulary)
+        if self.vocabulary:
+            kwargs["limit_choices_to"] = Q(scheme__slug__in=self.vocabulary)
         # A static message, not one interpolating `vocabulary`: `%` on a
         # gettext_lazy() proxy evaluates it immediately, which would defeat
         # the laziness this default exists to keep (translation happens at
         # access time, per request).
-        kwargs.setdefault("help_text", _("A concept from this field's configured vocabulary."))
+        kwargs.setdefault("help_text", _("A concept from this field's configured vocabulary or vocabularies."))
         super().__init__(**kwargs)
 
     def validate(self, value, model_instance):
@@ -96,21 +142,29 @@ class ConceptField(ForeignKey):
         refusal itself is still ``limit_choices_to``. Only reachable on a
         field bound to a model (``remote_field.model`` must be resolved);
         proved end-to-end by T005 against a real test-app model.
+
+        A declaration naming no vocabulary reaches here too (#111), for the
+        one refusal that survives without a restriction: a primary key no
+        concept carries. It has no vocabulary to name, so it re-raises with
+        ``invalid_unrestricted`` — the same ``KeyError`` would otherwise fire
+        on a placeholder nothing could fill.
         """
         try:
             super().validate(value, model_instance)
         except ValidationError as exc:
             if exc.code != "invalid":
                 raise
-            raise ValidationError(
-                self.error_messages["invalid"],
-                code="invalid",
-                # Carry the ForeignKey's own params through. A consumer's
-                # error_messages["invalid"] is free to use `model`, `pk` or
-                # `field`, and dropping them would reproduce the same
-                # KeyError-on-read this override exists to prevent.
-                params={**(exc.params or {}), "value": value, "vocabulary": self.vocabulary},
-            ) from exc
+            # Carry the ForeignKey's own params through. A consumer's
+            # error_messages["invalid"] is free to use `model`, `pk` or
+            # `field`, and dropping them would reproduce the same
+            # KeyError-on-read this override exists to prevent.
+            params = {**(exc.params or {}), "value": value}
+            if self.vocabulary:
+                message = self.error_messages["invalid"]
+                params["vocabulary"] = ", ".join(self.vocabulary)
+            else:
+                message = self.error_messages["invalid_unrestricted"]
+            raise ValidationError(message, code="invalid", params=params) from exc
 
     def contribute_to_class(self, cls, name, private_only=False, **kwargs):
         """Add ``get_<name>_label()`` and ``get_<name>_uri()`` to the
@@ -290,28 +344,6 @@ def _refuse_concepts_outside_vocabulary(*, vocabulary, instance, action, reverse
     )
 
 
-def _normalise_vocabulary(vocabulary):
-    """Normalise ``ConceptsField``'s ``vocabulary`` argument to a tuple of slugs.
-
-    One code path for all three shapes (FR-002, ``decisions.md`` D9): a single
-    slug becomes a one-element tuple so ``__in`` serves both the one- and
-    several-vocabulary cases, a list collapses duplicates with order left
-    insignificant, and an omitted (``None``) vocabulary normalises to the
-    empty tuple — the field's only real branch, and everywhere it appears the
-    answer is to do nothing rather than something weaker.
-    """
-    if vocabulary is None:
-        slugs = ()
-    elif isinstance(vocabulary, str):
-        slugs = (vocabulary,)
-    else:
-        slugs = tuple(vocabulary)
-    for slug in slugs:
-        if not isinstance(slug, str):
-            raise TypeError(f"ConceptsField() vocabulary elements must be strings; got {slug!r}.")
-    return tuple(dict.fromkeys(slugs))
-
-
 def _install_required_set_check(cls):
     """Install the required-set rule onto ``cls.full_clean`` (FR-010, D3, D8,
     R2, R5), once per class.
@@ -382,7 +414,8 @@ class ConceptsField(ManyToManyField):
     list of slugs, or omitted entirely. A declaration naming no vocabulary is
     a supported shape rather than an error — it keeps the delete protection
     T003 builds, the label/URI readback, and the required-set rule, and gives
-    up only the restriction.
+    up only the restriction. :class:`ConceptField` takes the same three shapes
+    and means the same thing by each (#111).
 
     ``to`` and ``limit_choices_to`` are not the consumer's to supply: ``to``
     is fixed and ``limit_choices_to`` is derived from ``vocabulary``, set only
@@ -407,7 +440,7 @@ class ConceptsField(ManyToManyField):
                 "ConceptsField() generates its own through model with PROTECT on the "
                 "foreign key to Concept; a consumer may not override it."
             )
-        self.vocabulary = _normalise_vocabulary(vocabulary)
+        self.vocabulary = _normalise_vocabulary(vocabulary, type(self).__name__)
         kwargs["to"] = "controlled_vocabularies.Concept"
         if self.vocabulary:
             kwargs["limit_choices_to"] = Q(scheme__slug__in=self.vocabulary)

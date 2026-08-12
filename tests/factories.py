@@ -21,12 +21,14 @@ from controlled_vocabularies.models import (
 )
 from tests.testapp.models import (
     Artifact,
+    Borehole,
     Deposit,
     FieldNote,
     Outcrop,
     Photograph,
     RockSample,
     Sample,
+    Sketch,
     Specimen,
     Survey,
 )
@@ -321,3 +323,25 @@ class PhotographFactory(factory.django.DjangoModelFactory):
         model = Photograph
 
     name = factory.Sequence(lambda n: f"Photograph {n}")
+
+
+class BoreholeFactory(factory.django.DjangoModelFactory):
+    """Build a saved :class:`~tests.testapp.models.Borehole` (#111) — the
+    ``ConceptField`` naming two vocabularies. ``dominant_material`` is optional
+    and left unset by default."""
+
+    class Meta:
+        model = Borehole
+
+    name = factory.Sequence(lambda n: f"Borehole {n}")
+
+
+class SketchFactory(factory.django.DjangoModelFactory):
+    """Build a saved :class:`~tests.testapp.models.Sketch` (#111) — the
+    ``ConceptField`` naming no vocabulary. ``subject`` is optional and left
+    unset by default."""
+
+    class Meta:
+        model = Sketch
+
+    name = factory.Sequence(lambda n: f"Sketch {n}")
