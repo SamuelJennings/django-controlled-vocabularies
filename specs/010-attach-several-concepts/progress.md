@@ -269,3 +269,44 @@ clean. Re-verified after convergence: 1146 passed on the feature branch.
 
 Watch: D12 records that the "three vocabularies, one absent" case was proved against the test app's
 existing two-vocabulary model rather than by adding a third slug, to leave US-8's fixtures intact.
+
+## T008 — the plural accessors (US-4)
+
+Did: `get_<name>_labels()` and `get_<name>_uris()` contributed in `contribute_to_class` alongside
+the through generation, named after the single-value field's singular accessors and guarded the same
+way — a model defining either name keeps its own definition. Labels delegate to
+`Concept.display_label()`, which already resolves the active language and falls back to the
+vocabulary's default, so nothing about language resolution is reimplemented here. URIs are each
+concept's `uri` unchanged. Both return an empty list for a record holding nothing, and both guard an
+unsaved record explicitly: touching a many-to-many manager before the instance has a primary key
+raises `ValueError`, which is not the empty result the accessors promise. Six tests using the
+existing multilingual and single-language fixtures.
+
+Verified: full suite 1152 passed, `pre-commit run --all-files` green, `makemigrations --check`
+clean. The collision-guard test was itself proved by removing the guard and watching it fail.
+
+Watch: D13 records that the collision-guard test uses an `isolate_apps` throwaway model rather than
+a new test-app model, to avoid perturbing fixtures other stories depend on.
+
+## T009 — the required-set rule (US-5)
+
+Did: `_install_required_set_check` wraps the consuming class's `full_clean`, once per class.
+`clean_fields()` never looks at a many-valued relation, so a required `ConceptsField` has no hook
+into model validation without it. The wrapper resolves every required `ConceptsField` on the
+instance's class at call time rather than closing over the field that triggered the install, so a
+model declaring two required fields has both enforced. An unsaved record is skipped: a record exists
+before its memberships can, and touching the relation manager without a primary key raises
+`ValueError`, which `full_clean` does not catch. The wrapped method's own errors are merged rather
+than replaced. Nine tests, including the two-required-field model in all three arrangements and a
+record carrying both a bad character field and an empty required set.
+
+Verified: the two-field enumeration was proved against a reinstated defect — a wrapper closing over
+the triggering field fails exactly those tests. Full suite 1161 at the story, 1162 after the
+convergence fix below. `pre-commit run --all-files` green, `makemigrations --check` clean.
+
+Watch: one defect found at convergence and fixed there, recorded as D14. The `__dict__` install guard
+and the review's call-time resolution interact: with call-time resolution a subclass is already
+covered by the wrapper it inherits, so the `__dict__` guard installed a second wrapper around the
+first and reported every empty required field on a multi-table child twice. The guard now tests the
+resolved method for its own tag. Proved by reinstating the `__dict__` guard and watching the new test
+fail.
