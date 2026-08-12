@@ -240,3 +240,26 @@ with their own migration. T001 adds the remaining four models and a second migra
 **Revisit if:** a later story finds the two-migration split (0002 under T003, 0003 under T001)
 awkward to review; Forge squashes migrations at convergence regardless, so this is not expected to
 matter past this branch.
+
+## D11 — Two T005 tests wrap the refused write in its own `transaction.atomic()` (Implementer, US2)
+
+Not anticipated by `tasks.md`, `plan.md` or `research.md` — a mechanical consequence of how Django
+implements the relation manager, surfaced only once the receiver from T005 actually raised inside a
+test.
+
+`ManyRelatedManager.add()` and `.set()` (`related_descriptors.py`) both run inside
+`transaction.atomic(using=db, savepoint=False)`. When the `pre_add` receiver raises a
+`ValidationError` from inside that block, and the block holds no savepoint of its own, the exception
+poisons the whole connection: pytest-django's own transaction wrapping each test is left needing a
+rollback, and the next query issued in that same test raises `TransactionManagementError` instead of
+running. Two of T005's tests read the record's set back after the expected raise (to assert it is
+unchanged, per the acceptance criteria), so both hit this.
+
+The fix is the pattern Django's own docs use for asserting a raise from inside code that itself uses
+`atomic(savepoint=False)`: give the raising call its own nested `transaction.atomic()`, which opens a
+savepoint the exception rolls back to on its way out, leaving the outer test transaction usable
+afterwards. No production code changed; this is a test-authoring detail, not a behavioural choice
+about the field.
+
+**ADR:** none — a Django transaction mechanic, not a decision about this feature's behaviour or
+public surface.
