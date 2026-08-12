@@ -125,3 +125,56 @@ are built the same way.
 
 **ADR:** none at spec time. If the plan does extract a shared base, that is a public extension point
 and Article VIII makes it part of the Python API contract, so it wants an ADR then.
+
+## D7 — The two fields do not share an implementation (resolves D6)
+
+Taken at S3 with both shapes in view, which is what D6 said it would take.
+
+The overlap is smaller than the two features' matching prose suggests. `research.md` R1 to R6
+establish that every mechanism differs: `ForeignKey` against `ManyToManyField`, `validate()` against
+an `m2m_changed` receiver, an inherited `on_delete=PROTECT` against a generated through model, a
+column's `null=False` against a validation hook installed on the consuming class. What actually
+repeats is storing and stripping the `vocabulary` kwarg — about six lines — and the shape of the
+contributed accessors.
+
+A base class holding six lines of kwarg handling would have to sit above two classes with different
+parents, so it would be a mixin invented to avoid a small duplication rather than a shared concept.
+Article III's own instruction covers the case: prefer duplication over the wrong abstraction. The
+next reader of a declaration should find out what it does in one hop.
+
+One thing is genuinely shared and is treated that way: the system check already walks every field of
+every model, and gains a second type in its filter. A widened filter is not an abstraction.
+
+**ADR:** none — declining to extract is the status quo, and nothing downstream inherits it. If a
+third consumption field ever arrives, the question is properly reopened then, and by that point an
+extraction would have three uses to shape it.
+
+## D8 — The required-set rule is installed onto `full_clean`, guarded on the primary key
+
+D3 fixed the meaning of required. This fixes where it runs, and the constraints are not stylistic.
+
+Django gives a field no hook into model validation for a many-valued relation: `full_clean()` calls
+`clean_fields()`, which iterates `_meta.fields`, which excludes many-to-many by an explicit filter
+(`research.md` R2). Either the rule runs at the form layer only — which would leave FR-010's first
+half unimplementable as approved — or the field installs the check itself. It installs it, once per
+consuming class, delegating to the original.
+
+Two constraints came out of the probe rather than out of taste:
+
+- **An unsaved record is skipped.** Touching the relation descriptor when the primary key is `None`
+  raises `ValueError`, and `full_clean` catches only `ValidationError`, so an unguarded check turns
+  an ordinary `ModelForm.is_valid()` on a new object into an uncaught crash. It is also the correct
+  semantic: a record exists before its memberships can, so an empty set on an unsaved record is the
+  right intermediate state of every legitimate creation.
+- **Other errors survive.** The wrapped `full_clean` raises before the added check runs, so the check
+  catches that `ValidationError`, merges its own message into the error dictionary under the field's
+  name, and re-raises. A record with a bad character field and an empty required set reports both.
+
+The cost is honest: this is the most invasive thing the feature does, because it modifies a class the
+package does not own. It is bounded — one wrapper per class, delegating, merging — and it is the
+price of `full_clean()` meaning what the spec says it means. A consuming model that overrides
+`full_clean` after declaring the field would shadow it, which the README states.
+
+**ADR:** none — a mechanism internal to this field, not a rule anything else inherits. It becomes
+ADR-worthy only if a second feature needs the same installation trick, at which point the pattern is
+the decision rather than this instance of it.
