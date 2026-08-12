@@ -209,3 +209,25 @@ Next: T006 (form choices) — tests only, per the brief, unless they show `limit
 already carry through for a `ConceptsField`.
 
 Watch: none.
+
+## 2026-08-12T14:20:00+02:00 · Implementer US-2 · T006
+
+Did: form choices (FR-006, R1) — tests only, no code, as the brief predicted:
+`ManyToManyField.formfield()` already passes `limit_choices_to` through to
+`ModelMultipleChoiceField`, the same mechanism T006 (FS-009) already proved for `ConceptField`. One
+new test-only `DepositForm` and one new class in `tests/test_fields.py`, `TestConceptsFieldFormChoices`,
+three tests: a form generated from `Deposit` offers only the "rock-type" vocabulary's concepts and
+excludes another vocabulary's; a submission carrying a foreign concept is rejected and nothing
+saves; a valid submission saves and the membership appears. All three passed on first run — no RED
+step, since the task itself is the proof that no code was needed and the tests measure exactly
+that. One commit, task ID in the subject.
+
+Verified: `poetry run pytest tests/test_fields.py -q` — 102 passed (99 baseline + 3 new).
+`poetry run ruff check tests/test_fields.py` and `poetry run ruff format --check tests/test_fields.py`
+— clean. `DJANGO_SETTINGS_MODULE=tests.settings poetry run python -m django makemigrations --check
+--dry-run` — "No changes detected".
+
+Next: full-suite verify (`poetry run pytest -q`), `poetry run pre-commit run --all-files`, then the
+completion report. T005 and T006 are the whole of US-2's brief scope for this run.
+
+Watch: none.

@@ -64,6 +64,10 @@ cannot run ``validate()`` at all.
   against the receiver directly, since a direct call would pass even if
   Django's ``bulk_create`` fast path were skipping ``m2m_changed`` entirely
   (R6), which is precisely the failure this task guards against.
+- ``TestConceptsFieldFormChoices`` — FS-010 T006 (US-2): no new code —
+  ``limit_choices_to`` from T002 already restricts a ``ModelForm``'s
+  ``ModelMultipleChoiceField`` queryset and rejects an out-of-vocabulary
+  submission, the same way T006 (FS-009) already proved for ``ConceptField``.
 """
 
 import warnings
@@ -622,6 +626,61 @@ class TestConceptsFieldWritePathVocabularyCheck:
     def test_a_field_naming_no_vocabulary_connects_no_receiver_for_its_through_model(self):
         through = Photograph._meta.get_field("keywords").remote_field.through
         assert not m2m_changed.has_listeners(sender=through)
+
+
+class DepositForm(forms.ModelForm):
+    """Test-only — the plain ``ModelForm`` Django would auto-generate from
+    ``Deposit``, used by T006 to prove ``limit_choices_to`` reaches a
+    ``ConceptsField``'s ``ModelMultipleChoiceField`` choices and submission
+    validation, the same way ``SpecimenForm`` already proves it for
+    ``ConceptField`` (T006, FS-009)."""
+
+    class Meta:
+        model = Deposit
+        fields = ["name", "rock_types"]
+
+
+class TestConceptsFieldFormChoices:
+    """FS-010 T006 (US-2, FR-006, R1) — also no new code:
+    ``ManyToManyField.formfield()`` passes ``limit_choices_to`` through to
+    ``ModelMultipleChoiceField`` exactly as ``ForeignKey.formfield()`` does
+    for ``ConceptField``. This class is the proof."""
+
+    @pytest.mark.django_db
+    def test_form_field_offers_only_the_named_vocabularys_concepts(self):
+        rock_scheme = ConceptSchemeFactory(name="Rock Type")
+        matching_concept = ConceptFactory(scheme=rock_scheme)
+        other_scheme = ConceptSchemeFactory(name="Mineral")
+        other_concept = ConceptFactory(scheme=other_scheme)
+
+        form = DepositForm()
+        choices = list(form.fields["rock_types"].queryset)
+
+        assert matching_concept in choices
+        assert other_concept not in choices
+
+    @pytest.mark.django_db
+    def test_submission_carrying_a_concept_from_an_unnamed_vocabulary_is_rejected(self):
+        other_scheme = ConceptSchemeFactory(name="Mineral")
+        other_concept = ConceptFactory(scheme=other_scheme)
+
+        form = DepositForm(data={"name": "Wrong vocabulary", "rock_types": [other_concept.pk]})
+
+        assert not form.is_valid()
+        assert "rock_types" in form.errors
+        assert Deposit.objects.count() == 0
+
+    @pytest.mark.django_db
+    def test_valid_submission_saves_and_the_memberships_appear(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        concept = ConceptFactory(scheme=scheme)
+
+        form = DepositForm(data={"name": "Granite deposit", "rock_types": [concept.pk]})
+
+        assert form.is_valid(), form.errors
+        deposit = form.save()
+
+        assert concept in deposit.rock_types.all()
 
 
 class TestConceptFieldMigrations:

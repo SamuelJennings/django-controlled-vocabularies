@@ -179,8 +179,19 @@
         },
         {
           "id": "T006",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_fields.py::TestConceptsFieldFormChoices"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_fields.py -q",
+              "poetry run ruff check tests/test_fields.py",
+              "poetry run ruff format --check tests/test_fields.py",
+              "DJANGO_SETTINGS_MODULE=tests.settings poetry run python -m django makemigrations --check --dry-run"
+            ]
+          }
         }
       ]
     },
