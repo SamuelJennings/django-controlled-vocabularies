@@ -386,6 +386,22 @@ class ConceptsField(ManyToManyField):
         receiver is a fresh ``partial`` with no other reference keeping it
         alive — a weak reference would let it be garbage-collected before
         any write ever reaches it.
+
+        Alongside the through generation, ``get_<name>_labels()`` and
+        ``get_<name>_uris()`` are contributed to the consuming model
+        (FR-008, FR-009, T008) — plural, named the way ``ConceptField``'s
+        own singular ``get_<name>_label()``/``get_<name>_uri()`` are.
+        Labels come from each attached concept's
+        :meth:`~controlled_vocabularies.models.Concept.display_label`,
+        which already resolves the active language with fallback to the
+        vocabulary's default; URIs are each concept's ``uri`` unchanged.
+        An unsaved instance (``pk`` is ``None``) is guarded explicitly:
+        Django's many-to-many manager raises ``ValueError`` the moment its
+        queryset is touched before the instance has a primary key, and
+        both accessors promise an empty result rather than a raise for a
+        record holding nothing. The ``setattr`` is guarded exactly like
+        ``ConceptField``'s: a model that already defines either name keeps
+        its own definition.
         """
         if self.remote_field.hidden:
             self.remote_field.related_name = f"_{cls._meta.app_label}_{cls.__name__.lower()}_{name}_+"
@@ -399,6 +415,23 @@ class ConceptsField(ManyToManyField):
                     sender=self.remote_field.through,
                     weak=False,
                 )
+
+            def get_labels(instance):
+                if instance.pk is None:
+                    return []
+                return [concept.display_label() for concept in getattr(instance, name).all()]
+
+            def get_uris(instance):
+                if instance.pk is None:
+                    return []
+                return [concept.uri for concept in getattr(instance, name).all()]
+
+            labels_attr_name = f"get_{name}_labels"
+            uris_attr_name = f"get_{name}_uris"
+            if not hasattr(cls, labels_attr_name):
+                setattr(cls, labels_attr_name, get_labels)
+            if not hasattr(cls, uris_attr_name):
+                setattr(cls, uris_attr_name, get_uris)
 
         setattr(cls, self.name, ManyToManyDescriptor(self.remote_field, reverse=False))
         self.m2m_db_table = partial(self._get_m2m_db_table, cls._meta)

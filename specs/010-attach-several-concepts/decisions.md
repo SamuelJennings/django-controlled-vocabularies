@@ -293,3 +293,40 @@ test can then move onto it without weakening in the meantime.
 
 **ADR:** none — a test-authoring scope decision, not a change to this feature's behaviour or public
 surface.
+
+## D13 — T008's collision-guard proof uses `isolate_apps`, not a new testapp model; the accessors also guard an unsaved record (Implementer, US4)
+
+`tasks.md`'s T008 acceptance names the collision guard directly: "a model that already defines
+either accessor name itself... keeps its own definition," the same guard `ConceptField`'s T011
+proved against a real, purpose-built testapp model (`Artifact.get_mineral_label`). No existing
+`ConceptsField` testapp model both names no vocabulary (so the `multilingual_scheme`/
+`single_language_scheme` fixtures' concepts can be attached without tripping T005's write-path
+check) and already defines `get_keywords_labels()` itself — `Photograph` is the only
+no-vocabulary model, and every other test in this file that uses it relies on the field-contributed
+accessors being real, so adding a permanent pre-existing definition to it would either break those
+or force a second no-vocabulary model. `TestConceptsFieldMembershipModel`'s own
+`test_declaring_two_concepts_fields_on_one_model_warns_of_nothing` already establishes the pattern
+for this exact situation — a throwaway model declared inside the test body under
+`@isolate_apps("tests.testapp")` — so `test_a_models_own_definition_survives_the_contribution_guard`
+follows that precedent rather than widening `tests/testapp/models.py` for a scenario the isolated
+model proves just as directly, and without touching `tests/factories.py` (outside this story's
+allowed files) to give it one.
+
+Separately: `get_<name>_labels()`/`get_<name>_uris()` return `[]` for an unsaved instance
+(`instance.pk is None`), not only for a saved one holding no concepts. `tasks.md` doesn't call
+this out explicitly, but FR-008/FR-009 both say "a record holding nothing MUST return an empty
+result rather than raise," and Django's many-to-many manager raises `ValueError` — not the
+`AttributeError`-subclassing `RelatedObjectDoesNotExist` `ConceptField`'s singular accessors
+already guard against — the moment its queryset is touched before the instance has a primary key.
+Without the `pk is None` guard, `get_<name>_labels()`/`get_<name>_uris()` would crash on exactly the
+required-`ConceptsField`, not-yet-saved case `TestConceptFieldLabelAndUriAccessors`'s own
+`test_both_accessors_return_none_on_a_required_field_with_nothing_attached` already covers for the
+singular field. `test_both_accessors_return_an_empty_list_on_an_unsaved_record_rather_than_raising`
+proves it against `Deposit`, the required `ConceptsField`.
+
+**Revisit if:** a future story needs a testapp model with its own pre-existing `get_<name>_labels`/
+`get_<name>_uris` definition for other reasons; this test can then move onto it.
+
+**ADR:** none — a test-authoring scope decision and a direct reading of FR-008/FR-009's own words,
+not a change to this feature's behaviour or public surface beyond what those requirements already
+state.

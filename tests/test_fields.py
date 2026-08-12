@@ -76,6 +76,17 @@ cannot run ``validate()`` at all.
   single-instance and a bulk queryset delete, the scheme holding it survives
   too, an unheld concept deletes normally, and deleting the consuming record
   removes only its membership rows and leaves every concept in place (D5).
+- ``TestConceptsFieldLabelAndUriAccessors`` — FS-010 T008 (US-4, FR-008,
+  FR-009): ``contribute_to_class()`` gives the consuming model
+  ``get_<name>_labels()`` and ``get_<name>_uris()``, plural, named the way
+  ``ConceptField``'s own singular accessors are (T011's precedent). Labels
+  delegate to ``Concept.display_label()`` per attached concept, in the
+  active language with fallback to the vocabulary's default; URIs return
+  each concept's own ``uri`` unchanged. Both return an empty result rather
+  than raising for a record holding nothing, including an unsaved one —
+  the many-to-many manager raises ``ValueError`` the moment it is touched
+  before a primary key exists. The ``setattr`` is guarded exactly like
+  ``ConceptField``'s.
 """
 
 import warnings
@@ -784,6 +795,87 @@ class TestConceptsFieldDeleteGuard:
         concept.delete()
 
         assert not Concept.objects.filter(pk=concept.pk).exists()
+
+
+class TestConceptsFieldLabelAndUriAccessors:
+    """FS-010 T008 (US-4, FR-008, FR-009) — ``contribute_to_class()`` gives
+    the consuming model ``get_<name>_labels()`` and ``get_<name>_uris()``,
+    plural, one entry per attached concept, named the way
+    ``ConceptField``'s own singular ``get_<name>_label()``/
+    ``get_<name>_uri()`` are (``TestConceptFieldLabelAndUriAccessors``'s
+    precedent). Labels delegate to ``Concept.display_label()``, which
+    already resolves the active language with fallback to the vocabulary's
+    default — nothing here reimplements that. URIs are each concept's own
+    ``uri``, unchanged. Both return an empty result rather than raising for
+    a record holding nothing, and the ``setattr`` is guarded so a model
+    that already defines one of these names keeps its own. Exercised
+    against :class:`~tests.testapp.models.Photograph`'s ``keywords`` field,
+    the one ``ConceptsField`` naming no vocabulary, so the ``multilingual_scheme``
+    and ``single_language_scheme`` fixtures' concepts can be attached
+    without tripping T005's write-path vocabulary check."""
+
+    @pytest.mark.django_db
+    def test_labels_accessor_returns_the_active_languages_label_for_each_attached_concept(
+        self, multilingual_scheme
+    ):
+        concepts = list(multilingual_scheme.concepts.all())
+        multilingual_concept = next(c for c in concepts if c.labels.filter(language="de").exists())
+        other_concept = next(c for c in concepts if c.pk != multilingual_concept.pk)
+        photograph = PhotographFactory()
+        photograph.keywords.add(multilingual_concept, other_concept)
+
+        with translation.override("de"):
+            expected = {multilingual_concept.display_label(), other_concept.display_label()}
+            assert set(photograph.get_keywords_labels()) == expected
+
+    @pytest.mark.django_db
+    def test_labels_accessor_falls_back_to_the_vocabulary_default(self, single_language_scheme):
+        concept = single_language_scheme.concepts.first()
+        photograph = PhotographFactory()
+        photograph.keywords.add(concept)
+
+        with translation.override("fr"):
+            assert photograph.get_keywords_labels() == [concept.display_label()]
+
+    @pytest.mark.django_db
+    def test_uris_accessor_returns_each_attached_concepts_own_uri_unchanged(self, multilingual_scheme):
+        concepts = list(multilingual_scheme.concepts.all())
+        photograph = PhotographFactory()
+        photograph.keywords.add(*concepts)
+
+        assert set(photograph.get_keywords_uris()) == {concept.uri for concept in concepts}
+
+    @pytest.mark.django_db
+    def test_both_accessors_return_an_empty_list_when_nothing_is_attached(self):
+        photograph = PhotographFactory()
+
+        assert photograph.get_keywords_labels() == []
+        assert photograph.get_keywords_uris() == []
+
+    def test_both_accessors_return_an_empty_list_on_an_unsaved_record_rather_than_raising(self):
+        # Touching a many-to-many manager before the instance has a primary
+        # key raises ValueError; both accessors promise an empty result
+        # instead (FR-008, FR-009), the ConceptsField counterpart of
+        # TestConceptFieldLabelAndUriAccessors's unsaved-required-field case.
+        deposit = Deposit(name="not yet surveyed")
+
+        assert deposit.get_rock_types_labels() == []
+        assert deposit.get_rock_types_uris() == []
+
+    @isolate_apps("tests.testapp")
+    def test_a_models_own_definition_survives_the_contribution_guard(self):
+        class OwnLabelsConceptsFieldModel(models.Model):
+            keywords = ConceptsField(blank=True, related_name="+")
+
+            class Meta:
+                app_label = "testapp"
+
+            def get_keywords_labels(self):
+                return ["this model's own labels, not the field's"]
+
+        instance = OwnLabelsConceptsFieldModel()
+
+        assert instance.get_keywords_labels() == ["this model's own labels, not the field's"]
 
 
 class TestConceptFieldMigrations:
