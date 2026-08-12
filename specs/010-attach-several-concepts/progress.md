@@ -152,3 +152,25 @@ Watch: `decisions.md` D10 records that `Deposit`/`Survey` (T003) and the remaini
 (T001) landed across two migrations rather than one — Forge squashes at convergence, so this is not
 expected to need attention, but naming it in case a reviewer diffs the two migration files
 separately and wonders why.
+
+## 2026-08-12T12:40:12+02:00 · Implementer US-1 · T004
+
+Did: attaching, reading back and the reverse accessor — one new class,
+`TestConceptsFieldAttachAndReadBack` in `tests/test_fields.py`, four tests. Assertion only, per the
+brief and plan.md: T002/T003 already provide `.add()`/`.remove()`, the generated through model and
+the `related_name` reverse accessor, so no code was written in `controlled_vocabularies/`. Covers:
+two concepts attached and the record reloaded returns exactly those two, compared as a set, and not
+a third; attaching an already-held concept is a no-op held exactly once (Django's own `pre_add`
+`pk_set` exclusion, R3 — asserted, not built); removing one of two leaves the other attached and the
+removed concept still in the database; the `related_name` reverse accessor from the concept side
+returns the record and not an unrelated one. No ordering asserted anywhere (D1). One commit, task ID
+in the subject.
+
+Verified: `poetry run pytest tests/test_fields.py -q` — 94 passed (90 baseline + 4 new).
+`poetry run ruff check tests/test_fields.py` — all checks passed. Story-level full verify
+(`poetry run pytest -q`) not yet run — single-task story, deferred to the completion report per
+`craft-tdd`.
+
+Next: full-suite verify, completion report. T004 is the whole of US-1's brief scope for this run.
+
+Watch: none.
