@@ -23,10 +23,10 @@ All notable changes to this project are documented in this file. The format foll
   list rather than raising for a record holding nothing, without overwriting either name on a
   model that already defines it. See the README.
 - `ConceptField`: a `ForeignKey` field a consuming project declares on its own model, naming zero,
-  one, or several vocabularies by their `ConceptScheme` slugs — the same three shapes
-  `ConceptsField` takes, meaning the same thing by each. Naming one or several constrains form
+  one, or several vocabularies by their `ConceptScheme` slugs. It takes the same three shapes
+  `ConceptsField` takes and means the same thing by each. Naming one or several constrains form
   choices and `full_clean()` to those vocabularies and refuses a concept from any other, naming
-  every accepted vocabulary in the refusal; naming none restricts nothing. Every shape refuses
+  every accepted vocabulary in the refusal. Naming none restricts nothing. Every shape refuses
   deletion of a referenced concept (`on_delete=PROTECT`) whether the delete
   reaches it directly or cascades down from its scheme, and adds `get_<field>_label()` /
   `get_<field>_uri()` accessors reading the attached concept's preferred label (falling back to

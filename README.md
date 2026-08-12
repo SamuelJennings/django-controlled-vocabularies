@@ -107,9 +107,9 @@ from controlled_vocabularies.fields import ConceptField
 
 class Specimen(models.Model):
     name = models.CharField(max_length=200)
-    rock_type = ConceptField(vocabulary="rock-type")                      # one vocabulary
-    dominant_material = ConceptField(vocabulary=["igneous", "mineral"])   # several
-    subject = ConceptField(null=True, blank=True)                         # no vocabulary named
+    rock_type = ConceptField(vocabulary="rock-type")                     # one vocabulary
+    dominant_material = ConceptField(vocabulary=["igneous", "mineral"])  # several
+    keyword = ConceptField(null=True, blank=True)                        # no vocabulary named
 ```
 
 `vocabulary` names the owning `ConceptScheme` by its slug rather than by a database relation. A
@@ -121,9 +121,9 @@ vocabularies, and the refusal names every vocabulary the field accepts. Leaving 
 entirely restricts nothing: any concept in the database is a valid choice. That last shape is for a
 field drawing on whatever a project has imported rather than one fixed list.
 
-Where the field names one or more vocabularies, only a concept whose `scheme.slug` matches is
-offered as a form choice or accepted by `full_clean()`, and a concept from any other is refused.
-Whichever shape you declare, deleting a concept a record still references is refused
+When the field names at least one vocabulary, only a concept whose `scheme.slug` matches is offered
+as a form choice or accepted by `full_clean()`. A concept from any other vocabulary is refused.
+Deleting a concept a record still references is refused whichever shape you declare
 (`on_delete=PROTECT`), whether the delete reaches it directly or cascades down from its scheme.
 
 Reading a concept back:

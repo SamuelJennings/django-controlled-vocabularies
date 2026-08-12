@@ -9,10 +9,9 @@ out of ``limit_choices_to``: it is what ``ForeignKey.validate()`` applies, and
 it is a ``Q``, so it is lazy and never queries the database while the
 declaration is only being read (FR-003).
 
-Both take the **same** ``vocabulary`` argument, in the same three shapes, and
-mean the same thing by each (#111): one slug, several, or none at all. A
-declaration naming none gives up the restriction and keeps every other
-guarantee.
+Both take the same ``vocabulary`` argument, in the same three shapes, and mean
+the same thing by each (#111): one slug, several, or none at all. A declaration
+naming none gives up the restriction and keeps every other guarantee.
 """
 
 from functools import partial
