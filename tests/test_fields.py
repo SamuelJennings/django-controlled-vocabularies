@@ -482,6 +482,68 @@ class TestConceptsFieldConsumingModels:
         assert field.verbose_name
 
 
+class TestConceptsFieldAttachAndReadBack:
+    """FS-010 T004 (FR-001, US-1, D1, D4) — attaching, reading back, and the
+    reverse accessor, against :class:`~tests.testapp.models.Deposit` and
+    :class:`~tests.testapp.models.Outcrop`. With T002 and T003 already in
+    place, this is assertion rather than construction: the duplicate-attach
+    case is Django's own ``m2m_changed`` ``pre_add`` behaviour (``pk_set``
+    already excludes an already-attached concept, research.md R3), asserted
+    here rather than built. No test in this class asserts an order — D1 makes
+    the attached set unordered, so every multi-concept comparison is a set
+    comparison."""
+
+    @pytest.mark.django_db
+    def test_two_attached_concepts_are_returned_and_no_third(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        first = ConceptFactory(scheme=scheme)
+        second = ConceptFactory(scheme=scheme)
+        third = ConceptFactory(scheme=scheme)
+        deposit = DepositFactory()
+
+        deposit.rock_types.add(first, second)
+
+        reloaded = Deposit.objects.get(pk=deposit.pk)
+        assert set(reloaded.rock_types.all()) == {first, second}
+        assert third not in reloaded.rock_types.all()
+
+    @pytest.mark.django_db
+    def test_attaching_an_already_held_concept_holds_it_exactly_once(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        concept = ConceptFactory(scheme=scheme)
+        deposit = DepositFactory()
+        deposit.rock_types.add(concept)
+
+        deposit.rock_types.add(concept)
+
+        assert list(deposit.rock_types.all()) == [concept]
+
+    @pytest.mark.django_db
+    def test_removing_one_of_two_leaves_the_other_attached_and_the_concept_intact(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        kept = ConceptFactory(scheme=scheme)
+        removed = ConceptFactory(scheme=scheme)
+        deposit = DepositFactory()
+        deposit.rock_types.add(kept, removed)
+
+        deposit.rock_types.remove(removed)
+
+        assert set(deposit.rock_types.all()) == {kept}
+        assert Concept.objects.filter(pk=removed.pk).exists()
+
+    @pytest.mark.django_db
+    def test_reverse_accessor_from_the_concept_side_returns_the_record(self):
+        outcrop = OutcropFactory()
+        scheme = ConceptSchemeFactory(name="Mineral")
+        concept = ConceptFactory(scheme=scheme)
+        other_concept = ConceptFactory(scheme=scheme)
+
+        outcrop.minerals.add(concept)
+
+        assert outcrop in concept.outcrops.all()
+        assert outcrop not in other_concept.outcrops.all()
+
+
 class TestConceptFieldMigrations:
     """T002 — the app migrates from zero, and stays ``makemigrations --check`` clean."""
 
