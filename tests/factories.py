@@ -19,7 +19,17 @@ from controlled_vocabularies.models import (
     ConceptRelation,
     ConceptScheme,
 )
-from tests.testapp.models import Artifact, Deposit, Sample, Specimen, Survey
+from tests.testapp.models import (
+    Artifact,
+    Deposit,
+    FieldNote,
+    Outcrop,
+    Photograph,
+    RockSample,
+    Sample,
+    Specimen,
+    Survey,
+)
 
 
 class ConceptSchemeFactory(factory.django.DjangoModelFactory):
@@ -269,3 +279,45 @@ class SurveyFactory(factory.django.DjangoModelFactory):
         model = Survey
 
     name = factory.Sequence(lambda n: f"Survey {n}")
+
+
+class OutcropFactory(factory.django.DjangoModelFactory):
+    """Build a saved :class:`~tests.testapp.models.Outcrop` (FS-010 T001).
+    ``minerals`` is optional and left unset by default, for the same reason
+    as :class:`DepositFactory`."""
+
+    class Meta:
+        model = Outcrop
+
+    name = factory.Sequence(lambda n: f"Outcrop {n}")
+
+
+class RockSampleFactory(factory.django.DjangoModelFactory):
+    """Build a saved :class:`~tests.testapp.models.RockSample` (FS-010 T001).
+    ``primary_mineral`` (``ConceptField``) and ``associated_minerals``
+    (``ConceptsField``) are both optional and left unset by default."""
+
+    class Meta:
+        model = RockSample
+
+    name = factory.Sequence(lambda n: f"Rock sample {n}")
+
+
+class FieldNoteFactory(factory.django.DjangoModelFactory):
+    """Build a saved :class:`~tests.testapp.models.FieldNote` (FS-010 T001).
+    ``keywords`` is optional and left unset by default."""
+
+    class Meta:
+        model = FieldNote
+
+    name = factory.Sequence(lambda n: f"Field note {n}")
+
+
+class PhotographFactory(factory.django.DjangoModelFactory):
+    """Build a saved :class:`~tests.testapp.models.Photograph` (FS-010 T001).
+    ``keywords`` is optional and left unset by default."""
+
+    class Meta:
+        model = Photograph
+
+    name = factory.Sequence(lambda n: f"Photograph {n}")

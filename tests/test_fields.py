@@ -77,10 +77,26 @@ from tests.factories import (
     ArtifactFactory,
     ConceptFactory,
     ConceptSchemeFactory,
+    DepositFactory,
+    FieldNoteFactory,
+    OutcropFactory,
+    PhotographFactory,
+    RockSampleFactory,
     SampleFactory,
     SpecimenFactory,
+    SurveyFactory,
 )
-from tests.testapp.models import Artifact, Deposit, Sample, Specimen, Survey
+from tests.testapp.models import (
+    Artifact,
+    Deposit,
+    FieldNote,
+    Outcrop,
+    Photograph,
+    RockSample,
+    Sample,
+    Specimen,
+    Survey,
+)
 
 
 class TestConceptFieldConstruction:
@@ -365,6 +381,105 @@ class TestConceptsFieldMigrations:
     @pytest.mark.django_db
     def test_makemigrations_check_is_clean(self):
         call_command("makemigrations", "--check", "--dry-run", verbosity=0)
+
+
+class TestConceptsFieldConsumingModels:
+    """FS-010 T001 (FR-001, US-1 through US-8) — the remaining four consuming
+    models: optional with a ``related_name``, both field types on one model,
+    two named vocabularies, and no vocabulary named. ``Deposit`` and
+    ``Survey`` (T003) round out the six `tasks.md` T001 lists."""
+
+    @pytest.mark.django_db
+    def test_all_six_models_are_queryable(self):
+        """Proof the extended migration applied — pytest-django builds the
+        test database from every installed app's migrations, from zero, for
+        the whole session."""
+        assert Deposit.objects.count() == 0
+        assert Survey.objects.count() == 0
+        assert Outcrop.objects.count() == 0
+        assert RockSample.objects.count() == 0
+        assert FieldNote.objects.count() == 0
+        assert Photograph.objects.count() == 0
+
+    @pytest.mark.django_db
+    def test_makemigrations_check_is_clean(self):
+        call_command("makemigrations", "--check", "--dry-run", verbosity=0)
+
+    @pytest.mark.django_db
+    def test_all_six_factories_build_valid_saved_records(self):
+        assert DepositFactory().pk is not None
+        assert SurveyFactory().pk is not None
+        assert OutcropFactory().pk is not None
+        assert RockSampleFactory().pk is not None
+        assert FieldNoteFactory().pk is not None
+        assert PhotographFactory().pk is not None
+
+    @pytest.mark.django_db
+    def test_optional_field_with_related_name_reads_back_from_both_sides(self):
+        outcrop = OutcropFactory()
+        scheme = ConceptSchemeFactory(name="Mineral")
+        concept = ConceptFactory(scheme=scheme)
+
+        outcrop.minerals.add(concept)
+
+        assert concept in outcrop.minerals.all()
+        assert outcrop in concept.outcrops.all()
+
+    @pytest.mark.django_db
+    def test_both_field_types_on_one_model_coexist_without_clashing(self):
+        """The collision case `plan.md`'s Risks section refuses to assume
+        away: a ``ConceptField`` and a ``ConceptsField`` against the same
+        vocabulary, declared on the same model, read and write independently."""
+        scheme = ConceptSchemeFactory(name="Mineral")
+        primary = ConceptFactory(scheme=scheme)
+        associated = ConceptFactory(scheme=scheme)
+        sample = RockSampleFactory(primary_mineral=primary)
+
+        sample.associated_minerals.add(associated)
+
+        reloaded = RockSample.objects.get(pk=sample.pk)
+        assert reloaded.primary_mineral == primary
+        assert associated in reloaded.associated_minerals.all()
+
+    def test_field_naming_two_vocabularies_restricts_to_their_union(self):
+        field = FieldNote._meta.get_field("keywords")
+        assert field.vocabulary == ("rock-type", "mineral")
+        assert field.get_limit_choices_to() == Q(scheme__slug__in=("rock-type", "mineral"))
+
+    def test_field_naming_no_vocabulary_sets_no_restriction(self):
+        field = Photograph._meta.get_field("keywords")
+        assert field.vocabulary == ()
+        assert field.get_limit_choices_to() == {}
+
+    @pytest.mark.django_db
+    def test_field_naming_no_vocabulary_still_attaches_a_concept_from_any_scheme(self):
+        photograph = PhotographFactory()
+        scheme = ConceptSchemeFactory(name="Anything")
+        concept = ConceptFactory(scheme=scheme)
+
+        photograph.keywords.add(concept)
+
+        assert concept in photograph.keywords.all()
+
+    @pytest.mark.parametrize(
+        ("model", "field_name"),
+        [
+            (Deposit, "rock_types"),
+            (Survey, "primary_minerals"),
+            (Survey, "secondary_minerals"),
+            (Outcrop, "minerals"),
+            (RockSample, "associated_minerals"),
+            (FieldNote, "keywords"),
+            (Photograph, "keywords"),
+        ],
+    )
+    def test_every_concepts_field_has_translatable_help_text_and_a_verbose_name(self, model, field_name):
+        """Article XII — ``help_text`` is mandatory and translatable; every
+        declaration above also supplies an explicit ``verbose_name``."""
+        field = model._meta.get_field(field_name)
+        assert isinstance(field.help_text, Promise)
+        assert str(field.help_text)
+        assert field.verbose_name
 
 
 class TestConceptFieldMigrations:

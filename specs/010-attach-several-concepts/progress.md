@@ -105,3 +105,30 @@ Next: T001 — the remaining four consuming models (optional-with-related_name, 
 one model, two-vocabulary, no-vocabulary), their factories, and the final migration for the phase.
 
 Watch: none.
+
+## 2026-08-12T13:05+02:00 · Implementer US0 · T001
+
+Did: added the four remaining consuming models `tasks.md` T001 lists — `Outcrop` (optional
+`ConceptsField` with `related_name="outcrops"`), `RockSample` (a `ConceptField` and a
+`ConceptsField` against the same "mineral" vocabulary on one model, the collision case), `FieldNote`
+(`ConceptsField` naming two vocabularies, `["rock-type", "mineral"]`), `Photograph` (`ConceptsField`
+naming none) — plus their factories, and generated
+`tests/testapp/migrations/0003_concepts_field_remaining_consumers.py`. All six T001 models (the two
+from T003 plus these four) now exist. Every `ConceptsField` on the extended test app carries an
+explicit `verbose_name` and a `gettext_lazy`-wrapped `help_text` (Article XII).
+
+Verified: `poetry run pytest tests/test_fields.py -k TestConceptsFieldConsumingModels` — 15 passed
+(all-six-queryable, makemigrations --check clean, all-six-factories-build, the optional
+related_name reverse accessor, the collision case reading/writing both field types independently,
+the two-vocabulary union restriction, the no-vocabulary field still attaching a concept from any
+scheme, and the parametrized help_text/verbose_name check across all seven `ConceptsField`
+declarations). Full file `poetry run pytest tests/test_fields.py` — 90 passed (75 prior + 15 new).
+`DJANGO_SETTINGS_MODULE=tests.settings poetry run python -m django makemigrations --check --dry-run`
+— "No changes detected". `poetry run ruff check` / `ruff format --check` on all touched files —
+clean (one migration file needed `ruff format`, applied).
+
+Next: full-suite verify (`poetry run pytest -q`, expect 1080 + 30 new = 1110), `poetry run
+pre-commit run --all-files`, completion report. Phase F (T001–T003) is then complete and every
+later US0 story can build on it.
+
+Watch: none.
