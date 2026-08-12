@@ -134,7 +134,7 @@
       "id": "US1",
       "priority": "P1",
       "issue": 102,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
@@ -158,7 +158,7 @@
       "id": "US2",
       "priority": "P1",
       "issue": 103,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
@@ -199,13 +199,24 @@
       "id": "US3",
       "priority": "P1",
       "issue": 104,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T007",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_fields.py::TestConceptsFieldDeleteGuard"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_fields.py -k TestConceptsFieldDeleteGuard -q",
+              "poetry run pytest -q",
+              "DJANGO_SETTINGS_MODULE=tests.settings poetry run python -m django makemigrations --check --dry-run",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
         }
       ]
     },
@@ -241,13 +252,25 @@
       "id": "US6",
       "priority": "P2",
       "issue": 107,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T010",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_checks.py::TestCheckConceptsFieldVocabularies",
+              "tests/test_checks.py::TestCheckConceptFieldVocabularies"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_checks.py -q",
+              "poetry run pytest -q",
+              "DJANGO_SETTINGS_MODULE=tests.settings poetry run python -m django makemigrations --check --dry-run",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
         }
       ]
     },

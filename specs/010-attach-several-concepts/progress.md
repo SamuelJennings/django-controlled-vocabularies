@@ -231,3 +231,41 @@ Next: full-suite verify (`poetry run pytest -q`), `poetry run pre-commit run --a
 completion report. T005 and T006 are the whole of US-2's brief scope for this run.
 
 Watch: none.
+
+## T007 — delete protection, both directions (US-3)
+
+Did: tests only, as tasks.md specifies. `TestConceptsFieldDeleteGuard` in `tests/test_fields.py`,
+six tests against real models and real deletes, never a mocked collector: deleting a held concept
+raises `ProtectedError` with concept, record and membership all surviving; the same deletion through
+`Concept.objects.filter(...).delete()` raises too, so the guarantee holds on the queryset path and
+is not an accident of the single-object path; deleting the `ConceptScheme` holding a held concept is
+refused and nothing in the vocabulary is removed; an unheld concept deletes cleanly; deleting the
+consuming record succeeds, removes only its membership rows and leaves every concept (D5); a concept
+detached from every record it was on then deletes cleanly. No production code — T003 built the
+mechanism, this task proves it at the boundary the spec states.
+
+Verified: full suite 1139 passed at the story, `pre-commit run --all-files` green,
+`makemigrations --check --dry-run` clean. Re-verified after convergence on the feature branch.
+
+Watch: every test passed on first run. That is expected for a proof task and was checked rather than
+assumed — the `on_delete` values in `_create_membership_model` were re-read to confirm the green
+result comes from the real mechanism.
+
+## T010 — widen the system check (US-6)
+
+Did: `check_concept_field_vocabularies` in `controlled_vocabularies/checks.py` now covers both field
+types. Each field is paired with the slugs it names — a one-tuple for `ConceptField`, the normalised
+tuple for `ConceptsField` — and the distinct set is flattened from those pairs, so the single-query
+shape holds however many vocabularies a declaration names. One warning per absent slug per field,
+naming the absent slug rather than the whole declaration. A field naming no vocabulary contributes
+nothing and can never be warned about (D9). Warning id, message, hint and `DatabaseError` silence
+are unchanged. `tests/test_checks.py` gains `TestCheckConceptsFieldVocabularies`, seven tests; every
+pre-existing assertion stays, and only a stale comment on the one-query test was rewritten.
+
+Verified: the widened check was proved against a reinstated defect — narrowing the filter back to
+`ConceptField` only fails exactly the three new tests, then passes again once restored. Full suite
+1140 passed at the story, `pre-commit run --all-files` green, `makemigrations --check --dry-run`
+clean. Re-verified after convergence: 1146 passed on the feature branch.
+
+Watch: D12 records that the "three vocabularies, one absent" case was proved against the test app's
+existing two-vocabulary model rather than by adding a third slug, to leave US-8's fixtures intact.
