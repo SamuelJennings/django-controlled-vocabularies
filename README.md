@@ -190,7 +190,8 @@ a list of records that's at least one query per record. `prefetch_related("rock_
 several, or none all give a record the same three things: a concept it already holds cannot be
 deleted out from under it, its attached concepts read back by label and by URI, and required still
 means at least one. Naming one or several vocabularies adds a fourth guarantee on top — a concept
-outside those vocabularies is refused, at both the form and the `full_clean()` level.
+outside those vocabularies is refused, both by a form built from the model and by the relation
+itself, in either direction, at the moment the membership is written.
 
 A field naming no vocabulary gives up only that fourth guarantee, and nothing else. Said plainly, so
 it needn't be inferred:

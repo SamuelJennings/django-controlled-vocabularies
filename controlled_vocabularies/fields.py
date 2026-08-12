@@ -241,7 +241,7 @@ def _create_membership_model(field, cls):
     )
 
 
-def _refuse_concepts_outside_vocabulary(*, vocabulary, action, reverse, model, pk_set, **kwargs):
+def _refuse_concepts_outside_vocabulary(*, vocabulary, instance, action, reverse, model, pk_set, **kwargs):
     """``m2m_changed`` receiver for a :class:`ConceptsField`'s generated
     through model (FR-005, D2, R1, R3, R6): refuse the whole write when any
     incoming concept falls outside the declared ``vocabulary``.
@@ -253,19 +253,28 @@ def _refuse_concepts_outside_vocabulary(*, vocabulary, action, reverse, model, p
 
     Only ``pre_add`` is checked. ``post_add``, ``pre_remove``, ``post_remove``,
     ``pre_clear`` and ``post_clear`` all reach this same receiver and are
-    ignored. ``reverse`` writes are ignored too: a reverse-direction write
-    (e.g. ``concept.outcrops.add(an_outcrop)``) carries the *owner* model's
-    primary keys in ``pk_set``, not ``Concept``'s, so checking them against
-    ``vocabulary`` would be meaningless.
+    ignored.
+
+    Both directions are checked, but they are not the same check. Django
+    gives every relation a live reverse accessor unless the declaration hides
+    it, so ``concept.deposit_set.add(a_deposit)`` reaches the same through
+    model as ``deposit.rock_types.add(a_concept)`` and has to be refused on
+    the same terms. What differs is where the concept is: on a forward write
+    ``pk_set`` holds the incoming concepts' primary keys, while on a reverse
+    write it holds the *owner* model's, and the single concept being attached
+    is ``instance`` (D16).
 
     Raising here aborts the whole write before any row is inserted (FR-005).
     ``QuerySet.set()`` is implemented as ``remove()`` then ``add()``, so the
     same receiver refuses a mixed write whole, leaving the record's existing
     set untouched (D2).
     """
-    if action != "pre_add" or reverse:
+    if action != "pre_add":
         return
-    invalid = list(model.objects.filter(pk__in=pk_set).exclude(scheme__slug__in=vocabulary))
+    if reverse:
+        invalid = [] if instance.scheme.slug in vocabulary else [instance]
+    else:
+        invalid = list(model.objects.filter(pk__in=pk_set).exclude(scheme__slug__in=vocabulary))
     if not invalid:
         return
     raise ValidationError(

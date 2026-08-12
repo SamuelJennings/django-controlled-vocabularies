@@ -388,3 +388,29 @@ for that one shape instead.
 
 **ADR:** none — a test-tooling decision internal to this file's own AST sweep, not a change to any
 shipped behaviour or public surface.
+
+## D16 — the write-path refusal checks both directions
+
+**Context.** T005 connected the `pre_add` receiver and ignored reverse-direction writes, on the
+reasoning that a reverse write carries the owner model's primary keys in `pk_set` rather than
+concepts', so checking `pk_set` against the vocabulary would be meaningless.
+
+**Problem.** The premise is true and the conclusion does not follow. Django gives every relation a
+live reverse accessor unless the declaration hides it with `related_name="+"`, so
+`concept.deposit_set.add(a_deposit)` reaches the same through model as
+`deposit.rock_types.add(a_concept)`. Reproduced on the plainest possible declaration —
+`Deposit.rock_types`, which names no `related_name` at all: the forward write of a Mineral concept
+is refused, the reverse write of the same concept succeeds in silence, and the membership then reads
+back through the plural accessors as if it were legitimate. FR-005 and SC-002 were both false as
+implemented.
+
+**Decision.** Check both directions, with a different question in each. On a forward write the
+incoming concepts are `pk_set` and are resolved in one query, as before. On a reverse write the
+single concept being attached is `instance`, and its scheme is what the vocabulary is checked
+against. Same `ValidationError`, same message.
+
+**Verified.** Three tests drive the real relation managers: the default reverse accessor, a named
+one, and a valid reverse attach that must still succeed. The two refusal tests fail against the
+`reverse` early return and pass against the fix.
+
+**Author.** Found by the review panel as F1 (critical) and applied at convergence.

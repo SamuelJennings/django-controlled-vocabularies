@@ -663,6 +663,42 @@ class TestConceptsFieldWritePathVocabularyCheck:
 
         assert set(deposit.rock_types.all()) == {first, second}
 
+    @pytest.mark.django_db
+    def test_the_default_reverse_accessor_refuses_a_concept_from_an_unnamed_vocabulary(self):
+        # Django gives every relation a live reverse accessor unless the
+        # declaration hides it, so this path reaches the same through model
+        # as deposit.rock_types.add() and has to be refused on the same
+        # terms. Deposit.rock_types names no related_name, so the accessor
+        # here is Django's default one.
+        other_scheme = ConceptSchemeFactory(name="Mineral")
+        other_concept = ConceptFactory(scheme=other_scheme)
+        deposit = DepositFactory()
+
+        with pytest.raises(ValidationError), transaction.atomic():
+            other_concept.deposit_set.add(deposit)
+
+        assert list(deposit.rock_types.all()) == []
+
+    @pytest.mark.django_db
+    def test_a_named_reverse_accessor_refuses_a_concept_from_an_unnamed_vocabulary(self):
+        outcrop = OutcropFactory()
+        other_concept = ConceptFactory(scheme=ConceptSchemeFactory(name="Rock Type"))
+
+        with pytest.raises(ValidationError), transaction.atomic():
+            other_concept.outcrops.add(outcrop)
+
+        assert list(outcrop.minerals.all()) == []
+
+    @pytest.mark.django_db
+    def test_the_reverse_accessor_attaches_a_concept_from_the_named_vocabulary(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        concept = ConceptFactory(scheme=scheme)
+        deposit = DepositFactory()
+
+        concept.deposit_set.add(deposit)
+
+        assert list(deposit.rock_types.all()) == [concept]
+
     def test_a_field_naming_no_vocabulary_connects_no_receiver_for_its_through_model(self):
         through = Photograph._meta.get_field("keywords").remote_field.through
         assert not m2m_changed.has_listeners(sender=through)
