@@ -394,3 +394,37 @@ the test project now declares), `tests/test_checks.py` (an import line extended)
 `tests/test_standards.py` (the i18n sweep's module list and its comments). Every removed line in
 the three is a comment or a docstring replaced by a longer one, an extended import, or an extended
 module list. No assertion was weakened and no test was deleted.
+
+## S6 REVIEW — 2026-08-13
+
+One reviewer, three lenses (spec-compliance, security, architecture), clean context, diff against
+`origin/main`. Security and architecture were in scope because the diff adds a public endpoint and a
+runtime dependency and deviates from the reviewed plan in three recorded places. All three receipts
+verified against the registry (`craft-review/2026-08-05/57b2f2f3`,
+`craft-simplify/2026-08-04/69038ce1`, `craft-security/2026-08-04/ea3d6742`).
+
+**Verdict: approve on all three lenses.** Two low findings, no medium, high or critical, so no fix
+cycle. Both were verified here rather than accepted.
+
+- **SEC-001 (security, low) — accepted, recorded, no code change.** The claim holds: an
+  unresolvable `field=` reference returns before any database access while a resolved one runs the
+  three-query restricted path, so refusals are byte-identical in content and distinguishable by
+  timing. What the reviewer did not have is the reason it discloses nothing — the widget writes the
+  same reference into the rendered page. A field rendered through `formfield()` carries
+  `field=testapp.specimen.rock_type` in its own widget HTML, checked against a rendered field rather
+  than inferred, so every valid reference is already published to anyone who can load such a form.
+  The residual — a caller who can reach the endpoint but no page rendering the field — is written up
+  as D16 with the cost of closing it.
+- **ARCH-001 (architecture, low) — rejected, already tried.** The duplication is real and the
+  suggested extraction is the same candidate the S5 simplification pass took and reverted. Re-run
+  rather than cited: extracting `_ConceptChoiceFieldMixin` ahead of both library bases leaves the
+  suite green and turns mypy red with four errors on the two class-definition lines (`queryset` and
+  `to_field_name` incompatible between `BaseTomSelectModelMixin` and `ModelChoiceField`). Six
+  duplicated lines for four `type: ignore` comments on somebody else's incompatibility is not a
+  simplification. The probe was reverted and mypy is green on all 21 source files.
+
+**Kit gap found while running the gate.** `forge check-receipts` crashes with an `AttributeError`
+on a findings file holding several lenses, because it expects one object and this schema permits an
+array. Worked around by splitting the array and running the gate per lens, each against its own
+role (`reviewer`, plus `reviewer_security` for the security lens). All green. The CLI fix belongs
+in the kit, not in this feature.

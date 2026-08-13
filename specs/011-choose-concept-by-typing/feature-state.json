@@ -3,7 +3,7 @@
   "feature": "011-choose-concept-by-typing",
   "branch": "011-choose-concept-by-typing",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "CONVERGE",
+  "state": "REVIEW",
   "state_history": [
     {
       "state": "INTAKE",
@@ -59,6 +59,11 @@
       "state": "CONVERGE",
       "at": "2026-08-13T20:45:00Z",
       "note": "No migrations to consolidate - the feature introduces none. Simplification pass found one candidate (the two form fields' identical __init__) and rejected it: the shared mixin surfaces four pre-existing mypy incompatibilities between the library's mixin and Django's ModelChoiceField, trading six duplicated lines for four type-ignore comments. Three decisions graduated to ADRs 0008/0009/0010 and all fifteen carry a verdict. Ledger reconciled to the schema: the design_review gate's extra fields and the stories' commits/receipts keys are folded into the fields the schema carries, and every done task now holds its evidence. stage-exit S5 green on all six checks."
+    },
+    {
+      "state": "REVIEW",
+      "at": "2026-08-13T18:20:00Z",
+      "note": "one reviewer, three lenses (spec-compliance, security, architecture); approve on all three, 2 low findings, 0 medium/high/critical so no fix cycle; SEC-001 accepted and recorded as D16 (the reference is published in the rendered widget HTML, so the timing oracle discloses nothing new), ARCH-001 rejected - the extraction is the S5 candidate, re-run here and mypy red with 4 errors; forge verify green on all five steps"
     }
   ],
   "gates": {
@@ -99,6 +104,16 @@
     "merge": {
       "approved_by": null,
       "at": null
+    },
+    "review": {
+      "approved_by": "forge reviewer (subagent)",
+      "at": "2026-08-13T18:15:00Z",
+      "self_resolved": [
+        "Verdict approve on all three lenses: 2 finding(s), both low, 0 medium/high/critical, so no fix cycle",
+        "SEC-001 accepted without a code change and recorded as D16: refusals are byte-identical in content and distinguishable by timing, but the widget publishes the same field reference in the rendered page",
+        "ARCH-001 declined: the shared __init__ extraction is the candidate S5 already reverted; re-run here, suite green and mypy red with 4 errors on the two class-definition lines",
+        "Craft-skill receipts echoed and verified: craft-review/2026-08-05/57b2f2f3, craft-simplify/2026-08-04/69038ce1, craft-security/2026-08-04/ea3d6742"
+      ]
     }
   },
   "stories": [

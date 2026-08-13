@@ -340,3 +340,33 @@ developer reading a traceback about a reverse match they never wrote. One `try`/
 than that.
 
 **ADR:** none — one try/except that improves a message, sealed inside this package's widget.
+
+## D16 — The reference check is not timing-safe, and that is accepted
+
+**Status:** self-resolved, raised in code review (SEC-001, low).
+
+FR-006 says a refusal must not disclose whether the named model or field exists. The response bodies
+are byte-identical across all four refusal shapes, and a shipped test holds them that way. The work
+behind them is not: a reference that fails to resolve, or resolves to something that is not one of
+this package's concept fields, returns before any database access, while a resolved one runs the
+restricted query the suite bounds at three. The difference is measurable, so a caller who can time
+responses can tell a valid `<app_label>.<model>.<field_name>` from an invalid one.
+
+Nothing is done about it, for a reason narrower than "these names are not secret". The widget writes
+the reference into the rendered page: `get_autocomplete_params()` puts
+`field=<app_label>.<model>.<field_name>` into the control's own configuration, and it appears in the
+widget's HTML verbatim — checked against a rendered field, not inferred. Every valid reference is
+therefore published to anyone who can load a form carrying one of these fields. A timing oracle over
+the same set tells such a caller nothing new.
+
+What remains is the caller who can reach the search endpoint but cannot load any page that renders
+the field. There the timing difference does leak which references exist, one guess at a time, over a
+name space they must already suspect. Equalising the cost means running a throwaway query on the
+failing path — paying for every malformed request in order to hide a set of names the healthy path
+gives away for free.
+
+R7 owns the endpoint's behaviour under load, and a project that must not expose concept data at all
+restricts the include (D3, ADR 0008). This is written down so the next reader knows the promise in
+FR-006 is about response content and not about response time.
+
+**ADR:** none — an accepted residual on a decision ADR 0008 and ADR 0010 already carry.
