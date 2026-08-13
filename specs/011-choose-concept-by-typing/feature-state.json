@@ -283,13 +283,31 @@
       "id": "US7",
       "priority": "P3",
       "issue": 122,
-      "status": "pending",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T011",
-          "status": "pending",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_standards.py::TestFieldsChecksI18nSweep::test_module_carries_no_bare_user_visible_literal[controlled_vocabularies.views]",
+              "tests/test_standards.py::TestFieldsChecksI18nSweep::test_module_carries_no_bare_user_visible_literal[controlled_vocabularies.forms]",
+              "tests/test_standards.py::TestFieldsChecksI18nVisitorCatchesAViolation::test_catches_a_bare_literal_raised_as_improperly_configured",
+              "tests/test_standards.py::TestFieldsChecksI18nVisitorCatchesAViolation::test_catches_a_positional_placeholder_passed_to_a_translation_call",
+              "tests/test_standards.py::TestFormsMissingRouteMessageIsTranslatable::test_missing_route_message_is_a_lazy_translation",
+              "tests/test_standards.py::TestReadmeDocumentsTheConceptSearchControlsWiring (7 tests: three wiring steps by name, their order, what the endpoint exposes, the no-permission-rule stance, the JavaScript requirement)"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_standards.py -q  # RED: 6 README tests failed before the README section was written; GREEN: 82 passed after",
+              "poetry run pytest -q  # 1298 passed (orchestrator re-run)",
+              "forge verify --repo .  # conformance, lint, typecheck, test, build all passed (orchestrator re-run)",
+              "forge check-receipts --skills craft-tdd,craft-increments  # both receipts verified",
+              "mutation probe (orchestrator): a bare ValidationError literal added to views.py fails the views sweep; a positional placeholder in a forms.py translation call fails the forms sweep; renaming the middleware path in README fails two README tests"
+            ],
+            "notes": "The task brief said two wiring steps and prohibited a third; the repo record (D15, tasks.md T011, amended FR-002/010/014, shipped W004 check) says three. The implementer followed the repo over the brief and flagged it. Correct call - the brief predates D15."
+          }
         }
       ]
     }
