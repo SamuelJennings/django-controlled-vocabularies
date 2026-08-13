@@ -276,3 +276,65 @@ class TestConceptAutocompleteRestrictionFromDeclaration:
         escaped_equals = "\\u003D"
         assert f"autocompleteParams: 'field{escaped_equals}testapp.specimen.rock_type'" in rendered["html"]
 
+
+@pytest.mark.django_db
+class TestConceptAutocompleteRefusalDisclosesNothing:
+    """FR-006: an unresolvable ``field=`` reference never discloses what it
+    rejects. All four refusal shapes are byte-identical HTTP responses, and
+    identical to a search that simply matched nothing (T007)."""
+
+    def _get(self, **params):
+        return Client().get(reverse("controlled_vocabularies:concept-autocomplete"), params)
+
+    def test_four_unresolvable_references_and_a_true_empty_search_are_byte_identical(self):
+        baseline = self._get(field=_field_reference(Specimen, "rock_type"))
+        assert baseline.status_code == 200
+
+        naming_a_model_that_does_not_exist = self._get(field="testapp.nosuchmodel.rock_type")
+        naming_a_field_that_is_not_one_of_this_packages = self._get(field="testapp.specimen.name")
+        naming_a_field_that_does_not_exist = self._get(field="testapp.specimen.no_such_field")
+        with_no_reference_at_all = self._get()
+
+        for response in (
+            naming_a_model_that_does_not_exist,
+            naming_a_field_that_is_not_one_of_this_packages,
+            naming_a_field_that_does_not_exist,
+            with_no_reference_at_all,
+        ):
+            assert response.status_code == 200
+            assert response.content == baseline.content
+
+
+@pytest.mark.django_db
+class TestConceptAutocompleteRequestControlledSurfacesAreClosed:
+    """decisions.md D8: ``allowed_filter_fields`` and ``allowed_ordering_fields``
+    close the two other request-controlled surfaces the endpoint exposes, and
+    they refuse differently (T007)."""
+
+    def test_a_blocked_filter_field_empties_the_page(self):
+        ConceptFactory(label="Granite")
+        reference = _field_reference(Sketch, "subject")  # unrestricted: nothing to hide the guard behind
+
+        response = Client().get(
+            reverse("controlled_vocabularies:concept-autocomplete"),
+            {"field": reference, "f": "x__label=Granite"},
+        )
+
+        body = json.loads(response.content)
+        assert body["results"] == []
+
+    def test_a_blocked_ordering_parameter_leaves_the_views_own_order_in_place(self):
+        ConceptFactory(label="Basalt")
+        ConceptFactory(label="Granite")
+        reference = _field_reference(Sketch, "subject")  # unrestricted: nothing to hide the guard behind
+
+        default = Client().get(reverse("controlled_vocabularies:concept-autocomplete"), {"field": reference})
+        with_ordering = Client().get(
+            reverse("controlled_vocabularies:concept-autocomplete"),
+            {"field": reference, "ordering": "-label"},
+        )
+
+        default_ids = [result["id"] for result in json.loads(default.content)["results"]]
+        ordered_ids = [result["id"] for result in json.loads(with_ordering.content)["results"]]
+        assert default_ids  # the guard is being tested against real, non-empty results
+        assert ordered_ids == default_ids
