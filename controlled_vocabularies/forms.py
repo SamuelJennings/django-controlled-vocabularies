@@ -22,11 +22,21 @@ with ``limit_choices_to``.
 
 from urllib.parse import urlencode
 
+from django.core.exceptions import ImproperlyConfigured
+from django.urls import NoReverseMatch
+from django.utils.translation import gettext_lazy as _
 from django_tomselect.app_settings import AllowedCSSFrameworks, TomSelectConfig
 from django_tomselect.forms import TomSelectModelChoiceField, TomSelectModelMultipleChoiceField
 from django_tomselect.widgets import TomSelectModelMultipleWidget, TomSelectModelWidget
 
+from .checks import AUTOCOMPLETE_URL_NAME
 from .models import Concept
+
+_MISSING_ROUTE_MESSAGE = _(
+    "controlled_vocabularies's URL configuration is not included in the project's "
+    'URLconf. Add path("<prefix>/", include("controlled_vocabularies.urls")) to the '
+    'project\'s root URLconf, and add "django_tomselect" to INSTALLED_APPS.'
+)
 
 
 def _config() -> TomSelectConfig:
@@ -46,7 +56,7 @@ def _config() -> TomSelectConfig:
     against ``django_tomselect`` ``2026.6.2``, not the annotation).
     """
     return TomSelectConfig(
-        url="controlled_vocabularies:concept-autocomplete",
+        url=AUTOCOMPLETE_URL_NAME,
         value_field="id",
         label_field="display_label",
         css_framework=AllowedCSSFrameworks.DEFAULT.value,  # type: ignore[arg-type]
@@ -98,11 +108,40 @@ class _ConceptWidgetReferenceMixin:
         return urlencode({"field": f"{meta.app_label}.{meta.model_name}.{self.model_field.name}"})
 
 
-class ConceptWidget(_ConceptWidgetReferenceMixin, _ConceptWidgetValidationMixin, TomSelectModelWidget):
+class _ConceptWidgetRouteMixin:
+    """The render-time counterpart to the two ``checks.py`` warnings
+    (decisions.md D14): a project that ignores them still reaches a render.
+
+    ``TomSelectModelWidget.get_autocomplete_context()`` resolves this
+    package's route twice while building a single widget's context — once
+    through ``get_search_lookups()`` (``widgets.py:1209-1216``, via
+    ``LazyView.get_url()``), before ``get_autocomplete_url()`` itself
+    (``widgets.py:225-241``) ever runs. Both re-raise ``NoReverseMatch``
+    verbatim on failure, and the first one to run wins, so overriding only
+    ``get_autocomplete_url()`` — the hook D14 names — does not observably
+    catch a missing route: confirmed against the installed wheel (``2026.6.2``),
+    where the earlier call fails first. Wrapping ``get_autocomplete_context()``
+    instead is the seam that actually runs for both concept widgets, model or
+    multiple, since it is the one call both roads pass through before either
+    named hook executes.
+    """
+
+    def get_autocomplete_context(self):
+        try:
+            return super().get_autocomplete_context()
+        except NoReverseMatch as exc:
+            raise ImproperlyConfigured(_MISSING_ROUTE_MESSAGE) from exc
+
+
+class ConceptWidget(
+    _ConceptWidgetRouteMixin, _ConceptWidgetReferenceMixin, _ConceptWidgetValidationMixin, TomSelectModelWidget
+):
     """The control :class:`ConceptChoiceField` renders (FR-001)."""
 
 
-class ConceptsWidget(_ConceptWidgetReferenceMixin, _ConceptWidgetValidationMixin, TomSelectModelMultipleWidget):
+class ConceptsWidget(
+    _ConceptWidgetRouteMixin, _ConceptWidgetReferenceMixin, _ConceptWidgetValidationMixin, TomSelectModelMultipleWidget
+):
     """The control :class:`ConceptsChoiceField` renders (FR-001)."""
 
 

@@ -19,9 +19,10 @@ during a POST). Both the single- (``ConceptField``) and multiple-valued
 FR-009 promises nothing already guaranteed was taken away.
 """
 
-from django import forms
-
 import pytest
+from django import forms
+from django.core.exceptions import ImproperlyConfigured
+from django.test import override_settings
 
 from controlled_vocabularies.forms import ConceptChoiceField, ConceptsChoiceField
 from tests.factories import ConceptFactory, ConceptSchemeFactory, OutcropFactory
@@ -140,3 +141,21 @@ class TestConceptFieldSubmissionSurvives:
 
         assert not form.is_valid()
         assert "minerals" in form.errors
+
+
+class TestConceptFieldRenderingWithoutTheRouteIncluded:
+    """T008, decisions.md D14: a project that ignores the system check's warning
+    still reaches a render. The library's own ``get_autocomplete_url()`` would
+    re-raise ``NoReverseMatch`` verbatim there — a message naming a URL pattern
+    the developer never wrote. This widget catches it and raises
+    ``ImproperlyConfigured`` naming both wiring steps instead, so the assertion
+    is on the message, not the exception type alone."""
+
+    @override_settings(ROOT_URLCONF=())
+    def test_rendering_raises_improperlyconfigured_naming_both_steps(self):
+        with pytest.raises(ImproperlyConfigured) as exc_info:
+            str(SampleForm())
+
+        message = str(exc_info.value)
+        assert "controlled_vocabularies.urls" in message
+        assert "INSTALLED_APPS" in message

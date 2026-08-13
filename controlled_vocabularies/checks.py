@@ -11,12 +11,20 @@ useful.
 from django.apps import apps
 from django.core import checks
 from django.db import DatabaseError
+from django.urls import NoReverseMatch, reverse
 from django.utils.translation import gettext_lazy as _
 
 from .fields import ConceptField, ConceptsField
 from .models import ConceptScheme
 
 CHECK_ID = "controlled_vocabularies.W001"
+CHECK_ID_MISSING_ROUTE = "controlled_vocabularies.W002"
+CHECK_ID_MISSING_INSTALLED_APP = "controlled_vocabularies.W003"
+
+#: The name the control's widget reverses at render time (``forms.py``'s
+#: ``_config()``). Named once here so the check and the widget cannot drift
+#: apart about which route is being asked for.
+AUTOCOMPLETE_URL_NAME = "controlled_vocabularies:concept-autocomplete"
 
 
 def check_concept_field_vocabularies(app_configs, **kwargs):
@@ -64,4 +72,47 @@ def check_concept_field_vocabularies(app_configs, **kwargs):
         for field in fields
         for slug in field.vocabulary
         if slug not in existing
+    ]
+
+
+def check_concept_autocomplete_route_included(app_configs, **kwargs):
+    """Warn when the project has not included this package's URL configuration
+    (FR-002, FR-010, ``decisions.md`` D6, D10).
+
+    ``reverse()`` resolves entirely against the already-loaded URLconf module, so
+    this never queries the database — unlike :func:`check_concept_field_vocabularies`,
+    it costs nothing to run on every invocation regardless of migration state.
+    """
+    try:
+        reverse(AUTOCOMPLETE_URL_NAME)
+    except NoReverseMatch:
+        return [
+            checks.Warning(
+                _("controlled_vocabularies's URL configuration is not included in the project's URLconf."),
+                hint=_(
+                    'Add path("<prefix>/", include("controlled_vocabularies.urls")) to the project\'s root URLconf.'
+                ),
+                id=CHECK_ID_MISSING_ROUTE,
+            )
+        ]
+    return []
+
+
+def check_django_tomselect_installed(app_configs, **kwargs):
+    """Warn when ``django_tomselect`` is not among the project's installed
+    applications (FR-010, ``decisions.md`` D10).
+
+    Django finds another package's templates and static assets only inside an
+    installed application, so without this entry the control has a route to call
+    but nothing to render it with. ``apps.is_installed()`` reads the already-loaded
+    app registry, so this never queries the database either.
+    """
+    if apps.is_installed("django_tomselect"):
+        return []
+    return [
+        checks.Warning(
+            _("django_tomselect is not in the project's INSTALLED_APPS."),
+            hint=_('Add "django_tomselect" to INSTALLED_APPS.'),
+            id=CHECK_ID_MISSING_INSTALLED_APP,
+        )
     ]
