@@ -8,6 +8,24 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Added
 
+- Choosing a concept by typing: `ConceptField` and `ConceptsField` now render, by default and in
+  any Django form built from a consuming model, as a search-as-you-type control backed by this
+  package's own search endpoint (`controlled_vocabularies.urls`). A project wires it in three
+  steps — include the route, add `django_tomselect` to `INSTALLED_APPS`, and add
+  `django_tomselect.middleware.TomSelectMiddleware` to `MIDDLEWARE` — each reported by
+  `manage.py check` when missing (`controlled_vocabularies.W002`, `W003`, `W004`). A search
+  returns a concept's identifier, its preferred label in the active language, and its
+  vocabulary's name, restricted to whatever vocabularies the field declares and carrying no
+  permission rule of its own; a project needing to restrict which concepts are searchable
+  restricts the include instead. Matching runs case-insensitively across a concept's preferred,
+  alternative and hidden labels in the active language and its default-language preferred label,
+  a concept matching on several appearing once. Pages are bounded and stable: a page past the
+  last returns nothing rather than re-serving the first. An already-attached concept still
+  renders, under its active-language preferred label, even when its vocabulary is no longer named
+  by the field's declaration. The control needs a browser running JavaScript; without one, both
+  fields still work as an ordinary required-relation form field. See the README.
+- New runtime dependency: [`django-tomselect`](https://pypi.org/project/django-tomselect/)
+  `^2026.6.2`, which the concept search control above is built on.
 - `ConceptsField`: a `ManyToManyField` field a consuming project declares on its own model, naming
   zero, one, or several vocabularies by their `ConceptScheme` slugs. Naming one or several
   restricts form choices and the write path to those vocabularies, refusing a concept from any

@@ -221,6 +221,53 @@ directly against the database outside Django — raw SQL, a database console, a 
 rows without going through the ORM — because Django never writes an `ON DELETE` clause into the
 schema for any relation. The protection lives in application code, not in a database constraint.
 
+## Choosing a concept by typing
+
+`ConceptField` and `ConceptsField` render as a search-as-you-type control by default. A project
+declaring either gets it without naming a widget, writing an endpoint, or configuring anything
+per field — an ordinary `ModelForm` built from the model already renders it.
+
+Getting it working outside the admin takes three steps, done once per project rather than once
+per field. In the order a developer does them:
+
+1. **Include the route.** The package carries its own search endpoint in
+   `controlled_vocabularies.urls`; include it once, at an address of your choosing:
+
+   ```python
+   from django.urls import include, path
+
+   urlpatterns = [
+       ...
+       path("vocab/", include("controlled_vocabularies.urls")),
+   ]
+   ```
+
+2. **Add `"django_tomselect"` to `INSTALLED_APPS`.** The control's templates and static assets
+   live inside that package, and Django only finds another package's templates and static files
+   through an installed app — no amount of work in this package moves that.
+
+3. **Add `"django_tomselect.middleware.TomSelectMiddleware"` to `MIDDLEWARE`.** Without it, the
+   control still renders, but as a plain `<select>` carrying no search box and no JavaScript at
+   all — nothing errors, nothing warns at render time, and the control simply doesn't work.
+
+Skip any of the three and `manage.py check` reports it: a missing route
+(`controlled_vocabularies.W002`), a missing `INSTALLED_APPS` entry (`controlled_vocabularies.W003`),
+or a missing middleware entry (`controlled_vocabularies.W004`), each naming exactly what to add.
+A render that reaches the missing-route case despite the warning raises `ImproperlyConfigured`
+naming both the route and the `INSTALLED_APPS` entry, rather than the underlying library's own
+`NoReverseMatch` against a URL pattern you never wrote.
+
+A search returns, per concept, its identifier, its preferred label in the active language, and the
+name of the vocabulary it belongs to — nothing else, no editorial notes or alternative labels. The
+results are restricted to whatever vocabularies the field declares, the same restriction that
+already governs which concepts a form accepts; a field naming no vocabulary searches every concept
+in the database. The endpoint carries **no permission rule by default** — it serves the same
+concept data the rest of this package publishes at stable URIs. A project holding vocabularies it
+does not want searched restricts the include instead, at whatever access level fits.
+
+The control needs a browser running JavaScript. Without it, both fields still work as an ordinary
+required-relation form field; only the search-as-you-type behaviour is unavailable.
+
 ## Importing a published vocabulary
 
 `import_skos()` reads a SKOS file — Turtle, RDF/XML, or JSON-LD — and creates or updates the

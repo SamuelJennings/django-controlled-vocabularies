@@ -315,3 +315,43 @@ Reconciled against evidence rather than memory: the commits are on the branch an
 (`origin` head `ac91f511`, PR #123 open and draft), each story's acceptance is recorded above with
 what was verified, and the ledger now matches. The six completion comments are posted. US-7 (T011)
 is the only story still unimplemented.
+
+## S4 IMPLEMENT — US-7 (#122), 2026-08-13
+
+T011 accepted. `tests/test_standards.py`'s fields/checks sweep (T012) is extended to `views.py`
+and `forms.py`, gains `ImproperlyConfigured` as a recognised bare-literal sink (the exception
+`forms.py`'s route mixin raises, decisions.md D14), and gains a positional-placeholder check
+against `_`/`gettext_lazy`/`ngettext_lazy` calls — closing the gap that the pre-existing sweep
+never checked fields.py/checks.py for a positional placeholder at all, only for a bare literal.
+`views.py` carries no user-visible string of any kind, so its sweep entry stays green by having
+nothing to flag; `forms.py`'s one message (`_MISSING_ROUTE_MESSAGE`) is additionally checked at
+runtime for being a lazy translation, since it's referenced by name where it's raised and the AST
+sweep only inspects a call's own arguments. Both proof-of-catch tests were run against the
+extended visitor before the extension existed and failed for the right reason (the sink wasn't
+recognised yet) before passing after.
+
+The README gains a "Choosing a concept by typing" section: the three wiring steps in order
+(route include, `INSTALLED_APPS`, `MIDDLEWARE`), each check id that reports it missing, what a
+search returns, the no-default-permission-rule stance and the include as the restriction lever
+(decisions.md D3), and the JavaScript requirement. Six tests assert the README documents all of
+it, including that the three steps appear in that order. `CONTEXT.md` gains a **Concept search
+control** term and updates `ConceptField`'s stale `#88`-is-pending cross-reference to point at
+the delivered control. `CHANGELOG.md` records the addition and the new `django-tomselect` runtime
+dependency.
+
+**Deviation from the brief, resolved in favour of the shipped record.** T011's own brief listed a
+prohibition against documenting "a third wiring step" and instructed asserting the README
+documents "both" steps. `tasks.md`'s own T011 entry, `decisions.md` D15, and `spec.md`'s FR-002/
+FR-010/FR-014 (all amended during US-6) agree the shipped feature has three steps — the third,
+the middleware, is the one that fails silently rather than raising, which is exactly why D15
+exists as a decision record and not a line in a commit message. `checks.py` already ships
+`controlled_vocabularies.W004` and `tests/settings.py` already wires the middleware. Documented
+three steps, matching the code, `decisions.md`, and `tasks.md` rather than the brief's
+apparently-stale two-step instruction, per this task's own "the README describes what shipped,
+not what was planned" framing.
+
+Verified here: full suite 1298 green (was 1285 before T011; `test_standards.py` itself went from
+69 to 82, all thirteen new), `poetry run deptry .` clean, `makemigrations --check --dry-run`
+reports no changes, `poetry run pre-commit run --all-files` green on all eight hooks, `forge
+verify` green on all five steps. Both craft receipts (`craft-tdd/2026-08-05/eae3b6c7`,
+`craft-increments/2026-08-05/d3dce07f`) loaded and confirmed.
