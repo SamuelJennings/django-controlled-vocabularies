@@ -21,12 +21,31 @@ FR-009 promises nothing already guaranteed was taken away.
 
 import pytest
 from django import forms
+from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import ImproperlyConfigured
-from django.test import override_settings
+from django.test import RequestFactory, override_settings
+from django.utils import translation
+from django_tomselect.middleware import TomSelectMiddleware
 
 from controlled_vocabularies.forms import ConceptChoiceField, ConceptsChoiceField
-from tests.factories import ConceptFactory, ConceptSchemeFactory, OutcropFactory
+from tests.factories import ConceptFactory, ConceptSchemeFactory, OutcropFactory, SampleFactory
 from tests.testapp.models import Deposit, Outcrop, Sample
+
+
+def _rendered_under_an_ambient_request(build):
+    """Render ``build()`` (a callable returning the string to render) under an
+    ambient request, the way ``TomSelectMiddleware`` supplies one for every real
+    HTTP response. ``tests/settings.py`` installs no middleware, so nothing else
+    sets ``django_tomselect``'s thread-local request — without one,
+    ``TomSelectModelWidget.get_context()`` returns its base context before ever
+    reaching ``_get_selected_options()``: it requires ``request`` truthy and
+    ``validate_request(request)``, and the latter requires ``request.user``
+    (confirmed against the installed wheel, ``2026.6.2``, ``widgets.py:619-633``
+    and ``widgets.py:1093-1116``, not against the README).
+    """
+    request = RequestFactory().get("/")
+    request.user = AnonymousUser()
+    return TomSelectMiddleware(lambda r: build())(request)
 
 
 class SampleForm(forms.ModelForm):
@@ -164,3 +183,118 @@ class TestConceptFieldRenderingWithoutTheRouteIncluded:
         message = str(exc_info.value)
         assert "controlled_vocabularies.urls" in message
         assert "INSTALLED_APPS" in message
+
+
+@pytest.mark.django_db
+class TestConceptFieldShowsWhatARecordAlreadyHolds:
+    """T009, FR-008, plan.md A8, decisions.md D12: an existing record's attached
+    concept renders unrestricted, because A6 path two narrows
+    ``_ConceptWidgetValidationMixin.get_queryset()`` to the field's current
+    declaration and the library resolves already-selected values through that
+    same method (``widgets.py:965``). What a record already holds is displayed
+    unrestricted; what a submission newly contains is still validated against
+    the declaration — the validation path (T004) is untouched, and its own
+    refusal tests above still pass.
+
+    Both fields' shapes are covered independently: :class:`Sample`'s
+    ``mineral`` (the single-valued ``ConceptField``, ``ConceptWidget``) and
+    :class:`Outcrop`'s ``minerals`` (the multiple-valued ``ConceptsField``,
+    ``ConceptsWidget``). Each reaches the render through a different widget
+    class, so a property proved for one alone would leave the other free to
+    regress — the exact gap T008 found and repaired.
+    """
+
+    def test_a_concept_field_shows_the_attached_concept_under_its_active_language_label(self):
+        scheme = ConceptSchemeFactory(name="Mineral")
+        concept = ConceptFactory(scheme=scheme, multilingual=True, label="Quartz")
+        sample = SampleFactory(mineral=concept)
+
+        with translation.override("de"):
+            rendered = _rendered_under_an_ambient_request(lambda: str(SampleForm(instance=sample)))
+
+        assert concept.preferred_label("de") in rendered
+        assert "Quartz" not in rendered
+
+    def test_a_concepts_field_shows_every_attached_concept_under_its_active_language_label(self):
+        scheme = ConceptSchemeFactory(name="Mineral")
+        concepts = [ConceptFactory(scheme=scheme, multilingual=True, label=f"Concept {i}") for i in range(3)]
+        outcrop = OutcropFactory()
+        outcrop.minerals.add(*concepts)
+
+        with translation.override("de"):
+            rendered = _rendered_under_an_ambient_request(lambda: str(OutcropForm(instance=outcrop)))
+
+        for concept in concepts:
+            assert concept.preferred_label("de") in rendered
+
+    def test_submitting_the_concepts_field_form_untouched_leaves_all_three_attached(self):
+        scheme = ConceptSchemeFactory(name="Mineral")
+        concepts = [ConceptFactory(scheme=scheme, label=f"Concept {i}") for i in range(3)]
+        outcrop = OutcropFactory()
+        outcrop.minerals.add(*concepts)
+
+        form = OutcropForm(
+            data={"name": outcrop.name, "minerals": [concept.pk for concept in concepts]},
+            instance=outcrop,
+        )
+
+        assert form.is_valid(), form.errors
+        instance = form.save()
+        assert set(instance.minerals.values_list("pk", flat=True)) == {concept.pk for concept in concepts}
+
+    def test_removing_one_attached_concept_and_saving_removes_exactly_that_one(self):
+        scheme = ConceptSchemeFactory(name="Mineral")
+        concepts = [ConceptFactory(scheme=scheme, label=f"Concept {i}") for i in range(3)]
+        outcrop = OutcropFactory()
+        outcrop.minerals.add(*concepts)
+        kept = concepts[:2]
+
+        form = OutcropForm(
+            data={"name": outcrop.name, "minerals": [concept.pk for concept in kept]},
+            instance=outcrop,
+        )
+
+        assert form.is_valid(), form.errors
+        instance = form.save()
+        assert set(instance.minerals.values_list("pk", flat=True)) == {concept.pk for concept in kept}
+
+    def test_a_concept_field_still_shows_an_attached_concept_outside_the_current_vocabulary(self):
+        """The un-overridden widget drops this concept (plan.md A8, R1): the
+        record already holds it, but ``_get_selected_options()`` resolves it
+        through the same narrowed ``get_queryset()`` the validation path uses,
+        and this concept's scheme is not the field's declared vocabulary."""
+        outside_scheme = ConceptSchemeFactory(name="Rock Type")
+        outside_concept = ConceptFactory(scheme=outside_scheme, label="Basalt")
+        sample = SampleFactory(mineral=outside_concept)
+
+        rendered = _rendered_under_an_ambient_request(lambda: str(SampleForm(instance=sample)))
+
+        assert "Basalt" in rendered
+
+    def test_a_concepts_field_still_shows_an_attached_concept_outside_the_current_vocabulary(self):
+        """The multiple-valued field's own widget class, proved independently
+        (see the single-valued case above for why the un-overridden widget
+        drops it).
+
+        ``fields.py``'s ``_refuse_concepts_outside_vocabulary`` (an
+        ``m2m_changed`` receiver) refuses ``.add()``ing a concept outside the
+        vocabulary outright, by design (D2) — so unlike the single-valued
+        case above, a concept cannot be attached directly from a foreign
+        scheme. The realistic route to the same state is the one that
+        receiver does not — and, by its own docstring, is not meant to —
+        guard against: the concept is attached while still in-vocabulary,
+        then its *own* scheme is reassigned afterwards, exactly as an editor
+        recategorising a concept would leave it.
+        """
+        mineral_scheme = ConceptSchemeFactory(name="Mineral")
+        concept = ConceptFactory(scheme=mineral_scheme, label="Basalt")
+        outcrop = OutcropFactory()
+        outcrop.minerals.add(concept)
+
+        other_scheme = ConceptSchemeFactory(name="Rock Type")
+        concept.scheme = other_scheme
+        concept.save()
+
+        rendered = _rendered_under_an_ambient_request(lambda: str(OutcropForm(instance=outcrop)))
+
+        assert "Basalt" in rendered

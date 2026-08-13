@@ -24,6 +24,7 @@ from urllib.parse import urlencode
 
 from django.core.exceptions import ImproperlyConfigured
 from django.urls import NoReverseMatch
+from django.utils.html import escape
 from django.utils.translation import gettext_lazy as _
 from django_tomselect.app_settings import AllowedCSSFrameworks, TomSelectConfig
 from django_tomselect.forms import TomSelectModelChoiceField, TomSelectModelMultipleChoiceField
@@ -133,14 +134,73 @@ class _ConceptWidgetRouteMixin:
             raise ImproperlyConfigured(_MISSING_ROUTE_MESSAGE) from exc
 
 
+class _ConceptWidgetDisplayMixin:
+    """The two overrides T009 (FR-008, plan.md A8) requires for an
+    already-attached concept — the third path, kept apart from both restricted
+    ones (:class:`_ConceptWidgetValidationMixin` narrows what a *submission*
+    may newly contain; :class:`_ConceptWidgetReferenceMixin` carries only a
+    reference for *searching*). What a record already holds is displayed
+    unrestricted; this mixin is where that happens, and it touches neither of
+    the other two.
+
+    ``_get_selected_options()`` (``widgets.py:959``) is where the library
+    resolves an already-attached value into what the control renders as
+    selected, and it does so through ``self.get_queryset()`` —
+    :class:`_ConceptWidgetValidationMixin`'s narrowed queryset (D12) — so
+    without this override an attached concept whose vocabulary the field no
+    longer names would be silently dropped from the render, and the absence
+    saved back on the next submission (R1). The swap is scoped to this one
+    call: ``get_queryset`` is shadowed on the instance only for the duration
+    of the library's own ``_get_selected_options()`` and restored immediately
+    after in a ``finally``, so nothing else that reads ``self.get_queryset()``
+    — including validation — ever observes the unrestricted queryset.
+
+    ``get_label_for_object()`` (``widgets.py:1039``) is the other property
+    A8 calls out ("labels must come out as ``display_label()`` ... rather
+    than ``str(obj)``"). With ``label_field="display_label"``
+    (:func:`_config`), the library reads it straight off the model instance
+    with ``getattr(obj, "display_label")`` — and
+    :meth:`~controlled_vocabularies.models.Concept.display_label` is a
+    method, not a property, so unmodified this stringifies the *bound
+    method* rather than calling it. Confirmed against the installed wheel
+    (``2026.6.2``) with a real ``Concept`` instance: the rendered label came
+    out as ``"<bound method Concept.display_label of ...>"``, not a label.
+    T003's AJAX search path (``prepare_results()``) never hits this — it
+    builds a plain dict with ``"display_label"`` already a string — so this
+    only ever affects the already-selected render this mixin owns, and only
+    ``Concept`` instances ever reach it through this package's widgets.
+    """
+
+    def _get_selected_options(self, value, autocomplete_view):
+        unrestricted_get_queryset = self.get_queryset
+        self.get_queryset = lambda: Concept.objects.all()
+        try:
+            return super()._get_selected_options(value, autocomplete_view)
+        finally:
+            self.get_queryset = unrestricted_get_queryset
+
+    def get_label_for_object(self, obj, autocomplete_view):
+        if isinstance(obj, Concept):
+            return escape(obj.display_label())
+        return super().get_label_for_object(obj, autocomplete_view)
+
+
 class ConceptWidget(
-    _ConceptWidgetRouteMixin, _ConceptWidgetReferenceMixin, _ConceptWidgetValidationMixin, TomSelectModelWidget
+    _ConceptWidgetRouteMixin,
+    _ConceptWidgetReferenceMixin,
+    _ConceptWidgetValidationMixin,
+    _ConceptWidgetDisplayMixin,
+    TomSelectModelWidget,
 ):
     """The control :class:`ConceptChoiceField` renders (FR-001)."""
 
 
 class ConceptsWidget(
-    _ConceptWidgetRouteMixin, _ConceptWidgetReferenceMixin, _ConceptWidgetValidationMixin, TomSelectModelMultipleWidget
+    _ConceptWidgetRouteMixin,
+    _ConceptWidgetReferenceMixin,
+    _ConceptWidgetValidationMixin,
+    _ConceptWidgetDisplayMixin,
+    TomSelectModelMultipleWidget,
 ):
     """The control :class:`ConceptsChoiceField` renders (FR-001)."""
 
