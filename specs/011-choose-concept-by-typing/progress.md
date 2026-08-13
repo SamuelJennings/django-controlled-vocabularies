@@ -28,3 +28,9 @@ Branch `011-choose-concept-by-typing` pushed as the bot. Issue #88 promoted in p
 Approved in session, with one amendment to the run's direction: **django-tomselect is a
 recommendation, not a binding choice, and the research step decides.** `decisions.md` D1 updated
 accordingly. No changes requested to the specification itself.
+
+## Plan gate — restored to a real gate, 2026-08-13
+
+The maintainer asked to inspect the plan before implementation begins. For this run the plan
+notification is a **stop**, not a veto window: the run halts after the design review and waits for
+an explicit go-ahead before any story is implemented. Silence is not consent here.
