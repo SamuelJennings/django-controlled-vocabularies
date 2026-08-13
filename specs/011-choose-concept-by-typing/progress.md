@@ -88,3 +88,13 @@ test that catches it (T004, `form.is_valid()` on a legitimate concept) did not e
 draft of the task list.
 
 **Waiting at the plan gate.** Nothing is implemented and nothing will be until the maintainer says go.
+
+## Plan gate — APPROVED 2026-08-13 by Sam (SamuelJennings)
+
+Approved after inspection at the hard stop, with no changes requested. The approval covers D10,
+the one decision raised for him: a consuming project wires two entries rather than the one the
+specification promised at the spec gate — the route, and the supporting package among its
+installed applications. `spec.md`'s intake clarification carries the correction in place.
+
+Implementation begins. Stories are implemented by dispatched subagents on the Sonnet tier, one at
+a time, each in its own worktree, each verified here against evidence rather than assertion.

@@ -3,7 +3,7 @@
   "feature": "011-choose-concept-by-typing",
   "branch": "011-choose-concept-by-typing",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "PLAN",
+  "state": "IMPLEMENT",
   "state_history": [
     {
       "state": "INTAKE",
@@ -49,9 +49,9 @@
       ]
     },
     "plan": {
-      "approved_by": null,
-      "at": null,
-      "note": "HARD STOP for this run at Sam's instruction 2026-08-13 - silence is not consent, no story is implemented without an explicit go-ahead",
+      "approved_by": "SamuelJennings",
+      "at": "2026-08-13T13:00:00Z",
+      "note": "Approved in session after inspection at the hard stop; approval covers D10 (a project wires two entries, not one), which was the decision raised for him",
       "self_resolved": [
         "D7 django-tomselect adopted, evaluated against the wheel",
         "D8 both request-controlled surfaces closed explicitly against the library default",
@@ -59,10 +59,8 @@
         "D11 the field reference is a plain dotted path, not a signed token",
         "D12 the validation queryset comes from the widget, not the endpoint - corrects a critical design defect",
         "D13 Concept.label is not indexed for this feature, recorded under Article XIII",
-        "D14 a missing route reads the same at render time as at check time"
-      ],
-      "raised_for_decision": [
-        "D10 a project wires two entries, not one - amends a promise approved at the spec gate"
+        "D14 a missing route reads the same at render time as at check time",
+        "D10 accepted at the plan gate: a project adds the route and the supporting package to INSTALLED_APPS"
       ]
     },
     "design_review": {
