@@ -3,7 +3,7 @@
   "feature": "011-choose-concept-by-typing",
   "branch": "011-choose-concept-by-typing",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "REVIEW",
+  "state": "PR_READY",
   "state_history": [
     {
       "state": "INTAKE",
@@ -64,6 +64,11 @@
       "state": "REVIEW",
       "at": "2026-08-13T18:20:00Z",
       "note": "one reviewer, three lenses (spec-compliance, security, architecture); approve on all three, 2 low findings, 0 medium/high/critical so no fix cycle; SEC-001 accepted and recorded as D16 (the reference is published in the rendered widget HTML, so the timing oracle discloses nothing new), ARCH-001 rejected - the extraction is the S5 candidate, re-run here and mypy red with 4 errors; forge verify green on all five steps"
+    },
+    {
+      "state": "PR_READY",
+      "at": "2026-08-13T18:40:00Z",
+      "note": "PR #123 body rewritten to the contract and humanized, review report posted as a bot comment, US-4's title corrected for the third wiring step and the amendment recorded on #119; story-comment and issue-title gates green, last push actor is the bot, draft lifted; merge gate is Sam's"
     }
   ],
   "gates": {
@@ -411,6 +416,6 @@
   },
   "pr": {
     "number": 123,
-    "draft": true
+    "draft": false
   }
 }
