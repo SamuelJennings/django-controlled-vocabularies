@@ -1,8 +1,12 @@
-"""Import-contract test for the ``django-tomselect`` runtime dependency (T001, FR-015).
+"""Package-level checks whose subject is the installed package rather than one module.
 
-Article VIII pins compatibility to names rather than to a version: a later release of
-``django-tomselect`` that renames one of these symbols fails here, at the dependency
-boundary, rather than later at form render.
+Currently the import contract for the ``django-tomselect`` runtime dependency
+(T001, FR-015). Article VIII pins compatibility to names rather than to a version:
+a later release of ``django-tomselect`` that renames one of these symbols fails
+here, at the dependency boundary, rather than later at form render.
+
+Article X mirrors a test module onto a source module; ``test_smoke.py`` is the
+standing exception for a check that has no single source module to mirror.
 """
 
 from django.apps import apps
