@@ -76,7 +76,7 @@ alongside `views.py`/`forms.py`, which are the first code to import it (Article 
 | III — Anti-Abstraction | The `formfield()` override goes on the existing mixin because both fields share the `vocabulary` contract it derives from. No new base class. | Pass |
 | IV — Integration-First | Exercised through real `ModelForm`s built from the test app's existing consuming models and through real requests to the routed endpoint. | Pass |
 | V — Security & data-safety | The whole of A6, plus the two allowlists closed explicitly (D8). The endpoint carries no permission rule by design (D3), which the README states rather than implies. | Pass |
-| VI — Documentation | README gains both wiring steps, what the endpoint exposes, how to restrict it, and the browser requirement. `CONTEXT.md` gains the terms. CHANGELOG records the addition. | Pass |
+| VI — Documentation | README gains all three wiring steps (D15), what the endpoint exposes, how to restrict it, and the browser requirement. `CONTEXT.md` gains the terms. CHANGELOG records the addition. | Pass |
 | VII — Dependency discipline | One dependency, justified in D7 against the alternatives, declared alongside the code that imports it. It carries no transitive runtime packages, which is why deptry stays quiet. | Pass |
 | VIII — Compatibility | `django-tomselect` declares `django>=4.2.29` and Python `>=3.11,<4.0`, classifying 5.2 and 6.0 — wider than this package's floor on both axes, so it constrains nothing this package promises. The public names added (`ConceptChoiceField`, `ConceptsChoiceField`, the URL name) enter the API contract. | Pass |
 | IX — URI identity | The endpoint returns a concept's identifier and label. It creates nothing and changes nothing. | Pass |
@@ -282,7 +282,7 @@ both wiring steps, so the two paths give the same answer (D14).
 Assets are the dependency's, reached through Django's ordinary form-media mechanism — this package
 ships no JavaScript, no CSS and no template of its own, which is the cheapest way to satisfy FR-011
 and the one with nothing to maintain. Strings are wrapped with named placeholders. README gains the
-two wiring steps, what the endpoint exposes, how a project restricts access to it, and the
+three wiring steps (D15), what the endpoint exposes, how a project restricts access to it, and the
 JavaScript requirement. `CONTEXT.md` gains the terms. CHANGELOG records the addition, and the
 dependency is declared alongside `views.py`.
 

@@ -298,3 +298,60 @@ class TestConceptFieldShowsWhatARecordAlreadyHolds:
         rendered = _rendered_under_an_ambient_request(lambda: str(OutcropForm(instance=outcrop)))
 
         assert "Basalt" in rendered
+
+
+@pytest.mark.django_db
+class TestTheControlIsActuallyInstantiated:
+    """US-6 repair, decisions.md D15 — every other render assertion in this module
+    is about what the page does *not* carry (no concept labels, FR-003) or about
+    which form field class is bound (FR-001). None of them would notice the page
+    carrying no search control at all, which is exactly what a project missing
+    ``TomSelectMiddleware`` gets: ``get_context()`` returns its base context and
+    the ``<select>`` is rendered with no JavaScript to turn it into one.
+
+    Asserted for both widget classes, and asserted the other way round too — the
+    same render without the ambient request must NOT carry it, or the assertion
+    proves nothing about the middleware."""
+
+    @pytest.mark.parametrize("form_class", [SampleForm, DepositForm])
+    def test_the_page_carries_the_instantiated_control(self, form_class):
+        rendered = _rendered_under_an_ambient_request(lambda: str(form_class()))
+
+        assert "new TomSelect" in rendered
+
+    @pytest.mark.parametrize("form_class", [SampleForm, DepositForm])
+    def test_the_page_carries_no_control_without_the_ambient_request(self, form_class):
+        rendered = str(form_class())
+
+        assert "new TomSelect" not in rendered
+
+
+@pytest.mark.django_db
+class TestDisplayingAnAttachedConceptLeavesValidationNarrow:
+    """US-6 repair — ``_ConceptWidgetDisplayMixin`` widens ``get_queryset()`` for
+    the duration of one library call and must leave it exactly as it found it.
+    Without the restore, the same widget instance validates every later
+    submission against every concept, which is the leak D12 exists to prevent,
+    and no other test in the suite notices."""
+
+    @pytest.mark.parametrize(
+        ("form_class", "field_name", "instance_factory"),
+        [(SampleForm, "mineral", SampleFactory), (OutcropForm, "minerals", OutcropFactory)],
+    )
+    def test_the_widget_queryset_is_narrow_again_after_a_render(self, form_class, field_name, instance_factory):
+        mineral_scheme = ConceptSchemeFactory(name="Mineral")
+        attached = ConceptFactory(scheme=mineral_scheme)
+        foreign = ConceptFactory(scheme=ConceptSchemeFactory(name="Rock Type"))
+        instance = instance_factory()
+        if field_name == "mineral":
+            instance.mineral = attached
+            instance.save()
+        else:
+            instance.minerals.add(attached)
+
+        form = form_class(instance=instance)
+        widget = form.fields[field_name].widget
+        _rendered_under_an_ambient_request(lambda: str(form))
+
+        assert "get_queryset" not in widget.__dict__
+        assert not widget.get_queryset().filter(pk=foreign.pk).exists()

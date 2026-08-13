@@ -190,6 +190,38 @@ one and not the other is told, at check time, before a page is ever rendered. FR
 User Story 4 are amended to describe two steps. This is recorded here rather than absorbed quietly
 because the maintainer read and approved the one-step promise.
 
+## D15 — A project wires three things, and the third one fails silently
+
+**Status:** self-resolved during implementation, amends the requirement D10 already amended.
+**Raised at US-6.**
+
+D10 corrected one wiring step to two. It is three. The third is
+`django_tomselect.middleware.TomSelectMiddleware` in the project's `MIDDLEWARE`.
+
+The dependency's widget builds the context that carries the control — the script that turns the
+`<select>` into a search-as-you-type box — only when its own thread-local request is set, and
+`TomSelectMiddleware` is the only thing in the package that ever sets it (`middleware.py` holds the
+sole assignment to `_request_local`). Without it, `TomSelectModelWidget.get_context()` takes the
+early return at `widgets.py:626-629` and hands back its base context.
+
+Measured on this package's own `SampleForm`, against the installed wheel: 36,232 characters
+rendered without the middleware against 67,519 with it, and the string `new TomSelect(` — the
+instantiation itself — absent from the first and present in the second. A project that wires the
+two steps D10 names gets an empty `<select>` and no error of any kind.
+
+This one was found because T009 could not test its own subject without it, not because anything
+failed. Nothing fails: no exception, no warning, no log line above debug level. That is what makes
+it worth a decision record rather than a line in a commit message. It also means every render
+assertion this feature had written until now was made against the degraded context, so none of them
+would have noticed the control missing — `tests/test_forms.py` now asserts the instantiation is
+present under an ambient request and absent without one, so the two states are distinguished rather
+than assumed.
+
+The remedy matches D10's: a third system check (`controlled_vocabularies.W004`) naming the exact
+entry to add, so the step is discoverable at check time rather than remembered. `tests/settings.py`
+now wires the middleware, so the test project matches a correctly wired real one. FR-002, FR-010,
+FR-014 and User Story 4 are amended to describe three steps.
+
 ## D11 — The field reference is a plain dotted path, not a signed token
 
 **Status:** self-resolved.

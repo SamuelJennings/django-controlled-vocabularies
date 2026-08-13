@@ -151,9 +151,10 @@ class _ConceptWidgetDisplayMixin:
     longer names would be silently dropped from the render, and the absence
     saved back on the next submission (R1). The swap is scoped to this one
     call: ``get_queryset`` is shadowed on the instance only for the duration
-    of the library's own ``_get_selected_options()`` and restored immediately
-    after in a ``finally``, so nothing else that reads ``self.get_queryset()``
-    — including validation — ever observes the unrestricted queryset.
+    of the library's own ``_get_selected_options()`` and the shadow is deleted
+    in a ``finally``, leaving the instance exactly as it was found, so nothing
+    else that reads ``self.get_queryset()`` — including validation — ever
+    observes the unrestricted queryset.
 
     ``get_label_for_object()`` (``widgets.py:1039``) is the other property
     A8 calls out ("labels must come out as ``display_label()`` ... rather
@@ -172,12 +173,11 @@ class _ConceptWidgetDisplayMixin:
     """
 
     def _get_selected_options(self, value, autocomplete_view):
-        unrestricted_get_queryset = self.get_queryset
         self.get_queryset = lambda: Concept.objects.all()
         try:
             return super()._get_selected_options(value, autocomplete_view)
         finally:
-            self.get_queryset = unrestricted_get_queryset
+            del self.get_queryset
 
     def get_label_for_object(self, obj, autocomplete_view):
         if isinstance(obj, Concept):

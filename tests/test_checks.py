@@ -18,10 +18,12 @@ from django.test.utils import CaptureQueriesContext
 from controlled_vocabularies.checks import (
     CHECK_ID,
     CHECK_ID_MISSING_INSTALLED_APP,
+    CHECK_ID_MISSING_MIDDLEWARE,
     CHECK_ID_MISSING_ROUTE,
     check_concept_autocomplete_route_included,
     check_concept_field_vocabularies,
     check_django_tomselect_installed,
+    check_tomselect_middleware_installed,
 )
 from tests.factories import ConceptSchemeFactory
 from tests.testapp.models import Specimen
@@ -327,3 +329,57 @@ class TestBothWiringChecksReachManageCheck:
         call_command("check", stderr=stderr)
 
         assert CHECK_ID_MISSING_INSTALLED_APP not in stderr.getvalue()
+
+
+class TestCheckTomselectMiddlewareInstalled:
+    """US-6 repair — the third wiring step (decisions.md D15). Without
+    ``TomSelectMiddleware`` the widget renders an empty select carrying no
+    control, and nothing raises, so this check is the only report of it.
+    ``settings.MIDDLEWARE`` is read directly, so it never touches the database."""
+
+    def test_warns_when_the_middleware_is_not_installed(self):
+        with override_settings(MIDDLEWARE=[]):
+            warnings = check_tomselect_middleware_installed(None)
+
+        assert len(warnings) == 1
+        warning = warnings[0]
+        assert warning.id == CHECK_ID_MISSING_MIDDLEWARE
+        message = f"{warning.msg} {warning.hint}"
+        assert "django_tomselect.middleware.TomSelectMiddleware" in message
+
+    def test_absent_when_the_middleware_is_installed(self):
+        warnings = check_tomselect_middleware_installed(None)
+
+        assert warnings == []
+
+    def test_reported_objects_are_warnings_not_errors(self):
+        with override_settings(MIDDLEWARE=[]):
+            warnings = check_tomselect_middleware_installed(None)
+
+        assert warnings
+        for warning in warnings:
+            assert isinstance(warning, django_checks.Warning)
+
+    @pytest.mark.django_db
+    def test_runs_without_touching_the_database(self, django_assert_num_queries):
+        with override_settings(MIDDLEWARE=[]), django_assert_num_queries(0):
+            check_tomselect_middleware_installed(None)
+
+
+@pytest.mark.django_db
+class TestTheMiddlewareCheckReachesManageCheck:
+    """US-6 repair — same reasoning as :class:`TestBothWiringChecksReachManageCheck`:
+    a check nobody registered reports nothing, whatever it returns."""
+
+    def test_the_missing_middleware_is_reported_by_manage_check(self):
+        stderr = io.StringIO()
+        with override_settings(MIDDLEWARE=[]):
+            call_command("check", stderr=stderr)
+
+        assert CHECK_ID_MISSING_MIDDLEWARE in stderr.getvalue()
+
+    def test_the_missing_middleware_is_absent_from_manage_check_once_installed(self):
+        stderr = io.StringIO()
+        call_command("check", stderr=stderr)
+
+        assert CHECK_ID_MISSING_MIDDLEWARE not in stderr.getvalue()

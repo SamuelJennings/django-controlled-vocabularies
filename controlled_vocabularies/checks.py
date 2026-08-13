@@ -9,6 +9,7 @@ useful.
 """
 
 from django.apps import apps
+from django.conf import settings
 from django.core import checks
 from django.db import DatabaseError
 from django.urls import NoReverseMatch, reverse
@@ -20,6 +21,11 @@ from .models import ConceptScheme
 CHECK_ID = "controlled_vocabularies.W001"
 CHECK_ID_MISSING_ROUTE = "controlled_vocabularies.W002"
 CHECK_ID_MISSING_INSTALLED_APP = "controlled_vocabularies.W003"
+CHECK_ID_MISSING_MIDDLEWARE = "controlled_vocabularies.W004"
+
+#: The middleware the control's widget needs on the page (``forms.py``). Named
+#: once here for the same reason as :data:`AUTOCOMPLETE_URL_NAME`.
+TOMSELECT_MIDDLEWARE = "django_tomselect.middleware.TomSelectMiddleware"
 
 #: The name the control's widget reverses at render time (``forms.py``'s
 #: ``_config()``). Named once here so the check and the widget cannot drift
@@ -114,5 +120,37 @@ def check_django_tomselect_installed(app_configs, **kwargs):
             _("django_tomselect is not in the project's INSTALLED_APPS."),
             hint=_('Add "django_tomselect" to INSTALLED_APPS.'),
             id=CHECK_ID_MISSING_INSTALLED_APP,
+        )
+    ]
+
+
+def check_tomselect_middleware_installed(app_configs, **kwargs):
+    """Warn when ``TomSelectMiddleware`` is not in the project's ``MIDDLEWARE``
+    (FR-002, FR-010, ``decisions.md`` D10, D15).
+
+    The third wiring step, and the one that fails most quietly. The control's
+    widget builds its full context — the part carrying the JavaScript that turns
+    the ``<select>`` into a search-as-you-type box — only when
+    ``django_tomselect``'s thread-local request is set, and only this middleware
+    ever sets it (``middleware.py``, the sole assignment to ``_request_local``).
+    Without it, ``TomSelectModelWidget.get_context()`` returns its base context
+    (``widgets.py:626-629``), which renders an empty ``<select>`` carrying no
+    control at all: measured on this package's own form at 36,232 characters
+    against 67,519 with the middleware present, and with no ``new TomSelect(``
+    anywhere in the page.
+
+    Nothing raises in that state, so the check is the only thing that reports it.
+    Reads ``settings.MIDDLEWARE`` only, so it never queries the database.
+    """
+    if TOMSELECT_MIDDLEWARE in settings.MIDDLEWARE:
+        return []
+    return [
+        checks.Warning(
+            _("django_tomselect's TomSelectMiddleware is not in the project's MIDDLEWARE."),
+            hint=_(
+                'Add "django_tomselect.middleware.TomSelectMiddleware" to MIDDLEWARE. Without it '
+                "the concept field renders as an empty select carrying no search control."
+            ),
+            id=CHECK_ID_MISSING_MIDDLEWARE,
         )
     ]

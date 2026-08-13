@@ -211,3 +211,48 @@ shape: a mechanism covered only where it is reached one way.
   class fails on its own.
 
 Both mutations now fail at least one test. Five tests added, 1254 → 1259.
+
+## S4 IMPLEMENT — US-6 (#121), 2026-08-13
+
+T009 accepted (`6f592bf`, plus the repair below). A record's already-attached concepts render under
+their active-language preferred labels, including a concept whose vocabulary the declaration no
+longer names — the case A8 calls the one a plausible implementation gets wrong silently, written
+against the un-overridden widget and watched to fail first. `_ConceptWidgetDisplayMixin` is the
+third path, deliberately unrestricted, and it leaves the other two alone: what a record holds is
+displayed, what a submission newly contains is still validated against the declaration.
+
+The implementer found a second wheel defect on the way: with `label_field="display_label"`, the
+library reads the attribute off the instance with `getattr()`, and `Concept.display_label` is a
+method rather than a property, so an unmodified render stringifies the bound method. Fixed in the
+same mixin and probed independently of the queryset swap.
+
+Verified here rather than accepted: full suite 1277 green after the repair, `forge verify` green on
+all five steps, both craft receipts confirmed against the registry.
+
+**The story turned up a third wiring step, and it is the one that fails silently — D15.** The
+implementer could not test its own subject without an ambient request, and reported that as test
+scaffolding. It is not scaffolding. `django_tomselect` builds the context carrying the control only
+when its thread-local request is set, and `TomSelectMiddleware` is the only thing that sets it.
+Measured on `SampleForm` against the wheel: 36,232 characters rendered without the middleware
+against 67,519 with it, and `new TomSelect(` — the instantiation — absent from the first. A project
+that wires the two steps D10 names gets an empty `<select>`, no control, and no error of any kind.
+
+Consequence for this feature's own evidence: every render assertion written before this one was made
+against the degraded context, so none of them would have noticed the control missing. Two tests now
+assert the instantiation is present under an ambient request and absent without one, for both widget
+classes, so the two states are distinguished rather than assumed. A third system check
+(`controlled_vocabularies.W004`) names the entry to add, `tests/settings.py` wires the middleware so
+the test project matches a correctly wired one, and FR-002, FR-010, FR-014 and User Story 4 are
+amended to three steps.
+
+**Two more mutation probes of mine, on mechanisms the implementer's four did not name.**
+
+- **The queryset restoration was uncovered.** Deleting the `finally` that undoes the mixin's
+  temporary widening left all 1265 tests green, so the same widget instance would have validated
+  every later submission against every concept — exactly the leak D12 exists to prevent. The
+  restoration is now a `del` of the instance shadow rather than a reassignment, which leaves no
+  residue for `deepcopy` to carry into another widget, and a test asserts both that nothing is left
+  behind and that the queryset is narrow again.
+- **The third check** is covered the way the other two are: present when the middleware is missing,
+  absent when it is there, a warning rather than an error, no queries, and reported through
+  `call_command("check")` rather than only called directly.

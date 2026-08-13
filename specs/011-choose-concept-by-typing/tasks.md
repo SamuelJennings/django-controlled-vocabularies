@@ -218,8 +218,8 @@ because it documents what the others built.
 
   Test first, extending `tests/test_standards.py`'s existing sweep to cover `views.py`, `forms.py`
   and the new check messages: no user-visible string is a bare literal, and every placeholder is
-  named. Assert the README documents both steps by name — the second one is the one a reader is most
-  likely to be missing.
+  named. Assert the README documents all three steps by name (D15 added the middleware) — the ones
+  after the first are those a reader is most likely to be missing.
 
   The README is public markdown and goes through the humanizer pass before it lands.
 
