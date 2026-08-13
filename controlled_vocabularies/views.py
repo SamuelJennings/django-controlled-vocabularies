@@ -8,9 +8,18 @@ belongs to (FR-005, FR-012) — not the editorial notes or hidden/alternative
 labels the concept also holds.
 """
 
+from django.conf import settings
+from django.db.models import Q, QuerySet
+from django.utils.translation import get_language
 from django_tomselect.autocompletes import AutocompleteModelView
 
-from .models import Concept
+from .models import Concept, ConceptLabel
+
+#: The label kinds a typed string matches against, in the active language
+#: (FR-004, plan.md A4). The default-language preferred label — every
+#: concept's own ``label`` column — is matched separately, unconditional on
+#: the active language.
+_SEARCHED_LABEL_KINDS = [ConceptLabel.Kind.PREFERRED, ConceptLabel.Kind.ALTERNATIVE, ConceptLabel.Kind.HIDDEN]
 
 
 class ConceptAutocompleteView(AutocompleteModelView):
@@ -24,6 +33,27 @@ class ConceptAutocompleteView(AutocompleteModelView):
     allowed_ordering_fields = []
     value_fields = ["id"]
     virtual_fields = ["display_label", "vocabulary"]
+
+    def search(self, queryset: QuerySet, query: str) -> QuerySet:
+        """Match ``query`` against a concept's names (FR-004, plan.md A4).
+
+        Replaces the base ``search_lookups`` mechanism, left empty because it
+        expresses one flat list of ORM lookups and cannot express "the active
+        language's labels, of three kinds, or the default-language column".
+        ``query`` is exactly what the base view's ``get_queryset()`` already
+        extracted from the request (``autocompletes.py:396``) — nothing else
+        is read off the request here (decisions.md D8). ``icontains`` gives
+        case-insensitivity portably and folds no accents (decisions.md D4).
+        ``.distinct()`` is what makes a concept matching on several of its
+        labels appear once (FR-004).
+        """
+        if not query:
+            return queryset
+        active_language = get_language() or settings.LANGUAGE_CODE
+        return queryset.filter(
+            Q(label__icontains=query)
+            | Q(labels__language=active_language, labels__kind__in=_SEARCHED_LABEL_KINDS, labels__text__icontains=query)
+        ).distinct()
 
     def hook_queryset(self, queryset):
         """Attach what ``prepare_results()`` needs before filtering, searching and
