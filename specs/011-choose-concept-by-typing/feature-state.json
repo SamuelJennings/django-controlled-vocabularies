@@ -125,13 +125,45 @@
       "tasks": [
         {
           "id": "T003",
-          "status": "pending",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_views.py::TestConceptAutocompleteResults::test_a_result_carries_exactly_the_id_display_label_and_vocabulary",
+              "tests/test_views.py::TestConceptAutocompleteResults::test_a_full_page_of_concepts_with_labels_and_notes_costs_a_bounded_query_count"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_views.py -q  # RED: 2 failed (extra can_view/can_update/can_delete keys; 2 queries done, 3 expected)",
+              "poetry run pytest tests/test_views.py -q  # GREEN: 2 passed",
+              "poetry run pytest tests/test_urls.py -q  # 2 passed (T002 regression check)",
+              "DJANGO_SETTINGS_MODULE=tests.settings poetry run python -m django makemigrations --check --dry-run  # No changes detected",
+              "poetry run pre-commit run --files controlled_vocabularies/views.py tests/test_views.py"
+            ]
+          }
         },
         {
           "id": "T004",
-          "status": "pending",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_forms.py::TestConceptFieldRendersAsTheControl::test_a_concept_field_binds_this_packages_form_field_and_widget",
+              "tests/test_forms.py::TestConceptFieldRendersAsTheControl::test_a_concepts_field_binds_this_packages_form_field_and_widget",
+              "tests/test_forms.py::TestConceptFieldRenderingIsBoundedByVocabularySize::test_rendered_length_and_absence_of_labels_hold_for_a_small_vocabulary",
+              "tests/test_forms.py::TestConceptFieldRenderingIsBoundedByVocabularySize::test_rendered_length_is_identical_for_a_large_vocabulary",
+              "tests/test_forms.py::TestConceptFieldSubmissionSurvives::test_a_legitimate_concept_is_valid_and_saves_for_a_concept_field",
+              "tests/test_forms.py::TestConceptFieldSubmissionSurvives::test_a_foreign_concept_is_still_refused_for_a_concept_field",
+              "tests/test_forms.py::TestConceptFieldSubmissionSurvives::test_a_legitimate_concept_is_valid_and_saves_for_a_concepts_field",
+              "tests/test_forms.py::TestConceptFieldSubmissionSurvives::test_a_foreign_concept_is_still_refused_for_a_concepts_field"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_forms.py -q  # RED: ModuleNotFoundError: no module named controlled_vocabularies.forms",
+              "poetry run pytest tests/test_forms.py -q  # RED: 2 failed on the D12 submission assertions (invalid_choice) after forms.py/formfield() landed, before the widget's get_queryset() override",
+              "poetry run pytest tests/test_forms.py tests/test_fields.py -q  # GREEN: 181 passed",
+              "DJANGO_SETTINGS_MODULE=tests.settings poetry run python -m django makemigrations --check --dry-run  # No changes detected",
+              "poetry run pre-commit run --files controlled_vocabularies/fields.py controlled_vocabularies/forms.py tests/test_forms.py"
+            ]
+          }
         }
       ]
     },
