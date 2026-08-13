@@ -31,6 +31,8 @@ The research step names the choice with its evidence. If it lands anywhere other
 recommended candidate, that goes to the maintainer with the reasoning rather than being decided
 quietly, because he named a starting point and is owed the result.
 
+**ADR:** none — a record of what the maintainer preferred at intake, not a rule the package abides by. D7 settles it, and carries the ADR.
+
 ## D2 — Matching does not cover notation, though intake agreed it would
 
 **Status:** self-resolved, corrects an intake answer.
@@ -45,6 +47,8 @@ A requirement to match on a value no record holds is untestable and would be qui
 specification therefore covers the three kinds of label, and the correction is recorded in
 `spec.md`'s clarifications rather than left as a silent narrowing of what was agreed. Notation
 joins the search when a concept can carry one, which is the feature that adds it.
+
+**ADR:** none — a correction to one requirement's scope; nothing downstream inherits it. It reopens when a concept can hold a notation.
 
 ## D3 — The search endpoint carries no permission rule by default
 
@@ -65,6 +69,8 @@ Article V's "auth/authz is never fast-lane work" is honoured by naming the decis
 putting it in front of the maintainer at the spec gate, rather than by inventing a permission
 model this package has no basis to define.
 
+**ADR:** docs/adr/0008-the-concept-search-endpoint-carries-no-permission-rule.md
+
 ## D4 — Accent folding is not promised
 
 **Status:** self-resolved.
@@ -74,6 +80,8 @@ than one database, so a promise of accent-insensitivity either holds on one and 
 forces a portable implementation nobody has asked for. Case-insensitivity is portable and is
 promised. The specification says which is which rather than staying silent and letting a consumer
 infer either.
+
+**ADR:** none — a statement about one search's collation behaviour, sealed inside the endpoint.
 
 ## D5 — Ordering of results is stable, not relevance-ranked
 
@@ -86,6 +94,8 @@ the paging guarantee harder to state and to test. A stable order that a person c
 the guarantee this feature makes. If ranking is wanted, it arrives with R6 or R7, where searching
 across vocabularies is the subject rather than a means.
 
+**ADR:** none — local to this endpoint's ordering; R6/R7 own ranking if it is ever wanted.
+
 ## D6 — The missing route is reported by the existing system check
 
 **Status:** self-resolved.
@@ -95,6 +105,8 @@ the database does not hold. Adding the missing-route report to it rather than in
 mechanism keeps one place a developer looks, and matches how the absent-vocabulary case was handled
 for the delivered fields. It stays a warning for the same reason that one is: a project mid-setup,
 or one whose forms are not yet wired, is not broken.
+
+**ADR:** none — reuses the mechanism the package already has, so there is no new convention to abide by.
 
 ## D7 — django-tomselect is adopted, and the evaluation was run against the wheel
 
@@ -129,6 +141,8 @@ on GitHub. Every API fact the plan depends on was re-checked against the publish
 `django_tomselect-2026.6.2-py3-none-any.whl`, because a plan built on a default branch is a plan
 built on code nobody will install. D8, D9 and D10 are what that re-check changed.
 
+**ADR:** docs/adr/0009-the-search-control-is-a-dependency-the-vocabulary-logic-is-not.md
+
 ## D8 — Both request-controlled surfaces are closed explicitly, against the library's default
 
 **Status:** self-resolved.
@@ -155,6 +169,8 @@ view's own order. The original wording asked for both to be "unchanged from the 
 them", which is true of the second and false of the first, and a test written to it would have failed
 on a guard that was working correctly.
 
+**ADR:** none — the concrete closing of this library's two allowlists; the rule it serves is recorded in docs/adr/0010-a-restriction-is-derived-on-every-path-not-carried-on-one.md.
+
 ## D9 — The endpoint-ownership requirement is met, and the research flag is resolved rather than carried
 
 **Status:** self-resolved, closes a flag `research.md` raised.
@@ -168,6 +184,8 @@ configuration of its own is precisely what leaves this package free to ship one.
 So this package carries `controlled_vocabularies/urls.py`, a project includes it once under a prefix
 of its own choosing, and the control resolves the URL *name* rather than a path. The requirement is
 met as written. The flag was a real thing to check and the answer is that it does not bind.
+
+**ADR:** none — resolves a research flag. What it confirms is FR-002 as already written, not a new decision.
 
 ## D10 — A project wires two things, not one, and the spec is amended to say so
 
@@ -189,6 +207,8 @@ missing `INSTALLED_APPS` entry the same way it reports a missing route, so a pro
 one and not the other is told, at check time, before a page is ever rendered. FR-002, FR-014 and
 User Story 4 are amended to describe two steps. This is recorded here rather than absorbed quietly
 because the maintainer read and approved the one-step promise.
+
+**ADR:** none — an installation step, carried by the README and a system check. The wiring it describes is stated in docs/adr/0009-the-search-control-is-a-dependency-the-vocabulary-logic-is-not.md.
 
 ## D15 — A project wires three things, and the third one fails silently
 
@@ -222,6 +242,8 @@ entry to add, so the step is discoverable at check time rather than remembered. 
 now wires the middleware, so the test project matches a correctly wired real one. FR-002, FR-010,
 FR-014 and User Story 4 are amended to describe three steps.
 
+**ADR:** none — the same installation step as D10, corrected. Its durable part is the system check and the README, both of which shipped.
+
 ## D11 — The field reference is a plain dotted path, not a signed token
 
 **Status:** self-resolved.
@@ -241,6 +263,8 @@ already achieves nothing.
 The reason to record this rather than simply not do it is that "the browser sends an identifier, so
 sign it" is a reasonable-sounding review comment, and the answer is a property of FR-006's design
 rather than an oversight.
+
+**ADR:** none — its substance (the reference names a declaration, carries no restriction, and is deliberately unsigned) is recorded in docs/adr/0010-a-restriction-is-derived-on-every-path-not-carried-on-one.md.
 
 ## D12 — The form's validation queryset comes from the widget, not from the endpoint
 
@@ -277,6 +301,8 @@ The general shape is worth keeping. A restriction carried on the request path is
 other path, and a fail-closed default turns that invisibility into a total outage rather than a
 quiet hole. The reviewer found it by reading the library's `clean()` rather than its documentation.
 
+**ADR:** docs/adr/0010-a-restriction-is-derived-on-every-path-not-carried-on-one.md
+
 ## D13 — `Concept.label` is not indexed for this feature
 
 **Status:** self-resolved, recorded under Article XIII.
@@ -296,6 +322,8 @@ What would change it: a measured page-fetch cost on a real vocabulary, or a requ
 by `label` without narrowing first. R7 owns the scale work and is where a benchmark belongs. The
 composite index is the answer if one is ever needed, not `db_index=True`.
 
+**ADR:** none — an Article XIII record about one column and one ordering path. R7 owns the measurement that would change it.
+
 ## D14 — A missing route reads the same at render time as at check time
 
 **Status:** self-resolved.
@@ -310,3 +338,5 @@ This package's widget catches it and raises `ImproperlyConfigured` naming both s
 was to narrow the spec's wording to the check path only, which would have been honest and left a
 developer reading a traceback about a reverse match they never wrote. One `try`/`except` is cheaper
 than that.
+
+**ADR:** none — one try/except that improves a message, sealed inside this package's widget.
