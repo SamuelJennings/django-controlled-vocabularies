@@ -66,7 +66,12 @@ class TestConceptAutocompleteSearch:
     """A typed string matches a concept by any of its labels, in the active
     language (FR-004, User Story 2). Every case is displayed under the
     concept's preferred label for the active language, whichever label the
-    match was made on (FR-005)."""
+    match was made on (FR-005).
+
+    Each search fragment is one no other clause of the filter can match: a
+    fragment that is also a substring of the default-language ``label``
+    column passes whether or not the label kind under test is searched at
+    all, which is a test that asserts nothing about its own scenario."""
 
     @pytest.mark.django_db
     def test_a_fragment_of_an_alternative_label_finds_the_concept_by_its_preferred_label(self):
@@ -83,10 +88,10 @@ class TestConceptAutocompleteSearch:
     @pytest.mark.django_db
     def test_a_fragment_of_a_hidden_label_finds_the_concept_by_its_preferred_label(self):
         concept = ConceptFactory(label="Granite")
-        concept.add_label(language="en", kind="hidden", text="granit")
+        concept.add_label(language="en", kind="hidden", text="granyte")
         ConceptFactory(label="Basalt")
 
-        response = Client().get(reverse("controlled_vocabularies:concept-autocomplete"), {"q": "granit"})
+        response = Client().get(reverse("controlled_vocabularies:concept-autocomplete"), {"q": "granyte"})
 
         body = json.loads(response.content)
         assert [result["id"] for result in body["results"]] == [concept.pk]
@@ -96,12 +101,12 @@ class TestConceptAutocompleteSearch:
     def test_a_fragment_of_either_the_active_or_default_language_preferred_label_finds_the_concept_by_the_active_one(
         self,
     ):
-        concept = ConceptFactory(label="Granite", multilingual=True, german_label__text="Granit")
+        concept = ConceptFactory(label="Granite", multilingual=True, german_label__text="Granitgestein")
         ConceptFactory(label="Basalt", multilingual=True, german_label__text="Basalt")
 
         with translation.override("de"):
             by_active_language = Client().get(
-                reverse("controlled_vocabularies:concept-autocomplete"), {"q": "Granit"}
+                reverse("controlled_vocabularies:concept-autocomplete"), {"q": "gestein"}
             )
             by_default_language = Client().get(
                 reverse("controlled_vocabularies:concept-autocomplete"), {"q": "Granite"}
@@ -110,7 +115,7 @@ class TestConceptAutocompleteSearch:
         for response in (by_active_language, by_default_language):
             body = json.loads(response.content)
             assert [result["id"] for result in body["results"]] == [concept.pk]
-            assert body["results"][0]["display_label"] == "Granit"
+            assert body["results"][0]["display_label"] == "Granitgestein"
 
     @pytest.mark.django_db
     def test_a_concept_with_no_active_language_labels_is_found_and_shown_by_its_default_label(self):
