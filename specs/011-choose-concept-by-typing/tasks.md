@@ -9,6 +9,13 @@ the same task. Task ids are stable and never reused.
 cites in `django_tomselect` was read from the published wheel `2026.6.2`, not from the project's
 default branch. Where the two differ the wheel wins, because the wheel is what a project installs.
 
+**Design review changed four of these tasks.** T004 now carries the widget's validation queryset and
+the assertion that proves a submission survives, T003 and T006 use `hook_queryset()` rather than
+overriding `get_queryset()`, T007's allowlist assertion is rewritten to match how the library
+actually refuses, and T009's override is required rather than contingent. The reasons are `decisions.md`
+D8 (amended), D12, D13 and D14. A task that reverts to the earlier wording reintroduces a defect that
+was found before any code was written.
+
 **One pre-existing test module is modified**, `tests/test_checks.py`, and only extended (T008). Any
 other task that finds itself editing an existing test has got the change wrong: this feature adds
 `views.py`, `forms.py` and `urls.py`, adds one method to `fields.py`'s mixin, and adds two warnings
@@ -61,8 +68,11 @@ because it documents what the others built.
 - **T003** — Results carry the concept, its preferred label and its vocabulary (FR-005, FR-012).
 
   `virtual_fields = ["display_label", "vocabulary"]` and a `prepare_results()` override reading
-  `Concept.display_label()` and the scheme's label. `get_queryset()` gains
-  `select_related("scheme")` and `prefetch_related("labels")`.
+  `Concept.display_label()` and the scheme's label. `hook_queryset()` gains
+  `select_related("scheme")` and `prefetch_related("labels")` — the library's documented extension
+  point, run before filtering, searching and ordering. **No task overrides `get_queryset()` on the
+  view**; doing so makes this package responsible for re-chaining the allowlist enforcement, the
+  search and the ordering it inherits.
 
   Test first, in `tests/test_views.py`: a result carries exactly the identifier, the preferred label
   and the vocabulary, and **carries none of** the editorial notes, definitions or hidden labels the
@@ -73,9 +83,16 @@ because it documents what the others built.
 - **T004** — Both fields render as the control, with nothing declared (FR-001, FR-003, FR-009).
 
   Create `controlled_vocabularies/forms.py` with `ConceptChoiceField`, `ConceptsChoiceField` and
-  their two widgets (the widgets are empty subclasses at this task; T006 gives them their override).
-  Add `formfield()` to `ConceptFieldMixin` in `fields.py`, returning them with `css_framework` pinned
-  to the framework-free default and every kwarg Django supplies passed through.
+  their two widgets. Add `formfield()` to `ConceptFieldMixin` in `fields.py`, returning them with
+  `css_framework` pinned to the framework-free default and every kwarg Django supplies passed
+  through, and giving the widget the model field instance it needs for its own `get_queryset()`.
+
+  **The widget's `get_queryset()` override lands here, not in T006** (plan A6 path two, D12). It
+  returns `Concept.objects.complex_filter(field.get_limit_choices_to())` built from that model field
+  instance, with no request consulted. Without it the library resolves the validation queryset
+  through the endpoint and an ambient request that carries no field reference during a POST, and
+  every submission fails with `invalid_choice`. The submission assertions below are what catch that,
+  so they are not optional colour on this task — they are its point.
 
   Test first, in `tests/test_forms.py`: build an ordinary `ModelForm` from the test app's existing
   consuming models — no widget declared, no form field declared — and assert the bound widget is this
@@ -84,6 +101,9 @@ because it documents what the others built.
   concept's label appears in the output. Then assert a submitted form still saves the record with the
   concept attached, for both the single- and multiple-value field, and that a foreign concept is
   still refused — FR-009 is a promise that nothing was taken away, so it needs the assertion.
+  Assert `form.is_valid()` is `True` on the first of those, before asserting the save: an
+  `invalid_choice` on a legitimate concept is the exact failure D12 exists to prevent, and a test
+  that only checks the record afterwards reports it as a mysteriously absent row.
 
 ## US-2 — Found by any of its names, shown by one (#117)
 
@@ -103,8 +123,10 @@ because it documents what the others built.
 
 - **T006** — The restriction is derived from the declaration (FR-006).
 
-  The widget override sending `field=<app_label>.<model>.<field_name>`, and `get_queryset()`
-  resolving it and applying `complex_filter(field.get_limit_choices_to())`.
+  The widget override sending `field=<app_label>.<model>.<field_name>`, and `hook_queryset()`
+  resolving it and applying `complex_filter(field.get_limit_choices_to())`. This is the **search**
+  path only — the validation path is T004's widget `get_queryset()` and is already in place by the
+  time this task runs (D12).
 
   Test first, in `tests/test_views.py`, with three vocabularies in the database and a search string
   matching concepts in all three:
@@ -126,37 +148,49 @@ because it documents what the others built.
   to one another and to a search that simply matched nothing**. Asserting "returns no results" would
   pass while a 404 disclosed which model exists.
 
-  Then the two allowlists (D8): a request carrying `f=` filtering on a `Concept` field outside
-  `value_fields`, and one carrying an `ordering` parameter, each returns results unchanged from the
-  same request without them. Reinstate the open default (`allowed_filter_fields = None`) locally and
-  confirm the test fails before closing it again — a guard that has never been seen to fail is not
-  known to guard anything.
+  Then the two allowlists (D8), which refuse differently — assert each on its own behaviour, not on
+  a shared "unchanged" wording. A request carrying `f=` filtering on a `Concept` field outside
+  `value_fields` returns an **empty** page: the rejected filter discards the queryset before the
+  search runs. A request carrying an `ordering` parameter returns the same results in the view's own
+  order. Reinstate the open default (`allowed_filter_fields = None`) locally and confirm the test
+  fails before closing it again — a guard that has never been seen to fail is not known to guard
+  anything.
 
 ## US-4 — One route, and nothing else to wire (#119)
 
-- **T008** — Both wiring steps reported at check time (FR-010).
+- **T008** — Both wiring steps reported at check time, and at render time (FR-010, US-4).
 
   Two warnings in `checks.py`, neither touching the database: the package's URL configuration is not
-  included, and `django_tomselect` is not in `INSTALLED_APPS`. Each names what to add.
+  included, and `django_tomselect` is not in `INSTALLED_APPS`. Each names what to add. Plus the
+  widget's `get_autocomplete_url()` override catching `NoReverseMatch` and raising
+  `ImproperlyConfigured` naming both steps (D14), because a project that ignores a warning reaches a
+  render and the library re-raises the reverse error verbatim there.
 
   Test first, extending `tests/test_checks.py` (the one pre-existing module this feature modifies):
   each warning appears when its condition holds and is absent when it does not, each is a warning
   rather than an error, and the check runs without a database — assert with `django_assert_num_queries(0)`
-  rather than by reading the code.
+  rather than by reading the code. Then, in `tests/test_forms.py`, rendering a form with the route
+  not included raises `ImproperlyConfigured` whose message names both steps — assert on the message,
+  not the exception type alone, since naming what is missing is the whole requirement.
 
 ## US-6 — An existing record shows what it holds (#121)
 
 - **T009** — Attached concepts render, including one the declaration no longer allows (FR-008).
 
-  Inherited behaviour, verified first and overridden only if it fails (plan A8, R1).
+  The `_get_selected_options()` override resolving already-attached instances against
+  `Concept.objects.all()` (plan A8). **Required work, not a contingency:** T004's widget
+  `get_queryset()` is what the library uses to build selected options (`widgets.py:965`), so without
+  this override a concept outside the declaration's current restriction is dropped from the rendered
+  control and saved away. What a record already holds is displayed unrestricted; what a submission
+  newly contains is still validated against the declaration.
 
   Test first, in `tests/test_forms.py`: a record holding one concept through the single-value field
   and another holding three through the multiple-value field, each reopened, showing the attached
   concepts under their **active-language preferred labels**; submitting an untouched form leaving the
   record unchanged; removing one and saving removing exactly that one; and **a record holding a
-  concept from a vocabulary its field no longer names still showing that concept**. If the last fails,
-  add a `get_context()` override on this package's widget — the budget for it is in this task, not a
-  replan.
+  concept from a vocabulary its field no longer names still showing that concept**. Write that last
+  case against the un-overridden widget first and watch it fail, then add the override — it is the
+  one assertion in this feature that a plausible implementation gets wrong silently.
 
 ## US-5 — A real vocabulary stays usable (#120)
 

@@ -29,6 +29,11 @@
       "state": "PLAN",
       "at": "2026-08-13T12:05:00Z",
       "note": "research.md landed (3 candidates, recommends django-tomselect); every load-bearing API fact re-verified against the published wheel 2026.6.2 rather than the GitHub default branch; plan.md A1-A10, tasks.md T001-T011, decisions.md D7-D11; spec amended (D10) - a project wires two entries, not one"
+    },
+    {
+      "state": "PLAN",
+      "at": "2026-08-13T12:35:00Z",
+      "note": "S3R design review returned request-changes with 5 findings, all 5 verified against the wheel source and all 5 remedied in the plan; D12 (validation queryset comes from the widget, not the endpoint) was critical - the first draft would have failed every form submission; D8 amended, D13 label indexing recorded, D14 render-time route error; tasks T003/T004/T006/T007/T008/T009 rewritten"
     }
   ],
   "gates": {
@@ -51,15 +56,28 @@
         "D7 django-tomselect adopted, evaluated against the wheel",
         "D8 both request-controlled surfaces closed explicitly against the library default",
         "D9 the endpoint-ownership requirement is met; the research flag does not bind",
-        "D11 the field reference is a plain dotted path, not a signed token"
+        "D11 the field reference is a plain dotted path, not a signed token",
+        "D12 the validation queryset comes from the widget, not the endpoint - corrects a critical design defect",
+        "D13 Concept.label is not indexed for this feature, recorded under Article XIII",
+        "D14 a missing route reads the same at render time as at check time"
       ],
       "raised_for_decision": [
         "D10 a project wires two entries, not one - amends a promise approved at the spec gate"
       ]
     },
     "design_review": {
-      "approved_by": null,
-      "at": null
+      "approved_by": "forge design reviewer (subagent)",
+      "at": "2026-08-13T12:33:00Z",
+      "verdict": "request-changes",
+      "findings": 5,
+      "confirmed": 5,
+      "declined": 0,
+      "remedied": true,
+      "receipts": [
+        "craft-review/2026-08-05/57b2f2f3",
+        "craft-security/2026-08-04/ea3d6742",
+        "craft-simplify/2026-08-04/69038ce1"
+      ]
     },
     "merge": {
       "approved_by": null,
@@ -74,8 +92,16 @@
       "status": "pending",
       "replans": 0,
       "tasks": [
-        { "id": "T001", "status": "pending", "attempts": 0 },
-        { "id": "T002", "status": "pending", "attempts": 0 }
+        {
+          "id": "T001",
+          "status": "pending",
+          "attempts": 0
+        },
+        {
+          "id": "T002",
+          "status": "pending",
+          "attempts": 0
+        }
       ]
     },
     {
@@ -85,8 +111,16 @@
       "status": "pending",
       "replans": 0,
       "tasks": [
-        { "id": "T003", "status": "pending", "attempts": 0 },
-        { "id": "T004", "status": "pending", "attempts": 0 }
+        {
+          "id": "T003",
+          "status": "pending",
+          "attempts": 0
+        },
+        {
+          "id": "T004",
+          "status": "pending",
+          "attempts": 0
+        }
       ]
     },
     {
@@ -95,7 +129,13 @@
       "issue": 117,
       "status": "pending",
       "replans": 0,
-      "tasks": [{ "id": "T005", "status": "pending", "attempts": 0 }]
+      "tasks": [
+        {
+          "id": "T005",
+          "status": "pending",
+          "attempts": 0
+        }
+      ]
     },
     {
       "id": "US3",
@@ -104,8 +144,16 @@
       "status": "pending",
       "replans": 0,
       "tasks": [
-        { "id": "T006", "status": "pending", "attempts": 0 },
-        { "id": "T007", "status": "pending", "attempts": 0 }
+        {
+          "id": "T006",
+          "status": "pending",
+          "attempts": 0
+        },
+        {
+          "id": "T007",
+          "status": "pending",
+          "attempts": 0
+        }
       ]
     },
     {
@@ -114,7 +162,13 @@
       "issue": 119,
       "status": "pending",
       "replans": 0,
-      "tasks": [{ "id": "T008", "status": "pending", "attempts": 0 }]
+      "tasks": [
+        {
+          "id": "T008",
+          "status": "pending",
+          "attempts": 0
+        }
+      ]
     },
     {
       "id": "US5",
@@ -122,7 +176,13 @@
       "issue": 120,
       "status": "pending",
       "replans": 0,
-      "tasks": [{ "id": "T010", "status": "pending", "attempts": 0 }]
+      "tasks": [
+        {
+          "id": "T010",
+          "status": "pending",
+          "attempts": 0
+        }
+      ]
     },
     {
       "id": "US6",
@@ -130,7 +190,13 @@
       "issue": 121,
       "status": "pending",
       "replans": 0,
-      "tasks": [{ "id": "T009", "status": "pending", "attempts": 0 }]
+      "tasks": [
+        {
+          "id": "T009",
+          "status": "pending",
+          "attempts": 0
+        }
+      ]
     },
     {
       "id": "US7",
@@ -138,14 +204,32 @@
       "issue": 122,
       "status": "pending",
       "replans": 0,
-      "tasks": [{ "id": "T011", "status": "pending", "attempts": 0 }]
+      "tasks": [
+        {
+          "id": "T011",
+          "status": "pending",
+          "attempts": 0
+        }
+      ]
     }
   ],
   "budgets": {
-    "converge_cycles": { "max": 2, "used": 0 },
-    "review_cycles": { "max": 1, "used": 0 },
-    "design_review_cycles": { "max": 1, "used": 0 },
-    "tokens": { "max": 4000000, "used": 0 }
+    "converge_cycles": {
+      "max": 2,
+      "used": 0
+    },
+    "review_cycles": {
+      "max": 1,
+      "used": 0
+    },
+    "design_review_cycles": {
+      "max": 1,
+      "used": 1
+    },
+    "tokens": {
+      "max": 4000000,
+      "used": 0
+    }
   },
   "pr": {
     "number": 123,

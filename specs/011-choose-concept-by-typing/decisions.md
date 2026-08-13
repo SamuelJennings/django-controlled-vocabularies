@@ -147,6 +147,14 @@ refuses rather than falling back to the open default — verified in the wheel a
 comes from the declaration and not from the request, and leaving a second request-supplied filter
 open would satisfy that requirement in the letter while breaking it in fact.
 
+**Amended after design review:** the two refuse differently, and the test has to say so. A rejected
+`f=` discards the whole result set — `_apply_filter_list()` returns `None`, `apply_filters()` turns
+that into `queryset.none()` (`autocompletes.py:597-603`), and it runs before `search()` (`:392-396`),
+so the empty set survives the rest of the pipeline. A rejected `ordering` leaves the results in the
+view's own order. The original wording asked for both to be "unchanged from the same request without
+them", which is true of the second and false of the first, and a test written to it would have failed
+on a guard that was working correctly.
+
 ## D9 — The endpoint-ownership requirement is met, and the research flag is resolved rather than carried
 
 **Status:** self-resolved, closes a flag `research.md` raised.
@@ -201,3 +209,72 @@ already achieves nothing.
 The reason to record this rather than simply not do it is that "the browser sends an identifier, so
 sign it" is a reasonable-sounding review comment, and the answer is a property of FR-006's design
 rather than an oversight.
+
+## D12 — The form's validation queryset comes from the widget, not from the endpoint
+
+**Status:** correction, found in design review.
+
+The first draft of A6 carried the field's restriction in one place: a `field=` parameter the control
+appends to its own search requests, resolved server-side into `limit_choices_to`. That covers
+searching and nothing else, and the gap is not cosmetic — it would have made the feature unusable.
+
+The library's field replaces its own queryset during `clean()` from `self.widget.get_queryset()`
+(`forms.py:210-215`). The stock widget walks back to the endpoint through `LazyView`, which builds
+its request from `get_current_request()` — the ambient request in thread-local storage
+(`lazy_utils.py:117`, `middleware.py:38`) — or, with no middleware installed, from a synthetic proxy
+request carrying no parameters at all. During a form POST the ambient request is the page's own
+submission, whose `GET` is empty under either branch. A6's fail-closed refusal, written for a
+tampered reference, would therefore have been the state on *every* submission, and
+`ModelChoiceField.to_python()` raises `invalid_choice` against an empty queryset. Nobody could have
+saved a form.
+
+The fix separates the two paths rather than making the reference reach further. This package's widget
+overrides `get_queryset()` to build the restriction directly from the model field instance
+`formfield()` already holds. Nothing is read from the request on that path, so FR-006 holds there by
+construction, and it now holds on the write path as well — which the search-only design never did.
+This is also what Django's unmodified `formfield()` does with `limit_choices_to`, so the behaviour
+restored is the ordinary one rather than a new rule.
+
+Two consequences are carried, not absorbed. Narrowing the widget's `get_queryset()` also narrows how
+already-attached concepts are resolved for display (`widgets.py:965`), so FR-008 now needs an
+explicit `_get_selected_options()` override — moved from a contingency in T009 to required work.
+And T004 gains the assertion that would have caught this: submit a legitimate concept and confirm
+the form saves.
+
+The general shape is worth keeping. A restriction carried on the request path is invisible to every
+other path, and a fail-closed default turns that invisibility into a total outage rather than a
+quiet hole. The reviewer found it by reading the library's `clean()` rather than its documentation.
+
+## D13 — `Concept.label` is not indexed for this feature
+
+**Status:** self-resolved, recorded under Article XIII.
+
+A7 puts `ordering = ("label", "pk")` on the endpoint, the first ordering path anything has placed on
+`Concept.label`. Article XIII requires the indexing choice to be recorded either way, so: **no index
+is added.**
+
+The reasons. Every request that reaches this ordering has already been narrowed by a declaration's
+`limit_choices_to` and, in the typing case, by an `icontains` match over a joined label table — the
+sort runs over a small remainder, not over the table. US-5's "tens of thousands" is a whole-database
+figure, not a per-request one. And an index on `label` alone would not serve the ordering tuple
+anyway; matching it needs a composite `(label, pk)`, which is a migration in a package that ships
+none in this feature.
+
+What would change it: a measured page-fetch cost on a real vocabulary, or a request path that orders
+by `label` without narrowing first. R7 owns the scale work and is where a benchmark belongs. The
+composite index is the answer if one is ever needed, not `db_index=True`.
+
+## D14 — A missing route reads the same at render time as at check time
+
+**Status:** self-resolved.
+
+FR-010 reports both wiring steps through the system check. US-4's independent test asks for something
+slightly wider: a missing route should fail with a message naming what is missing rather than an
+internal error. A project that ignores a check warning still reaches a render, and the library
+re-raises `NoReverseMatch` verbatim there (`widgets.py:239-241`), which names a URL pattern and not
+the thing to do about it.
+
+This package's widget catches it and raises `ImproperlyConfigured` naming both steps. The alternative
+was to narrow the spec's wording to the check path only, which would have been honest and left a
+developer reading a traceback about a reverse match they never wrote. One `try`/`except` is cheaper
+than that.

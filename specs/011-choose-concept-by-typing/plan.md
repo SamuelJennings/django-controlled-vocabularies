@@ -22,6 +22,13 @@ fact this plan depends on was re-checked against the published wheel `django_tom
 because a plan built on a repository's default branch is a plan built on code nobody will install.
 Findings that changed as a result are in `decisions.md` D7 to D11 and in Risks below.
 
+**Design-reviewed, and one thing it found was fatal.** A single reviewer read this plan against the
+spec, the wheel and the constitution before any story was implemented. It returned five findings, all
+five confirmed against the wheel's source rather than accepted on assertion. The critical one is D12:
+the first draft enforced the field's restriction only on the search request, which would have made
+every legitimate form submission fail validation. D12 to D14 and the amendments to A5 to A9 are that
+pass.
+
 The shape of the work:
 
 | What the spec asks | Where it comes from |
@@ -31,7 +38,7 @@ The shape of the work:
 | Nothing of the vocabulary in the page (FR-003) | inherited — the widget renders one `<select>` and no options (A1) |
 | Match across preferred, alternative and hidden labels (FR-004) | `search()` override, one `Q` over the label table plus the default-language column (A4) |
 | Display under the preferred label, name the vocabulary (FR-005) | `virtual_fields` + `prepare_results()` over `display_label` (A5) |
-| Restriction derived from the declaration, never from the request (FR-006) | `get_queryset()` resolves the field reference and applies its `limit_choices_to` (A6) |
+| Restriction derived from the declaration, never from the request (FR-006) | two server-side paths: `hook_queryset()` on the endpoint for search, `get_queryset()` on the widget for form validation (A6) |
 | Bounded, stable paging (FR-007) | inherited, with a total order and one override for the past-the-end case (A7) |
 | Existing record shows what it holds (FR-008) | inherited, verified against the restricted queryset (A8) |
 | Route missing is reported by the existing check (FR-010) | `checks.py`, widened (A9) |
@@ -146,9 +153,14 @@ translation is inactive.
 
 `value_fields = ["id"]`, `virtual_fields = ["display_label", "vocabulary"]`, and a `prepare_results()`
 override that reads `Concept.display_label()` — which already resolves the active language and falls
-back to the vocabulary's default — and the scheme's label. `get_queryset()` carries
+back to the vocabulary's default — and the scheme's label. `hook_queryset()` carries
 `select_related("scheme")` and `prefetch_related("labels")`, because `display_label()` walks
 `self.labels.all()` and a bounded page would otherwise cost a query per row.
+
+`hook_queryset()` rather than `get_queryset()`: the library documents it as the extension point run
+before filtering, searching and ordering (`autocompletes.py:377`, called at `:392`), and overriding
+`get_queryset()` puts this package in the position of re-chaining the base pipeline — allowlist
+enforcement, `search()`, `order_queryset()` — correctly and forever. Same for A6.
 
 The vocabulary is returned on every result rather than only when a field spans several. FR-005 makes
 it conditional; always returning it is one behaviour instead of two, costs one already-selected
@@ -156,14 +168,19 @@ attribute, and is inside what FR-012 permits the endpoint to expose.
 
 ### A6 — The restriction is derived, never received (FR-006)
 
-The load-bearing part of the feature. Three pieces:
+The load-bearing part of the feature. **The restriction is enforced twice, on two different paths,
+because a search request and a form submission reach the server by different routes.** Design review
+found the first draft of this section enforced it on the search path only, and in doing so broke
+every legitimate submission — the correction is recorded as D12 and the two paths are now separate.
+
+**Path one — searching.** Three pieces:
 
 1. **The reference the control sends.** The widget overrides `get_autocomplete_params()` — a
    documented hook that reaches the rendered attributes and the browser plugin
    (`widgets.py:440` → `templates/django_tomselect/tomselect.html:193`) — and appends
    `field=<app_label>.<model>.<field_name>`. It is a *reference to a declaration*, never a
    restriction: nothing in it says which vocabulary, and altering it cannot widen anything.
-2. **Resolution, in `get_queryset()`.** Look the reference up through the app registry; require the
+2. **Resolution, in `hook_queryset()`.** Look the reference up through the app registry; require the
    resolved field to be an instance of this package's `ConceptFieldMixin`; apply
    `queryset.complex_filter(field.get_limit_choices_to())`. `complex_filter` is Django's own path
    for exactly this and handles the empty case, so a declaration naming no vocabulary makes every
@@ -173,13 +190,36 @@ The load-bearing part of the feature. Three pieces:
    HTTP 200, identical in shape and status to a search that matched nothing. No exception escapes,
    so a missing model and an existing-but-wrong field are indistinguishable from outside.
 
+**Path two — validating a submission.** The reference above is a GET parameter on the control's own
+AJAX calls. It is not present when the form is posted, and no amount of care on the endpoint makes
+it so. The library's field takes its validation queryset from `self.widget.get_queryset()`
+(`forms.py:210-215`), which by default walks back to the endpoint through `LazyView` and an
+*ambient* request (`lazy_utils.py:117`) — during a POST, that is the page's own submission, whose
+`GET` is empty. Path one's fail-closed branch would then be the guaranteed state on every
+submission, and `ModelChoiceField.to_python()` would raise `invalid_choice` for every value.
+
+So this package's widget overrides `get_queryset()` to return
+`Concept.objects.complex_filter(field.get_limit_choices_to())` directly, from the model field
+instance `formfield()` already holds. No request is consulted, so nothing is request-derived here
+either. This restores the behaviour Django's own `formfield()` gives an unmodified
+`ModelChoiceField` — a value outside `limit_choices_to` is refused — rather than adding a rule, and
+it makes FR-006 hold on the write path, which the search-only design never did.
+
+The two paths derive the same restriction from the same declaration by the same call. They differ
+only in how they find the declaration: path one resolves a reference, path two already has the field.
+
 **Two request-controlled surfaces are closed explicitly** (`research.md`, confirmed in the wheel):
 `allowed_filter_fields = []` and `allowed_ordering_fields = []`. Both default to `None`, which the
 library treats as "validate that the field exists on the model" rather than "reject" — so by default
 a hand-edited request can filter or order by any field on `Concept`. The values never leak, but
 an unclosed filter is a boolean oracle over the model. The empty list is checked with `is not None`
 in both places (`autocompletes.py:500`, `:696`), so `[]` genuinely blocks rather than falling back.
-The test for this alters a real request and asserts the results are unchanged (D8).
+
+The test alters a real request, and the two surfaces refuse differently — a point the first draft of
+this plan got wrong. A rejected `f=` empties the whole page: `apply_filters()` returns
+`queryset.none()` (`autocompletes.py:597-603`) and runs *before* `search()` (`:392-396`), so nothing
+survives. A rejected `ordering` leaves the results in the view's own order. Asserting "unchanged"
+for both would fail on the first (D8).
 
 ### A7 — Bounded and stable (FR-007)
 
@@ -188,6 +228,10 @@ for more. Stability needs a **total** order: `ordering = ("label", "pk")`, becau
 only within a vocabulary and a field naming none can span several. `pk` breaks the tie, so
 successive pages neither repeat nor skip.
 
+This is the first ordering path put on `Concept.label`, and Article XIII makes the indexing choice a
+recorded one. It is recorded in D13: `label` gets no index in this feature, with the reason and the
+condition that would change it.
+
 One override. The inherited `paginate_queryset()` catches `EmptyPage` and returns **page 1**
 (`autocompletes.py:743`), which would make a request past the end silently re-serve the beginning —
 the spec's edge case says it returns nothing and says no more exist. The override is the empty-page
@@ -195,13 +239,21 @@ branch only; everything else is inherited.
 
 ### A8 — An existing record shows what it holds (FR-008)
 
-Inherited, and verified rather than assumed. The widget resolves already-attached instances
-server-side to render them as selected. Two properties need asserting because a plausible
-implementation gets either wrong: labels must come out as `display_label()` in the active language
-rather than `str(obj)`, and a concept whose vocabulary the declaration no longer names must still
-render — if the widget builds selected options through the same restricted queryset the endpoint
-uses, it will silently drop that concept and a person will save the emptiness back. Where the
-inherited behaviour fails either, the fix is a `get_context()` override on this package's widget.
+Partly inherited, and one override is now **required rather than contingent**. The widget resolves
+already-attached instances server-side to render them as selected, and it does so through
+`self.get_queryset()` (`widgets.py:965`) — the very method A6 path two now narrows to the
+declaration's restriction. So a concept whose vocabulary the declaration no longer names would be
+dropped from the rendered control, and a person would save the emptiness back. A6's fix creates
+this, so A6 pays for it: this package's widget overrides `_get_selected_options()` to resolve
+already-attached instances against `Concept.objects.all()`.
+
+The two paths are not in conflict once separated. What a record *already holds* is displayed
+unrestricted, because the record holds it. What a submission may *newly contain* is validated
+against the declaration. That is Django's own behaviour for a `ModelChoiceField` narrowed by
+`limit_choices_to`, and FR-008 is about the first while FR-006 is about the second.
+
+The other property still needs asserting: labels must come out as `display_label()` in the active
+language rather than `str(obj)`.
 
 ### A9 — The missing route is reported at check time (FR-010, and the second wiring step)
 
@@ -219,6 +271,12 @@ recorded as D10, the spec text is amended rather than quietly stretched, and it 
 the plan gate because it changes an acceptance scenario the maintainer approved. Both stay warnings,
 matching the existing check: a project mid-setup is not broken.
 
+**The check is not the only place a missing route surfaces.** US-4's independent test asks for a
+message naming what is missing rather than an internal error, and a project that ignores the warning
+reaches a render, where `get_autocomplete_url()` re-raises `NoReverseMatch` verbatim
+(`widgets.py:239-241`). This package's widget catches it and raises `ImproperlyConfigured` naming
+both wiring steps, so the two paths give the same answer (D14).
+
 ### A10 — Assets, strings, documentation (FR-011, FR-013, FR-014, FR-015)
 
 Assets are the dependency's, reached through Django's ordinary form-media mechanism — this package
@@ -232,7 +290,7 @@ dependency is declared alongside `views.py`.
 
 | # | Risk | Handling |
 |---|---|---|
-| R1 | The widget builds already-selected options through the restricted queryset, dropping a concept whose vocabulary the field no longer names (FR-008). | A8 asserts it directly on a real record. A `get_context()` override is the fallback and is budgeted in T009. |
+| R1 | The widget builds already-selected options through the restricted queryset, dropping a concept whose vocabulary the field no longer names (FR-008). | No longer a risk but a certainty, created by A6 path two: `_get_selected_options()` calls `self.get_queryset()`. The override is required work in T009, and T009 asserts it on a real record. |
 | R2 | `.distinct()` over a join with `order_by("label", "pk")` is correct on PostgreSQL and SQLite but is the kind of thing that differs. | The paging test runs against a match set larger than one page and asserts two successive pages are disjoint and complete, on the suite's real database. |
 | R3 | A second live session or a later Django release changes `get_autocomplete_params()`'s wiring, and the field reference silently stops being sent — the endpoint would then return *everything* the fallback allows. | The refusal is fail-closed: an absent reference returns no results, so a broken wiring produces an empty control rather than an unrestricted one. Asserted as its own case. |
 | R4 | Single-maintainer dependency (`research.md` Req 8: one maintainer, 87 stars against DAL's 1,870). | Named in D7 with what it would cost to leave: this package's own code is four overrides and a `formfield()`, so the escape is the widget layer, not the feature. |

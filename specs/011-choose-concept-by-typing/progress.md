@@ -62,3 +62,29 @@ Dispatched: one reviewer, three lenses (spec compliance, security, architecture)
 `forge check-skills --role design_reviewer,design_reviewer_security,design_reviewer_architecture`
 green before dispatch — craft-review, craft-security and craft-simplify all present, receipted and
 on the allowlist.
+
+**Verdict: request-changes, five findings, all five confirmed.** Receipts returned and matched
+(`forge check-receipts` green): craft-review/2026-08-05/57b2f2f3, craft-security/2026-08-04/ea3d6742,
+craft-simplify/2026-08-04/69038ce1.
+
+Every finding was checked against the wheel's own source before it became work, rather than accepted
+on the reviewer's severity. One piece of the critical finding's reasoning was wrong and the finding
+still held: `BaseTomSelectModelMixin.__init__` does *not* discard a `queryset` kwarg — it warns and
+then passes it to `super().__init__()` (`forms.py:156-188`), so the library's own warning text is
+untrue. The defect binds one line later, at `clean()`, which overwrites `self.queryset` from the
+widget regardless of what was passed. That is why the remedy is the widget override and not a
+constructor argument.
+
+| # | Lens | Severity | Confirmed | Disposition |
+|---|---|---|---|---|
+| F1 | security | critical | yes, and the remedy narrowed | D12 — validation queryset comes from the widget; A6 split into two paths; T004 and T009 rewritten |
+| F2 | spec compliance | high | yes — `Concept.label` carries no index and no record of the choice | D13 — recorded as "not indexed", with the reason and what would change it |
+| F3 | security | medium | yes — a rejected `f=` empties the queryset before `search()` runs | D8 amended; T007's assertion rewritten per surface |
+| F4 | architecture | medium | yes — `hook_queryset()` is the documented pre-pipeline hook | A5, A6, T003 and T006 moved off `get_queryset()` |
+| F5 | spec compliance | low | yes — `get_autocomplete_url()` re-raises `NoReverseMatch` verbatim | D14 — widget reframes it as `ImproperlyConfigured`; folded into T008 |
+
+No finding was declined. F1 would have shipped a feature in which no form could be saved, and the
+test that catches it (T004, `form.is_valid()` on a legitimate concept) did not exist in the first
+draft of the task list.
+
+**Waiting at the plan gate.** Nothing is implemented and nothing will be until the maintainer says go.
