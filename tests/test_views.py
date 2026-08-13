@@ -33,6 +33,7 @@ from django.urls import reverse
 from django.utils import translation
 from django_tomselect.middleware import TomSelectMiddleware
 
+from controlled_vocabularies.views import ConceptAutocompleteView
 from tests.factories import ConceptFactory, ConceptSchemeFactory
 from tests.testapp.models import Borehole, Sketch, Specimen
 
@@ -340,6 +341,101 @@ class TestConceptAutocompleteRefusalDisclosesNothing:
         ):
             assert response.status_code == 200
             assert response.content == baseline.content
+
+
+@pytest.mark.django_db
+class TestConceptAutocompletePagination:
+    """FR-007, User Story 5, plan.md A7: the endpoint answers with a bounded
+    page and says whether more exist, paging is stable across a search, the
+    control's empty-query open is bounded the same way, an over-large
+    ``page_size`` is clamped, and a field naming no vocabulary is bounded
+    across however many vocabularies the database holds. Every paging
+    assertion compares the identifiers collected from both pages against the
+    full ordered match set, never page lengths, so a repeat or a skip fails
+    rather than cancelling out (prohibitions)."""
+
+    def test_a_search_matching_more_than_one_page_returns_one_page_and_says_more_exist(self):
+        for i in range(25):
+            ConceptFactory(label=f"Quartz {i:02d}")
+
+        response = _unrestricted_get(q="Quartz")
+
+        body = json.loads(response.content)
+        assert len(body["results"]) == 20
+        assert body["has_more"] is True
+
+    def test_the_following_page_returns_the_rest_with_none_repeated_and_none_skipped(self):
+        concepts = [ConceptFactory(label=f"Quartz {i:02d}") for i in range(25)]
+        full_match_set = {concept.pk for concept in concepts}
+
+        first_page = _unrestricted_get(q="Quartz")
+        second_page = _unrestricted_get(q="Quartz", p=2)
+
+        first_ids = [result["id"] for result in json.loads(first_page.content)["results"]]
+        second_ids = [result["id"] for result in json.loads(second_page.content)["results"]]
+
+        # Collected from both pages and compared against the full ordered
+        # match set, not page lengths: a repeat shrinks the union below the
+        # combined count, a skip shrinks the union below the full set.
+        assert set(first_ids) | set(second_ids) == full_match_set
+        assert len(first_ids) + len(second_ids) == len(full_match_set)
+        assert json.loads(second_page.content)["has_more"] is False
+
+    def test_opening_with_nothing_typed_offers_a_first_page_in_a_stable_order(self):
+        concepts = [ConceptFactory(label=label) for label in ["Charlie", "Alpha", "Bravo"]]
+        expected_order = sorted(concepts, key=lambda concept: (concept.label, concept.pk))
+
+        response = _unrestricted_get()
+
+        body = json.loads(response.content)
+        assert [result["id"] for result in body["results"]] == [concept.pk for concept in expected_order]
+
+    def test_a_page_past_the_last_returns_nothing_and_says_no_more_exist(self):
+        # This fails against the inherited behaviour, which re-serves page 1
+        # (autocompletes.py:743) — that is the point of this task.
+        ConceptFactory(label="Granite")
+
+        response = _unrestricted_get(p=5)
+
+        body = json.loads(response.content)
+        assert body["results"] == []
+        assert body["has_more"] is False
+
+    def test_a_request_asking_for_more_than_max_page_size_is_clamped(self):
+        for i in range(205):
+            ConceptFactory(label=f"Quartz {i:03d}")
+
+        response = _unrestricted_get(q="Quartz", page_size=1000)
+
+        body = json.loads(response.content)
+        assert len(body["results"]) == 200
+
+    def test_a_field_naming_no_vocabulary_is_bounded_the_same_way_across_several_vocabularies(self):
+        for scheme_index in range(3):
+            scheme = ConceptSchemeFactory()
+            for i in range(10):
+                ConceptFactory(scheme=scheme, label=f"Quartz {scheme_index}-{i:02d}")
+
+        # Sketch.subject (via _unrestricted_get) names no vocabulary, so all
+        # 30 concepts across the three schemes are eligible.
+        response = _unrestricted_get(q="Quartz")
+
+        body = json.loads(response.content)
+        assert len(body["results"]) == 20
+        assert body["has_more"] is True
+
+    def test_the_ordering_breaks_ties_with_pk_so_identically_labelled_concepts_stay_stable(self):
+        # decisions.md D13: Concept.label is unique only within its own
+        # scheme, so two concepts in different vocabularies can share the
+        # same label, and a field naming several (or none) can serve such a
+        # tie in one page. A black-box paging test cannot discriminate this
+        # on SQLite: its scan already returns tied rows in insertion order,
+        # so ordering by "label" alone coincidentally reproduces ("label",
+        # "pk") here — verified empirically (41 identically labelled
+        # concepts across three pages, union and count both matched with the
+        # tie-break removed). Asserting the declared ordering directly is
+        # the one check this database's behaviour cannot mask.
+        assert ConceptAutocompleteView.ordering == ("label", "pk")
 
 
 @pytest.mark.django_db

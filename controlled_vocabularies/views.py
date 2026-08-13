@@ -8,15 +8,23 @@ belongs to (FR-005, FR-012) — not the editorial notes or hidden/alternative
 labels the concept also holds.
 """
 
+from typing import TYPE_CHECKING
+
 from django.apps import apps
 from django.conf import settings
 from django.core.exceptions import FieldDoesNotExist
+from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 from django.db.models import Q, QuerySet
 from django.utils.translation import get_language
 from django_tomselect.autocompletes import AutocompleteModelView
 
 from .fields import ConceptFieldMixin
 from .models import Concept, ConceptLabel
+
+if TYPE_CHECKING:
+    # Matches the base view's own guarded import (autocompletes.py) — this
+    # override's return type must satisfy the same contract.
+    from django_tomselect._types import PaginatedResponse
 
 #: The label kinds a typed string matches against, in the active language
 #: (FR-004, plan.md A4). The default-language preferred label — every
@@ -107,6 +115,52 @@ class ConceptAutocompleteView(AutocompleteModelView):
         # ConceptField/ConceptsField also inherit) is invisible to mypy after
         # narrowing on the mixin alone.
         return queryset.complex_filter(field.get_limit_choices_to())  # type: ignore[attr-defined]
+
+    def paginate_queryset(self, queryset: QuerySet) -> "PaginatedResponse":
+        """Bounded and stable past the end (FR-007, plan.md A7).
+
+        ``page_size``, the inherited ``MAX_PAGE_SIZE`` clamp (applied in
+        ``setup()`` before this runs) and the total ordering
+        (``ordering = ("label", "pk")`` above) are unchanged and stay
+        inherited — this mirrors the base implementation
+        (``autocompletes.py:730``) so the query shape stays identical, and
+        overrides only the ``EmptyPage`` branch. The inherited branch
+        catches ``EmptyPage`` and returns page 1 (``autocompletes.py:743``),
+        which would make a request past the end silently re-serve the
+        beginning; this returns an ordinary empty page instead, saying no
+        more exist, the same shape a search that matched nothing already
+        returns.
+        """
+        try:
+            page_number = int(self.page)
+            page_number = max(1, page_number)
+        except (TypeError, ValueError):
+            page_number = 1
+
+        paginator = Paginator(queryset, self.page_size)
+
+        try:
+            page = paginator.page(page_number)
+        except PageNotAnInteger:
+            page = paginator.page(1)
+        except EmptyPage:
+            return {
+                "results": [],
+                "page": page_number,
+                "has_more": False,
+                "next_page": None,
+                "total_pages": paginator.num_pages,
+            }
+
+        page_num = int(page.number)
+        has_more = bool(page.has_next())
+        return {
+            "results": self.prepare_results(page.object_list),
+            "page": page_num,
+            "has_more": has_more,
+            "next_page": page_num + 1 if has_more else None,
+            "total_pages": int(paginator.num_pages),
+        }
 
     def prepare_results(self, results):
         """Shape each result down to exactly what FR-012 permits (FR-005): the
