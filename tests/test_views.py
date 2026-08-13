@@ -12,6 +12,14 @@ what keeps that from costing a query per row.
 three kinds of label in the active language, or by the default-language preferred
 label every concept carries (FR-004, User Story 2). Every case is displayed under
 the concept's preferred label, whichever label matched (FR-005).
+
+Every request here carries a ``field=`` reference, because T006 made one mandatory:
+the endpoint derives what a search may return from the declaration that reference
+names, and a request without one is refused with an empty page (FR-006). These two
+classes are about result shaping and label matching rather than the restriction, so
+they name :class:`~tests.testapp.models.Sketch`'s ``subject`` — the declaration that
+names no vocabulary and so makes every concept eligible — leaving each assertion
+about exactly what its own name says.
 """
 
 import json
@@ -36,6 +44,19 @@ def _field_reference(model, field_name):
     return f"{model._meta.app_label}.{model._meta.model_name}.{field_name}"
 
 
+def _unrestricted_get(**params):
+    """Search from the one declaration that restricts nothing.
+
+    ``Sketch.subject`` names no vocabulary, so its ``limit_choices_to`` is an
+    empty ``Q`` and every concept stays eligible — the restriction T006 added
+    is present but neutral, which is what keeps a result-shaping or
+    label-matching assertion about result shaping or label matching."""
+    return Client().get(
+        reverse("controlled_vocabularies:concept-autocomplete"),
+        {"field": _field_reference(Sketch, "subject"), **params},
+    )
+
+
 class SpecimenForm(forms.ModelForm):
     class Meta:
         model = Specimen
@@ -53,7 +74,7 @@ class TestConceptAutocompleteResults:
         concept.add_label(language="en", kind="alternative", text="granitic rock")
         concept.add_label(language="en", kind="hidden", text="granit")
 
-        response = Client().get(reverse("controlled_vocabularies:concept-autocomplete"))
+        response = _unrestricted_get()
 
         body = json.loads(response.content)
         assert len(body["results"]) == 1
@@ -74,7 +95,7 @@ class TestConceptAutocompleteResults:
             concept.add_note(language="en", kind="definition", value="A definition.")
 
         with django_assert_num_queries(3):
-            response = Client().get(reverse("controlled_vocabularies:concept-autocomplete"))
+            response = _unrestricted_get()
 
         body = json.loads(response.content)
         assert len(body["results"]) == 20
@@ -97,7 +118,7 @@ class TestConceptAutocompleteSearch:
         concept.add_label(language="en", kind="alternative", text="granitic rock")
         ConceptFactory(label="Basalt")
 
-        response = Client().get(reverse("controlled_vocabularies:concept-autocomplete"), {"q": "granitic"})
+        response = _unrestricted_get(q="granitic")
 
         body = json.loads(response.content)
         assert [result["id"] for result in body["results"]] == [concept.pk]
@@ -109,7 +130,7 @@ class TestConceptAutocompleteSearch:
         concept.add_label(language="en", kind="hidden", text="granyte")
         ConceptFactory(label="Basalt")
 
-        response = Client().get(reverse("controlled_vocabularies:concept-autocomplete"), {"q": "granyte"})
+        response = _unrestricted_get(q="granyte")
 
         body = json.loads(response.content)
         assert [result["id"] for result in body["results"]] == [concept.pk]
@@ -123,12 +144,8 @@ class TestConceptAutocompleteSearch:
         ConceptFactory(label="Basalt", multilingual=True, german_label__text="Basalt")
 
         with translation.override("de"):
-            by_active_language = Client().get(
-                reverse("controlled_vocabularies:concept-autocomplete"), {"q": "gestein"}
-            )
-            by_default_language = Client().get(
-                reverse("controlled_vocabularies:concept-autocomplete"), {"q": "Granite"}
-            )
+            by_active_language = _unrestricted_get(q="gestein")
+            by_default_language = _unrestricted_get(q="Granite")
 
         for response in (by_active_language, by_default_language):
             body = json.loads(response.content)
@@ -141,11 +158,31 @@ class TestConceptAutocompleteSearch:
         ConceptFactory(label="Basalt")
 
         with translation.override("de"):
-            response = Client().get(reverse("controlled_vocabularies:concept-autocomplete"), {"q": "Granite"})
+            response = _unrestricted_get(q="Granite")
 
         body = json.loads(response.content)
         assert [result["id"] for result in body["results"]] == [concept.pk]
         assert body["results"][0]["display_label"] == "Granite"
+
+    @pytest.mark.django_db
+    def test_a_label_in_another_language_does_not_match(self):
+        # The other half of FR-004's "in the active language": a fragment
+        # unique to a label the active language does not own must not find
+        # the concept. Without this, dropping the language constraint from
+        # the filter altogether leaves every other test in this class green.
+        concept = ConceptFactory(label="Granite")
+        concept.add_label(language="de", kind="alternative", text="Tiefengestein")
+
+        response = _unrestricted_get(q="Tiefengestein")
+
+        body = json.loads(response.content)
+        assert body["results"] == []
+
+        with translation.override("de"):
+            in_its_own_language = _unrestricted_get(q="Tiefengestein")
+
+        body = json.loads(in_its_own_language.content)
+        assert [result["id"] for result in body["results"]] == [concept.pk]
 
     @pytest.mark.django_db
     def test_a_concept_matching_on_two_of_its_labels_appears_once(self):
@@ -154,7 +191,7 @@ class TestConceptAutocompleteSearch:
         concept.add_label(language="en", kind="hidden", text="Granites")
         ConceptFactory(label="Basalt")
 
-        response = Client().get(reverse("controlled_vocabularies:concept-autocomplete"), {"q": "Granit"})
+        response = _unrestricted_get(q="Granit")
 
         body = json.loads(response.content)
         assert [result["id"] for result in body["results"]] == [concept.pk]
@@ -164,7 +201,7 @@ class TestConceptAutocompleteSearch:
         concept = ConceptFactory(label="Granite")
         ConceptFactory(label="Basalt")
 
-        response = Client().get(reverse("controlled_vocabularies:concept-autocomplete"), {"q": "GRANITE"})
+        response = _unrestricted_get(q="GRANITE")
 
         body = json.loads(response.content)
         assert [result["id"] for result in body["results"]] == [concept.pk]

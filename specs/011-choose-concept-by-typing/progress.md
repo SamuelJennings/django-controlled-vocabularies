@@ -140,3 +140,36 @@ Two items came back with the report, and one of them was overstated.
   against FS-010, with the measured behaviour per path. Nothing in this feature depends on it and
   the T004 tests use an optional `ConceptsField`, whose class docstring was corrected here to the
   measured behaviour rather than the reported one.
+
+## S4 IMPLEMENT — US-3 (#118), 2026-08-13
+
+T006 and T007 accepted (`9af5076`, `791b696`, plus the test repair below). The endpoint now derives what a
+search may return from the field declaration a `field=<app_label>.<model>.<field_name>` reference
+names, resolved through Django's app registry at `hook_queryset()`, and never from anything else
+the request carries. The four refusal shapes — an unresolvable model, a field that is not one of
+this package's, a field that does not exist, and no reference at all — return byte-identical
+HTTP 200 empty pages, indistinguishable from a search that matched nothing. Both request-controlled
+surfaces stay closed: a blocked `f=` filter empties the page, a blocked ordering parameter leaves
+the view's own order in place.
+
+The implementer ran a mutation probe per covered mechanism, as the US-3 brief required after US-2,
+and one of its own probes caught a vacuous test on the way through: the allowlist test sent no
+`field=`, so T006's own restriction emptied the queryset regardless of the allowlist. Repaired
+before the report by sending an unrestricted reference first.
+
+Verified here rather than accepted: full suite 1245 green, `forge verify` green on all five steps,
+all three craft receipts confirmed against the registry.
+
+**The report came back red, correctly.** Making a `field=` reference mandatory broke eight
+pre-existing T003/T005 tests that call the endpoint bare. The behaviour is what the plan specifies
+(A6 point 3, R3) and the browser always sends the reference, so the tests were stale rather than
+the code wrong: they are about result shaping and label matching, and each now searches through
+`Sketch.subject`, the declaration that names no vocabulary and so leaves every concept eligible.
+The restriction is present but neutral, which keeps each assertion about its own subject.
+
+**A seventh mutation probe found a gap US-2 left open.** Removing the active-language constraint
+from the search filter altogether left all sixteen tests green: every case asserted that a label
+in the active language *matches*, and none that a label in another language does *not*. A concept
+whose German alternative label must not be found under English — and must be found under German —
+now covers it. All six clauses of the filter (three label kinds, the default-language column, the
+deduplication, the language constraint) fail at least one test when removed.
