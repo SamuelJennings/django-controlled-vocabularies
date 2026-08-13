@@ -34,6 +34,11 @@
       "state": "PLAN",
       "at": "2026-08-13T12:35:00Z",
       "note": "S3R design review returned request-changes with 5 findings, all 5 verified against the wheel source and all 5 remedied in the plan; D12 (validation queryset comes from the widget, not the endpoint) was critical - the first draft would have failed every form submission; D8 amended, D13 label indexing recorded, D14 render-time route error; tasks T003/T004/T006/T007/T008/T009 rewritten"
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-13T13:35:00Z",
+      "note": "US0 Phase F landed (T001 dependency, T002 endpoint+route); receipts verified, full suite 1220 green re-run by the orchestrator; conformance was red on the implementer's file placement (tests/test_dependencies.py mirrors no source module) and was fixed in 4e2c0c3 by moving it to tests/test_smoke.py, the standing package-level exception; forge verify green on all five steps"
     }
   ],
   "gates": {
@@ -87,19 +92,28 @@
       "id": "US0",
       "priority": "P1",
       "issue": null,
-      "status": "pending",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T001",
-          "status": "pending",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1
         },
         {
           "id": "T002",
-          "status": "pending",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1
         }
+      ],
+      "commits": [
+        "0aa19d3",
+        "58a6f36",
+        "4e2c0c3"
+      ],
+      "receipts": [
+        "craft-tdd/2026-08-05/eae3b6c7",
+        "craft-increments/2026-08-05/d3dce07f"
       ]
     },
     {
