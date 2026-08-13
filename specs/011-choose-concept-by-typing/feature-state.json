@@ -1,0 +1,154 @@
+{
+  "$schema": "https://openclaw.local/schemas/feature-state.schema.json",
+  "feature": "011-choose-concept-by-typing",
+  "branch": "011-choose-concept-by-typing",
+  "repo": "SamuelJennings/django-controlled-vocabularies",
+  "state": "PLAN",
+  "state_history": [
+    {
+      "state": "INTAKE",
+      "at": "2026-08-13T11:07:00Z",
+      "note": "issue #88 grilled against R3, siblings #86/#87 delivered and #89; two decisions with the maintainer - what a typed string matches, and what a project must wire"
+    },
+    {
+      "state": "SPECIFY",
+      "at": "2026-08-13T11:11:00Z",
+      "note": "spec.md, 7 user stories, FR-001..015, SC-001..007; coverage scan resolved 5 further ambiguities, one correcting an intake answer (notation); decisions.md D1-D6"
+    },
+    {
+      "state": "SETUP",
+      "at": "2026-08-13T11:20:00Z",
+      "note": "branch pushed as the bot; #88 promoted to FS-011, stories #116-#122 created and linked, draft PR #123 bot-authored; check-issue-titles green"
+    },
+    {
+      "state": "PLAN",
+      "at": "2026-08-13T11:29:34Z",
+      "note": "spec gate approved by Sam; tomselect recommendation qualified as non-binding, research decides; plan gate restored to a hard stop for this run"
+    },
+    {
+      "state": "PLAN",
+      "at": "2026-08-13T12:05:00Z",
+      "note": "research.md landed (3 candidates, recommends django-tomselect); every load-bearing API fact re-verified against the published wheel 2026.6.2 rather than the GitHub default branch; plan.md A1-A10, tasks.md T001-T011, decisions.md D7-D11; spec amended (D10) - a project wires two entries, not one"
+    }
+  ],
+  "gates": {
+    "spec": {
+      "approved_by": "SamuelJennings",
+      "at": "2026-08-13T11:29:34Z",
+      "self_resolved": [
+        "D2 notation is out - the model has nowhere to hold one",
+        "D3 the endpoint carries no permission rule",
+        "D4 accent folding is not promised",
+        "D5 ordering is stable, not relevance-ranked",
+        "D6 the missing route is reported by the existing system check"
+      ]
+    },
+    "plan": {
+      "approved_by": null,
+      "at": null,
+      "note": "HARD STOP for this run at Sam's instruction 2026-08-13 - silence is not consent, no story is implemented without an explicit go-ahead",
+      "self_resolved": [
+        "D7 django-tomselect adopted, evaluated against the wheel",
+        "D8 both request-controlled surfaces closed explicitly against the library default",
+        "D9 the endpoint-ownership requirement is met; the research flag does not bind",
+        "D11 the field reference is a plain dotted path, not a signed token"
+      ],
+      "raised_for_decision": [
+        "D10 a project wires two entries, not one - amends a promise approved at the spec gate"
+      ]
+    },
+    "design_review": {
+      "approved_by": null,
+      "at": null
+    },
+    "merge": {
+      "approved_by": null,
+      "at": null
+    }
+  },
+  "stories": [
+    {
+      "id": "US0",
+      "priority": "P1",
+      "issue": null,
+      "status": "pending",
+      "replans": 0,
+      "tasks": [
+        { "id": "T001", "status": "pending", "attempts": 0 },
+        { "id": "T002", "status": "pending", "attempts": 0 }
+      ]
+    },
+    {
+      "id": "US1",
+      "priority": "P1",
+      "issue": 116,
+      "status": "pending",
+      "replans": 0,
+      "tasks": [
+        { "id": "T003", "status": "pending", "attempts": 0 },
+        { "id": "T004", "status": "pending", "attempts": 0 }
+      ]
+    },
+    {
+      "id": "US2",
+      "priority": "P1",
+      "issue": 117,
+      "status": "pending",
+      "replans": 0,
+      "tasks": [{ "id": "T005", "status": "pending", "attempts": 0 }]
+    },
+    {
+      "id": "US3",
+      "priority": "P1",
+      "issue": 118,
+      "status": "pending",
+      "replans": 0,
+      "tasks": [
+        { "id": "T006", "status": "pending", "attempts": 0 },
+        { "id": "T007", "status": "pending", "attempts": 0 }
+      ]
+    },
+    {
+      "id": "US4",
+      "priority": "P2",
+      "issue": 119,
+      "status": "pending",
+      "replans": 0,
+      "tasks": [{ "id": "T008", "status": "pending", "attempts": 0 }]
+    },
+    {
+      "id": "US5",
+      "priority": "P2",
+      "issue": 120,
+      "status": "pending",
+      "replans": 0,
+      "tasks": [{ "id": "T010", "status": "pending", "attempts": 0 }]
+    },
+    {
+      "id": "US6",
+      "priority": "P2",
+      "issue": 121,
+      "status": "pending",
+      "replans": 0,
+      "tasks": [{ "id": "T009", "status": "pending", "attempts": 0 }]
+    },
+    {
+      "id": "US7",
+      "priority": "P3",
+      "issue": 122,
+      "status": "pending",
+      "replans": 0,
+      "tasks": [{ "id": "T011", "status": "pending", "attempts": 0 }]
+    }
+  ],
+  "budgets": {
+    "converge_cycles": { "max": 2, "used": 0 },
+    "review_cycles": { "max": 1, "used": 0 },
+    "design_review_cycles": { "max": 1, "used": 0 },
+    "tokens": { "max": 4000000, "used": 0 }
+  },
+  "pr": {
+    "number": 123,
+    "draft": true
+  }
+}

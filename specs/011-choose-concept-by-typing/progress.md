@@ -34,3 +34,31 @@ accordingly. No changes requested to the specification itself.
 The maintainer asked to inspect the plan before implementation begins. For this run the plan
 notification is a **stop**, not a veto window: the run halts after the design review and waits for
 an explicit go-ahead before any story is implemented. Silence is not consent here.
+
+## S3 PLAN — 2026-08-13
+
+`research.md` landed: three candidates evaluated (django-tomselect, django-autocomplete-light,
+vendoring Tom Select behind a view written here), recommending **django-tomselect**, which is also
+what the maintainer suggested. `django-select2` stays excluded — it wraps select2, which is a jQuery
+plugin, and no configuration removes that.
+
+**Every load-bearing API fact was re-verified against the published wheel `2026.6.2`** rather than
+the project's default branch, which is what the research read. Three things changed as a result and
+are recorded as D8, D9 and D10.
+
+`plan.md` (A1–A10, five risks, three complexity entries) and `tasks.md` (T001–T011, mapped to the
+seven story issues) written. `decisions.md` gained D7–D11.
+
+**One amendment to the approved specification.** D10: a project wires two entries, not one. The
+dependency's templates and static assets live inside its own app directory, and Django finds another
+package's templates only in an installed app, so `django_tomselect` must be in `INSTALLED_APPS`
+alongside the route include. FR-002, FR-010, FR-014, User Story 4 and the intake clarification are
+amended in place rather than stretched, and the system check reports either step when it is missing.
+This is on the plan gate because the maintainer read and approved the one-step promise.
+
+## S3R DESIGN REVIEW — 2026-08-13
+
+Dispatched: one reviewer, three lenses (spec compliance, security, architecture), one round.
+`forge check-skills --role design_reviewer,design_reviewer_security,design_reviewer_architecture`
+green before dispatch — craft-review, craft-security and craft-simplify all present, receipted and
+on the allowlist.
