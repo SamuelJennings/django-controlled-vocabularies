@@ -8,11 +8,14 @@ belongs to (FR-005, FR-012) — not the editorial notes or hidden/alternative
 labels the concept also holds.
 """
 
+from django.apps import apps
 from django.conf import settings
+from django.core.exceptions import FieldDoesNotExist
 from django.db.models import Q, QuerySet
 from django.utils.translation import get_language
 from django_tomselect.autocompletes import AutocompleteModelView
 
+from .fields import ConceptFieldMixin
 from .models import Concept, ConceptLabel
 
 #: The label kinds a typed string matches against, in the active language
@@ -56,14 +59,54 @@ class ConceptAutocompleteView(AutocompleteModelView):
         ).distinct()
 
     def hook_queryset(self, queryset):
-        """Attach what ``prepare_results()`` needs before filtering, searching and
-        ordering run (plan.md A5) — the library's documented extension point, not
-        an override of ``get_queryset()`` (plan.md A6): ``select_related("scheme")``
-        for the vocabulary name, ``prefetch_related("labels")`` because
-        ``display_label()`` walks ``self.labels.all()`` and a bounded page would
-        otherwise cost a query per row (R5).
+        """Attach what ``prepare_results()`` needs, then narrow to what the
+        requested field declaration allows (T006, FR-006, plan.md A6 path
+        one) — both before filtering, searching and ordering run, at the
+        library's documented extension point rather than an override of
+        ``get_queryset()``: ``select_related("scheme")`` for the vocabulary
+        name, ``prefetch_related("labels")`` because ``display_label()``
+        walks ``self.labels.all()`` and a bounded page would otherwise cost a
+        query per row (R5).
         """
-        return queryset.select_related("scheme").prefetch_related("labels")
+        queryset = queryset.select_related("scheme").prefetch_related("labels")
+        return self._restrict_to_declaration(queryset)
+
+    def _restrict_to_declaration(self, queryset: QuerySet) -> QuerySet:
+        """Derive the restriction from the field declaration the request
+        names, never from the request itself (FR-006, decisions.md D11).
+
+        ``field`` is a ``<app_label>.<model>.<field_name>`` reference the
+        control's widget appends (plan.md A6 path one); it identifies which
+        declaration is searching and carries no restriction of its own —
+        altering it can only name a different declaration, whose own
+        restriction then applies. Resolution happens through Django's app
+        registry, exactly as it does when Django itself loads a string
+        ``to``; nothing here reads a vocabulary, a scheme, or anything else
+        directly off the request.
+
+        A reference that fails to resolve, names a field that is not one of
+        this package's concept fields, or is absent, returns
+        ``Concept.objects.none()`` — an ordinary empty page, HTTP 200,
+        identical in shape to a search that matched nothing. No exception
+        escapes, so a missing model and an existing-but-wrong field are
+        indistinguishable from outside (plan.md A6 point 3).
+        """
+        reference = self.request.GET.get("field")
+        if not reference:
+            return queryset.none()
+        try:
+            app_label, model_name, field_name = reference.split(".", 2)
+            model = apps.get_model(app_label, model_name)
+            field = model._meta.get_field(field_name)
+        except (ValueError, LookupError, FieldDoesNotExist):
+            return queryset.none()
+        if not isinstance(field, ConceptFieldMixin):
+            return queryset.none()
+        # ConceptFieldMixin is a plain mixin, not itself a RelatedField, so
+        # get_limit_choices_to() (from ForeignKey/ManyToManyField, which
+        # ConceptField/ConceptsField also inherit) is invisible to mypy after
+        # narrowing on the mixin alone.
+        return queryset.complex_filter(field.get_limit_choices_to())  # type: ignore[attr-defined]
 
     def prepare_results(self, results):
         """Shape each result down to exactly what FR-012 permits (FR-005): the

@@ -20,6 +20,8 @@ request consulted, restoring what an unmodified ``ModelChoiceField`` already doe
 with ``limit_choices_to``.
 """
 
+from urllib.parse import urlencode
+
 from django_tomselect.app_settings import AllowedCSSFrameworks, TomSelectConfig
 from django_tomselect.forms import TomSelectModelChoiceField, TomSelectModelMultipleChoiceField
 from django_tomselect.widgets import TomSelectModelMultipleWidget, TomSelectModelWidget
@@ -71,11 +73,36 @@ class _ConceptWidgetValidationMixin:
         return Concept.objects.complex_filter(self.model_field.get_limit_choices_to())
 
 
-class ConceptWidget(_ConceptWidgetValidationMixin, TomSelectModelWidget):
+class _ConceptWidgetReferenceMixin:
+    """The ``get_autocomplete_params()`` override T006 exists for (plan.md
+    A6 path one, decisions.md D11).
+
+    Appends ``field=<app_label>.<model>.<field_name>`` — a reference to this
+    widget's own declaration, read from the same ``model_field`` attribute
+    :class:`_ConceptWidgetValidationMixin` reads — to every autocomplete
+    request the control's browser plugin makes. It identifies which
+    declaration is searching and carries no restriction of its own: the
+    restriction is read from that declaration on the server (T006), never
+    from this parameter's value.
+
+    Absent — a widget built without going through ``formfield()`` — sends no
+    reference, which the endpoint's own fail-closed refusal already covers.
+    """
+
+    model_field = None
+
+    def get_autocomplete_params(self) -> str:
+        if self.model_field is None:
+            return ""
+        meta = self.model_field.model._meta
+        return urlencode({"field": f"{meta.app_label}.{meta.model_name}.{self.model_field.name}"})
+
+
+class ConceptWidget(_ConceptWidgetReferenceMixin, _ConceptWidgetValidationMixin, TomSelectModelWidget):
     """The control :class:`ConceptChoiceField` renders (FR-001)."""
 
 
-class ConceptsWidget(_ConceptWidgetValidationMixin, TomSelectModelMultipleWidget):
+class ConceptsWidget(_ConceptWidgetReferenceMixin, _ConceptWidgetValidationMixin, TomSelectModelMultipleWidget):
     """The control :class:`ConceptsChoiceField` renders (FR-001)."""
 
 
