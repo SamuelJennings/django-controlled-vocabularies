@@ -3,7 +3,7 @@
   "feature": "011-choose-concept-by-typing",
   "branch": "011-choose-concept-by-typing",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "PR_READY",
+  "state": "MERGED",
   "state_history": [
     {
       "state": "INTAKE",
@@ -69,6 +69,11 @@
       "state": "PR_READY",
       "at": "2026-08-13T18:40:00Z",
       "note": "PR #123 body rewritten to the contract and humanized, review report posted as a bot comment, US-4's title corrected for the third wiring step and the amendment recorded on #119; story-comment and issue-title gates green, last push actor is the bot, draft lifted; merge gate is Sam's"
+    },
+    {
+      "state": "MERGED",
+      "at": "2026-08-13T19:30:30Z",
+      "note": "PR #123 merged; approved by SamuelJennings"
     }
   ],
   "gates": {
@@ -107,8 +112,8 @@
       ]
     },
     "merge": {
-      "approved_by": null,
-      "at": null
+      "approved_by": "SamuelJennings",
+      "at": "2026-08-13T19:30:21Z"
     },
     "review": {
       "approved_by": "forge reviewer (subagent)",
