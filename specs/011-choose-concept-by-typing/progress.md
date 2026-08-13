@@ -355,3 +355,42 @@ Verified here: full suite 1298 green (was 1285 before T011; `test_standards.py` 
 reports no changes, `poetry run pre-commit run --all-files` green on all eight hooks, `forge
 verify` green on all five steps. Both craft receipts (`craft-tdd/2026-08-05/eae3b6c7`,
 `craft-increments/2026-08-05/d3dce07f`) loaded and confirmed.
+
+## S5 CONVERGE — 2026-08-13
+
+**Migrations:** none. The feature adds no model change, so there is nothing to consolidate.
+`makemigrations --check --dry-run` reports no changes.
+
+**Simplification pass** (`craft-simplify`, receipt `craft-simplify/2026-08-04/69038ce1`). One
+candidate, rejected. `ConceptChoiceField.__init__` and `ConceptsChoiceField.__init__` are
+byte-identical, and extracting the shared mixin does remove six duplicated lines — but it puts a
+third class in each field's MRO, which surfaces four pre-existing incompatibilities between the
+library's `BaseTomSelectModelMixin` and Django's `ModelChoiceField` (`queryset` and
+`to_field_name` declared differently in each). The suite stayed green and mypy went red. Six
+duplicated lines for four type-ignore comments is not a simplification, so it was reverted.
+Nothing else in the feature's own code met the bar: the widget mixins are separated deliberately
+(each names one guarantee), and the docstring density matches the modules already in the package.
+
+**ADR graduation.** Three of the fifteen decisions clear the bar of durable *and* architectural
+*and* non-obvious:
+
+- D3 → `docs/adr/0008-the-concept-search-endpoint-carries-no-permission-rule.md`
+- D7 → `docs/adr/0009-the-search-control-is-a-dependency-the-vocabulary-logic-is-not.md`
+- D12 → `docs/adr/0010-a-restriction-is-derived-on-every-path-not-carried-on-one.md`
+
+The other twelve record a declining reason in place. D11 is the one worth naming: its substance
+(the field reference names a declaration, carries no restriction, and is deliberately unsigned)
+is part of ADR 0010 rather than an ADR of its own.
+
+**Ledger reconciliation.** `stage-exit --stage S5` was red on the schema, with twelve errors
+predating this stage: the `design_review` gate carried six fields the schema does not define, two
+stories carried `commits` and `receipts` keys, and seven `done` tasks carried no evidence at all.
+The substance was preserved rather than deleted — the design review's verdict, finding counts and
+receipts are now `self_resolved` entries, and each task's evidence is written from the story
+write-ups above. Green on all six checks afterwards.
+
+**tamper-check** flags three pre-existing test files: `tests/settings.py` (the three wiring steps
+the test project now declares), `tests/test_checks.py` (an import line extended) and
+`tests/test_standards.py` (the i18n sweep's module list and its comments). Every removed line in
+the three is a comment or a docstring replaced by a longer one, an extended import, or an extended
+module list. No assertion was weakened and no test was deleted.

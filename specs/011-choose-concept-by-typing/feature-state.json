@@ -3,7 +3,7 @@
   "feature": "011-choose-concept-by-typing",
   "branch": "011-choose-concept-by-typing",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "IMPLEMENT",
+  "state": "CONVERGE",
   "state_history": [
     {
       "state": "INTAKE",
@@ -49,6 +49,16 @@
       "state": "IMPLEMENT",
       "at": "2026-08-13T14:10:00Z",
       "note": "ledger reconciled after a token-limit interruption: US3-US6 were implemented, verified and recorded in progress.md but never checkpointed here; commits 9af5076/791b696/d85085b/6f592bf/6957851 plus their repairs are on the branch and pushed (origin head ac91f511). US7 (T011) remains the only unimplemented story."
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-13T20:10:00Z",
+      "note": "US7 T011 landed and accepted (translatable-string sweep extended to views.py and forms.py, README's three wiring steps, CONTEXT.md term, CHANGELOG entry); receipts verified, full suite 1298 green and forge verify green on all five steps re-run by the orchestrator; the README assertions were watched to fail before the section was written, and two of the sweep's new capabilities were re-probed here by planting a bare literal in views.py and a positional placeholder in forms.py"
+    },
+    {
+      "state": "CONVERGE",
+      "at": "2026-08-13T20:45:00Z",
+      "note": "No migrations to consolidate - the feature introduces none. Simplification pass found one candidate (the two form fields' identical __init__) and rejected it: the shared mixin surfaces four pre-existing mypy incompatibilities between the library's mixin and Django's ModelChoiceField, trading six duplicated lines for four type-ignore comments. Three decisions graduated to ADRs 0008/0009/0010 and all fifteen carry a verdict. Ledger reconciled to the schema: the design_review gate's extra fields and the stories' commits/receipts keys are folded into the fields the schema carries, and every done task now holds its evidence. stage-exit S5 green on all six checks."
     }
   ],
   "gates": {
@@ -66,7 +76,6 @@
     "plan": {
       "approved_by": "SamuelJennings",
       "at": "2026-08-13T13:00:00Z",
-      "note": "Approved in session after inspection at the hard stop; approval covers D10 (a project wires two entries, not one), which was the decision raised for him",
       "self_resolved": [
         "D7 django-tomselect adopted, evaluated against the wheel",
         "D8 both request-controlled surfaces closed explicitly against the library default",
@@ -75,21 +84,16 @@
         "D12 the validation queryset comes from the widget, not the endpoint - corrects a critical design defect",
         "D13 Concept.label is not indexed for this feature, recorded under Article XIII",
         "D14 a missing route reads the same at render time as at check time",
-        "D10 accepted at the plan gate: a project adds the route and the supporting package to INSTALLED_APPS"
+        "D10 accepted at the plan gate: a project adds the route and the supporting package to INSTALLED_APPS",
+        "Plan gate note: Approved in session after inspection at the hard stop; approval covers D10 (a project wires two entries, not one), which was the decision raised for him"
       ]
     },
     "design_review": {
       "approved_by": "forge design reviewer (subagent)",
       "at": "2026-08-13T12:33:00Z",
-      "verdict": "request-changes",
-      "findings": 5,
-      "confirmed": 5,
-      "declined": 0,
-      "remedied": true,
-      "receipts": [
-        "craft-review/2026-08-05/57b2f2f3",
-        "craft-security/2026-08-04/ea3d6742",
-        "craft-simplify/2026-08-04/69038ce1"
+      "self_resolved": [
+        "Verdict request-changes: 5 finding(s), 5 confirmed against the wheel's source, 0 declined, all remedied in plan.md and tasks.md (3263022) and each remedy verified by the orchestrator rather than a reviewer re-dispatch",
+        "Craft-skill receipts echoed: craft-review/2026-08-05/57b2f2f3, craft-security/2026-08-04/ea3d6742, craft-simplify/2026-08-04/69038ce1"
       ]
     },
     "merge": {
@@ -108,22 +112,31 @@
         {
           "id": "T001",
           "status": "done",
-          "attempts": 1
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_smoke.py::TestDjangoTomselectDependency"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_smoke.py -q  # dependency contract, green",
+              "forge verify --repo .  # RED on conformance at first: the contract had been written to tests/test_dependencies.py, which mirrors no source module (Article X); moved to tests/test_smoke.py (4e2c0c3), all five steps green afterwards"
+            ]
+          }
         },
         {
           "id": "T002",
           "status": "done",
-          "attempts": 1
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_urls.py::TestConceptAutocompleteUrl"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_urls.py -q  # 2 passed",
+              "forge verify --repo .  # all five steps green (orchestrator re-run, beebf29)"
+            ]
+          }
         }
-      ],
-      "commits": [
-        "0aa19d3",
-        "58a6f36",
-        "4e2c0c3"
-      ],
-      "receipts": [
-        "craft-tdd/2026-08-05/eae3b6c7",
-        "craft-increments/2026-08-05/d3dce07f"
       ]
     },
     {
@@ -208,14 +221,6 @@
             ]
           }
         }
-      ],
-      "commits": [
-        "ea2827e",
-        "960b092"
-      ],
-      "receipts": [
-        "craft-tdd/2026-08-05/eae3b6c7",
-        "craft-increments/2026-08-05/d3dce07f"
       ]
     },
     {
@@ -228,12 +233,33 @@
         {
           "id": "T006",
           "status": "done",
-          "attempts": 1
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_views.py::TestConceptAutocompleteRestrictionFromDeclaration"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_views.py -q  # RED first: a mandatory field= reference refused eight pre-existing T003/T005 tests that call the endpoint bare; the tests were stale, not the code, and each now searches through Sketch.subject (5abb8b9)",
+              "poetry run pytest -q  # 1245 passed (orchestrator re-run)",
+              "forge verify --repo .  # all five steps green (orchestrator re-run)",
+              "mutation probe (orchestrator, seventh, beyond the brief): removing the active-language constraint from the search filter left all 16 tests green - a German alternative label that must not be found under English now covers it, and all six clauses of the filter fail at least one test when removed"
+            ]
+          }
         },
         {
           "id": "T007",
           "status": "done",
-          "attempts": 1
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_views.py::TestConceptAutocompleteRefusalDisclosesNothing",
+              "tests/test_views.py::TestConceptAutocompleteRequestControlledSurfacesAreClosed"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_views.py -q  # the four refusal shapes return byte-identical HTTP 200 empty pages",
+              "mutation probe (implementer): its own probe caught a vacuous allowlist test - it sent no field=, so T006 emptied the queryset regardless of the allowlist; repaired before the report by sending an unrestricted reference first"
+            ]
+          }
         }
       ]
     },
@@ -247,7 +273,20 @@
         {
           "id": "T008",
           "status": "done",
-          "attempts": 1
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_checks.py::TestCheckConceptAutocompleteRouteIncluded",
+              "tests/test_checks.py::TestCheckDjangoTomselectInstalled",
+              "tests/test_checks.py::TestBothWiringChecksReachManageCheck",
+              "tests/test_forms.py::TestConceptFieldRenderingWithoutTheRouteIncluded"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 1259 passed after the repair (orchestrator re-run)",
+              "forge verify --repo .  # all five steps green (orchestrator re-run)",
+              "mutation probe (orchestrator): deleting the two check registrations in apps.py left all 1254 tests green - FR-010 promises a project is told, so the tests now assert through manage.py check (repair, 3d5347c)"
+            ]
+          }
         }
       ]
     },
@@ -261,7 +300,17 @@
         {
           "id": "T010",
           "status": "done",
-          "attempts": 1
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_views.py::TestConceptAutocompletePagination"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 1285 passed after the repair (orchestrator re-run)",
+              "forge verify --repo .  # all five steps green (orchestrator re-run)",
+              "repair (ac91f51): the story shipped a thirty-line copy of the vendor pagination method to change one branch; it delegates to super() and reads its answer instead, and the ordering that actually ran is now asserted"
+            ]
+          }
         }
       ]
     },
@@ -275,7 +324,22 @@
         {
           "id": "T009",
           "status": "done",
-          "attempts": 1
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_forms.py::TestConceptFieldShowsWhatARecordAlreadyHolds",
+              "tests/test_forms.py::TestTheControlIsActuallyInstantiated",
+              "tests/test_forms.py::TestDisplayingAnAttachedConceptLeavesValidationNarrow",
+              "tests/test_checks.py::TestCheckTomselectMiddlewareInstalled",
+              "tests/test_checks.py::TestTheMiddlewareCheckReachesManageCheck"
+            ],
+            "commands": [
+              "poetry run pytest -q  # 1277 passed after the repair (orchestrator re-run)",
+              "forge verify --repo .  # all five steps green (orchestrator re-run)",
+              "measurement (D15): the form rendered at 36,232 characters without TomSelectMiddleware against 67,519 with it, with the string \"new TomSelect(\" absent from the first and present in the second - the third wiring step and its system check (W004) came from this",
+              "mutation probe (orchestrator): deleting the queryset restoration in _get_selected_options left the suite green, which would have let one widget instance validate every later submission against every concept (repair, 6950cf2)"
+            ]
+          }
         }
       ]
     },
@@ -304,9 +368,9 @@
               "poetry run pytest -q  # 1298 passed (orchestrator re-run)",
               "forge verify --repo .  # conformance, lint, typecheck, test, build all passed (orchestrator re-run)",
               "forge check-receipts --skills craft-tdd,craft-increments  # both receipts verified",
-              "mutation probe (orchestrator): a bare ValidationError literal added to views.py fails the views sweep; a positional placeholder in a forms.py translation call fails the forms sweep; renaming the middleware path in README fails two README tests"
-            ],
-            "notes": "The task brief said two wiring steps and prohibited a third; the repo record (D15, tasks.md T011, amended FR-002/010/014, shipped W004 check) says three. The implementer followed the repo over the brief and flagged it. Correct call - the brief predates D15."
+              "mutation probe (orchestrator): a bare ValidationError literal added to views.py fails the views sweep; a positional placeholder in a forms.py translation call fails the forms sweep; renaming the middleware path in README fails two README tests",
+              "orchestrator note: The task brief said two wiring steps and prohibited a third; the repo record (D15, tasks.md T011, amended FR-002/010/014, shipped W004 check) says three. The implementer followed the repo over the brief and flagged it. Correct call - the brief predates D15."
+            ]
           }
         }
       ]
