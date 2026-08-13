@@ -39,6 +39,11 @@
       "state": "IMPLEMENT",
       "at": "2026-08-13T13:35:00Z",
       "note": "US0 Phase F landed (T001 dependency, T002 endpoint+route); receipts verified, full suite 1220 green re-run by the orchestrator; conformance was red on the implementer's file placement (tests/test_dependencies.py mirrors no source module) and was fixed in 4e2c0c3 by moving it to tests/test_smoke.py, the standing package-level exception; forge verify green on all five steps"
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-13T14:35:00Z",
+      "note": "US2 T005 landed (search() matches the three label kinds in the active language plus the default-language label, deduplicated); receipts verified, full suite 1236 green and forge verify green on all five steps re-run by the orchestrator; two of the six tests were vacuous on the kind under test - \"granit\" and \"Granit\" are substrings of the default label \"Granite\", so dropping PREFERRED or HIDDEN from the searched kinds left all six passing; fragments changed to \"granyte\" and \"gestein\" in 960b092 and every clause of the filter is now load-bearing for at least one test"
     }
   ],
   "gates": {
@@ -171,14 +176,41 @@
       "id": "US2",
       "priority": "P1",
       "issue": 117,
-      "status": "pending",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T005",
-          "status": "pending",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_views.py::TestConceptAutocompleteSearch::test_a_fragment_of_an_alternative_label_finds_the_concept_by_its_preferred_label",
+              "tests/test_views.py::TestConceptAutocompleteSearch::test_a_fragment_of_a_hidden_label_finds_the_concept_by_its_preferred_label",
+              "tests/test_views.py::TestConceptAutocompleteSearch::test_a_fragment_of_either_the_active_or_default_language_preferred_label_finds_the_concept_by_the_active_one",
+              "tests/test_views.py::TestConceptAutocompleteSearch::test_a_concept_with_no_active_language_labels_is_found_and_shown_by_its_default_label",
+              "tests/test_views.py::TestConceptAutocompleteSearch::test_a_concept_matching_on_two_of_its_labels_appears_once",
+              "tests/test_views.py::TestConceptAutocompleteSearch::test_a_search_differing_only_in_case_from_a_label_still_matches"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_views.py::TestConceptAutocompleteSearch -q  # implementer's first RED was vacuous (6 passed with no search() override, single concept per test); fixed by adding a decoy concept, then RED for the right reason: 6 failed on the decoy leaking in",
+              "poetry run pytest tests/test_views.py -q  # GREEN: 8 passed",
+              "poetry run pytest -q  # 1236 passed (orchestrator re-run)",
+              "poetry run pre-commit run --all-files  # 8 hooks green (orchestrator re-run)",
+              "DJANGO_SETTINGS_MODULE=tests.settings poetry run python -m django makemigrations --check --dry-run  # No changes detected",
+              "forge verify --repo . --base origin/main  # conformance, lint, typecheck, test, build all passed",
+              "mutation probe (orchestrator): dropping PREFERRED / ALTERNATIVE / HIDDEN from _SEARCHED_LABEL_KINDS, dropping .distinct(), dropping the default-label Q -- each now fails at least one test; before the test repair, dropping PREFERRED or HIDDEN left all 6 green"
+            ]
+          }
         }
+      ],
+      "commits": [
+        "ea2827e",
+        "960b092"
+      ],
+      "receipts": [
+        "craft-tdd/2026-08-05/eae3b6c7",
+        "craft-increments/2026-08-05/d3dce07f"
       ]
     },
     {
