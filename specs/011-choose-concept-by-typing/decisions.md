@@ -5,7 +5,7 @@ Each entry names what was unclear, what was chosen, and why the choice is defens
 
 ## D1 — Search-as-you-type comes from an established third-party integration, not from custom code
 
-**Status:** maintainer's direction, recorded at intake 2026-08-13. Binding on the plan.
+**Status:** maintainer's recommendation, recorded at intake 2026-08-13 and qualified at the spec gate the same day. **Not binding — the research step decides.**
 
 The maintainer stated the shape of the solution before specification began and asked that it be
 carried into planning rather than discussed at intake:
@@ -18,14 +18,18 @@ carried into planning rather than discussed at intake:
 - **`django-tomselect` is the candidate to evaluate first** as a newer alternative offering
   similar functionality.
 
-This is a direction, not a decision already taken. The plan stage owes it a real evaluation
-against this specification's requirements — in particular FR-006 (the restriction is derived from
+The maintainer confirmed at the spec gate that this is a recommendation rather than an
+instruction, and that research settles it. So the plan stage owes the candidate a real evaluation
+against this specification's requirements, alongside the alternatives it is being preferred over — in particular FR-006 (the restriction is derived from
 the declaration, never taken from the request), FR-007 (bounded, stable paging) and FR-002 (the
 package carries the endpoint and the control resolves the project's chosen address) — plus
 Article VII's dependency justification and the dual compatibility contract of Article VIII, which
-constrains what Django and Python versions a dependency may drop. If the candidate cannot meet
-those, the finding goes back to the maintainer with the evidence rather than being worked around
-quietly.
+constrains what Django and Python versions a dependency may drop. The jQuery objection stands whatever the evaluation concludes: it is a
+constraint on the answer, not a preference to be traded away.
+
+The research step names the choice with its evidence. If it lands anywhere other than the
+recommended candidate, that goes to the maintainer with the reasoning rather than being decided
+quietly, because he named a starting point and is owed the result.
 
 ## D2 — Matching does not cover notation, though intake agreed it would
 
