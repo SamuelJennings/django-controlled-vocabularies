@@ -98,3 +98,45 @@ installed applications. `spec.md`'s intake clarification carries the correction 
 
 Implementation begins. Stories are implemented by dispatched subagents on the Sonnet tier, one at
 a time, each in its own worktree, each verified here against evidence rather than assertion.
+
+## S4 IMPLEMENT — US-0 (Phase F), 2026-08-13
+
+T001 and T002 accepted. `django-tomselect` declared as a runtime dependency, the autocomplete
+view and its route in place, answering nothing yet. The implementer's own checks read green while
+`forge verify` did not: the dependency contract had been written to `tests/test_dependencies.py`,
+which mirrors no source module and so fails the Article X conformance rule, and pre-commit does
+not run conformance. Moved here to `tests/test_smoke.py`, the standing exception for a
+package-level check (`4e2c0c3`). All five verify steps green afterwards.
+
+## S4 IMPLEMENT — US-1 (#116), 2026-08-13
+
+T003 and T004 accepted (`81a0fb4`, `6f1fbd5`). Results carry the identifier, the preferred label
+and the vocabulary and nothing else, built on `hook_queryset()` and `prepare_results()` with no
+`get_queryset()` override on the view (A5, A6). Both model fields bind this package's form field
+and widget from the declaration alone, and the widget derives its validation queryset from the
+model field instance rather than an ambient request — D12, the design review's critical finding.
+The implementer reproduced that defect on the way through: with `formfield()` landed but before
+the widget override, a legitimate concept failed with `invalid_choice`, exactly as predicted.
+
+Verified here rather than accepted: full suite re-run at 1230 passed, `forge verify` green on all
+five steps against `origin/main`, both craft receipts confirmed against the registry.
+
+Two items came back with the report, and one of them was overstated.
+
+- **The wheel's `TomSelectConfig.validate()` rejects its own enum.** `css_framework` is annotated
+  `AllowedCSSFrameworks` and validated against `{f.value for f in AllowedCSSFrameworks}`, and the
+  enum does not subclass `str`, so passing the member raises `ValidationError` while satisfying
+  the type checker. Confirmed in the installed wheel (`app_settings.py:151`, `:585`). The member's
+  `.value` is passed with a narrow `type: ignore` and the wheel line named in the docstring. This
+  is a fourth documentation-versus-behaviour error in `django-tomselect`, on top of the three the
+  plan already records.
+- **A required `ConceptsField` has a pre-existing submission defect — narrower than reported.**
+  The report claimed every submission fails, valid or not. Probed directly: creating a record
+  works, because `_install_required_set_check` skips an instance with no primary key, and editing
+  a record whose relation already has members works. The one failing path is editing a saved
+  record whose relation is still empty, where `_post_clean()` runs `full_clean()` before
+  `save_m2m()` and the check reads the database rather than the submission. That path matters —
+  it is the one that would populate a record imported without concepts — so it is filed as #124
+  against FS-010, with the measured behaviour per path. Nothing in this feature depends on it and
+  the T004 tests use an optional `ConceptsField`, whose class docstring was corrected here to the
+  measured behaviour rather than the reported one.

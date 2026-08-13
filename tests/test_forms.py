@@ -91,12 +91,14 @@ class TestConceptFieldSubmissionSurvives:
     of a legitimate concept survive validation, on both fields' shapes.
 
     The ``ConceptsField`` half uses :class:`Outcrop` (``minerals``, ``blank=True``)
-    rather than :class:`Deposit`: a *required* ``ConceptsField`` trips FS-010's own
-    ``_install_required_set_check`` through any ``ModelForm`` regardless of D12,
-    because ``_post_clean()`` runs model-level ``full_clean()`` before
-    ``save_m2m()`` attaches anything — a pre-existing full_clean()/save_m2m()
-    ordering issue this task's fixture choice sidesteps rather than one D12's
-    widget queryset is responsible for.
+    rather than :class:`Deposit`, to keep the assertions on D12 alone. A *required*
+    ``ConceptsField`` has one submission path of its own that fails for an unrelated,
+    pre-existing reason (#124): editing a saved record whose relation is still empty.
+    ``_post_clean()`` runs model-level ``full_clean()`` — and so FS-010's
+    ``_install_required_set_check`` — before ``save_m2m()`` has attached anything, so
+    the submission that would populate the relation is the one refused. Creating a
+    record is unaffected: the check skips an instance with no primary key. Nothing
+    here is D12's widget queryset.
     """
 
     def test_a_legitimate_concept_is_valid_and_saves_for_a_concept_field(self):

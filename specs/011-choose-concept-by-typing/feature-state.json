@@ -120,7 +120,7 @@
       "id": "US1",
       "priority": "P1",
       "issue": 116,
-      "status": "pending",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
