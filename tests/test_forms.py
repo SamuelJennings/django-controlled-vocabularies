@@ -149,12 +149,17 @@ class TestConceptFieldRenderingWithoutTheRouteIncluded:
     re-raise ``NoReverseMatch`` verbatim there — a message naming a URL pattern
     the developer never wrote. This widget catches it and raises
     ``ImproperlyConfigured`` naming both wiring steps instead, so the assertion
-    is on the message, not the exception type alone."""
+    is on the message, not the exception type alone.
+
+    Both widgets carry the mixin, so both are asserted: the single-valued and the
+    many-valued field reach the render through different widget classes, and one
+    covered on its own leaves the other free to raise the library's own error."""
 
     @override_settings(ROOT_URLCONF=())
-    def test_rendering_raises_improperlyconfigured_naming_both_steps(self):
+    @pytest.mark.parametrize("form_class", [SampleForm, DepositForm])
+    def test_rendering_raises_improperlyconfigured_naming_both_steps(self, form_class):
         with pytest.raises(ImproperlyConfigured) as exc_info:
-            str(SampleForm())
+            str(form_class())
 
         message = str(exc_info.value)
         assert "controlled_vocabularies.urls" in message

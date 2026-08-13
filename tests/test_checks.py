@@ -292,3 +292,38 @@ class TestCheckDjangoTomselectInstalled:
     def test_runs_without_touching_the_database(self, django_assert_num_queries):
         with django_assert_num_queries(0):
             check_django_tomselect_installed(None)
+
+
+@pytest.mark.django_db
+class TestBothWiringChecksReachManageCheck:
+    """T008 — FR-010 promises the two wiring steps are *reported*, which a
+    function nobody registered never does. Calling the check functions directly
+    passes whether or not ``apps.ready()`` registers them, so these assert on
+    what a project actually runs: ``manage.py check``."""
+
+    def test_the_missing_route_is_reported_by_manage_check(self):
+        stderr = io.StringIO()
+        with override_settings(ROOT_URLCONF=()):
+            call_command("check", stderr=stderr)
+
+        assert CHECK_ID_MISSING_ROUTE in stderr.getvalue()
+
+    def test_the_missing_route_is_absent_from_manage_check_once_included(self):
+        stderr = io.StringIO()
+        call_command("check", stderr=stderr)
+
+        assert CHECK_ID_MISSING_ROUTE not in stderr.getvalue()
+
+    def test_the_missing_installed_app_is_reported_by_manage_check(self):
+        installed = [app for app in settings.INSTALLED_APPS if app != "django_tomselect"]
+        stderr = io.StringIO()
+        with override_settings(INSTALLED_APPS=installed):
+            call_command("check", stderr=stderr)
+
+        assert CHECK_ID_MISSING_INSTALLED_APP in stderr.getvalue()
+
+    def test_the_missing_installed_app_is_absent_from_manage_check_once_installed(self):
+        stderr = io.StringIO()
+        call_command("check", stderr=stderr)
+
+        assert CHECK_ID_MISSING_INSTALLED_APP not in stderr.getvalue()

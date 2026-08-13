@@ -173,3 +173,41 @@ in the active language *matches*, and none that a label in another language does
 whose German alternative label must not be found under English — and must be found under German —
 now covers it. All six clauses of the filter (three label kinds, the default-language column, the
 deduplication, the language constraint) fail at least one test when removed.
+
+## S4 IMPLEMENT — US-4 (#119), 2026-08-13
+
+T008 accepted (`d85085b`, plus the test repair below). A project missing either wiring step D10
+requires now hears about it twice: `manage.py check` reports the absent route include
+(`controlled_vocabularies.W002`) and the absent `INSTALLED_APPS` entry (`W003`), and a render that
+gets past both warnings raises `ImproperlyConfigured` naming both steps rather than the library's
+own `NoReverseMatch` against a URL pattern the developer never wrote. Neither check touches the
+database, proven with `django_assert_num_queries(0)` rather than by reading the code.
+
+**D14 named the wrong hook, and the implementer measured its way to the right one.** Against the
+installed `django_tomselect` 2026.6.2 wheel, `TomSelectModelWidget.get_autocomplete_context()`
+resolves the route twice while building one widget's context — once inside `get_search_lookups()`
+(`widgets.py:1209-1216`, via `LazyView.get_url()`) before `get_autocomplete_url()`
+(`widgets.py:225-241`) ever runs. Both re-raise `NoReverseMatch` verbatim and the earlier one wins,
+so an override on `get_autocomplete_url()` alone never executes on a missing route. The mixin wraps
+`get_autocomplete_context()` instead, the one seam both roads pass through, shared by both concept
+widgets through the same MRO. The fifth documentation-versus-behaviour discrepancy this feature has
+found in the library.
+
+Verified here rather than accepted: full suite 1259 green after the repair below, `forge verify`
+green on all five steps, both craft receipts confirmed against the registry.
+
+**Two mutation probes of my own found gaps the implementer's nine left open**, both in the same
+shape: a mechanism covered only where it is reached one way.
+
+- **Neither check was registered in any test.** Deleting both `register()` calls from
+  `apps.ready()` left all 1254 tests green — every check test called the function directly, so the
+  functions were covered and the thing FR-010 actually promises, that a project is *told*, was not.
+  `W001` had this covered all along through `test_silencing_the_check_id_suppresses_it`. Four tests
+  now assert both ids through `call_command("check")`, present when the wiring is missing and
+  absent when it is not.
+- **The many-valued widget's render path was uncovered.** Removing `_ConceptWidgetRouteMixin` from
+  `ConceptsWidget` alone left all 1254 green, because the render test used `SampleForm`
+  (a `ConceptField`). It is now parametrised across `SampleForm` and `DepositForm`, so each widget
+  class fails on its own.
+
+Both mutations now fail at least one test. Five tests added, 1254 → 1259.
