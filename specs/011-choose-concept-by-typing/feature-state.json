@@ -44,6 +44,11 @@
       "state": "IMPLEMENT",
       "at": "2026-08-13T14:35:00Z",
       "note": "US2 T005 landed (search() matches the three label kinds in the active language plus the default-language label, deduplicated); receipts verified, full suite 1236 green and forge verify green on all five steps re-run by the orchestrator; two of the six tests were vacuous on the kind under test - \"granit\" and \"Granit\" are substrings of the default label \"Granite\", so dropping PREFERRED or HIDDEN from the searched kinds left all six passing; fragments changed to \"granyte\" and \"gestein\" in 960b092 and every clause of the filter is now load-bearing for at least one test"
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-13T14:10:00Z",
+      "note": "ledger reconciled after a token-limit interruption: US3-US6 were implemented, verified and recorded in progress.md but never checkpointed here; commits 9af5076/791b696/d85085b/6f592bf/6957851 plus their repairs are on the branch and pushed (origin head ac91f511). US7 (T011) remains the only unimplemented story."
     }
   ],
   "gates": {
@@ -217,18 +222,18 @@
       "id": "US3",
       "priority": "P1",
       "issue": 118,
-      "status": "pending",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T006",
-          "status": "pending",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1
         },
         {
           "id": "T007",
-          "status": "pending",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1
         }
       ]
     },
@@ -236,13 +241,13 @@
       "id": "US4",
       "priority": "P2",
       "issue": 119,
-      "status": "pending",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T008",
-          "status": "pending",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1
         }
       ]
     },
@@ -250,13 +255,13 @@
       "id": "US5",
       "priority": "P2",
       "issue": 120,
-      "status": "pending",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T010",
-          "status": "pending",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1
         }
       ]
     },
@@ -264,13 +269,13 @@
       "id": "US6",
       "priority": "P2",
       "issue": 121,
-      "status": "pending",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T009",
-          "status": "pending",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1
         }
       ]
     },

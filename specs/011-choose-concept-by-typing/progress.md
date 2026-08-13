@@ -289,3 +289,29 @@ wheel is confirmed pristine.
   search issued: both columns present in the `ORDER BY`, `label` before `id`, with three concepts
   sharing one label across three vocabularies — the real shape of a tie, since `label` is unique
   only within a vocabulary. Emptying `ordering` fails it, and dropping `pk` fails it.
+
+## S4 IMPLEMENT — US-2 (#117), recorded retrospectively 2026-08-13
+
+T005 accepted (`ea2827e`, plus the repair at `960b092`). Matching runs over the preferred,
+alternative and hidden labels a concept carries in the active language and over the
+default-language preferred column, case-insensitively, with a concept matching on several of its
+labels returned once. The library's `search_lookups` mechanism is left empty and the search step
+replaced outright, because one flat list of ORM lookups cannot express three kinds of label in one
+language plus a column in another.
+
+This section was missed when the story was accepted. The gap it left in the tests — every case
+asserting that an active-language label matches and none that another language's does not — was
+caught later by a mutation probe during US-3 and repaired there.
+
+## S4 — ledger reconciliation after a token-limit interruption, 2026-08-13
+
+The session hit a usage limit mid-run. US-3, US-4, US-5 and US-6 were implemented, verified and
+written up above, but `feature-state.json` was never checkpointed past US-2 and no story
+completion comment had been posted for any story at all. Both are the same failure: the
+checkpoint action that should be atomic with accepting a story was split from it by the
+interruption.
+
+Reconciled against evidence rather than memory: the commits are on the branch and pushed
+(`origin` head `ac91f511`, PR #123 open and draft), each story's acceptance is recorded above with
+what was verified, and the ledger now matches. The six completion comments are posted. US-7 (T011)
+is the only story still unimplemented.
