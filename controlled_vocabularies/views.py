@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING
 from django.apps import apps
 from django.conf import settings
 from django.core.exceptions import FieldDoesNotExist
-from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 from django.db.models import Q, QuerySet
 from django.utils.translation import get_language
 from django_tomselect.autocompletes import AutocompleteModelView
@@ -122,44 +121,35 @@ class ConceptAutocompleteView(AutocompleteModelView):
         ``page_size``, the inherited ``MAX_PAGE_SIZE`` clamp (applied in
         ``setup()`` before this runs) and the total ordering
         (``ordering = ("label", "pk")`` above) are unchanged and stay
-        inherited — this mirrors the base implementation
-        (``autocompletes.py:730``) so the query shape stays identical, and
-        overrides only the ``EmptyPage`` branch. The inherited branch
-        catches ``EmptyPage`` and returns page 1 (``autocompletes.py:743``),
-        which would make a request past the end silently re-serve the
-        beginning; this returns an ordinary empty page instead, saying no
-        more exist, the same shape a search that matched nothing already
-        returns.
+        inherited. Only the one branch ``plan.md`` A7 names is replaced: the
+        base catches ``EmptyPage`` and returns page 1
+        (``autocompletes.py:743``), so a request past the end silently
+        re-serves the beginning. Here it returns an ordinary empty page
+        saying no more exist — the same shape a search that matched nothing
+        already returns.
+
+        The base does the paginating and this reads its answer, rather than
+        reimplementing it. Copying the base's body to change one branch would
+        fork thirty lines of somebody else's code, and the fork would go on
+        looking correct after the original changed. The one cost is that a
+        request past the end pays for the page-1 results the base prepared
+        before this discards them, which is the price of exactly one ordinary
+        first-page request, on the rarest path the endpoint has.
         """
+        response = super().paginate_queryset(queryset)
         try:
-            page_number = int(self.page)
-            page_number = max(1, page_number)
+            page_number = max(1, int(self.page))
         except (TypeError, ValueError):
-            page_number = 1
+            return response
 
-        paginator = Paginator(queryset, self.page_size)
-
-        try:
-            page = paginator.page(page_number)
-        except PageNotAnInteger:
-            page = paginator.page(1)
-        except EmptyPage:
-            return {
-                "results": [],
-                "page": page_number,
-                "has_more": False,
-                "next_page": None,
-                "total_pages": paginator.num_pages,
-            }
-
-        page_num = int(page.number)
-        has_more = bool(page.has_next())
+        if page_number <= int(response["total_pages"]):
+            return response
         return {
-            "results": self.prepare_results(page.object_list),
-            "page": page_num,
-            "has_more": has_more,
-            "next_page": page_num + 1 if has_more else None,
-            "total_pages": int(paginator.num_pages),
+            "results": [],
+            "page": page_number,
+            "has_more": False,
+            "next_page": None,
+            "total_pages": int(response["total_pages"]),
         }
 
     def prepare_results(self, results):

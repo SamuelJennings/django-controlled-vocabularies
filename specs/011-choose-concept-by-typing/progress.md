@@ -256,3 +256,36 @@ amended to three steps.
 - **The third check** is covered the way the other two are: present when the middleware is missing,
   absent when it is there, a warning rather than an error, no queries, and reported through
   `call_command("check")` rather than only called directly.
+
+## S4 IMPLEMENT — US-5 (#120), 2026-08-13
+
+T010 accepted (`6957851`, plus the repair below). A search matching more concepts than one page
+holds returns one page and says more exist, the following page returns the rest with none repeated
+and none skipped (asserted by collecting identifiers against the full ordered match set, not by
+comparing lengths), opening with nothing typed offers a first page in a stable order, an over-large
+`page_size` is clamped, and a page past the last returns nothing and says no more exist — the branch
+A7 exists for, written first and watched to fail against the inherited behaviour, which re-serves
+page 1.
+
+Verified here rather than accepted: full suite 1285 green after the repair, `forge verify` green on
+all five steps, both craft receipts confirmed against the registry. The implementer mutated the
+installed wheel's `MAX_PAGE_SIZE` to prove its clamp test was load-bearing and restored it; the
+wheel is confirmed pristine.
+
+**Two orchestrator changes.**
+
+- **The override was a fork of the vendor's method.** T010 reimplemented `paginate_queryset()`
+  whole — thirty lines copied from `autocompletes.py` — to change one branch, on the reasoning that
+  delegating would cost an extra `COUNT` and break T003's `assertNumQueries(3)`. It does not: the
+  override now calls `super()` and replaces the response only when the requested page is past the
+  last, which leaves every normal request's query shape untouched and the copied body deleted. The
+  one cost is that a request past the end pays for the page-1 results the base prepared before they
+  are discarded, on the rarest path the endpoint has. T003's query-count test is green.
+- **The tie-break was asserted as a constant.** The implementer established, correctly and
+  empirically, that SQLite returns tied rows in insertion order whether or not `pk` is declared, so
+  no paging assertion can discriminate the tie-break on this database. Its answer was to assert
+  `ConceptAutocompleteView.ordering == ("label", "pk")`, which restates the source and would still
+  pass if the base view never applied the ordering at all. Added a test that asserts on the SQL the
+  search issued: both columns present in the `ORDER BY`, `label` before `id`, with three concepts
+  sharing one label across three vocabularies — the real shape of a tie, since `label` is unique
+  only within a vocabulary. Emptying `ordering` fails it, and dropping `pk` fails it.

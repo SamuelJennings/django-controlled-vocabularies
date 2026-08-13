@@ -27,8 +27,10 @@ import json
 import pytest
 from django import forms
 from django.contrib.auth.models import AnonymousUser
+from django.db import connection
 from django.http import HttpResponse
 from django.test import Client, RequestFactory
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import translation
 from django_tomselect.middleware import TomSelectMiddleware
@@ -436,6 +438,24 @@ class TestConceptAutocompletePagination:
         # tie-break removed). Asserting the declared ordering directly is
         # the one check this database's behaviour cannot mask.
         assert ConceptAutocompleteView.ordering == ("label", "pk")
+
+    def test_both_ordering_columns_reach_the_database(self):
+        """The assertion above says the class declares the tie-break. This one
+        says the endpoint applies it: the base view reads ``ordering`` through
+        its own ``apply_ordering()``, and a declared-but-unapplied ordering
+        would satisfy the assertion above while sorting by nothing in
+        particular. Asserted on the SQL the search actually issued."""
+        for name in ("Mineral", "Rock Type", "Lithology"):
+            ConceptFactory(scheme=ConceptSchemeFactory(name=name), label="Tied label")
+
+        with CaptureQueriesContext(connection) as ctx:
+            _unrestricted_get(q="Tied")
+
+        selects = [q["sql"] for q in ctx.captured_queries if "ORDER BY" in q["sql"]]
+        assert selects, [q["sql"] for q in ctx.captured_queries]
+        order_by = selects[0].split("ORDER BY", 1)[1]
+        assert '"label" ASC' in order_by
+        assert order_by.index('"label" ASC') < order_by.index('"id" ASC')
 
 
 @pytest.mark.django_db
