@@ -26,6 +26,7 @@ DATABASES = {
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.auth",
+    "django_tomselect",
     "controlled_vocabularies",
     "tests.testapp",
 ]

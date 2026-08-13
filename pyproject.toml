@@ -36,6 +36,10 @@ defusedxml = "^0.7.1"
 # this same commit — T006/skos.py is the first code that imports it at
 # runtime (decisions.md D12).
 rdflib = "^7.6.0"
+# The search-as-you-type endpoint and its form fields (FR-002, FR-015). This
+# package's own views.py and forms.py are the code that imports it at runtime
+# (research.md, decisions.md D9).
+django-tomselect = "^2026.6.2"
 
 [tool.poetry.group.dev.dependencies]
 # Family toolchain bundle; the pin tag is the family-standard version. Ships
