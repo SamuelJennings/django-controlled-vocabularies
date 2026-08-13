@@ -115,6 +115,33 @@ class ConceptFieldMixin:
         if not hasattr(cls, attr_name):
             setattr(cls, attr_name, accessor)
 
+    def formfield(self, **kwargs):
+        """Return this package's form field so an ordinary ``ModelForm`` gets the
+        search-as-you-type control from the model declaration alone (T004, FR-001,
+        plan.md A3) — nothing declared per field or per form.
+
+        The import is deferred: ``forms.py`` imports ``Concept`` from this
+        package's own ``models.py``, and ``formfield()`` runs only once every
+        app's models have loaded, so a top-level import here would tie the
+        *consuming* project's app-loading order to something a top-level import
+        cannot assume.
+
+        ``model_field`` — this field instance itself — is passed through so the
+        widget's own ``get_queryset()`` can build the validation queryset
+        directly from it, with no request consulted (decisions.md D12, plan.md
+        A6 path two). Everything Django itself supplies — ``required``,
+        ``label``, ``help_text``, ``limit_choices_to`` — passes through
+        unchanged (FR-009): this method only decides which form field class
+        renders and hands it the one extra thing it needs.
+        """
+        from .forms import ConceptChoiceField, ConceptsChoiceField
+
+        kwargs["model_field"] = self
+        kwargs.setdefault(
+            "form_class", ConceptsChoiceField if isinstance(self, ManyToManyField) else ConceptChoiceField
+        )
+        return super().formfield(**kwargs)
+
     def deconstruct(self):
         """Strip the kwargs this package fixes and record ``vocabulary`` instead.
 

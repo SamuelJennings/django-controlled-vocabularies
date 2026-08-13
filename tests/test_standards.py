@@ -30,6 +30,8 @@ from django.utils.text import Truncator
 
 from controlled_vocabularies import checks as checks_module
 from controlled_vocabularies import fields as fields_module
+from controlled_vocabularies import forms as forms_module
+from controlled_vocabularies import views as views_module
 from controlled_vocabularies.exchange.report import (
     NormalizedEntry,
     NormalizedReason,
@@ -688,36 +690,45 @@ class TestManagementPackageI18nSweep:
         )
 
 
-# --- FS-009 US-6 (T012): fields.py and checks.py carry no bare user-visible literal ---
+# --- FS-009 US-6 (T012), extended FS-011 US-7 (T011): fields.py, checks.py, views.py and
+# --- forms.py carry no bare user-visible literal, and no translated one carries a positional
+# --- placeholder ---
 #
 # The management-package sweep above (`_ManagementI18nVisitor`) is built for CommandError,
 # stdout/stderr.write, add_argument(help=...) and a class-level help = "...". None of those
-# shapes appears in a field or a system check, so pointing it at fields.py/checks.py unmodified
-# would report a clean sweep regardless of what the two modules actually contain — the exact
-# false-green tasks.md warns against. This visitor recognises the sinks a field and a check
+# shapes appears in a field, a system check, a view or a form, so pointing it at these modules
+# unmodified would report a clean sweep regardless of what they actually contain — the exact
+# false-green tasks.md warns against. This visitor recognises the sinks these four modules
 # actually carry: a Field/ForeignKey-style call's `help_text=`/`verbose_name=` keyword literal
 # (including `kwargs.setdefault("help_text", ...)`, the form `ConceptField` and `ConceptsField`
 # both use so a consumer can still override the default), an `error_messages`/
-# `default_error_messages` dict's literal values, a bare string passed to `ValidationError(...)`,
-# `checks.Warning(...)` or `checks.Error(...)`, and a `help_text`/`verbose_name`/
-# `verbose_name_plural` key in *any* dict literal — the shape `ConceptsField`'s generated
-# through-model `Meta` uses (`type("Meta", (), {...})`), which a keyword-argument check cannot
-# see at all. `on_delete`/`vocabulary`/`limit_choices_to`/`through` are rejected via bare
-# `TypeError`s in `fields.py`, deliberately outside every one of these sinks — they are
-# developer-facing, import-time diagnostics, not something an end user ever reads (decisions.md
-# D8).
+# `default_error_messages` dict's literal values, a bare string passed to `ValidationError(...)`
+# or `ImproperlyConfigured(...)` — the exception `forms.py`'s widgets raise when a project
+# ignores the route-inclusion check (T008, decisions.md D14) — `checks.Warning(...)` or
+# `checks.Error(...)`, and a `help_text`/`verbose_name`/`verbose_name_plural` key in *any* dict
+# literal — the shape `ConceptsField`'s generated through-model `Meta` uses
+# (`type("Meta", (), {...})`), which a keyword-argument check cannot see at all. It also flags a
+# positional placeholder (`%s`, `%d`, ...) passed directly to a translation call (`_`,
+# `gettext_lazy`, `ngettext_lazy`), the same standard the management sweep above already holds
+# `import_skos.py`/`rendering.py`/`sources.py` to, extended here to these four modules so a
+# system check's interpolated message (`checks.py`'s vocabulary warning) is held to it too.
+# `on_delete`/`vocabulary`/`limit_choices_to`/`through` are rejected via bare `TypeError`s in
+# `fields.py`, deliberately outside every one of these sinks — they are developer-facing,
+# import-time diagnostics, not something an end user ever reads (decisions.md D8).
 
-_FIELDS_CHECKS_MODULES = [fields_module, checks_module]
+_FIELDS_CHECKS_MODULES = [fields_module, checks_module, forms_module, views_module]
 _FIELD_METADATA_KEYWORDS = {"help_text", "verbose_name", "verbose_name_plural"}
 _DIAGNOSTIC_MESSAGE_KEYWORDS = {"msg", "message", "hint"}
 
 
 class _FieldsChecksI18nVisitor(ast.NodeVisitor):
-    """Walks one module's AST, recording every bare string literal reaching a field's or a
-    check's user-visible sinks."""
+    """Walks one module's AST, recording every bare string literal reaching a field's, a
+    check's, a view's or a form's user-visible sinks, and every positional placeholder passed
+    directly to a translation call."""
 
     def __init__(self) -> None:
         self.bare_literals: list[str] = []
+        self.positional_placeholders: list[str] = []
 
     @staticmethod
     def _str_constant(node: ast.expr) -> str | None:
@@ -735,13 +746,22 @@ class _FieldsChecksI18nVisitor(ast.NodeVisitor):
 
     def visit_Call(self, node: ast.Call) -> None:
         func = node.func
-        is_validation_error = isinstance(func, ast.Name) and func.id == "ValidationError"
+        is_validation_error = isinstance(func, ast.Name) and func.id in {
+            "ValidationError",
+            "ImproperlyConfigured",
+        }
         is_checks_diagnostic = (
             isinstance(func, ast.Attribute)
             and isinstance(func.value, ast.Name)
             and func.value.id == "checks"
             and func.attr in {"Warning", "Error"}
         )
+        is_translation_call = isinstance(func, ast.Name) and func.id in _TRANSLATION_CALL_NAMES
+        if is_translation_call:
+            for arg in node.args:
+                literal = self._str_constant(arg)
+                if literal is not None and _POSITIONAL_PLACEHOLDER.search(literal):
+                    self.positional_placeholders.append(literal)
         if is_validation_error or is_checks_diagnostic:
             for arg in node.args:
                 literal = self._str_constant(arg)
@@ -826,6 +846,23 @@ class TestFieldsChecksI18nVisitorCatchesAViolation:
         visitor = _visit_fields_checks_source("raise ValidationError('boom')\n")
         assert visitor.bare_literals == ["boom"]
 
+    def test_catches_a_bare_literal_raised_as_improperly_configured(self):
+        # forms.py's route mixin raises this when a project ignores the missing-route check.
+        visitor = _visit_fields_checks_source("raise ImproperlyConfigured('boom')\n")
+        assert visitor.bare_literals == ["boom"]
+
+    def test_catches_a_positional_placeholder_passed_to_a_translation_call(self):
+        visitor = _visit_fields_checks_source(
+            "from django.utils.translation import gettext_lazy as _\n_('%s changed')\n"
+        )
+        assert visitor.positional_placeholders == ["%s changed"]
+
+    def test_does_not_flag_a_named_placeholder_passed_to_a_translation_call(self):
+        visitor = _visit_fields_checks_source(
+            "from django.utils.translation import gettext_lazy as _\n_('%(model)s changed')\n"
+        )
+        assert visitor.positional_placeholders == []
+
     def test_catches_a_bare_literal_as_a_checks_warning(self):
         visitor = _visit_fields_checks_source("checks.Warning('boom')\n")
         assert visitor.bare_literals == ["boom"]
@@ -863,17 +900,21 @@ class TestFieldsChecksI18nVisitorCatchesAViolation:
             "kwargs.setdefault('help_text', _('fine'))\n"
             "error_messages = {'invalid': _('fine')}\n"
             "raise ValidationError(_('fine'))\n"
+            "raise ImproperlyConfigured(_('fine'))\n"
             "checks.Warning(_('fine %(model)s') % {'model': m}, hint=_('fine'))\n"
             "meta = {'verbose_name': _('fine') % {'x': 1}, 'db_table': 'x'}\n"
         )
         assert visitor.bare_literals == []
+        assert visitor.positional_placeholders == []
 
 
 class TestFieldsChecksI18nSweep:
-    """T012 — the sweep itself, run against the real files. Every user-visible string
-    ``ConceptField`` and ``check_concept_field_vocabularies`` put in front of a person is
-    translatable; the developer-facing ``on_delete``/``vocabulary`` ``TypeError``s are outside
-    every sink this visitor recognises, so they are exempt by construction (decisions.md D8)."""
+    """T012, extended T011 — the sweep itself, run against the real files: ``fields.py``,
+    ``checks.py`` (including the T011 middleware check, ``controlled_vocabularies.W004``),
+    ``views.py`` and ``forms.py``. Every user-visible string these four modules put in front of
+    a person is translatable with only named placeholders; the developer-facing
+    ``on_delete``/``vocabulary`` ``TypeError``s are outside every sink this visitor recognises,
+    so they are exempt by construction (decisions.md D8)."""
 
     @pytest.mark.parametrize("module", _FIELDS_CHECKS_MODULES, ids=lambda m: m.__name__)
     def test_module_carries_no_bare_user_visible_literal(self, module):
@@ -882,3 +923,66 @@ class TestFieldsChecksI18nSweep:
         assert visitor.bare_literals == [], (
             f"{module.__name__} passes a bare, untranslated literal to a user-visible sink: {visitor.bare_literals}"
         )
+        assert visitor.positional_placeholders == [], (
+            f"{module.__name__} passes a positional placeholder to a translation call: "
+            f"{visitor.positional_placeholders}"
+        )
+
+
+class TestFormsMissingRouteMessageIsTranslatable:
+    """T011 — ``forms.py``'s ``_MISSING_ROUTE_MESSAGE`` (decisions.md D14) is built once, at
+    import time, and referenced by name where it is raised (``_ConceptWidgetRouteMixin``), so
+    the AST sweep above — which only inspects an exception call's own arguments — cannot see
+    whether the referenced name is itself translatable. Checked directly here instead, the same
+    way the model-level validation messages earlier in this file are."""
+
+    def test_missing_route_message_is_a_lazy_translation(self):
+        assert isinstance(forms_module._MISSING_ROUTE_MESSAGE, Promise), (
+            "_MISSING_ROUTE_MESSAGE is not lazily translatable"
+        )
+
+
+# --- FS-011 US-7 (T011): the README documents the concept search control's wiring ---
+#
+# decisions.md D10 amended the "one route" promise to two steps, and D15 amended it again,
+# during implementation, to three — the third is the supporting package's middleware, and it is
+# the one that fails silently rather than raising (spec.md FR-002, FR-010, FR-014). This asserts
+# the shipped README documents all three, by name and in the order a developer does them, rather
+# than trusting a docs-writing pass to remember an amendment made after the plan was written.
+
+_README_TEXT = (Path(__file__).resolve().parents[1] / "README.md").read_text()
+
+
+class TestReadmeDocumentsTheConceptSearchControlsWiring:
+    """T011 — the three wiring steps (decisions.md D10, D15), in the order a developer does
+    them, plus what the endpoint exposes, its default permission stance, and the browser
+    requirement (FR-013, FR-014)."""
+
+    def test_documents_the_route_include_step(self):
+        assert 'include("controlled_vocabularies.urls")' in _README_TEXT
+
+    def test_documents_the_installed_apps_step(self):
+        assert '"django_tomselect"' in _README_TEXT and "INSTALLED_APPS" in _README_TEXT
+
+    def test_documents_the_middleware_step(self):
+        assert "django_tomselect.middleware.TomSelectMiddleware" in _README_TEXT and "MIDDLEWARE" in _README_TEXT
+
+    def test_documents_the_three_steps_in_wiring_order(self):
+        # A project does these in the order the render-time failure modes surface them: no route
+        # means every request 404s, a missing INSTALLED_APPS entry means no template/static asset
+        # to render with, and a missing middleware — the one that raises nothing at all — is the
+        # one a developer notices last, so it is documented last (decisions.md D15).
+        route_at = _README_TEXT.index('include("controlled_vocabularies.urls")')
+        installed_apps_at = _README_TEXT.index('"django_tomselect"')
+        middleware_at = _README_TEXT.index("django_tomselect.middleware.TomSelectMiddleware")
+        assert route_at < installed_apps_at < middleware_at
+
+    def test_documents_what_the_endpoint_exposes(self):
+        assert "preferred label" in _README_TEXT and "identifier" in _README_TEXT and "vocabulary" in _README_TEXT
+
+    def test_documents_no_default_permission_rule_and_the_include_as_the_restriction_lever(self):
+        assert "no permission rule" in _README_TEXT
+        assert "restrict" in _README_TEXT
+
+    def test_documents_the_javascript_requirement(self):
+        assert "JavaScript" in _README_TEXT

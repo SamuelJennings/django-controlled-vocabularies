@@ -8,13 +8,23 @@ from pathlib import Path
 
 import pytest
 from django import forms
+from django.conf import settings
 from django.core import checks as django_checks
 from django.core.management import call_command
 from django.db import connection
 from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 
-from controlled_vocabularies.checks import CHECK_ID, check_concept_field_vocabularies
+from controlled_vocabularies.checks import (
+    CHECK_ID,
+    CHECK_ID_MISSING_INSTALLED_APP,
+    CHECK_ID_MISSING_MIDDLEWARE,
+    CHECK_ID_MISSING_ROUTE,
+    check_concept_autocomplete_route_included,
+    check_concept_field_vocabularies,
+    check_django_tomselect_installed,
+    check_tomselect_middleware_installed,
+)
 from tests.factories import ConceptSchemeFactory
 from tests.testapp.models import Specimen
 
@@ -213,3 +223,163 @@ class TestCheckSurvivesUnmigratedDatabase:
         form = SpecimenForm()
 
         assert list(form.fields["rock_type"].queryset) == []
+
+
+class TestCheckConceptAutocompleteRouteIncluded:
+    """T008 — warns when the project has not included this package's URL
+    configuration (FR-010, decisions.md D14). ``reverse()`` resolves entirely
+    against the already-loaded URLconf, so this never touches the database."""
+
+    def test_warns_when_the_route_is_not_included(self):
+        with override_settings(ROOT_URLCONF=()):
+            warnings = check_concept_autocomplete_route_included(None)
+
+        assert len(warnings) == 1
+        warning = warnings[0]
+        assert warning.id == CHECK_ID_MISSING_ROUTE
+        message = f"{warning.msg} {warning.hint}"
+        assert "controlled_vocabularies.urls" in message
+
+    def test_absent_when_the_route_is_included(self):
+        warnings = check_concept_autocomplete_route_included(None)
+
+        assert warnings == []
+
+    def test_reported_objects_are_warnings_not_errors(self):
+        with override_settings(ROOT_URLCONF=()):
+            warnings = check_concept_autocomplete_route_included(None)
+
+        assert warnings
+        for warning in warnings:
+            assert isinstance(warning, django_checks.Warning)
+
+    @pytest.mark.django_db
+    def test_runs_without_touching_the_database(self, django_assert_num_queries):
+        with override_settings(ROOT_URLCONF=()), django_assert_num_queries(0):
+            check_concept_autocomplete_route_included(None)
+
+
+class TestCheckDjangoTomselectInstalled:
+    """T008 — warns when ``django_tomselect`` is not among the project's
+    installed applications (FR-010, decisions.md D10). ``apps.is_installed()``
+    reads the already-loaded app registry, so this never touches the
+    database."""
+
+    def test_warns_when_django_tomselect_is_not_installed(self):
+        installed = [app for app in settings.INSTALLED_APPS if app != "django_tomselect"]
+        with override_settings(INSTALLED_APPS=installed):
+            warnings = check_django_tomselect_installed(None)
+
+        assert len(warnings) == 1
+        warning = warnings[0]
+        assert warning.id == CHECK_ID_MISSING_INSTALLED_APP
+        message = f"{warning.msg} {warning.hint}"
+        assert "django_tomselect" in message
+
+    def test_absent_when_django_tomselect_is_installed(self):
+        warnings = check_django_tomselect_installed(None)
+
+        assert warnings == []
+
+    def test_reported_objects_are_warnings_not_errors(self):
+        installed = [app for app in settings.INSTALLED_APPS if app != "django_tomselect"]
+        with override_settings(INSTALLED_APPS=installed):
+            warnings = check_django_tomselect_installed(None)
+
+        assert warnings
+        for warning in warnings:
+            assert isinstance(warning, django_checks.Warning)
+
+    @pytest.mark.django_db
+    def test_runs_without_touching_the_database(self, django_assert_num_queries):
+        with django_assert_num_queries(0):
+            check_django_tomselect_installed(None)
+
+
+@pytest.mark.django_db
+class TestBothWiringChecksReachManageCheck:
+    """T008 — FR-010 promises the two wiring steps are *reported*, which a
+    function nobody registered never does. Calling the check functions directly
+    passes whether or not ``apps.ready()`` registers them, so these assert on
+    what a project actually runs: ``manage.py check``."""
+
+    def test_the_missing_route_is_reported_by_manage_check(self):
+        stderr = io.StringIO()
+        with override_settings(ROOT_URLCONF=()):
+            call_command("check", stderr=stderr)
+
+        assert CHECK_ID_MISSING_ROUTE in stderr.getvalue()
+
+    def test_the_missing_route_is_absent_from_manage_check_once_included(self):
+        stderr = io.StringIO()
+        call_command("check", stderr=stderr)
+
+        assert CHECK_ID_MISSING_ROUTE not in stderr.getvalue()
+
+    def test_the_missing_installed_app_is_reported_by_manage_check(self):
+        installed = [app for app in settings.INSTALLED_APPS if app != "django_tomselect"]
+        stderr = io.StringIO()
+        with override_settings(INSTALLED_APPS=installed):
+            call_command("check", stderr=stderr)
+
+        assert CHECK_ID_MISSING_INSTALLED_APP in stderr.getvalue()
+
+    def test_the_missing_installed_app_is_absent_from_manage_check_once_installed(self):
+        stderr = io.StringIO()
+        call_command("check", stderr=stderr)
+
+        assert CHECK_ID_MISSING_INSTALLED_APP not in stderr.getvalue()
+
+
+class TestCheckTomselectMiddlewareInstalled:
+    """US-6 repair — the third wiring step (decisions.md D15). Without
+    ``TomSelectMiddleware`` the widget renders an empty select carrying no
+    control, and nothing raises, so this check is the only report of it.
+    ``settings.MIDDLEWARE`` is read directly, so it never touches the database."""
+
+    def test_warns_when_the_middleware_is_not_installed(self):
+        with override_settings(MIDDLEWARE=[]):
+            warnings = check_tomselect_middleware_installed(None)
+
+        assert len(warnings) == 1
+        warning = warnings[0]
+        assert warning.id == CHECK_ID_MISSING_MIDDLEWARE
+        message = f"{warning.msg} {warning.hint}"
+        assert "django_tomselect.middleware.TomSelectMiddleware" in message
+
+    def test_absent_when_the_middleware_is_installed(self):
+        warnings = check_tomselect_middleware_installed(None)
+
+        assert warnings == []
+
+    def test_reported_objects_are_warnings_not_errors(self):
+        with override_settings(MIDDLEWARE=[]):
+            warnings = check_tomselect_middleware_installed(None)
+
+        assert warnings
+        for warning in warnings:
+            assert isinstance(warning, django_checks.Warning)
+
+    @pytest.mark.django_db
+    def test_runs_without_touching_the_database(self, django_assert_num_queries):
+        with override_settings(MIDDLEWARE=[]), django_assert_num_queries(0):
+            check_tomselect_middleware_installed(None)
+
+
+@pytest.mark.django_db
+class TestTheMiddlewareCheckReachesManageCheck:
+    """US-6 repair — same reasoning as :class:`TestBothWiringChecksReachManageCheck`:
+    a check nobody registered reports nothing, whatever it returns."""
+
+    def test_the_missing_middleware_is_reported_by_manage_check(self):
+        stderr = io.StringIO()
+        with override_settings(MIDDLEWARE=[]):
+            call_command("check", stderr=stderr)
+
+        assert CHECK_ID_MISSING_MIDDLEWARE in stderr.getvalue()
+
+    def test_the_missing_middleware_is_absent_from_manage_check_once_installed(self):
+        stderr = io.StringIO()
+        call_command("check", stderr=stderr)
+
+        assert CHECK_ID_MISSING_MIDDLEWARE not in stderr.getvalue()
