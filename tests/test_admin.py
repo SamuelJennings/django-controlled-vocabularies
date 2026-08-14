@@ -26,6 +26,7 @@ from deletion — both field kinds.
 """
 
 import pytest
+from django.db.models import ProtectedError
 from django.urls import reverse
 
 from tests.factories import ConceptFactory, ConceptSchemeFactory, OutcropFactory, SpecimenFactory
@@ -114,3 +115,99 @@ class TestAdminPageRenderingIsBoundedByVocabularySize:
 
         assert len(large_rendered) == len(small_rendered)
         assert not any(concept.label in large_rendered for concept in large_concepts)
+
+
+@pytest.mark.django_db
+class TestAdminSubmissionSavesAndFieldRulesStillBite:
+    """T004: FR-010, US-1 scenario 5. A POST from the add page saves the
+    chosen concept. A concept from outside the field's declared vocabulary is
+    refused at the form field's own level: the widget's ``get_queryset()``
+    (``tests/test_forms.py``'s ``TestConceptFieldSubmissionSurvives`` proves
+    this is what a legitimate submission survives) is narrowed to the
+    declaration, so ``ModelChoiceField.clean()`` rejects the foreign pk with
+    Django's own "not one of the available choices" message before the
+    model-level ``ConceptField.validate()`` custom message is ever reached —
+    the same reason the existing form-level tests assert on the errored
+    field, not on message text. And a concept referenced through the admin is
+    still protected from deletion — both field kinds."""
+
+    def test_a_legitimate_concept_saves_through_the_add_page_for_a_concept_field(self, admin_client):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        concept = ConceptFactory(scheme=scheme)
+
+        response = admin_client.post(
+            reverse("admin:testapp_specimen_add"),
+            {"name": "Granite sample", "rock_type": concept.pk, "_save": "Save"},
+        )
+
+        assert response.status_code == 302
+        specimen = Specimen.objects.get(name="Granite sample")
+        assert specimen.rock_type_id == concept.pk
+
+    def test_a_foreign_concept_is_refused_by_the_add_page_for_a_concept_field(self, admin_client):
+        other_scheme = ConceptSchemeFactory(name="Mineral")
+        foreign_concept = ConceptFactory(scheme=other_scheme)
+
+        response = admin_client.post(
+            reverse("admin:testapp_specimen_add"),
+            {"name": "Wrong vocabulary sample", "rock_type": foreign_concept.pk, "_save": "Save"},
+        )
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        assert not Specimen.objects.filter(name="Wrong vocabulary sample").exists()
+        assert 'id="id_rock_type_error"' in content
+
+    def test_a_legitimate_concept_saves_through_the_add_page_for_a_concepts_field(self, admin_client):
+        scheme = ConceptSchemeFactory(name="Mineral")
+        concept = ConceptFactory(scheme=scheme)
+
+        response = admin_client.post(
+            reverse("admin:testapp_outcrop_add"),
+            {"name": "Basalt outcrop", "minerals": [concept.pk], "_save": "Save"},
+        )
+
+        assert response.status_code == 302
+        outcrop = Outcrop.objects.get(name="Basalt outcrop")
+        assert concept in outcrop.minerals.all()
+
+    def test_a_foreign_concept_is_refused_by_the_add_page_for_a_concepts_field(self, admin_client):
+        other_scheme = ConceptSchemeFactory(name="Rock Type")
+        foreign_concept = ConceptFactory(scheme=other_scheme)
+
+        response = admin_client.post(
+            reverse("admin:testapp_outcrop_add"),
+            {"name": "Wrong vocabulary outcrop", "minerals": [foreign_concept.pk], "_save": "Save"},
+        )
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        assert not Outcrop.objects.filter(name="Wrong vocabulary outcrop").exists()
+        assert 'id="id_minerals_error"' in content
+
+    def test_a_concept_field_saved_through_the_admin_still_cannot_be_deleted(self, admin_client):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        concept = ConceptFactory(scheme=scheme)
+        admin_client.post(
+            reverse("admin:testapp_specimen_add"),
+            {"name": "Protected sample", "rock_type": concept.pk, "_save": "Save"},
+        )
+
+        with pytest.raises(ProtectedError):
+            concept.delete()
+
+        assert Specimen.objects.filter(name="Protected sample", rock_type=concept).exists()
+
+    def test_a_concepts_field_saved_through_the_admin_still_cannot_be_deleted(self, admin_client):
+        scheme = ConceptSchemeFactory(name="Mineral")
+        concept = ConceptFactory(scheme=scheme)
+        admin_client.post(
+            reverse("admin:testapp_outcrop_add"),
+            {"name": "Protected outcrop", "minerals": [concept.pk], "_save": "Save"},
+        )
+
+        with pytest.raises(ProtectedError):
+            concept.delete()
+
+        outcrop = Outcrop.objects.get(name="Protected outcrop")
+        assert concept in outcrop.minerals.all()
