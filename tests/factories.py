@@ -24,6 +24,7 @@ from tests.testapp.models import (
     Borehole,
     Deposit,
     FieldNote,
+    Locality,
     Outcrop,
     Photograph,
     RockSample,
@@ -235,6 +236,18 @@ class SpecimenFactory(factory.django.DjangoModelFactory):
 
     name = factory.Sequence(lambda n: f"Specimen {n}")
     rock_type = factory.SubFactory(ConceptFactory)
+
+
+class LocalityFactory(factory.django.DjangoModelFactory):
+    """Build a saved :class:`~tests.testapp.models.Locality` (US-3, T008), the
+    parent side of the inline relationship :class:`SpecimenFactory` (below)
+    attaches to via its own ``locality``. ``primary_mineral`` is optional and
+    left unset by default, for the same reason as :class:`DepositFactory`."""
+
+    class Meta:
+        model = Locality
+
+    name = factory.Sequence(lambda n: f"Locality {n}")
 
 
 class SampleFactory(factory.django.DjangoModelFactory):

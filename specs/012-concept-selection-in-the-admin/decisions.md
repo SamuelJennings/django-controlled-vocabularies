@@ -197,6 +197,31 @@ be maintained and run in CI for every future feature. Recording the gap is hones
 that does not exist is the failure this avoids. If a second browser-dependent story arrives, the
 harness becomes justified and this decision is the evidence for it.
 
+**Manual check (T010)**: in a project with the admin installed and a `ModelAdmin` carrying a
+`ConceptField`- or `ConceptsField`-consuming inline (`TabularInline` or `StackedInline`), on the
+parent's change page:
+
+1. Click "Add another" below the inline. The new row must render as the search-as-you-type control
+   — a text box you can type into and pick a result from — not a bare `<select>` listing every row
+   in the vocabulary (the failure `research.md` R4 describes: the browser JS never initialises the
+   clone).
+2. Type into it and confirm results arrive from the autocomplete endpoint (network tab: a request to
+   the field's own autocomplete URL, not a 404 or no request at all), restricted to the row's own
+   declared vocabulary.
+3. Pick a result, save the parent, and confirm the row persists holding it (the server-side half —
+   T011 — proves the save always works; this step proves the browser-added row actually reaches the
+   POST with the right value, not just that the control renders).
+4. Repeat against an inline whose formset starts with **no saved rows** (`extra = 0`, no existing
+   children) — the exact configuration `research.md` R4 measured the library's own fallback failing
+   on. The first row added on the page must behave identically to step 1.
+5. Confirm no error appears in the browser console on either add, and that adding a second row after
+   the first works the same way (the template row `concept-inline.js` reads from is never consumed —
+   it stays available for every subsequent "Add another" click).
+
+A failure at step 1 or 4 with no console error most likely means `concept-inline.js` isn't loading —
+check the rendered page's `<head>` for a `<script>` tag referencing it (declared on both widgets'
+`Media`, T010) before assuming the listener itself is wrong.
+
 ## D13 — The test project gains the admin, and the no-admin case is proven out of process
 
 **Ambiguous**: FR-001 through FR-008 need `django.contrib.admin` installed in the test project, and
@@ -349,3 +374,30 @@ disappear with it, on the unmodified base branch.
 **Revisit if**: `django_tomselect` fixes the underlying conflict upstream, or mypy's own
 handling of transitively-inherited base conflicts changes — either would make the ignore
 comments stale, and `mypy --warn-unused-ignores` would then flag them.
+
+## D21 — US-3's inline registrations and factory live outside `tasks.md`'s file list (T008)
+
+**Decision**: `Locality` (the parent model, with its own `ConceptField`) and the `locality`
+foreign key on `Specimen` are declared in `tests/testapp/models.py` as `tasks.md` T008 names, but
+the `TabularInline`/`StackedInline` registrations are on dedicated sites in `tests/test_admin.py`,
+not in `tests/testapp/admin.py`. `LocalityFactory` was added to `tests/factories.py`, a file
+`tasks.md` T008 and the task brief's `test_project_ownership` note both omit.
+
+**Why**: `tests/testapp/admin.py`'s own module docstring states the project's convention — bare
+registrations only; anything that declares something (an inline is a declaration) belongs on its
+own site in `tests/test_admin.py`, the pattern every prior story (`concept_registered_admin_site`,
+`bare_admin_site`) already follows. The task brief's own context named this explicitly and asked
+for the departure to be recorded here. `LocalityFactory` follows `craft-tdd`'s one-factory-per-model
+structure rule (constitution Article X) — every other model `tests/testapp/models.py` carries has
+one in `tests/factories.py`, and `Locality` is exercised by `pytest.mark.django_db` tests that need
+a saved instance the same way.
+
+Also decided here: `Locality` carries its own `ConceptField` (`primary_mineral`, vocabulary
+`"mineral"`, distinct from `Specimen.rock_type`'s `"rock-type"`) — not required by T008's acceptance
+text alone, but by `spec.md` US-3 scenario 4 ("an inline row whose field declares a different
+vocabulary **from the parent form's field**"), which presupposes the parent form has a field of its
+own to contrast against. Without it, T009's second test would have nothing to prove.
+
+**Revisit if**: a future story needs `Locality` registered on the default site for some other
+reason — at that point a bare registration belongs in `tests/testapp/admin.py` alongside
+`Specimen`/`Outcrop`/`RockSample`, unrelated to this decision.

@@ -160,3 +160,158 @@ Next: T007 was US-2's last task — the story's full-suite verify and report
 are next, not another task.
 
 Watch: none.
+
+## 2026-08-14T09:00:00Z · Implementer US-3 · T008
+
+Did: added `Locality` to `tests/testapp/models.py` — a new parent model with
+its own required-vocabulary-free but declared `ConceptField` (`primary_mineral`,
+vocabulary `"mineral"`), and a `locality` foreign key on the existing
+`Specimen` (`related_name="specimens"`, nullable so every pre-existing
+`SpecimenFactory()` call stays valid). `Specimen.rock_type` (vocabulary
+`"rock-type"`) and `Locality.primary_mineral` (vocabulary `"mineral"`) are
+deliberately different vocabularies — US-3 scenario 4 needs the parent form's
+own field and the inline row's field to be distinguishable. Added
+`LocalityFactory` to `tests/factories.py`, mirroring the existing one-factory-
+per-model convention (Article X); not in the brief's `test_project_ownership`
+file list, called out in deviations. Generated
+`tests/testapp/migrations/0004_locality_specimen_locality.py`.
+
+Departure from `tasks.md`: no inline `ModelAdmin` registrations were added to
+`tests/testapp/admin.py`. Its own docstring states the convention — bare
+registrations only, anything that declares something (an inline is a
+declaration) lives on its own site in `tests/test_admin.py` — and the brief's
+context names this explicitly. T009–T011 register `Locality` with its
+`Specimen` inline on dedicated sites there instead.
+
+Verified: `DJANGO_SETTINGS_MODULE=tests.settings poetry run django-admin
+makemigrations --check --dry-run` — before the migration: `Migrations for
+'testapp': tests/testapp/migrations/0004_locality_specimen_locality.py`
+(exit 1, as expected); after generating it, `No changes detected` (exit 0).
+`DJANGO_SETTINGS_MODULE=tests.settings poetry run django-admin check` —
+`System check identified no issues (0 silenced).` `poetry run pytest -q
+tests/test_admin.py` — 16 passed, unchanged (T008 adds no admin-facing
+behaviour of its own). `poetry run ruff check`/`ruff format --check` on
+`tests/testapp/models.py`, `tests/factories.py` and the new migration — clean
+(the migration needed one `ruff format` pass, applied).
+
+Next: T009 — saved inline rows carry the control.
+
+Watch: none.
+
+## 2026-08-14T09:25:00Z · Implementer US-3 · T009
+
+Did: added `tests/test_admin.py::TestInlineRowsCarryTheControl` (2 tests) —
+`Locality` registered with a `Specimen` `TabularInline` (`extra = 1`) on a
+dedicated site (`locality_tabular_site` fixture; also added
+`locality_stacked_site` for T010/T011). First test: two saved `Specimen`
+rows under one `Locality`, each carrying its own control showing its own
+concept (`id="id_specimens-<index>-rock_type"`, its own
+`autocompleteParams`), plus a third concept created but never attached,
+asserted absent — the vocabulary isn't dumped onto the page regardless of
+row count. Second test: `Locality.primary_mineral` (vocabulary `"mineral"`)
+and the inline row's `Specimen.rock_type` (vocabulary `"rock-type"`) each
+carry their own distinct `field=...` autocomplete reference and their own
+held concept's label (US-3 scenario 4). No production code — both tests pin
+behaviour Django's own per-field `formfield()` binding already provides
+correctly for formset rows, the same shape as T002-T004.
+
+Verified: `poetry run pytest -q tests/test_admin.py::TestInlineRowsCarryTheControl`
+— 2 passed, on first run. Not vacuous — confirmed by breaking the mechanism
+under test rather than assuming: a throwaway interactive script (mirroring
+T007's method) monkeypatched `ConceptChoiceField.__init__` to always pass
+`model_field=None`, the pre-`_ConceptWidgetReferenceMixin`-binding shape, and
+re-rendered the same `Locality` change page — both the parent's own
+`field=testapp.locality.primary_mineral` reference and the inline row's
+`field=testapp.specimen.rock_type` reference disappeared from the response
+(`get_autocomplete_params()` returns `""` when `model_field is None`),
+confirming the tests would have caught a regression in the per-field
+binding, for both the top-level and the inline case. `poetry run pytest -q
+tests/test_admin.py` (whole file) — 18 passed. `ruff check`/`ruff format
+--check tests/test_admin.py` — clean (one `ruff format` pass applied).
+
+Found, not fixed (out of scope — no production file this story may touch
+carries the cause, and it predates T008): a `Concept.label` containing an
+apostrophe never appears in a `ConceptField`'s already-selected-option
+render, reproduced identically on the pre-existing `Sample.mineral` with no
+`Locality`/US-3 code involved at all — `escapejs`-escaping the label
+(`'` for `'`) is also absent from the rendered output, so it isn't only
+a raw-apostrophe-vs-escaped mismatch; the selected option appears to be
+dropped from `_get_selected_options()`'s result entirely. Both test labels
+in this story avoid apostrophes to sidestep it. Recorded in this story's
+`concerns` for Forge to triage as a separate issue.
+
+Next: T010 — the empty-form row and the shipped script.
+
+Watch: the apostrophe-label finding above.
+
+## 2026-08-14T09:50:00Z · Implementer US-3 · T010
+
+Did: added `controlled_vocabularies/static/controlled_vocabularies/js/concept-inline.js`
+(new) — an IIFE listening for `formset:added`, recovering the configuration
+registered against the empty-form template row by substituting the added
+row's own `-<digits>-` segment back to `-__prefix__-` (mirroring
+`findSimilarConfig`'s own normalisation direction, reversed), then calling
+`window.djangoTomSelect.initialize(select, config)` — the same call the
+library's own per-widget script makes. Additive only: no existing
+django-tomselect path is read, wrapped or replaced, and it does nothing on a
+page that never dispatches the event. Added `class Media: js = [...]` to
+both `ConceptWidget` and `ConceptsWidget` in `forms.py` — the only
+`forms.py` change this story makes; `media_property`'s own MRO-walking
+merge keeps the base widget's own tomselect JS/CSS.
+
+Verified (TDD, both red first): `tests/test_forms.py::TestConceptWidgetsShipTheInlineInitialisationScript`
+— asset discoverable via `django.contrib.staticfiles.finders.find()` (green
+immediately, the asset already existed); both widgets' `Media.js` containing
+it — red before the `Media` classes were added (`AssertionError:
+'controlled_vocabularies/js/concept-inline.js' in
+['django_tomselect/js/django-tomselect.min.js']`), green after.
+`tests/test_admin.py::TestEmptyFormRowIsInitialisable` (2 tests, against
+`locality_stacked_site`/`locality_tabular_site`, `extra = 0`/`extra = 1`) —
+the empty-form row's select carries `id="id_specimens-__prefix__-rock_type"`,
+`data-tomselect`, and its own registered `autocompleteParams`; and the
+script's own id-substitution (mirrored in Python:
+`re.sub(r"-\d+-", "-__prefix__-", ...)`) applied to the real numbered row id
+on the same page equals the real template row id on that same page — both
+passed on first run (server-side rendering the script depends on, not the
+script's own execution, which decisions.md D12 keeps a documented manual
+check). `poetry run pytest -q tests/test_forms.py tests/test_admin.py` — 49
+passed. `poetry run ruff check`/`ruff format --check` on `forms.py`,
+`test_forms.py`, `test_admin.py` — clean. `poetry run mypy
+controlled_vocabularies/forms.py` — clean.
+
+decisions.md D12 gained the manual browser check steps (five steps: the
+"Add another" control initialises rather than staying bare, results arrive
+scoped to the row's own vocabulary, a browser-added row's save persists,
+the `extra = 0`/no-saved-rows shape from research.md R4 behaves the same,
+and no console error on repeated adds).
+
+Next: T011 — a parent saved with a new inline row keeps its concept.
+
+Watch: none.
+
+## 2026-08-14T10:10:00Z · Implementer US-3 · T011
+
+Did: added `tests/test_admin.py::TestNewInlineRowSavesItsConcept` — POSTs
+the change form of an existing `Locality` (`locality_stacked_site`,
+`extra = 0`, no saved children — the exact shape research.md R4 measured
+the library's own fallback failing on) with `specimens-TOTAL_FORMS` raised
+to `1` and one new, unsaved row (`specimens-0-id=""`) carrying a concept.
+No production code — the server-side "Add another" save path is Django's
+inline formset machinery, unrelated to `concept-inline.js`, which only
+initialises the widget in the browser (decisions.md D12).
+
+Verified: `poetry run pytest -q
+tests/test_admin.py::TestNewInlineRowSavesItsConcept` — 1 passed, on first
+run. Non-vacuous, checked directly: the same POST with `specimens-0-name`
+left blank (a required field) returned `200` with the form re-rendered
+(validation failure), not `302` — confirming the test's `302` + `Specimen
+.objects.get(...)` assertions discriminate a genuine save from a rejected
+one, not a POST that always redirects. `poetry run pytest -q
+tests/test_admin.py` (whole file) — 21 passed. `ruff check`/`ruff format
+--check tests/test_admin.py` — clean.
+
+Next: US-3's last task — the story's full-suite verify and completion
+report, not another task.
+
+Watch: the apostrophe-label finding recorded at T009 remains open, for
+Forge to triage as a separate issue.

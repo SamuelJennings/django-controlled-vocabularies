@@ -57,6 +57,15 @@ class Specimen(models.Model):
         verbose_name=_("rock type"),
         help_text=_("The rock type this specimen is classified as."),
     )
+    locality = models.ForeignKey(
+        "Locality",
+        null=True,
+        blank=True,
+        related_name="specimens",
+        on_delete=models.CASCADE,
+        verbose_name=_("locality"),
+        help_text=_("The locality where this specimen was collected, if recorded."),
+    )
 
     def __str__(self) -> str:
         return self.name
@@ -296,6 +305,32 @@ class Photograph(models.Model):
         related_name="+",
         verbose_name=_("keywords"),
         help_text=_("Keywords drawn from any vocabulary; this field names none in particular."),
+    )
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class Locality(models.Model):
+    """The parent side of the inline relationship US-3 (T008) exercises:
+    :class:`Specimen` rows may belong to one, through the ``locality`` foreign
+    key added there. Carries its own ``ConceptField`` against a vocabulary
+    distinct from ``Specimen.rock_type``, so a saved inline row's own
+    autocomplete reference can be told apart from the parent form's own field
+    (spec.md US-3 scenario 4)."""
+
+    name = models.CharField(
+        max_length=255,
+        verbose_name=_("name"),
+        help_text=_("The locality's catalogue name."),
+    )
+    primary_mineral = ConceptField(
+        vocabulary="mineral",
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name=_("primary mineral"),
+        help_text=_("The mineral this locality is primarily characterised by, if known."),
     )
 
     def __str__(self) -> str:

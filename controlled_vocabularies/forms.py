@@ -193,7 +193,17 @@ class ConceptWidget(
     _ConceptWidgetDisplayMixin,
     TomSelectModelWidget,
 ):
-    """The control :class:`ConceptChoiceField` renders (FR-001)."""
+    """The control :class:`ConceptChoiceField` renders (FR-001).
+
+    ``Media.js`` merges with the base widget's own (``media_property``
+    walks the MRO), adding ``concept-inline.js`` (T010, decisions.md D12) —
+    the listener that initialises this control in an inline row a person
+    adds with "Add another", which the library's own paths do not reach
+    (research.md R4).
+    """
+
+    class Media:
+        js = ["controlled_vocabularies/js/concept-inline.js"]
 
 
 class ConceptsWidget(
@@ -203,7 +213,11 @@ class ConceptsWidget(
     _ConceptWidgetDisplayMixin,
     TomSelectModelMultipleWidget,
 ):
-    """The control :class:`ConceptsChoiceField` renders (FR-001)."""
+    """The control :class:`ConceptsChoiceField` renders (FR-001). See
+    :class:`ConceptWidget` for ``Media``."""
+
+    class Media:
+        js = ["controlled_vocabularies/js/concept-inline.js"]
 
 
 class _DeclinesAdminRelatedWrapper:
