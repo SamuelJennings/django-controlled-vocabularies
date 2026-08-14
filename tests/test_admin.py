@@ -26,10 +26,8 @@ from deletion — both field kinds.
 """
 
 import pytest
-from django.db.models import ProtectedError
 from django.urls import reverse
 
-from controlled_vocabularies.models import Concept
 from tests.factories import ConceptFactory, ConceptSchemeFactory, OutcropFactory, SpecimenFactory
 from tests.testapp.models import Outcrop, Specimen
 
