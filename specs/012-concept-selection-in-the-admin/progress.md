@@ -160,3 +160,40 @@ Next: T007 was US-2's last task — the story's full-suite verify and report
 are next, not another task.
 
 Watch: none.
+
+## 2026-08-14T09:00:00Z · Implementer US-3 · T008
+
+Did: added `Locality` to `tests/testapp/models.py` — a new parent model with
+its own required-vocabulary-free but declared `ConceptField` (`primary_mineral`,
+vocabulary `"mineral"`), and a `locality` foreign key on the existing
+`Specimen` (`related_name="specimens"`, nullable so every pre-existing
+`SpecimenFactory()` call stays valid). `Specimen.rock_type` (vocabulary
+`"rock-type"`) and `Locality.primary_mineral` (vocabulary `"mineral"`) are
+deliberately different vocabularies — US-3 scenario 4 needs the parent form's
+own field and the inline row's field to be distinguishable. Added
+`LocalityFactory` to `tests/factories.py`, mirroring the existing one-factory-
+per-model convention (Article X); not in the brief's `test_project_ownership`
+file list, called out in deviations. Generated
+`tests/testapp/migrations/0004_locality_specimen_locality.py`.
+
+Departure from `tasks.md`: no inline `ModelAdmin` registrations were added to
+`tests/testapp/admin.py`. Its own docstring states the convention — bare
+registrations only, anything that declares something (an inline is a
+declaration) lives on its own site in `tests/test_admin.py` — and the brief's
+context names this explicitly. T009–T011 register `Locality` with its
+`Specimen` inline on dedicated sites there instead.
+
+Verified: `DJANGO_SETTINGS_MODULE=tests.settings poetry run django-admin
+makemigrations --check --dry-run` — before the migration: `Migrations for
+'testapp': tests/testapp/migrations/0004_locality_specimen_locality.py`
+(exit 1, as expected); after generating it, `No changes detected` (exit 0).
+`DJANGO_SETTINGS_MODULE=tests.settings poetry run django-admin check` —
+`System check identified no issues (0 silenced).` `poetry run pytest -q
+tests/test_admin.py` — 16 passed, unchanged (T008 adds no admin-facing
+behaviour of its own). `poetry run ruff check`/`ruff format --check` on
+`tests/testapp/models.py`, `tests/factories.py` and the new migration — clean
+(the migration needed one `ruff format` pass, applied).
+
+Next: T009 — saved inline rows carry the control.
+
+Watch: none.
