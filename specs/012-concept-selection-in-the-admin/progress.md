@@ -382,3 +382,42 @@ unused password, matching `tests/test_checks.py`'s existing `# noqa: S603` conve
 Next: US-4's full-suite verify and completion report — this story's last task.
 
 Watch: none.
+
+## 2026-08-14T09:40:00Z · Implementer US-5 · T014
+
+Did: added `tests/settings_no_admin.py` (new) — mirrors `tests/settings.py` minus
+`django.contrib.admin` and the middleware/apps that exist only for its own system checks.
+Added `tests/urls_no_admin.py` (new) — `tests/urls.py` mounts `admin.site.urls`
+unconditionally, and resolving any route through it walks that pattern too, which imports
+`django.contrib.admin` regardless of which route is being reversed; a urlconf carrying only
+the package's own route is what a no-admin project actually mounts. Gave
+`tests/test_checks.py:_run_django_admin()` a `settings: str = "tests.settings"` parameter,
+threaded into `DJANGO_SETTINGS_MODULE` — every existing call site unaffected. Added
+`TestProjectWithoutTheAdminIsUnaffected` (three tests): `check` is as clean under
+`settings_no_admin` as under `settings.py`; `django.contrib.admin` is absent from
+`sys.modules` in a fresh subprocess after a `ModelForm` over `Specimen` renders (via
+`django-admin shell -c`, `--no-startup --no-imports`); and, back under `tests.settings`
+(admin installed), `controlled_vocabularies.admin` registers nothing with the default site's
+`_registry`. Both new file-list departures recorded in `decisions.md` D23, per the task
+brief's own instruction. Covers FR-006, US-5 scenarios 1-2, SC-005.
+
+Verified non-vacuous, three ways: (1) the `check`-is-clean test — temporarily dropped
+`django_tomselect` from `settings_no_admin.py`'s `INSTALLED_APPS`; failed correctly
+(`CHECK_ID_MISSING_INSTALLED_APP` in stderr, no "no issues" line), restored. (2) the
+`sys.modules` test — ran the same subprocess script by hand with an explicit
+`import django.contrib.admin` spliced in before the assertion (a scratch probe, not
+committed); the `AssertionError` fired and the process exited non-zero, proving the
+mechanism genuinely catches a leak rather than always reporting clean. (3) the
+registers-nothing test — ran the same assertion by hand under `tests.settings` with
+`django_admin.site.register(Concept)` added first (also a scratch probe); the assertion
+failed as expected.
+
+`poetry run pytest -q tests/test_checks.py::TestProjectWithoutTheAdminIsUnaffected` — 3
+passed, on restore. `poetry run pytest -q tests/test_checks.py` (whole file) — 39 passed
+(35 pre-existing + 4: the three new tests plus one existing call site re-verified against
+the parameterised helper). `ruff check`/`ruff format --check` clean on
+`tests/settings_no_admin.py`, `tests/urls_no_admin.py`, `tests/test_checks.py`.
+
+Next: T015 (custom `AdminSite`).
+
+Watch: none.
