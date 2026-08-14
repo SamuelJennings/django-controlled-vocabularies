@@ -64,3 +64,40 @@ own refusal tests already use.
 Next: T005+ is US-2's scope, out of this story.
 
 Watch: none beyond D19 and the T002 pre-commit-exclusion note above.
+
+## 2026-08-14T08:20:00Z · Implementer US-2 · T005
+
+Did: added `TestConceptFieldOffersNoRelatedObjectAffordance` to `tests/test_admin.py`
+(five tests) plus two module-level fixtures (`concept_registered_admin_site`,
+`bare_admin_site`) and a small `_URLConf` helper that mounts a dedicated
+`AdminSite` instance (registering `Specimen`, `Outcrop` and, in the first
+fixture, `Concept`) at `admin/`, alongside this package's own route at
+`vocabularies/` so the widget's autocomplete reverse still resolves. No
+production code — pins FR-004, US-2 scenarios 1-5, SC-002.
+
+Verified: `poetry run pytest -q tests/test_admin.py::TestConceptFieldOffersNoRelatedObjectAffordance`
+— 4 failed, 1 passed. The four failures are the correct RED: with `Concept`
+registered and a superuser, both field kinds' add and change pages carry
+`related-widget-wrapper-link` and (bar the multi-value field's forced-off
+three) `add-related`/`change-related`/`delete-related`/`view-related` —
+matching research.md R1's measured table exactly. The one pass
+(`test_the_same_absence_holds_with_concept_not_registered`) is correctly
+green already: `options.py`'s `wrapper_kwargs = {}` on `NotRegistered` leaves
+every affordance boolean `False` regardless of the mechanism this story adds,
+which is scenario 4's own point — sanity-checked by temporarily deleting one
+`not in` assertion and confirming it fails, so the passing test is not
+vacuous.
+
+Two false starts before the fixture worked: `types.SimpleNamespace` as the
+`ROOT_URLCONF` override is unhashable (`_get_cached_resolver` is
+`functools.cache`d) — replaced with a plain `_URLConf` class; and the first
+version of `_URLConf` mounted only the admin, so every render raised
+`ImproperlyConfigured` from `forms.py`'s route-mixin before reaching an
+affordance assertion — fixed by mounting `controlled_vocabularies.urls` too,
+matching `tests/urls.py`.
+
+Next: T006 — the form field declines the wrapper.
+
+Watch: none beyond the T002 pre-commit-exclusion note (ruff run manually on
+this file; `ruff check --fix` on first run removed the now-unused `types`
+import after the `_URLConf` rewrite).

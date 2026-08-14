@@ -152,8 +152,11 @@
       "tasks": [
         {
           "id": "T005",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": [
+            "poetry run pytest -q tests/test_admin.py::TestConceptFieldOffersNoRelatedObjectAffordance — 4 failed, 1 passed (RED, expected: research.md R1's measured table)"
+          ]
         },
         {
           "id": "T006",

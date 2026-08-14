@@ -26,9 +26,12 @@ from deletion — both field kinds.
 """
 
 import pytest
+from django.contrib import admin
 from django.db.models import ProtectedError
-from django.urls import reverse
+from django.test import override_settings
+from django.urls import include, path, reverse
 
+from controlled_vocabularies.models import Concept
 from tests.factories import ConceptFactory, ConceptSchemeFactory, OutcropFactory, SpecimenFactory
 from tests.testapp.models import Outcrop, Specimen
 
@@ -211,3 +214,140 @@ class TestAdminSubmissionSavesAndFieldRulesStillBite:
 
         outcrop = Outcrop.objects.get(name="Protected outcrop")
         assert concept in outcrop.minerals.all()
+
+
+class _URLConf:
+    """A ``ROOT_URLCONF`` carrying one ``site``'s own admin plus this
+    package's own route, mirroring ``tests/urls.py`` — the control's widget
+    reverses ``controlled_vocabularies:concept-autocomplete`` while building
+    its render context (``forms.py``'s ``_ConceptWidgetRouteMixin``), so a
+    urlconf mounting only the admin raises ``ImproperlyConfigured`` before any
+    affordance assertion is ever reached. Uses the ``admin:`` app_name every
+    ``AdminSite`` uses regardless of instance name, so tests below reuse
+    ``reverse("admin:...")`` exactly as :func:`_assert_control_rendered` and
+    T002 already do. ``URLResolver.urlconf_module`` accepts any object
+    carrying ``urlpatterns``, not only a dotted import path — a plain object
+    rather than :class:`types.SimpleNamespace`, since the resolver cache keys
+    on it and ``SimpleNamespace``'s value-based ``__eq__`` makes it
+    unhashable."""
+
+    def __init__(self, site):
+        self.urlpatterns = [
+            path("admin/", site.urls),
+            path("vocabularies/", include("controlled_vocabularies.urls")),
+        ]
+
+
+_RELATED_OBJECT_AFFORDANCE_MARKERS = (
+    "related-widget-wrapper-link",
+    "add-related",
+    "change-related",
+    "delete-related",
+    "view-related",
+)
+
+
+def _assert_no_related_object_affordance(content):
+    """None of the four related-object links `RelatedFieldWidgetWrapper` can
+    render (``related_widget_wrapper.html``) are present. Deliberately not
+    asserting on the wrapper's ``data-context="available-source"`` attribute:
+    ``RelatedFieldWidgetWrapper.__init__`` mutates the wrapped widget's own
+    ``attrs`` dict with it before the T006 setter ever unwraps the widget, so
+    it survives harmlessly and is not itself an affordance (tasks.md T005)."""
+    for marker in _RELATED_OBJECT_AFFORDANCE_MARKERS:
+        assert marker not in content
+
+
+@pytest.fixture
+def concept_registered_admin_site():
+    """A dedicated admin site registering ``Concept`` alongside the two
+    consuming fields under test — the only configuration under which
+    research.md R1 measured the four related-object affordances appearing at
+    all. Never the default site: that one already registers ``Specimen`` and
+    ``Outcrop`` (``tests/testapp/admin.py``), and Django refuses registering
+    the same model on the same site twice."""
+    site = admin.AdminSite(name="us2_with_concept")
+    site.register(Specimen)
+    site.register(Outcrop)
+    site.register(Concept)
+    return site
+
+
+@pytest.fixture
+def bare_admin_site():
+    """The same two consuming models, on a second dedicated site that never
+    registers ``Concept`` — US-2 scenario 4: the affordances' absence does not
+    depend on what is registered."""
+    site = admin.AdminSite(name="us2_without_concept")
+    site.register(Specimen)
+    site.register(Outcrop)
+    return site
+
+
+@pytest.mark.django_db
+class TestConceptFieldOffersNoRelatedObjectAffordance:
+    """T005: FR-004, US-2 scenarios 1-5, SC-002.
+
+    ``Concept`` is registered in a dedicated admin site alongside the consuming
+    models, and ``admin_client`` signs in as a superuser holding every
+    permission — the one configuration research.md R1 measured all four
+    related-object affordances (add/change/delete/view) appearing under. Every
+    test also proves the control itself is unaffected (scenario 3): it still
+    renders and still carries its own autocomplete reference. The last test
+    proves scenario 4 — the same absence holds with ``Concept`` not registered
+    at all.
+    """
+
+    def test_add_page_offers_no_affordance_for_a_concept_field(self, admin_client, concept_registered_admin_site):
+        with override_settings(ROOT_URLCONF=_URLConf(concept_registered_admin_site)):
+            response = admin_client.get(reverse("admin:testapp_specimen_add"))
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        _assert_no_related_object_affordance(content)
+        _assert_control_rendered(content, Specimen, "rock_type")
+
+    def test_change_page_offers_no_affordance_for_a_concept_field(self, admin_client, concept_registered_admin_site):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        concept = ConceptFactory(scheme=scheme)
+        specimen = SpecimenFactory(rock_type=concept)
+
+        with override_settings(ROOT_URLCONF=_URLConf(concept_registered_admin_site)):
+            response = admin_client.get(reverse("admin:testapp_specimen_change", args=[specimen.pk]))
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        _assert_no_related_object_affordance(content)
+        _assert_control_rendered(content, Specimen, "rock_type")
+
+    def test_add_page_offers_no_affordance_for_a_concepts_field(self, admin_client, concept_registered_admin_site):
+        with override_settings(ROOT_URLCONF=_URLConf(concept_registered_admin_site)):
+            response = admin_client.get(reverse("admin:testapp_outcrop_add"))
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        _assert_no_related_object_affordance(content)
+        _assert_control_rendered(content, Outcrop, "minerals")
+
+    def test_change_page_offers_no_affordance_for_a_concepts_field(self, admin_client, concept_registered_admin_site):
+        scheme = ConceptSchemeFactory(name="Mineral")
+        concept = ConceptFactory(scheme=scheme)
+        outcrop = OutcropFactory()
+        outcrop.minerals.add(concept)
+
+        with override_settings(ROOT_URLCONF=_URLConf(concept_registered_admin_site)):
+            response = admin_client.get(reverse("admin:testapp_outcrop_change", args=[outcrop.pk]))
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        _assert_no_related_object_affordance(content)
+        _assert_control_rendered(content, Outcrop, "minerals")
+
+    def test_the_same_absence_holds_with_concept_not_registered(self, admin_client, bare_admin_site):
+        with override_settings(ROOT_URLCONF=_URLConf(bare_admin_site)):
+            response = admin_client.get(reverse("admin:testapp_specimen_add"))
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        _assert_no_related_object_affordance(content)
+        _assert_control_rendered(content, Specimen, "rock_type")
