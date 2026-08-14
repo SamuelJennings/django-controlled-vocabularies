@@ -30,9 +30,9 @@ All notable changes to this project are documented in this file. The format foll
   created or edited: no add, change, delete or view affordance for the related concept, whatever
   permissions the signed-in person holds. Where the admin presents the field read-only, the concept
   is shown by its preferred label and no control renders, Django's own read-only presentation.
-  `autocomplete_fields`, `raw_id_fields`, a form's own declared widget, and `readonly_fields` still
-  work as they would for any other related field, each keeping the same no-affordance and
-  validation guarantees. See the README.
+  `autocomplete_fields`, `raw_id_fields`, a form's own declared widget, and `readonly_fields` each
+  still work as they would for any other related field. The first three render what they asked for
+  and keep the same no-affordance and validation guarantees as the default control. See the README.
 - New runtime dependency: [`django-tomselect`](https://pypi.org/project/django-tomselect/)
   `^2026.6.2`, which the concept search control above is built on.
 - `ConceptsField`: a `ManyToManyField` field a consuming project declares on its own model, naming

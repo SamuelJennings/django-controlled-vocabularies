@@ -503,3 +503,21 @@ states — the admin mounted only where a project would actually mount it.
 
 **Revisit if**: a later story needs the no-admin urlconf to carry more than the one route — at that
 point `tests/urls_no_admin.py` grows with it, unrelated to this decision.
+
+## D26 — the CHANGELOG's override sentence excludes `readonly_fields` from the no-affordance claim
+
+**Decision**: T017's CHANGELOG entry originally read "`autocomplete_fields`, `raw_id_fields`, a
+form's own declared widget, and `readonly_fields` still work as they would for any other related
+field, each keeping the same no-affordance and validation guarantees." Corrected at the humanizer
+pass to attribute those guarantees to the first three only.
+
+**Why**: the sentence contradicted FR-008 and the README's own read-only paragraph. Django renders
+a read-only single-value relation as a link to that record's admin change page
+(`django/contrib/admin/helpers.py`, `AdminReadonlyField`), which this package neither adds nor
+suppresses — so a read-only concept field does carry a view affordance of a kind. A read-only field
+is also excluded from the form entirely, so it is not validated at all and "the same validation
+guarantees" is wrong for it too. The README already stated both facts correctly; only the CHANGELOG
+generalised past them.
+
+**Revisit if**: R5 registers `Concept` behind a curator-only permission and the read-only link
+becomes reachable in a way that warrants documenting on its own.

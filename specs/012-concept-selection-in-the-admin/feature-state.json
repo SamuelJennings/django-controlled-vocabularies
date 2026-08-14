@@ -268,18 +268,24 @@
       "id": "US6",
       "priority": "P3",
       "issue": 130,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T017",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": [
+            "poetry run pytest -q tests/test_standards.py::TestReadmeDocumentsTheAdminSection — 5 passed; tests/test_standards.py (whole file) — 88 passed"
+          ]
         },
         {
           "id": "T018",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": [
+            "poetry run pytest -q tests/test_standards.py::TestFieldsChecksI18nSweep — 5 passed; gate tested against the defect: ImproperlyConfigured('boom') spliced into admin.py turns the sweep red, reverted"
+          ]
         }
       ]
     }

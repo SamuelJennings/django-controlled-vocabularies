@@ -277,15 +277,15 @@ field the same way it builds any other, and the wiring is the three steps above:
 
 A concept is chosen on these pages, never created or edited there. Django ordinarily puts an
 add, change, delete or view link beside a related field so a person filling in a form can manage
-the related record without leaving it; none of the four appears beside a concept field, whether or
-not this package's own models are registered in the admin and whatever permissions the signed-in
+the related record without leaving it. None of the four appears beside a concept field, whether or
+not this package's own models are registered in the admin, and whatever permissions the signed-in
 person holds. Authoring stays wherever concepts themselves are curated — a controlled vocabulary
 stops being controlled the moment a data-entry form can invent or edit one.
 
 Where the admin presents the field read-only — listed in `readonly_fields`, or because the
 signed-in person may view the page but not change it — the concept is shown by its preferred label
 and no control renders. This is Django's own read-only presentation, not this package's: with
-`Concept` registered, a single concept links to its own change page; several concepts, on a
+`Concept` registered, a single concept links to its own change page. Several concepts, on a
 `ConceptsField`, always render as plain text. The package neither adds to this nor suppresses it.
 
 A project can still ask for a different control the way it would for any other related field:
