@@ -515,3 +515,50 @@ test_module_carries_no_bare_user_visible_literal[controlled_vocabularies.admin]"
 Next: full-suite verify and completion report — this story's last task.
 
 Watch: none.
+
+## 2026-08-14T11:20:00Z · Orchestrator · S6 review remedies and the D12 manual check
+
+Did: worked the code review's five findings, and ran D12's manual browser check — the thing
+finding ADMIN-002 established had never been performed.
+
+**The manual check (D12, five steps), run against Django 5.2.16, django_tomselect 2026.6.2,
+Chrome 144.** Harness out of tree in `/tmp/d12`: the test project's own settings with a
+file-backed SQLite database and a URLconf mounting `Locality` twice — a `TabularInline` with
+`extra = 1` on the default site, a `StackedInline` with `extra = 0` on a second site — over the
+repo's own `tests/testapp` models and factories. Nothing in the repo changed to run it.
+
+1. **Failed, then fixed (see decisions.md D27).** "Add another" produced a row with **two**
+   visible controls: the clone carries the template row's own rendered `.ts-wrapper`, ids
+   rewritten to the new row number, and this script then built the real one beside it. Both
+   inputs answered to `id="id_specimens-1-rock_type-ts-control"`. After the fix: one wrapper,
+   one control id, one live instance.
+2. **Passed.** Typing `gran` in a new row returned `Granite` from the row's own vocabulary;
+   `quartz`, a concept in the *mineral* vocabulary the field does not name, returned "No results
+   found". The restriction the server-side tests assert holds through the real endpoint.
+3. **Passed.** Picked `Granite`, saved the parent, and the row persisted holding it —
+   `Specimen(name='Added in the browser', rock_type=Granite, locality=1)` read back from the
+   database.
+4. **Passed.** On the `extra = 0` site against a `Locality` with no saved children, the first
+   row added behaved identically to step 1, and its concept saved (`Gneiss`).
+5. **Passed.** A second "Add another" on the same page behaved the same as the first, its concept
+   saved too (`Basalt`), and the browser console carried no error on either add — the only entry
+   across the whole session was a 404 for `/favicon.ico`, which the dev server does not serve.
+
+**The other four findings.** ADMIN-003 (low): `templateRowId` substituted the *first* `-<digits>-`
+segment, which is the outer row under a nested inline; now the last, identical for a core-Django
+inline and correct for a nested one, with the Python mirror in `tests/test_admin.py` moved with it
+and a nested id asserted alongside the flat one. ADMIN-004 (low) and ADMIN-005 (low): docstring
+corrections — the `widget` getter does not tolerate an early read, it depends on django_tomselect
+assigning the widget before `Field.__init__`, which is now named as the coupling it is; and the
+`Concept`-not-registered test documents its scenario rather than checking it, since Django
+suppresses the links itself there. ADMIN-001 (medium): the admin's false *Hold down "Control"*
+instruction, confirmed rendering under a live `ConceptsField` control. Left as it is — this is
+D15, re-raised, and the mechanism the review suggests is the one D15 measured and rejected
+(`options.py` *replaces* rather than appends when a field declares no help text of its own).
+Carried as a follow-up issue, and the README now says the sentence is Django's and does not apply.
+
+Verified: full suite, `forge verify`, and the manual check above. The two README claims the review
+called overstated are corrected in place.
+
+Watch: `concept-inline.js` now has two browser-only behaviours no test can reach. A third one
+should buy the harness rather than another entry here.

@@ -292,14 +292,21 @@ A project can still ask for a different control the way it would for any other r
 
 - `autocomplete_fields` renders Django's own autocomplete widget instead — Django requires the
   related model to be registered and searchable, as it does for any field named this way.
-- `raw_id_fields` renders Django's plain identifier input.
+- `raw_id_fields` renders Django's plain identifier input, with the magnifying-glass lookup link
+  Django gives every field named this way. That link opens a list to pick from — it selects a
+  concept, it does not create one.
 - A `ModelForm` declaring its own widget for the field via `Meta.widgets`, passed to
   `ModelAdmin.form`, renders that widget.
 - `readonly_fields` renders the read-only presentation described above.
 
-The first three still refuse the four related-object affordances, the same as the default control,
-and saving and validation carry on unchanged: a concept outside the field's named vocabularies is
-refused, and a legitimate one still saves.
+The first three still refuse the add, change, delete and view affordances, the same as the default
+control, and saving and validation carry on unchanged: a concept outside the field's named
+vocabularies is refused, and a legitimate one still saves.
+
+One piece of text on these pages is Django's rather than this package's. Under a multi-value field
+the admin adds *Hold down "Control", or "Command" on a Mac, to select more than one.* It is the
+same sentence the admin puts under any multiple-select field, and it does not describe this
+control: concepts are added by typing and picking, and removed one at a time.
 
 ## Importing a published vocabulary
 

@@ -236,10 +236,16 @@ class _DeclinesAdminRelatedWrapper:
     class in the MRO that defines the name, and only a data descriptor found
     first wins over one found later.
 
-    The getter tolerates being read before anything has been stored:
-    ``django/forms/fields.py:146`` evaluates ``widget = widget or self.widget``
-    during ``Field.__init__``, before any assignment on a freshly constructed
-    instance is guaranteed to have run.
+    The getter returns ``None`` before anything has been stored, and both
+    shipped field classes rely on never reaching it. ``django/forms/fields.py``
+    evaluates ``widget = widget or self.widget`` during ``Field.__init__`` and
+    then sets ``widget.is_required`` on the result, so a ``None`` there is an
+    ``AttributeError``, not a tolerated fallback. What keeps it unreachable is
+    ``django_tomselect``'s ``_create_widget``, which assigns the widget before
+    ``Field.__init__`` runs — a third-party invariant, named here so that a
+    library change surfaces as a known coupling rather than a bare
+    ``AttributeError``. A subclass of this mixin that relies on Django's
+    class-level widget default instead would hit exactly that.
 
     Each field subclass carries ``# type: ignore[misc]``: adding this mixin as
     a second explicit base makes mypy validate the full inherited MRO, which

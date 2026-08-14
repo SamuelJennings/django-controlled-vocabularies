@@ -363,6 +363,11 @@ class TestConceptFieldOffersNoRelatedObjectAffordance:
         _assert_control_rendered(content, Outcrop, "minerals")
 
     def test_the_same_absence_holds_with_concept_not_registered(self, admin_client, bare_admin_site):
+        """Pins US-2 scenario 4, and documents rather than checks it: Django
+        suppresses all four links itself when the related model is
+        unregistered, so this passes with or without the unwrap. The tests
+        above it — ``Concept`` registered, superuser, both field kinds, add
+        and change — are the ones that go red if the unwrap regresses."""
         with override_settings(ROOT_URLCONF=_URLConf(bare_admin_site)):
             response = admin_client.get(reverse("admin:testapp_specimen_add"))
         content = response.content.decode()
@@ -508,12 +513,19 @@ class TestEmptyFormRowIsInitialisable:
     def test_the_id_substitution_matches_the_identifier_djangos_inlinesjs_produces_for_a_new_row(
         self, admin_client, locality_tabular_site
     ):
-        """``concept-inline.js``'s own substitution — the single
+        """``concept-inline.js``'s own substitution — the **last**
         ``-<digits>-`` segment swapped for ``-__prefix__-`` — mirrored here in
         Python and checked against two real ids from the same rendered page:
         the numbered row ``extra = 1`` renders (the shape Django's own
         ``updateElementIndex``, ``inlines.js``, produces for a row it adds)
-        and the always-present empty-form template row."""
+        and the always-present empty-form template row.
+
+        A core-Django inline id carries exactly one such segment, so first and
+        last are the same identifier here. The nested-inline id asserted at the
+        end is what makes the rule chosen: only the innermost segment belongs
+        to the row being added, and this package renders concept controls
+        wherever a project puts them, including under a third-party nested
+        inline."""
         locality = LocalityFactory()
 
         with override_settings(ROOT_URLCONF=_URLConf(locality_tabular_site)):
@@ -522,9 +534,15 @@ class TestEmptyFormRowIsInitialisable:
 
         numbered_row_id = "id_specimens-0-rock_type"
         template_row_id = "id_specimens-__prefix__-rock_type"
+        innermost_segment = r"-\d+-(?![\s\S]*-\d+-)"
+
         assert f'id="{numbered_row_id}"' in content
         assert f'id="{template_row_id}"' in content
-        assert re.sub(r"-\d+-", "-__prefix__-", numbered_row_id, count=1) == template_row_id
+        assert re.sub(innermost_segment, "-__prefix__-", numbered_row_id) == template_row_id
+        assert (
+            re.sub(innermost_segment, "-__prefix__-", "id_localities-0-specimens-1-rock_type")
+            == "id_localities-0-specimens-__prefix__-rock_type"
+        )
 
 
 @pytest.mark.django_db

@@ -546,3 +546,30 @@ generalised past them.
 becomes reachable in a way that warrants documenting on its own.
 
 **ADR:** none — a documentation correction restoring what docs/adr/0011-a-concept-is-chosen-in-the-admin-never-created-there.md and docs/adr/0012-an-explicit-declaration-wins-and-nothing-is-reported.md already state.
+
+## D27 — an added inline row discards the control markup its clone brought with it
+**Raised by**: the code review, finding ADMIN-002 — `concept-inline.js` shipped with no executed
+verification of any kind, and D12's manual check had never been run. Running it found this.
+
+**The problem**: the empty-form template row is initialised on page load like every other row, so
+its rendered `.ts-wrapper` — the visible search control — is part of what Django's `inlines.js`
+clones, and Django then rewrites `__prefix__` to the new row number inside it. The added row
+therefore arrives already carrying an inert copy of the control, complete with duplicate element
+ids, before this script initialises the real one. Measured against Django 5.2.16 and
+django_tomselect 2026.6.2: two `.ts-wrapper` elements in the new row's cell, both visible, both
+holding an input with `id="id_specimens-1-rock_type-ts-control"`. `initialize`'s own destroy step
+does not reach the copy, because there is no TomSelect instance behind it — it is markup only.
+
+**Chosen**: before initialising, remove every `.ts-wrapper` that is a sibling of the select and is
+not the wrapper of a live instance, then initialise as before.
+
+**Why defensible**: the clone is markup with no owner, and the row is new, so nothing can be
+depending on it. Guarding on the live instance's own wrapper keeps the function correct if
+django_tomselect's `MutationObserver` fallback reaches the row first — that wrapper is left alone
+and `initialize` destroys it through the library's own path.
+
+**Not tested**: the fault and the fix are both invisible to a server-side test — the double control
+exists only in the cloned DOM. D12's boundary is unchanged, and this is the second thing that
+boundary has cost. Recorded in the retro as evidence toward a browser harness.
+
+**ADR:** none — an implementation detail of FR-003, inside a decision (D12) that already stands.
