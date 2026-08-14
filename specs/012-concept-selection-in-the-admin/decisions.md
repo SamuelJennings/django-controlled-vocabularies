@@ -116,3 +116,197 @@ how results are bounded and where the restriction comes from was settled in #88 
 one place. A second endpoint would be a second copy of the security-relevant rule that the
 restriction is derived from the field declaration rather than taken from the request, which is the
 rule Article V cares about most here. One endpoint, one place to get that right.
+
+## D9 — The form field declines the admin's wrapper, rather than a project applying a mixin
+
+**Ambiguous**: FR-004 says a consuming model registered with a `ModelAdmin` that declares nothing
+gets no related-object affordances. Django wraps every foreign key and many-to-many field in
+`RelatedFieldWidgetWrapper` at `django/contrib/admin/options.py:193`, unconditionally, and offers no
+hook to decline it. Three ways out were considered.
+
+**Chosen**: the form field owns its `widget` attribute, so its setter unwraps a
+`RelatedFieldWidgetWrapper` back to the widget inside it. Prototyped and measured before this plan
+was written (`research.md` R2): both fields come back unwrapped through the admin, and a plain
+`ModelForm` outside the admin is unchanged.
+
+**Why defensible**: it satisfies the requirement with no project action, no patch to Django, and no
+new public surface. The alternatives each fail something:
+
+- *A `ModelAdmin` mixin the project applies.* Contradicts FR-001, and its failure mode is silence —
+  a project that forgets it gets the affordances back with nothing to notice.
+- *Replacing `ModelAdmin.formfield_for_dbfield` at app-ready.* A monkey patch on a core Django
+  method, affecting every field on every model in the project, to change the behaviour of two. Fails
+  Article II and Article III, and a library that does this is a poor citizen in someone else's
+  project.
+
+The cost is honest and recorded in `plan.md` Risks: the setter depends on Django assigning to that
+attribute. The tests assert the absence of the four links in rendered output rather than the
+mechanism, so a future Django that built the wrapper differently fails a test rather than drifting.
+
+## D10 — The conditional admin import lives in `controlled_vocabularies/admin.py`
+
+**Ambiguous**: FR-006 forbids importing `django.contrib.admin` at startup, but the setter in D9 has
+to know what a `RelatedFieldWidgetWrapper` is.
+
+**Chosen**: a module named `admin.py` holding one lookup function that resolves the class lazily and
+returns `None` when the admin is not installed. It registers nothing.
+
+**Why defensible**: it keeps an admin-only import out of `forms.py`, which otherwise has nothing to
+do with the admin, and it gives `tests/test_admin.py` a source module to mirror under Article XIV.
+
+*Corrected at the design review (DR-005).* The original rationale claimed that Django's
+`AdminConfig.ready()` autodiscovery is what makes the module conditional. It is not: `forms.py`
+calls the lookup on every render, so any project rendering a concept field imports this module
+whether or not the admin is installed. **FR-006 is satisfied by the function importing
+`django.contrib.admin` only when it is among the installed applications**, and the test asserts
+`django.contrib.admin` is absent from `sys.modules` rather than that this module is. The module is
+still the right home; the reason was wrong.
+
+## D11 — ~~The many-to-many field ignores the admin's appended help text~~ *(superseded by D15)*
+
+**Ambiguous**: `formfield_for_manytomany` appends *Hold down "Control", or "Command" on a Mac, to
+select more than one.* to the help text of any `SelectMultiple`. Measured on `Outcrop.minerals`
+(`research.md` R3). The instruction is false under this control.
+
+**Chosen**: the multi-value form field keeps the help text it was constructed with and ignores a
+value that merely appends to it.
+
+**Superseded by D15 at the design review, before anything was built.** The rule stated here cannot
+deliver the behaviour, and the rule that could is worse than the problem. The text is kept as the
+record of what was considered.
+
+**Why it looked defensible**: it is the same shape as D9 — the admin mutates an attribute after
+`formfield()` returns, and the field owns the attribute. Matching the appended sentence is not needed, and would
+be fragile because the string is translated. Rejected: setting `allow_multiple_selected = False` on
+the widget, which would suppress the message but also stop `Select.get_context` emitting the
+`multiple` attribute, so a real multi-select would stop being one.
+
+## D12 — The inline script's browser behaviour is a documented manual check, not a test
+
+**Ambiguous**: US-3 requires a row added by "Add another" to carry a working control. That is
+browser behaviour, and this package has no browser test harness.
+
+**Chosen**: assert everything provable server-side — the asset ships, both widgets carry it in their
+media, the empty-form row renders a select with a registered configuration, the event name and the
+id substitution match what Django emits, and a parent POSTed with a new inline row saves its
+concept. The click itself is a manual check, written down as one.
+
+**Why defensible**: adding Playwright or Selenium to a Django library for one story is a
+runtime-scale dependency against Article VII, and a browser suite is infrastructure that then has to
+be maintained and run in CI for every future feature. Recording the gap is honest; claiming coverage
+that does not exist is the failure this avoids. If a second browser-dependent story arrives, the
+harness becomes justified and this decision is the evidence for it.
+
+## D13 — The test project gains the admin, and the no-admin case is proven out of process
+
+**Ambiguous**: FR-001 through FR-008 need `django.contrib.admin` installed in the test project, and
+FR-006 needs a project without it to be unaffected. One settings module cannot be both.
+
+**Chosen**: `tests/settings.py` gains the admin and the five applications and middleware its own
+system checks require. FR-006 is proven by `tests/settings_no_admin.py` exercised through
+`django-admin check` in a subprocess.
+
+**Why defensible**: `tests/test_checks.py` already runs `django-admin` in a subprocess for exactly
+this shape of assertion, so the idiom is the repo's own rather than invented for this feature. The
+alternative — running the whole suite twice under two settings modules — doubles CI time to prove
+one negative.
+
+
+## D14 — FR-004 is scoped to the editable control, not to read-only presentation
+
+**Raised by**: the design review, finding DR-001, verified against Django 5.2.16 before it was
+acted on.
+
+**The problem**: FR-004 as gated said no add, change, delete or view affordance "whether or not the
+package's own models are registered in the admin and whatever permissions the person holds". A field
+the admin renders read-only is excluded from the form, so no form field and no widget is built for
+it and the D9 setter never runs. `AdminReadonlyField.contents()`
+(`django/contrib/admin/helpers.py:294-298`) routes a read-only single-value relation through
+`get_admin_url` (`helpers.py:251-264`), which reverses `admin:<app>_<model>_change` and returns a
+link, falling back to plain text only while the model is unregistered. No package can decline that.
+Left unnoticed, the requirement would have passed its tests today and started rendering a link the
+moment R5 registers `Concept` — precisely the latent activation D1 exists to forbid.
+
+**Chosen**: amend FR-004 to govern the control, and state in FR-008 that read-only presentation is
+Django's own, including the link it renders once the model is registered. A read-only many-to-many
+field is unaffected either way: `helpers.py:293` renders it as `", ".join(map(str, value.all()))`,
+with no link.
+
+**Why defensible**: "selection-only" was a decision about what a person entering a record can do to
+the vocabulary from that page. A read-only field offers no selection at all, and following a link to
+a concept's own admin page is not authoring one from a data-entry form — what happens on that page
+is governed by the concept permissions the project grants. The alternative readings were both worse:
+leaving FR-004 as written makes it a requirement no implementation can satisfy, and suppressing the
+link would mean overriding admin internals for every consuming project to remove a read-only
+hyperlink.
+
+**Status**: this narrows a requirement the maintainer approved, so it is raised explicitly in the
+plan notification rather than absorbed quietly, and it is called out again at the merge gate.
+
+## D15 — The admin's false multi-select instruction is left alone
+
+**Raised by**: the design review, finding DR-002.
+
+**The problem**: `formfield_for_manytomany` appends *Hold down "Control", or "Command" on a Mac, to
+select more than one.* to a many-to-many field's help text. It is false under this control. D11
+planned to suppress it. Two things are wrong with that. No FR or SC asks for it — FR-010's
+enumerated guarantees are the vocabulary constraint, the delete protection, the required rule and
+the readback, none of which is help text. And the rule cannot work: `options.py:337-341` *replaces*
+rather than appends when the field has no help text of its own, so ignoring appends leaves the
+sentence in place; the rule that would catch both — freezing `help_text` after construction — also
+silently ignores the ordinary `self.fields[…].help_text = …` a consuming project writes in its own
+`ModelForm.__init__`.
+
+**Chosen**: drop the production change and the task. The sentence stays, as Django's behaviour
+rather than this package's.
+
+**Why defensible**: it is a cosmetic defect with no requirement behind it, and every mechanism for
+removing it costs a real guarantee or does not work. Dropping it also removes the only reason two
+stories had to edit `forms.py`, which is why the design review's own asymmetric bar treats
+work-removing findings as cheap. Carried to the retro as a candidate follow-up issue, where it can
+be judged on its own rather than smuggled into a feature about affordances.
+
+## D16 — Stories are dispatched sequentially onto the feature branch
+
+**Raised by**: the design review, finding DR-003.
+
+**The problem**: the task list had six stories and four shared files. `tests/test_admin.py` is
+touched by every story, `controlled_vocabularies/forms.py` by two, `tests/test_forms.py` by two, and
+`tests/testapp/admin.py` by three. The dependency section recorded one of those collisions and then
+declared the rest independent.
+
+**Chosen**: the stories run sequentially onto the feature branch, not in parallel worktrees, and the
+full collision list is written into `tasks.md` so the ordering is a stated constraint rather than an
+accident.
+
+**Why defensible**: parallel fan-out is a phase-2 capability and this feature does not need it. Four
+worktrees each creating their own version of a test module that does not exist at the base is a
+four-way conflict at convergence, which costs more than the wall-clock it would have saved.
+
+## D17 — One pre-existing test modified: the middleware check no longer empties `MIDDLEWARE`
+
+**Article I requires this to be recorded before the change stands.**
+
+`tests/test_checks.py::TestTheMiddlewareCheckReachesManageCheck::test_the_missing_middleware_is_reported_by_manage_check`
+ran `call_command("check")` under `override_settings(MIDDLEWARE=[])`. Once T001 installed
+`django.contrib.admin`, an empty middleware list trips the admin's own `admin.E4xx` checks and the
+command raises before the assertion is reached.
+
+**Changed to** dropping only `django_tomselect.middleware.TomSelectMiddleware` from the configured
+list, leaving the rest in place.
+
+**Why this is not weakening the test**: its stated subject is that `controlled_vocabularies.W004`
+is registered and reaches `manage.py check`. Removing exactly the middleware the check is about
+proves that more precisely than emptying the list did — the old form could have passed for reasons
+other than the one it names. Nothing about the assertion changed, and the test fails if the check is
+unregistered or stops firing.
+
+**Not changed**: the sibling tests that call `check_tomselect_middleware_installed()` directly under
+`MIDDLEWARE=[]`. They never reach the admin's checks, so they still exercise the empty case.
+
+## D18 — T001 was implemented by the orchestrator rather than dispatched
+
+Foundational, not a story: settings entries, a URL mount and three bare `ModelAdmin` registrations,
+with no design content and nothing for an Implementer to decide. The pipeline allows direct
+implementation for work of this shape provided the reason is recorded, and this is the record. Every
+story from US-1 onward is dispatched.

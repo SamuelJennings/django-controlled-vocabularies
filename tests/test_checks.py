@@ -20,6 +20,7 @@ from controlled_vocabularies.checks import (
     CHECK_ID_MISSING_INSTALLED_APP,
     CHECK_ID_MISSING_MIDDLEWARE,
     CHECK_ID_MISSING_ROUTE,
+    TOMSELECT_MIDDLEWARE,
     check_concept_autocomplete_route_included,
     check_concept_field_vocabularies,
     check_django_tomselect_installed,
@@ -372,8 +373,14 @@ class TestTheMiddlewareCheckReachesManageCheck:
     a check nobody registered reports nothing, whatever it returns."""
 
     def test_the_missing_middleware_is_reported_by_manage_check(self):
+        # Drop only the middleware under test rather than emptying the list: since
+        # 012 T001 the test project installs django.contrib.admin, whose own checks
+        # refuse an empty MIDDLEWARE and would abort the command before this
+        # assertion (012 decisions.md D17). Isolating the one entry is also the
+        # narrower test — it cannot pass for a reason other than the one it names.
+        remaining = [m for m in settings.MIDDLEWARE if m != TOMSELECT_MIDDLEWARE]
         stderr = io.StringIO()
-        with override_settings(MIDDLEWARE=[]):
+        with override_settings(MIDDLEWARE=remaining):
             call_command("check", stderr=stderr)
 
         assert CHECK_ID_MISSING_MIDDLEWARE in stderr.getvalue()
