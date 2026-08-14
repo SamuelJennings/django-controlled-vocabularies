@@ -121,25 +121,31 @@
           "id": "T002",
           "status": "done",
           "attempts": 1,
-          "evidence": [
-            "poetry run pytest -q tests/test_admin.py::TestConceptControlRendersOnAdminPages \u2014 4 passed"
-          ]
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q tests/test_admin.py::TestConceptControlRendersOnAdminPages — 4 passed"
+            ]
+          }
         },
         {
           "id": "T003",
           "status": "done",
           "attempts": 1,
-          "evidence": [
-            "poetry run pytest -q tests/test_admin.py::TestAdminPageRenderingIsBoundedByVocabularySize \u2014 1 passed"
-          ]
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q tests/test_admin.py::TestAdminPageRenderingIsBoundedByVocabularySize — 1 passed"
+            ]
+          }
         },
         {
           "id": "T004",
           "status": "done",
           "attempts": 2,
-          "evidence": [
-            "poetry run pytest -q tests/test_admin.py::TestAdminSubmissionSavesAndFieldRulesStillBite \u2014 attempt 1: 2 failed, 4 passed (wrong assumed message text, D19); attempt 2 (after fix): 6 passed"
-          ]
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q tests/test_admin.py::TestAdminSubmissionSavesAndFieldRulesStillBite — attempt 1: 2 failed, 4 passed (wrong assumed message text, D19); attempt 2 (after fix): 6 passed"
+            ]
+          }
         }
       ]
     },
@@ -154,28 +160,34 @@
           "id": "T005",
           "status": "done",
           "attempts": 1,
-          "evidence": [
-            "poetry run pytest -q tests/test_admin.py::TestConceptFieldOffersNoRelatedObjectAffordance \u2014 4 failed, 1 passed (RED, expected: research.md R1's measured table)"
-          ]
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q tests/test_admin.py::TestConceptFieldOffersNoRelatedObjectAffordance — 4 failed, 1 passed (RED, expected: research.md R1's measured table)"
+            ]
+          }
         },
         {
           "id": "T006",
           "status": "done",
           "attempts": 1,
-          "evidence": [
-            "poetry run pytest -q tests/test_admin.py::TestConceptFieldOffersNoRelatedObjectAffordance \u2014 5 passed",
-            "poetry run pytest -q tests/test_forms.py \u2014 22 passed (unchanged)",
-            "poetry run mypy controlled_vocabularies/admin.py controlled_vocabularies/forms.py \u2014 4 errors then fixed (D20), clean"
-          ]
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q tests/test_admin.py::TestConceptFieldOffersNoRelatedObjectAffordance — 5 passed",
+              "poetry run pytest -q tests/test_forms.py — 22 passed (unchanged)",
+              "poetry run mypy controlled_vocabularies/admin.py controlled_vocabularies/forms.py — 4 errors then fixed (D20), clean"
+            ]
+          }
         },
         {
           "id": "T007",
           "status": "done",
           "attempts": 1,
-          "evidence": [
-            "poetry run pytest -q tests/test_forms.py::TestConceptFieldDeclinesTheAdminWrapper \u2014 4 passed",
-            "poetry run pytest -q tests/test_forms.py \u2014 26 passed (whole file)"
-          ]
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q tests/test_forms.py::TestConceptFieldDeclinesTheAdminWrapper — 4 passed",
+              "poetry run pytest -q tests/test_forms.py — 26 passed (whole file)"
+            ]
+          }
         }
       ]
     },
@@ -190,33 +202,41 @@
           "id": "T008",
           "status": "done",
           "attempts": 1,
-          "evidence": [
-            "poetry run django-admin makemigrations --check --dry-run \u2014 clean; poetry run django-admin check \u2014 0 issues"
-          ]
+          "evidence": {
+            "commands": [
+              "poetry run django-admin makemigrations --check --dry-run — clean; poetry run django-admin check — 0 issues"
+            ]
+          }
         },
         {
           "id": "T009",
           "status": "done",
           "attempts": 1,
-          "evidence": [
-            "poetry run pytest -q tests/test_admin.py::TestInlineRowsCarryTheControl \u2014 2 passed"
-          ]
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q tests/test_admin.py::TestInlineRowsCarryTheControl — 2 passed"
+            ]
+          }
         },
         {
           "id": "T010",
           "status": "done",
           "attempts": 1,
-          "evidence": [
-            "poetry run pytest -q tests/test_forms.py::TestConceptWidgetsShipTheInlineInitialisationScript \u2014 3 passed (red before Media added); tests/test_admin.py::TestEmptyFormRowIsInitialisable \u2014 2 passed"
-          ]
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q tests/test_forms.py::TestConceptWidgetsShipTheInlineInitialisationScript — 3 passed (red before Media added); tests/test_admin.py::TestEmptyFormRowIsInitialisable — 2 passed"
+            ]
+          }
         },
         {
           "id": "T011",
           "status": "done",
           "attempts": 1,
-          "evidence": [
-            "poetry run pytest -q tests/test_admin.py::TestNewInlineRowSavesItsConcept \u2014 1 passed"
-          ]
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q tests/test_admin.py::TestNewInlineRowSavesItsConcept — 1 passed"
+            ]
+          }
         }
       ]
     },
@@ -231,17 +251,21 @@
           "id": "T012",
           "status": "done",
           "attempts": 1,
-          "evidence": [
-            "poetry run pytest -q tests/test_admin.py::TestExplicitDeclarationWins — 10 passed; tests/test_admin.py (whole file) — 31 passed"
-          ]
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q tests/test_admin.py::TestExplicitDeclarationWins — 10 passed; tests/test_admin.py (whole file) — 31 passed"
+            ]
+          }
         },
         {
           "id": "T013",
           "status": "done",
           "attempts": 1,
-          "evidence": [
-            "poetry run pytest -q tests/test_admin.py::TestReadOnlyPresentationRendersNoControl — 4 passed; tests/test_admin.py (whole file) — 35 passed"
-          ]
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q tests/test_admin.py::TestReadOnlyPresentationRendersNoControl — 4 passed; tests/test_admin.py (whole file) — 35 passed"
+            ]
+          }
         }
       ]
     },
@@ -255,12 +279,23 @@
         {
           "id": "T014",
           "status": "done",
-          "attempts": 1
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q tests/test_checks.py::TestProjectWithoutTheAdminIsUnaffected — 3 passed",
+              "gate tested against the defect: making the admin import unconditional turns the sys.modules assertion red"
+            ]
+          }
         },
         {
           "id": "T015",
           "status": "done",
-          "attempts": 1
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q tests/test_admin.py::TestCustomAdminSiteGetsTheSameBehaviour — 4 passed"
+            ]
+          }
         }
       ]
     },
@@ -275,17 +310,21 @@
           "id": "T017",
           "status": "done",
           "attempts": 1,
-          "evidence": [
-            "poetry run pytest -q tests/test_standards.py::TestReadmeDocumentsTheAdminSection — 5 passed; tests/test_standards.py (whole file) — 88 passed"
-          ]
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q tests/test_standards.py::TestReadmeDocumentsTheAdminSection — 5 passed; tests/test_standards.py (whole file) — 88 passed"
+            ]
+          }
         },
         {
           "id": "T018",
           "status": "done",
           "attempts": 1,
-          "evidence": [
-            "poetry run pytest -q tests/test_standards.py::TestFieldsChecksI18nSweep — 5 passed; gate tested against the defect: ImproperlyConfigured('boom') spliced into admin.py turns the sweep red, reverted"
-          ]
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q tests/test_standards.py::TestFieldsChecksI18nSweep — 5 passed; gate tested against the defect: ImproperlyConfigured('boom') spliced into admin.py turns the sweep red, reverted"
+            ]
+          }
         }
       ]
     }
