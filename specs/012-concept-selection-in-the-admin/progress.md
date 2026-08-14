@@ -197,3 +197,49 @@ behaviour of its own). `poetry run ruff check`/`ruff format --check` on
 Next: T009 — saved inline rows carry the control.
 
 Watch: none.
+
+## 2026-08-14T09:25:00Z · Implementer US-3 · T009
+
+Did: added `tests/test_admin.py::TestInlineRowsCarryTheControl` (2 tests) —
+`Locality` registered with a `Specimen` `TabularInline` (`extra = 1`) on a
+dedicated site (`locality_tabular_site` fixture; also added
+`locality_stacked_site` for T010/T011). First test: two saved `Specimen`
+rows under one `Locality`, each carrying its own control showing its own
+concept (`id="id_specimens-<index>-rock_type"`, its own
+`autocompleteParams`), plus a third concept created but never attached,
+asserted absent — the vocabulary isn't dumped onto the page regardless of
+row count. Second test: `Locality.primary_mineral` (vocabulary `"mineral"`)
+and the inline row's `Specimen.rock_type` (vocabulary `"rock-type"`) each
+carry their own distinct `field=...` autocomplete reference and their own
+held concept's label (US-3 scenario 4). No production code — both tests pin
+behaviour Django's own per-field `formfield()` binding already provides
+correctly for formset rows, the same shape as T002-T004.
+
+Verified: `poetry run pytest -q tests/test_admin.py::TestInlineRowsCarryTheControl`
+— 2 passed, on first run. Not vacuous — confirmed by breaking the mechanism
+under test rather than assuming: a throwaway interactive script (mirroring
+T007's method) monkeypatched `ConceptChoiceField.__init__` to always pass
+`model_field=None`, the pre-`_ConceptWidgetReferenceMixin`-binding shape, and
+re-rendered the same `Locality` change page — both the parent's own
+`field=testapp.locality.primary_mineral` reference and the inline row's
+`field=testapp.specimen.rock_type` reference disappeared from the response
+(`get_autocomplete_params()` returns `""` when `model_field is None`),
+confirming the tests would have caught a regression in the per-field
+binding, for both the top-level and the inline case. `poetry run pytest -q
+tests/test_admin.py` (whole file) — 18 passed. `ruff check`/`ruff format
+--check tests/test_admin.py` — clean (one `ruff format` pass applied).
+
+Found, not fixed (out of scope — no production file this story may touch
+carries the cause, and it predates T008): a `Concept.label` containing an
+apostrophe never appears in a `ConceptField`'s already-selected-option
+render, reproduced identically on the pre-existing `Sample.mineral` with no
+`Locality`/US-3 code involved at all — `escapejs`-escaping the label
+(`'` for `'`) is also absent from the rendered output, so it isn't only
+a raw-apostrophe-vs-escaped mismatch; the selected option appears to be
+dropped from `_get_selected_options()`'s result entirely. Both test labels
+in this story avoid apostrophes to sidestep it. Recorded in this story's
+`concerns` for Forge to triage as a separate issue.
+
+Next: T010 — the empty-form row and the shipped script.
+
+Watch: the apostrophe-label finding above.

@@ -23,6 +23,13 @@ a POST from the add page saves the chosen concept, one naming a concept
 outside the field's declared vocabulary is refused by the field's own
 validation, and a concept referenced through the admin is still protected
 from deletion — both field kinds.
+
+``TestInlineRowsCarryTheControl`` (T009), ``TestEmptyFormRowIsInitialisable``
+(T010) and ``TestNewInlineRowSavesItsConcept`` (T011) cover US-3: ``Locality``
+(``tests/testapp/models.py``, T008) is the parent, ``Specimen`` the inline
+child, registered on dedicated sites here rather than in
+``tests/testapp/admin.py`` per that module's own bare-registrations-only
+convention (T008's ``progress.md`` entry).
 """
 
 import pytest
@@ -32,8 +39,8 @@ from django.test import override_settings
 from django.urls import include, path, reverse
 
 from controlled_vocabularies.models import Concept
-from tests.factories import ConceptFactory, ConceptSchemeFactory, OutcropFactory, SpecimenFactory
-from tests.testapp.models import Outcrop, Specimen
+from tests.factories import ConceptFactory, ConceptSchemeFactory, LocalityFactory, OutcropFactory, SpecimenFactory
+from tests.testapp.models import Locality, Outcrop, Specimen
 
 
 def _field_reference(model, field_name):
@@ -351,3 +358,111 @@ class TestConceptFieldOffersNoRelatedObjectAffordance:
         assert response.status_code == 200
         _assert_no_related_object_affordance(content)
         _assert_control_rendered(content, Specimen, "rock_type")
+
+
+class _SpecimenTabularInline(admin.TabularInline):
+    """The registration T008's acceptance names — ``extra = 1`` — used on
+    ``locality_tabular_site``."""
+
+    model = Specimen
+    extra = 1
+
+
+class _SpecimenStackedInline(admin.StackedInline):
+    """The registration T008's acceptance names — ``extra = 0`` — the
+    configuration research.md R4 measured the library failing on, used on
+    ``locality_stacked_site``."""
+
+    model = Specimen
+    extra = 0
+
+
+class _LocalityTabularAdmin(admin.ModelAdmin):
+    inlines = [_SpecimenTabularInline]
+
+
+class _LocalityStackedAdmin(admin.ModelAdmin):
+    inlines = [_SpecimenStackedInline]
+
+
+@pytest.fixture
+def locality_tabular_site():
+    """``Locality`` with its ``Specimen`` inline as a ``TabularInline``,
+    ``extra = 1`` (T008)."""
+    site = admin.AdminSite(name="us3_locality_tabular")
+    site.register(Locality, _LocalityTabularAdmin)
+    return site
+
+
+@pytest.fixture
+def locality_stacked_site():
+    """``Locality`` with its ``Specimen`` inline as a ``StackedInline``,
+    ``extra = 0`` (T008) — the configuration with no numbered row rendered
+    until one is added, the shape research.md R4 measured the library
+    failing on."""
+    site = admin.AdminSite(name="us3_locality_stacked")
+    site.register(Locality, _LocalityStackedAdmin)
+    return site
+
+
+def _assert_inline_row_control_rendered(content, model, field_name, prefix, index):
+    """T009's per-row counterpart to :func:`_assert_control_rendered`: the
+    same three-part acceptance, against a saved inline row's own element id
+    (``id_<prefix>-<index>-<field_name>``) rather than the parent form's bare
+    one."""
+    element_id = f"id_{prefix}-{index}-{field_name}"
+    assert f'id="{element_id}"' in content
+    assert "data-tomselect" in content
+    escaped_equals = "\\u003D"
+    assert f"autocompleteParams: 'field{escaped_equals}{_field_reference(model, field_name)}'" in content
+
+
+@pytest.mark.django_db
+class TestInlineRowsCarryTheControl:
+    """T009: FR-003, US-3 scenarios 1 and 4."""
+
+    def test_two_saved_inline_rows_each_carry_the_control_showing_their_own_concept(
+        self, admin_client, locality_tabular_site
+    ):
+        rock_scheme = ConceptSchemeFactory(name="Rock Type")
+        first_concept = ConceptFactory(scheme=rock_scheme, label="Granite")
+        second_concept = ConceptFactory(scheme=rock_scheme, label="Basalt")
+        unattached_concept = ConceptFactory(scheme=rock_scheme, label="Unattached concept")
+        locality = LocalityFactory()
+        SpecimenFactory(locality=locality, rock_type=first_concept)
+        SpecimenFactory(locality=locality, rock_type=second_concept)
+
+        with override_settings(ROOT_URLCONF=_URLConf(locality_tabular_site)):
+            response = admin_client.get(reverse("admin:testapp_locality_change", args=[locality.pk]))
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        _assert_inline_row_control_rendered(content, Specimen, "rock_type", "specimens", 0)
+        _assert_inline_row_control_rendered(content, Specimen, "rock_type", "specimens", 1)
+        assert first_concept.label in content
+        assert second_concept.label in content
+        assert unattached_concept.label not in content
+
+    def test_an_inline_row_declaring_a_different_vocabulary_carries_its_own_reference_not_the_parents(
+        self, admin_client, locality_tabular_site
+    ):
+        mineral_scheme = ConceptSchemeFactory(name="Mineral")
+        rock_scheme = ConceptSchemeFactory(name="Rock Type")
+        parent_concept = ConceptFactory(scheme=mineral_scheme, label="Locality primary mineral")
+        row_concept = ConceptFactory(scheme=rock_scheme, label="Row rock type")
+        locality = LocalityFactory(primary_mineral=parent_concept)
+        SpecimenFactory(locality=locality, rock_type=row_concept)
+
+        with override_settings(ROOT_URLCONF=_URLConf(locality_tabular_site)):
+            response = admin_client.get(reverse("admin:testapp_locality_change", args=[locality.pk]))
+        content = response.content.decode()
+
+        parent_reference = _field_reference(Locality, "primary_mineral")
+        row_reference = _field_reference(Specimen, "rock_type")
+
+        assert response.status_code == 200
+        assert parent_reference != row_reference
+        _assert_control_rendered(content, Locality, "primary_mineral")
+        _assert_inline_row_control_rendered(content, Specimen, "rock_type", "specimens", 0)
+        assert parent_concept.label in content
+        assert row_concept.label in content
