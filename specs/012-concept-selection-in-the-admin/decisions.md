@@ -310,3 +310,24 @@ Foundational, not a story: settings entries, a URL mount and three bare `ModelAd
 with no design content and nothing for an Implementer to decide. The pipeline allows direct
 implementation for work of this shape provided the reason is recorded, and this is the record. Every
 story from US-1 onward is dispatched.
+
+## D19 — T004's refusal tests assert on the errored field, not on message text
+
+**Decision**: `tests/test_admin.py::TestAdminSubmissionSavesAndFieldRulesStillBite`'s two
+foreign-vocabulary tests assert `'id="id_rock_type_error"' in content` / `'id="id_minerals_error"'
+in content`, not any particular error string.
+
+**Why**: a first draft asserted `"is not a valid concept" in content` — the wording of
+`ConceptField.validate()`'s model-level custom message (`fields.py:215`). Run against the real
+admin POST, it failed: the actual rendered text is Django's own generic `ModelChoiceField` message,
+"Select a valid choice. That choice is not one of the available choices." The refusal happens at
+the form field's own level first — the widget's `get_queryset()` is already narrowed to the
+declared vocabulary (the same mechanism `tests/test_forms.py::TestConceptFieldSubmissionSurvives`
+proves is what lets a *legitimate* concept survive), so `ModelChoiceField.clean()` rejects the
+foreign pk before `Model.full_clean()` and the field's own custom message are ever reached. This
+matches the existing suite's own restraint: `test_forms.py`'s equivalent tests assert
+`"mineral" in form.errors`, never the message text, for the same reason.
+
+**Revisit if**: a future story moves the restriction from the widget's queryset to model-level
+validation only (so the custom message becomes reachable from a form submission) — then these
+tests' assertions should tighten to match, per `craft-tdd`'s "assert outcomes" rule.

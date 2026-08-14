@@ -44,3 +44,23 @@ Verified: `poetry run pytest -q tests/test_admin.py::TestAdminPageRenderingIsBou
 watch item).
 
 Next: T004 (submission saves, foreign-vocabulary refusal, delete protection).
+
+## 2026-08-14T06:04:28Z · Implementer US-1 · T004
+
+Did: added `TestAdminSubmissionSavesAndFieldRulesStillBite` to `tests/test_admin.py`, six
+tests, both field kinds. No production code — pins FR-010, US-1 scenario 5.
+
+Verified: `poetry run pytest -q tests/test_admin.py::TestAdminSubmissionSavesAndFieldRulesStillBite`
+— 6 passed; `poetry run pytest -q tests/test_admin.py` (whole file) — 11 passed. `ruff
+check`/`ruff format --check` clean (manual, per the T002 watch item).
+
+First draft of the two refusal tests asserted the model-level custom message
+("is not a valid concept...") and failed against the real response — the actual text is
+Django's generic ModelChoiceField message, because the widget's own queryset restriction
+refuses the foreign pk before the model-level message is ever reached. Recorded as D19 and
+fixed to assert on the errored field instead, matching the restraint `tests/test_forms.py`'s
+own refusal tests already use.
+
+Next: T005+ is US-2's scope, out of this story.
+
+Watch: none beyond D19 and the T002 pre-commit-exclusion note above.
