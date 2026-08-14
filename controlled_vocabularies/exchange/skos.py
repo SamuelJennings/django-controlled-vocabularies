@@ -173,7 +173,7 @@ def unique_slug_for_identifier(static_uri: str, taken_slugs: dict[str, str | Non
     return candidate
 
 
-class _FatalIdentity(Exception):
+class FatalIdentity(Exception):
     """Internal signal that a node's identity is fatal (D3/FR-004); carries the finding to record."""
 
     def __init__(self, reason: FatalReason, subject: str, **params: str) -> None:
@@ -261,7 +261,7 @@ class SkosGraph:
 
     @staticmethod
     def identify(node: rdflib.term.Node, *, hint: str | None = None) -> str:
-        """Return ``node``'s usable identifier, or raise :class:`_FatalIdentity` (FR-004, D3).
+        """Return ``node``'s usable identifier, or raise :class:`FatalIdentity` (FR-004, D3).
 
         A blank node supplies no identifier that survives re-serialization and is always fatal —
         an ordered collection's own member list is read as a list, never as a candidate record, so
@@ -275,12 +275,12 @@ class SkosGraph:
         """
         subject = hint or str(node)
         if isinstance(node, rdflib.BNode):
-            raise _FatalIdentity(FatalReason.MISSING_IDENTITY, subject=subject)
+            raise FatalIdentity(FatalReason.MISSING_IDENTITY, subject=subject)
         uri = str(node)
         try:
             validate_static_uri(uri)
         except ValidationError as exc:
-            raise _FatalIdentity(FatalReason.REFUSED_IDENTITY, subject=uri) from exc
+            raise FatalIdentity(FatalReason.REFUSED_IDENTITY, subject=uri) from exc
         return uri
 
     @staticmethod
@@ -657,7 +657,7 @@ class SchemeResolver:
         hint = self.skos_graph.first_literal(declared_node, SKOS.prefLabel)
         try:
             declared_uri = self.skos_graph.identify(declared_node, hint=hint)
-        except _FatalIdentity as exc:
+        except FatalIdentity as exc:
             self.report.add_fatal(exc.reason, exc.subject, **exc.params)
             return None, None
 
@@ -1193,7 +1193,7 @@ class ConceptImporter:
             hint = self.skos_graph.first_literal(node, SKOS.prefLabel)
             try:
                 uri = self.skos_graph.identify(node, hint=hint)
-            except _FatalIdentity as exc:
+            except FatalIdentity as exc:
                 self.report.add_fatal(exc.reason, exc.subject, **exc.params)
                 continue
             self._mentioned_uris.add(uri)
@@ -1379,7 +1379,7 @@ class ConceptImporter:
         concept.slug_is_manual = True
 
 
-class _ConceptReferenceResolverMixin:
+class ConceptReferenceResolverMixin:
     """Shared by :class:`RelationImporter` and :class:`CollectionImporter`, both of which resolve a
     URI back to the :class:`Concept` it identifies (D30 treats a membership as the same shape of
     problem a relationship already is) — a small shared base rather than duplicating the method,
@@ -1412,7 +1412,7 @@ class _ConceptReferenceResolverMixin:
         return concept
 
 
-class RelationImporter(_ConceptReferenceResolverMixin):
+class RelationImporter(ConceptReferenceResolverMixin):
     """Reconciles ``skos:broader``/``skos:narrower``/``skos:related`` into stored
     :class:`~controlled_vocabularies.models.ConceptRelation` rows (FR-010/FR-011).
     """
@@ -1584,7 +1584,7 @@ class RelationImporter(_ConceptReferenceResolverMixin):
             concepts_by_pk[a_pk].add_related(concepts_by_pk[b_pk])
 
 
-class CollectionImporter(_ConceptReferenceResolverMixin):
+class CollectionImporter(ConceptReferenceResolverMixin):
     """Creates or updates every ``skos:Collection``/``skos:OrderedCollection`` in the target
     vocabulary, with its membership (T027/T028, FR-012).
     """
@@ -1660,7 +1660,7 @@ class CollectionImporter(_ConceptReferenceResolverMixin):
             hint = self.skos_graph.first_literal(node, SKOS.prefLabel)
             try:
                 uri = self.skos_graph.identify(node, hint=hint)
-            except _FatalIdentity as exc:
+            except FatalIdentity as exc:
                 self.report.add_fatal(exc.reason, exc.subject, **exc.params)
                 continue
             mentioned_uris.add(uri)
