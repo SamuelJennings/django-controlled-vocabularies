@@ -32,6 +32,8 @@ child, registered on dedicated sites here rather than in
 convention (T008's ``progress.md`` entry).
 """
 
+import re
+
 import pytest
 from django.contrib import admin
 from django.db.models import ProtectedError
@@ -466,3 +468,50 @@ class TestInlineRowsCarryTheControl:
         _assert_inline_row_control_rendered(content, Specimen, "rock_type", "specimens", 0)
         assert parent_concept.label in content
         assert row_concept.label in content
+
+
+@pytest.mark.django_db
+class TestEmptyFormRowIsInitialisable:
+    """T010: FR-003, US-3 scenarios 2 and 5. What's provable server-side of
+    ``concept-inline.js`` (decisions.md D12): the empty-form template row
+    Django always renders (regardless of ``extra``) carries a select with
+    ``data-tomselect`` and a registered configuration whose id contains
+    ``__prefix__``, and the id substitution the script performs matches the
+    identifier Django's own ``inlines.js`` produces for a newly added row.
+    The browser click itself is the documented manual check."""
+
+    def test_the_empty_form_row_carries_a_select_with_a_registered_configuration(
+        self, admin_client, locality_stacked_site
+    ):
+        locality = LocalityFactory()
+
+        with override_settings(ROOT_URLCONF=_URLConf(locality_stacked_site)):
+            response = admin_client.get(reverse("admin:testapp_locality_change", args=[locality.pk]))
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        assert 'id="id_specimens-__prefix__-rock_type"' in content
+        assert "data-tomselect" in content
+        escaped_equals = "\\u003D"
+        assert f"autocompleteParams: 'field{escaped_equals}{_field_reference(Specimen, 'rock_type')}'" in content
+
+    def test_the_id_substitution_matches_the_identifier_djangos_inlinesjs_produces_for_a_new_row(
+        self, admin_client, locality_tabular_site
+    ):
+        """``concept-inline.js``'s own substitution — the single
+        ``-<digits>-`` segment swapped for ``-__prefix__-`` — mirrored here in
+        Python and checked against two real ids from the same rendered page:
+        the numbered row ``extra = 1`` renders (the shape Django's own
+        ``updateElementIndex``, ``inlines.js``, produces for a row it adds)
+        and the always-present empty-form template row."""
+        locality = LocalityFactory()
+
+        with override_settings(ROOT_URLCONF=_URLConf(locality_tabular_site)):
+            response = admin_client.get(reverse("admin:testapp_locality_change", args=[locality.pk]))
+        content = response.content.decode()
+
+        numbered_row_id = "id_specimens-0-rock_type"
+        template_row_id = "id_specimens-__prefix__-rock_type"
+        assert f'id="{numbered_row_id}"' in content
+        assert f'id="{template_row_id}"' in content
+        assert re.sub(r"-\d+-", "-__prefix__-", numbered_row_id, count=1) == template_row_id

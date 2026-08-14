@@ -409,3 +409,27 @@ class TestConceptFieldDeclinesTheAdminWrapper:
         field.widget = ordinary_widget
 
         assert field.widget is ordinary_widget
+
+
+class TestConceptWidgetsShipTheInlineInitialisationScript:
+    """T010: FR-003, US-3 scenarios 2 and 5 — the asset ships in the package
+    and is declared in both widgets' ``Media`` (decisions.md D12). The
+    listener itself, ``concept-inline.js``, is browser behaviour and is a
+    documented manual check (D12), not asserted here."""
+
+    _ASSET = "controlled_vocabularies/js/concept-inline.js"
+
+    def test_the_asset_is_discoverable_as_a_static_file(self):
+        from django.contrib.staticfiles.finders import find
+
+        assert find(self._ASSET) is not None
+
+    def test_the_concept_widget_declares_the_asset_in_its_media(self):
+        widget = ConceptChoiceField(model_field=Sample._meta.get_field("mineral"), required=False).widget
+
+        assert self._ASSET in widget.media._js
+
+    def test_the_concepts_widget_declares_the_asset_in_its_media(self):
+        widget = ConceptsChoiceField(model_field=Outcrop._meta.get_field("minerals"), required=False).widget
+
+        assert self._ASSET in widget.media._js

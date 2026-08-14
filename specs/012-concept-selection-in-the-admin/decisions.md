@@ -197,6 +197,31 @@ be maintained and run in CI for every future feature. Recording the gap is hones
 that does not exist is the failure this avoids. If a second browser-dependent story arrives, the
 harness becomes justified and this decision is the evidence for it.
 
+**Manual check (T010)**: in a project with the admin installed and a `ModelAdmin` carrying a
+`ConceptField`- or `ConceptsField`-consuming inline (`TabularInline` or `StackedInline`), on the
+parent's change page:
+
+1. Click "Add another" below the inline. The new row must render as the search-as-you-type control
+   — a text box you can type into and pick a result from — not a bare `<select>` listing every row
+   in the vocabulary (the failure `research.md` R4 describes: the browser JS never initialises the
+   clone).
+2. Type into it and confirm results arrive from the autocomplete endpoint (network tab: a request to
+   the field's own autocomplete URL, not a 404 or no request at all), restricted to the row's own
+   declared vocabulary.
+3. Pick a result, save the parent, and confirm the row persists holding it (the server-side half —
+   T011 — proves the save always works; this step proves the browser-added row actually reaches the
+   POST with the right value, not just that the control renders).
+4. Repeat against an inline whose formset starts with **no saved rows** (`extra = 0`, no existing
+   children) — the exact configuration `research.md` R4 measured the library's own fallback failing
+   on. The first row added on the page must behave identically to step 1.
+5. Confirm no error appears in the browser console on either add, and that adding a second row after
+   the first works the same way (the template row `concept-inline.js` reads from is never consumed —
+   it stays available for every subsequent "Add another" click).
+
+A failure at step 1 or 4 with no console error most likely means `concept-inline.js` isn't loading —
+check the rendered page's `<head>` for a `<script>` tag referencing it (declared on both widgets'
+`Media`, T010) before assuming the listener itself is wrong.
+
 ## D13 — The test project gains the admin, and the no-admin case is proven out of process
 
 **Ambiguous**: FR-001 through FR-008 need `django.contrib.admin` installed in the test project, and

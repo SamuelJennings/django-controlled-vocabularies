@@ -243,3 +243,48 @@ in this story avoid apostrophes to sidestep it. Recorded in this story's
 Next: T010 — the empty-form row and the shipped script.
 
 Watch: the apostrophe-label finding above.
+
+## 2026-08-14T09:50:00Z · Implementer US-3 · T010
+
+Did: added `controlled_vocabularies/static/controlled_vocabularies/js/concept-inline.js`
+(new) — an IIFE listening for `formset:added`, recovering the configuration
+registered against the empty-form template row by substituting the added
+row's own `-<digits>-` segment back to `-__prefix__-` (mirroring
+`findSimilarConfig`'s own normalisation direction, reversed), then calling
+`window.djangoTomSelect.initialize(select, config)` — the same call the
+library's own per-widget script makes. Additive only: no existing
+django-tomselect path is read, wrapped or replaced, and it does nothing on a
+page that never dispatches the event. Added `class Media: js = [...]` to
+both `ConceptWidget` and `ConceptsWidget` in `forms.py` — the only
+`forms.py` change this story makes; `media_property`'s own MRO-walking
+merge keeps the base widget's own tomselect JS/CSS.
+
+Verified (TDD, both red first): `tests/test_forms.py::TestConceptWidgetsShipTheInlineInitialisationScript`
+— asset discoverable via `django.contrib.staticfiles.finders.find()` (green
+immediately, the asset already existed); both widgets' `Media.js` containing
+it — red before the `Media` classes were added (`AssertionError:
+'controlled_vocabularies/js/concept-inline.js' in
+['django_tomselect/js/django-tomselect.min.js']`), green after.
+`tests/test_admin.py::TestEmptyFormRowIsInitialisable` (2 tests, against
+`locality_stacked_site`/`locality_tabular_site`, `extra = 0`/`extra = 1`) —
+the empty-form row's select carries `id="id_specimens-__prefix__-rock_type"`,
+`data-tomselect`, and its own registered `autocompleteParams`; and the
+script's own id-substitution (mirrored in Python:
+`re.sub(r"-\d+-", "-__prefix__-", ...)`) applied to the real numbered row id
+on the same page equals the real template row id on that same page — both
+passed on first run (server-side rendering the script depends on, not the
+script's own execution, which decisions.md D12 keeps a documented manual
+check). `poetry run pytest -q tests/test_forms.py tests/test_admin.py` — 49
+passed. `poetry run ruff check`/`ruff format --check` on `forms.py`,
+`test_forms.py`, `test_admin.py` — clean. `poetry run mypy
+controlled_vocabularies/forms.py` — clean.
+
+decisions.md D12 gained the manual browser check steps (five steps: the
+"Add another" control initialises rather than staying bare, results arrive
+scoped to the row's own vocabulary, a browser-added row's save persists,
+the `extra = 0`/no-saved-rows shape from research.md R4 behaves the same,
+and no console error on repeated adds).
+
+Next: T011 — a parent saved with a new inline row keeps its concept.
+
+Watch: none.
