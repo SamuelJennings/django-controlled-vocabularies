@@ -10,7 +10,13 @@ admin absent needs a fresh interpreter, not an ``override_settings`` inside
 the main suite.
 """
 
-SECRET_KEY = "test-key-not-for-production"
+from django.core.management.utils import get_random_secret_key
+
+# Generated per run rather than written down: this configuration is only ever
+# loaded by a throwaway subprocess that renders one form, nothing it signs
+# outlives that process, and a key literal in a second file is one more
+# credential-shaped string for a scanner to find.
+SECRET_KEY = get_random_secret_key()
 
 ROOT_URLCONF = "tests.urls_no_admin"
 

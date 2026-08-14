@@ -768,7 +768,10 @@ def _view_only_staff_user(*codenames):
     """A saved staff user holding exactly the named ``view_*`` permissions —
     never ``change_*`` — for US-4 scenario 7: a person who may view the page
     but not change it (T013)."""
-    user = get_user_model().objects.create_user(username="readonly-viewer", password="not-used", is_staff=True)  # noqa: S106
+    # No password: every caller reaches the page through ``force_login``, so the
+    # user never authenticates, and a literal here is a credential-shaped string
+    # in the repository for nothing.
+    user = get_user_model().objects.create_user(username="readonly-viewer", is_staff=True)
     for codename in codenames:
         user.user_permissions.add(Permission.objects.get(codename=codename))
     return user
