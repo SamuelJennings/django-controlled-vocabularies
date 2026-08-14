@@ -60,7 +60,7 @@ __all__ = [
 ]
 
 
-class _DoNothingContentHandler(ContentHandler):
+class DoNothingContentHandler(ContentHandler):
     """A content handler with no behaviour.
 
     The scan exists only to let `defusedxml`'s guards fire during parsing; it
@@ -85,7 +85,7 @@ def scan_rdf_xml(data: bytes) -> None:
     a document that fails on those grounds instead.
     """
     try:
-        defusedxml.sax.parseString(data, _DoNothingContentHandler())
+        defusedxml.sax.parseString(data, DoNothingContentHandler())
     except EntitiesForbidden as exc:
         raise UnsafeRdfXmlError(
             _(

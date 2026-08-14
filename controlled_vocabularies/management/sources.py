@@ -105,7 +105,7 @@ class ResolvedSource:
 
 
 @dataclass
-class _Fetched:
+class Fetched:
     path: Path
     content_type: str | None
     #: The address the document was actually served from, which differs from the one the
@@ -162,7 +162,7 @@ class SourceResolver:
             str(_("'%(source)s' could not be retrieved: %(error)s")) % {"source": self.source, "error": exc}
         )
 
-    def _fetch(self) -> _Fetched:
+    def _fetch(self) -> Fetched:
         """Fetch :attr:`source` to a temporary file under a timeout and a byte ceiling
         (T008, research.md R3)."""
         try:
@@ -203,9 +203,9 @@ class SourceResolver:
                             % {"source": self.source}
                         )
                     tmp.write(chunk)
-        return _Fetched(path=self._temp_path, content_type=content_type, final_url=final_url)
+        return Fetched(path=self._temp_path, content_type=content_type, final_url=final_url)
 
-    def _resolve_serialization(self, fetched: _Fetched) -> str:
+    def _resolve_serialization(self, fetched: Fetched) -> str:
         """Resolve a fetched document's serialization (T009, research.md R4): explicit
         ``--format``, then the URL path's extension, then the response ``Content-Type``,
         then a refusal naming what could not be determined. ``from_file``'s own extension

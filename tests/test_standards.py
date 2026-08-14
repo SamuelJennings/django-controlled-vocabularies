@@ -563,7 +563,7 @@ _TRANSLATION_CALL_NAMES = {"_", "gettext_lazy", "ngettext_lazy"}
 _POSITIONAL_PLACEHOLDER = re.compile(r"%(?!%|\()[-+ 0#]*\d*(?:\.\d+)?[a-zA-Z]")
 
 
-class _ManagementI18nVisitor(ast.NodeVisitor):
+class ManagementI18nVisitor(ast.NodeVisitor):
     """Walks one module's AST, recording every positional placeholder passed to a translation
     call and every bare string literal reaching a known output sink un-translated."""
 
@@ -627,8 +627,8 @@ class _ManagementI18nVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
 
-def _visit_source(source: str) -> _ManagementI18nVisitor:
-    visitor = _ManagementI18nVisitor()
+def _visit_source(source: str) -> ManagementI18nVisitor:
+    visitor = ManagementI18nVisitor()
     visitor.visit(ast.parse(source))
     return visitor
 
@@ -695,7 +695,7 @@ class TestManagementPackageI18nSweep:
 # --- checks.py, views.py, forms.py and admin.py carry no bare user-visible literal, and no
 # --- translated one carries a positional placeholder ---
 #
-# The management-package sweep above (`_ManagementI18nVisitor`) is built for CommandError,
+# The management-package sweep above (`ManagementI18nVisitor`) is built for CommandError,
 # stdout/stderr.write, add_argument(help=...) and a class-level help = "...". None of those
 # shapes appears in a field, a system check, a view or a form, so pointing it at these modules
 # unmodified would report a clean sweep regardless of what they actually contain — the exact
@@ -727,7 +727,7 @@ _FIELD_METADATA_KEYWORDS = {"help_text", "verbose_name", "verbose_name_plural"}
 _DIAGNOSTIC_MESSAGE_KEYWORDS = {"msg", "message", "hint"}
 
 
-class _FieldsChecksI18nVisitor(ast.NodeVisitor):
+class FieldsChecksI18nVisitor(ast.NodeVisitor):
     """Walks one module's AST, recording every bare string literal reaching a field's, a
     check's, a view's or a form's user-visible sinks, and every positional placeholder passed
     directly to a translation call."""
@@ -821,8 +821,8 @@ class _FieldsChecksI18nVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
 
-def _visit_fields_checks_source(source: str) -> _FieldsChecksI18nVisitor:
-    visitor = _FieldsChecksI18nVisitor()
+def _visit_fields_checks_source(source: str) -> FieldsChecksI18nVisitor:
+    visitor = FieldsChecksI18nVisitor()
     visitor.visit(ast.parse(source))
     return visitor
 
