@@ -133,3 +133,30 @@ non-test).
 Next: T007 — the declining behaviour asserted at form-field level.
 
 Watch: none.
+
+## 2026-08-14T08:45:00Z · Implementer US-2 · T007
+
+Did: added `TestConceptFieldDeclinesTheAdminWrapper` to `tests/test_forms.py`,
+four tests, both field classes. Each mirrors `options.py:215` exactly: wrap
+the field's own already-built widget in a `RelatedFieldWidgetWrapper`, assign
+it back onto `widget`, and assert the field holds the original widget
+instance (so its `model_field` binding is intact by construction, not
+re-checked separately) rather than the wrapper. A second pair per field class
+assigns an ordinary widget and asserts it is held as given. No production
+code — proves the seam T006 built, at the form-field level, complementing
+T005's page-level proof.
+
+Verified: `poetry run pytest -q tests/test_forms.py::TestConceptFieldDeclinesTheAdminWrapper`
+— 4 passed, on first run (expected: T006 already implements the mixin).
+Sanity-checked not vacuous: reconstructed the pre-T006 field shape (a plain
+`TomSelectModelChoiceField` subclass with no mixin) in an interactive shell
+against the same wrapper-assignment steps — `field.widget is original` came
+back `False` and the type stayed `RelatedFieldWidgetWrapper`, confirming the
+assertions genuinely exercise `_DeclinesAdminRelatedWrapper` rather than
+something already true without it. `poetry run pytest -q tests/test_forms.py`
+(whole file) — 26 passed. `ruff check`/`ruff format --check` clean (manual).
+
+Next: T007 was US-2's last task — the story's full-suite verify and report
+are next, not another task.
+
+Watch: none.

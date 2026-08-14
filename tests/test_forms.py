@@ -21,6 +21,8 @@ FR-009 promises nothing already guaranteed was taken away.
 
 import pytest
 from django import forms
+from django.contrib.admin.sites import AdminSite
+from django.contrib.admin.widgets import RelatedFieldWidgetWrapper
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import ImproperlyConfigured
 from django.test import RequestFactory, override_settings
@@ -355,3 +357,55 @@ class TestDisplayingAnAttachedConceptLeavesValidationNarrow:
 
         assert "get_queryset" not in widget.__dict__
         assert not widget.get_queryset().filter(pk=foreign.pk).exists()
+
+
+class TestConceptFieldDeclinesTheAdminWrapper:
+    """T007: FR-004, FR-005. ``tests/test_admin.py``'s
+    ``TestConceptFieldOffersNoRelatedObjectAffordance`` (T005) proves the
+    outcome at a rendered admin page; this proves the seam
+    ``_DeclinesAdminRelatedWrapper`` owns directly, at the form-field level.
+
+    Each test mirrors exactly what ``options.py:215`` does: wrap the field's
+    own already-built widget, then assign the wrapper back onto ``widget`` —
+    so "model_field binding intact" means the field holds the very same
+    widget instance it already carried, not a freshly constructed one."""
+
+    def test_a_concept_field_unwraps_a_related_field_widget_wrapper_to_its_own_widget(self):
+        model_field = Sample._meta.get_field("mineral")
+        field = ConceptChoiceField(model_field=model_field, required=False)
+        original_widget = field.widget
+        wrapper = RelatedFieldWidgetWrapper(field.widget, model_field.remote_field, AdminSite())
+
+        field.widget = wrapper
+
+        assert field.widget is original_widget
+        assert field.widget.model_field is model_field
+
+    def test_a_concept_field_holds_an_ordinary_widget_as_given(self):
+        model_field = Sample._meta.get_field("mineral")
+        field = ConceptChoiceField(model_field=model_field, required=False)
+        ordinary_widget = forms.TextInput()
+
+        field.widget = ordinary_widget
+
+        assert field.widget is ordinary_widget
+
+    def test_a_concepts_field_unwraps_a_related_field_widget_wrapper_to_its_own_widget(self):
+        model_field = Outcrop._meta.get_field("minerals")
+        field = ConceptsChoiceField(model_field=model_field, required=False)
+        original_widget = field.widget
+        wrapper = RelatedFieldWidgetWrapper(field.widget, model_field.remote_field, AdminSite())
+
+        field.widget = wrapper
+
+        assert field.widget is original_widget
+        assert field.widget.model_field is model_field
+
+    def test_a_concepts_field_holds_an_ordinary_widget_as_given(self):
+        model_field = Outcrop._meta.get_field("minerals")
+        field = ConceptsChoiceField(model_field=model_field, required=False)
+        ordinary_widget = forms.SelectMultiple()
+
+        field.widget = ordinary_widget
+
+        assert field.widget is ordinary_widget

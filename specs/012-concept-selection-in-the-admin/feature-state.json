@@ -170,8 +170,12 @@
         },
         {
           "id": "T007",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": [
+            "poetry run pytest -q tests/test_forms.py::TestConceptFieldDeclinesTheAdminWrapper — 4 passed",
+            "poetry run pytest -q tests/test_forms.py — 26 passed (whole file)"
+          ]
         }
       ]
     },
