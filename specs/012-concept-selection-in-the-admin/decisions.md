@@ -439,6 +439,45 @@ one place and follows the established convention exactly rather than inventing a
 `tests/test_standards.py` stops being one module's worth of "does the package meet its written
 standards" — at that point a dedicated `tests/test_docs.py` is the fix, unrelated to this decision.
 
+## D25 — T018's translation-status guard extends the existing sweep; the JS file gets no sweep at all
+
+**Decision**: `tasks.md` names `tests/test_admin.py` (plus source "as needed") for T018's
+translation-status half. This story instead adds `admin_module` (`controlled_vocabularies.admin`)
+to `tests/test_standards.py`'s `_FIELDS_CHECKS_MODULES` list, so
+`TestFieldsChecksI18nSweep::test_module_carries_no_bare_user_visible_literal` now runs against it
+alongside `fields.py`, `checks.py`, `forms.py` and `views.py`. No new visitor, no new test class,
+and no change to `controlled_vocabularies/admin.py` itself. `concept-inline.js` — the third file
+this feature added — gets no automated sweep of any kind, Python or otherwise.
+
+**Why**: enumeration first. `git diff main..HEAD -- controlled_vocabularies/` is the whole surface
+this feature added: `admin.py`, `forms.py`, and `concept-inline.js`. `forms.py`'s addition
+(`_DeclinesAdminRelatedWrapper`) is already covered — it's one of the four modules
+`_FIELDS_CHECKS_MODULES` already swept before this story. `admin.py` was the one gap: a module this
+feature added that no sweep reached. `_FieldsChecksI18nVisitor` already recognises the sinks a
+module like this could carry (`ValidationError`, `ImproperlyConfigured`, `checks.Warning`/`Error`,
+`help_text=`/`verbose_name=`), so extending the parametrize list is the whole fix — duplicating a
+second visitor in `test_admin.py` would check the same thing twice by two different mechanisms for
+no gain, and this file is already the established home for exactly this question (D24 makes the
+identical case for the README assertion). Proved as a real gate before trusting it: with a bare
+`error_messages = {"invalid": "boom"}` temporarily spliced into `admin.py` (never committed — `git
+diff --stat controlled_vocabularies/` shows nothing after reverting),
+`test_module_carries_no_bare_user_visible_literal[controlled_vocabularies.admin]` failed, reporting
+`['boom']`; reverted, and the whole `TestFieldsChecksI18nSweep` class passed again, five modules.
+
+`concept-inline.js` carries no equivalent sweep because Article XII's own text (`memory/
+constitution.md`) scopes the internationalization requirement to Python (models, forms, views,
+admin, validators) and templates (`{% trans %}`/`{% blocktranslate %}`); it says nothing about
+JavaScript, and no other feature in this repository's history has swept a JS file either. Read in
+full and enumerated by hand: every string literal in it is `'use strict'`, the `-__prefix__-` regex
+substitution, the `select[data-tomselect]` CSS selector, or the `formset:added` DOM event name — no
+`textContent`/`innerHTML` assignment, no `alert`, nothing a person reads. FR-011 is therefore
+satisfied by this file having nothing to wrap, stated here as the enumeration rather than asserted
+by a mechanism built to check for something that isn't there.
+
+**Revisit if**: a future feature ships a JavaScript file that does put text in front of a person —
+at that point it needs its own translation mechanism and its own test, not a retrofit of the Python
+AST sweep this decision extends.
+
 ## D23 — T014's `_run_django_admin` gains a `settings` parameter, and one file joins its list
 
 **Decision**: `tests/test_checks.py:_run_django_admin()` gains a `settings: str = "tests.settings"`

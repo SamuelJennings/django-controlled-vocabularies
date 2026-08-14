@@ -478,3 +478,40 @@ class did not disturb the sibling one it sits beside). `poetry run pytest -q tes
 Next: T018 (translation status + test-structure conformance).
 
 Watch: none.
+
+## 2026-08-14T08:35:00Z · Implementer US-6 · T018
+
+Did: enumerated this feature's whole production surface —
+`git diff main..HEAD -- controlled_vocabularies/` touches exactly `admin.py`, `forms.py` and
+`concept-inline.js`, matching the task brief's own count. `forms.py`'s addition was already covered
+by `tests/test_standards.py`'s existing `_FieldsChecksI18nVisitor` sweep (`_FIELDS_CHECKS_MODULES`
+already listed `forms_module`); `admin.py` was the one gap, so it joins that list —
+`TestFieldsChecksI18nSweep` now parametrizes over five modules instead of four. No production
+change: `admin.py` is one lazy lookup function and carries nothing to wrap. Proved the extension is
+a real gate rather than a vacuous one — spliced a bare `error_messages = {"invalid": "boom"}` into
+`admin.py`, ran the new parametrized case, watched it fail (`['boom']`), reverted (`git diff --stat
+controlled_vocabularies/` empty afterwards), reran green. `concept-inline.js` gets no sweep: Article
+XII (`memory/constitution.md`) scopes translatability to Python and templates and says nothing
+about JavaScript, and the file was read in full and enumerated by hand — every string literal in it
+is `'use strict'`, the `-__prefix__-` substitution, the `select[data-tomselect]` selector, or the
+`formset:added` event name, none of it text a person reads. `decisions.md` D25 records both halves
+of this reasoning and the file-list departure.
+
+Test-structure conformance (the second half of T018): `tests/test_admin.py` mirrors `admin.py`
+one-to-one and reuses `ConceptFactory`/`ConceptSchemeFactory`/`LocalityFactory`/`OutcropFactory`/
+`SpecimenFactory` from `tests/factories.py` and `Locality`/`Outcrop`/`Specimen` from
+`tests/testapp/models.py` throughout — no locally-defined factory or duplicated model, and every
+new `ModelAdmin`/`ModelForm`/`AdminSite` subclass it defines is test-only configuration for what's
+under test, not a consuming model (already permitted and precedented by D21/D22). `tests/
+test_checks.py`'s T014 additions reuse `Specimen` from `tests/testapp/models.py` and add no
+factory. Both already conform to Article X; no departure found, nothing changed.
+
+Verified: `poetry run pytest -q "tests/test_standards.py::TestFieldsChecksI18nSweep::
+test_module_carries_no_bare_user_visible_literal[controlled_vocabularies.admin]"` — 1 failed
+(`['boom']`) with the injected literal in place, then 1 passed after reverting.
+`poetry run pytest -q tests/test_standards.py` (whole file) — 88 passed. `ruff check`/`ruff format
+--check tests/test_standards.py` — clean.
+
+Next: full-suite verify and completion report — this story's last task.
+
+Watch: none.
