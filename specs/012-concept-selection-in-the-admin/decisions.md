@@ -331,3 +331,21 @@ matches the existing suite's own restraint: `test_forms.py`'s equivalent tests a
 **Revisit if**: a future story moves the restriction from the widget's queryset to model-level
 validation only (so the custom message becomes reachable from a form submission) — then these
 tests' assertions should tighten to match, per `craft-tdd`'s "assert outcomes" rule.
+
+## D20 — `# type: ignore[misc]` on both field classes, not a restructure
+
+**Decision**: `ConceptChoiceField` and `ConceptsChoiceField` each carry `# type: ignore[misc]`
+on their class line, immediately after adding `_DeclinesAdminRelatedWrapper` as their first
+base (T006).
+
+**Why**: mypy validates the full inherited MRO whenever a class lists more than one explicit
+base, and doing so here surfaces a pre-existing conflict between `django_tomselect`'s own
+`BaseTomSelectModelMixin` and Django's `ModelChoiceField` over `queryset`/`to_field_name` — a
+third-party inconsistency with nothing to do with this mixin, invisible before this task only
+because both field classes previously listed a single base (`TomSelectModelChoiceField`), which
+never triggers the check. Confirmed by reverting the mixin and re-running mypy: the errors
+disappear with it, on the unmodified base branch.
+
+**Revisit if**: `django_tomselect` fixes the underlying conflict upstream, or mypy's own
+handling of transitively-inherited base conflicts changes — either would make the ignore
+comments stale, and `mypy --warn-unused-ignores` would then flag them.

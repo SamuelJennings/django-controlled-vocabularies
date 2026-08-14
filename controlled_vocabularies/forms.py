@@ -30,6 +30,7 @@ from django_tomselect.app_settings import AllowedCSSFrameworks, TomSelectConfig
 from django_tomselect.forms import TomSelectModelChoiceField, TomSelectModelMultipleChoiceField
 from django_tomselect.widgets import TomSelectModelMultipleWidget, TomSelectModelWidget
 
+from .admin import related_field_widget_wrapper_class
 from .checks import AUTOCOMPLETE_URL_NAME
 from .models import Concept
 
@@ -205,7 +206,49 @@ class ConceptsWidget(
     """The control :class:`ConceptsChoiceField` renders (FR-001)."""
 
 
-class ConceptChoiceField(TomSelectModelChoiceField):
+class _DeclinesAdminRelatedWrapper:
+    """The T006 mixin (FR-004, plan.md "US-2"): ``widget`` becomes a property
+    whose setter unwraps a ``RelatedFieldWidgetWrapper`` — the admin's add,
+    change, delete and view affordances, applied unconditionally at
+    ``options.py:215`` — back to the widget it holds, and stores every other
+    value unchanged. No Django code is patched: the wrap still happens, this
+    field just declines to keep it, the same way any attribute assignment can
+    be declined by owning a property for it.
+
+    Must come **before** the django-tomselect field class in a subclass's
+    bases. Django's ``ChoiceField`` sets ``widget`` as a plain class
+    attribute (``forms/fields.py``), and a plain attribute earlier in the MRO
+    than this property would shadow it — attribute lookup stops at the first
+    class in the MRO that defines the name, and only a data descriptor found
+    first wins over one found later.
+
+    The getter tolerates being read before anything has been stored:
+    ``django/forms/fields.py:146`` evaluates ``widget = widget or self.widget``
+    during ``Field.__init__``, before any assignment on a freshly constructed
+    instance is guaranteed to have run.
+
+    Each field subclass carries ``# type: ignore[misc]``: adding this mixin as
+    a second explicit base makes mypy validate the full inherited MRO, which
+    surfaces an existing conflict between ``django_tomselect``'s own
+    ``BaseTomSelectModelMixin`` and Django's ``ModelChoiceField`` over
+    ``queryset``/``to_field_name`` — third-party, unrelated to this mixin, and
+    silent before this task only because a single-base subclass never
+    triggered the check.
+    """
+
+    @property
+    def widget(self):
+        return getattr(self, "_widget", None)
+
+    @widget.setter
+    def widget(self, value):
+        wrapper_class = related_field_widget_wrapper_class()
+        if wrapper_class is not None and isinstance(value, wrapper_class):
+            value = value.widget
+        self._widget = value
+
+
+class ConceptChoiceField(_DeclinesAdminRelatedWrapper, TomSelectModelChoiceField):  # type: ignore[misc]
     """The form field :class:`~controlled_vocabularies.fields.ConceptField`
     renders as, through ``ConceptFieldMixin.formfield()``.
 
@@ -224,7 +267,7 @@ class ConceptChoiceField(TomSelectModelChoiceField):
         self.widget.model_field = model_field
 
 
-class ConceptsChoiceField(TomSelectModelMultipleChoiceField):
+class ConceptsChoiceField(_DeclinesAdminRelatedWrapper, TomSelectModelMultipleChoiceField):  # type: ignore[misc]
     """The form field :class:`~controlled_vocabularies.fields.ConceptsField`
     renders as, through ``ConceptFieldMixin.formfield()``. See
     :class:`ConceptChoiceField` for ``model_field``.

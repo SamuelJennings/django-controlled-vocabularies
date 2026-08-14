@@ -160,8 +160,13 @@
         },
         {
           "id": "T006",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": [
+            "poetry run pytest -q tests/test_admin.py::TestConceptFieldOffersNoRelatedObjectAffordance — 5 passed",
+            "poetry run pytest -q tests/test_forms.py — 22 passed (unchanged)",
+            "poetry run mypy controlled_vocabularies/admin.py controlled_vocabularies/forms.py — 4 errors then fixed (D20), clean"
+          ]
         },
         {
           "id": "T007",

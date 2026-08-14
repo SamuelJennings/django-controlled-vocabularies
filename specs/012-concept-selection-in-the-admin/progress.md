@@ -101,3 +101,35 @@ Next: T006 — the form field declines the wrapper.
 Watch: none beyond the T002 pre-commit-exclusion note (ruff run manually on
 this file; `ruff check --fix` on first run removed the now-unused `types`
 import after the `_URLConf` rewrite).
+
+## 2026-08-14T08:35:00Z · Implementer US-2 · T006
+
+Did: added `controlled_vocabularies/admin.py` (new) — one function,
+`related_field_widget_wrapper_class()`, returning `RelatedFieldWidgetWrapper`
+or `None` when `django.contrib.admin` is not installed (`apps.is_installed()`,
+matching `checks.py`'s existing idiom), importing the admin only inside the
+function. Registers nothing. Added `_DeclinesAdminRelatedWrapper` to
+`forms.py`: `widget` becomes a property whose setter unwraps a
+`RelatedFieldWidgetWrapper` to the widget it holds via that lookup, and
+stores everything else unchanged; the getter tolerates being read before
+anything is stored (`getattr(self, "_widget", None)`). Applied to
+`ConceptChoiceField` and `ConceptsChoiceField` as the first base, before the
+django-tomselect field class, per the mechanic both the brief and the design
+review named.
+
+Verified: `poetry run pytest -q tests/test_admin.py::TestConceptFieldOffersNoRelatedObjectAffordance`
+— 5 passed (T005 green). `poetry run pytest -q tests/test_forms.py` — 22
+passed, unchanged (the non-admin path untouched). `poetry run pytest -q
+tests/test_admin.py` (whole file) — 16 passed. `poetry run mypy
+controlled_vocabularies/admin.py controlled_vocabularies/forms.py` — 4 errors
+on first run (`queryset`/`to_field_name` MRO conflict between
+`BaseTomSelectModelMixin` and `ModelChoiceField`, surfaced by the mixin
+becoming a second explicit base — third-party, unrelated to this change,
+confirmed by reverting and re-checking clean on the base branch); fixed with
+a targeted `# type: ignore[misc]` on each field class line, recorded as D20.
+`ruff check`/`ruff format --check` clean (manual, both files touched are
+non-test).
+
+Next: T007 — the declining behaviour asserted at form-field level.
+
+Watch: none.
