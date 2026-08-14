@@ -421,3 +421,29 @@ its docstring says it is: three bare registrations proving the default needs not
 **Revisit if**: a future story needs one of these declarations available to tests outside
 `tests/test_admin.py` — at that point it moves to `tests/testapp/admin.py`, unrelated to this
 decision.
+
+## D23 — T014's `_run_django_admin` gains a `settings` parameter, and one file joins its list
+
+**Decision**: `tests/test_checks.py:_run_django_admin()` gains a `settings: str = "tests.settings"`
+keyword parameter, threaded into `DJANGO_SETTINGS_MODULE`. Every pre-existing call site is
+unaffected — the default reproduces exactly what the hardcoded value did. `tasks.md` T014 named this
+change explicitly and asked for it to be recorded here (constitution Article I); the task brief's
+own `the_subprocess_helper` note repeats the same instruction.
+
+A second file joins T014's list beyond the two `tasks.md` names (`tests/settings_no_admin.py`,
+`tests/test_checks.py`): `tests/urls_no_admin.py`. `tests/settings.py`'s `ROOT_URLCONF` points at
+`tests.urls`, which mounts `admin.site.urls` unconditionally — reusing it for the no-admin settings
+module resolves that path lazily but still walks it while building `URLResolver.app_dict`, which
+constructs `AdminSite`'s default site and imports `django.contrib.admin` regardless of which route is
+being reversed. That would fail the FR-006 proof for a reason having nothing to do with the feature.
+`tests/urls_no_admin.py` mounts only `controlled_vocabularies.urls` — what a project without the
+admin actually has mounted — and `tests/settings_no_admin.py`'s `ROOT_URLCONF` names it instead.
+
+**Why defensible**: both changes are the minimum needed to make the acceptance-named files work at
+all; neither widens what T014 proves. The `settings` parameter is additive and backward-compatible
+(a `str` default, not a behavior change for any existing caller). The extra urlconf module is a test
+fixture, not production code, and follows the same convention `tests/urls.py`'s own docstring already
+states — the admin mounted only where a project would actually mount it.
+
+**Revisit if**: a later story needs the no-admin urlconf to carry more than the one route — at that
+point `tests/urls_no_admin.py` grows with it, unrelated to this decision.
