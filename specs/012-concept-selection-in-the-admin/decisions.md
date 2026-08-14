@@ -401,3 +401,23 @@ own to contrast against. Without it, T009's second test would have nothing to pr
 **Revisit if**: a future story needs `Locality` registered on the default site for some other
 reason — at that point a bare registration belongs in `tests/testapp/admin.py` alongside
 `Specimen`/`Outcrop`/`RockSample`, unrelated to this decision.
+
+## D22 — US-4's registrations also live outside `tasks.md`'s file list (T012, T013)
+
+**Decision**: `tasks.md` names `tests/testapp/admin.py` as a file T012 and T013 touch. Neither
+task does: every registration each declares — `autocomplete_fields`, `raw_id_fields`, a
+form-declared widget, `readonly_fields` — is exactly the kind of declaration
+`tests/testapp/admin.py`'s own module docstring reserves for a dedicated site in
+`tests/test_admin.py`. All eight new `ModelAdmin`/`ModelForm` classes and the four fixtures both
+tasks add (`autocomplete_site`, `raw_id_site`, `declared_widget_site`, `readonly_concept_site`)
+live there instead, alongside the equivalent US-1/US-2/US-3 sites already following the same
+convention.
+
+**Why**: this is the same departure D21 recorded for T008 — the task brief's own
+`test_project_ownership` context named it explicitly for this story too and asked for it to be
+recorded here rather than reasoned through silently. `tests/testapp/admin.py` stays exactly what
+its docstring says it is: three bare registrations proving the default needs nothing declared.
+
+**Revisit if**: a future story needs one of these declarations available to tests outside
+`tests/test_admin.py` — at that point it moves to `tests/testapp/admin.py`, unrelated to this
+decision.

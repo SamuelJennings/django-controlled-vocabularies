@@ -315,3 +315,34 @@ report, not another task.
 
 Watch: the apostrophe-label finding recorded at T009 remains open, for
 Forge to triage as a separate issue.
+
+## 2026-08-14T09:00:00Z · Implementer US-4 · T012
+
+Did: added `tests/test_admin.py::TestExplicitDeclarationWins` — three dedicated admin sites, each
+giving `Specimen.rock_type` one of the three declarations FR-005 names
+(`autocomplete_fields`, `raw_id_fields`, a `Meta.widgets`-declared widget), plus a shared
+`_ConceptSearchAdmin` for the two sites that also register `Concept`. No production code —
+`controlled_vocabularies/` untouched. `tests/testapp/admin.py` also untouched, per its own
+bare-registrations-only docstring convention; departure from `tasks.md`'s file list recorded as
+`decisions.md` D22, the same pattern D21 already established for T008.
+
+Verified non-vacuous, four ways, each by temporarily sabotaging the fixture or test data and
+watching the specific assertion fail for the right reason, then restoring: (1) each of the three
+"renders what it declared, not data-tomselect" tests — temporarily emptied the corresponding
+declaration (`autocomplete_fields = []`, `raw_id_fields = []`, `widgets = {}`) and reran; all
+three failed on `data-tomselect` being present. (2) the "no related-object link" assertion on
+`autocomplete_site`/`declared_widget_site` — a scratch probe registering `Specimen.locality` (a
+plain `ForeignKey`, no `_DeclinesAdminRelatedWrapper`) under `autocomplete_fields` on an
+otherwise-identical site showed the same markers `_assert_no_related_object_affordance` checks
+for; a plain FK does carry them, so the committed test's D9-declining ConceptField genuinely has
+something to prove. (3) the save/refuse pair — swapped each test's scheme so the "legitimate"
+concept came from the wrong vocabulary and the "ineligible" one from the right one; both flipped
+to red (302↔200) as expected. (4) `test_no_declaration_reports_a_check_error` — emptied
+`_ConceptSearchAdmin.search_fields`; `admin.E040` appeared. `poetry run pytest -q
+tests/test_admin.py::TestExplicitDeclarationWins` — 10 passed on restore. `poetry run pytest -q
+tests/test_admin.py` (whole file) — 31 passed. `ruff check`/`ruff format --check
+tests/test_admin.py` — clean.
+
+Next: T013 — read-only presentation renders no control.
+
+Watch: none.

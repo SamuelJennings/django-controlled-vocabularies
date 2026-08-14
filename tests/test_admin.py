@@ -30,11 +30,19 @@ from deletion — both field kinds.
 child, registered on dedicated sites here rather than in
 ``tests/testapp/admin.py`` per that module's own bare-registrations-only
 convention (T008's ``progress.md`` entry).
+
+``TestExplicitDeclarationWins`` (T012) and
+``TestReadOnlyPresentationRendersNoControl`` (T013) cover US-4: a project's
+own ``autocomplete_fields``, ``raw_id_fields`` or form-declared widget wins
+over the control, and a read-only field renders Django's own presentation —
+also registered on dedicated sites here rather than in
+``tests/testapp/admin.py``, per the same convention (``decisions.md`` D22).
 """
 
 import re
 
 import pytest
+from django import forms
 from django.contrib import admin
 from django.db.models import ProtectedError
 from django.test import override_settings
@@ -550,3 +558,160 @@ class TestNewInlineRowSavesItsConcept:
         specimen = Specimen.objects.get(name="Newly added specimen")
         assert specimen.locality_id == locality.pk
         assert specimen.rock_type_id == concept.pk
+
+
+class _AutocompleteSpecimenAdmin(admin.ModelAdmin):
+    """``rock_type`` named in ``autocomplete_fields`` — Django's own control
+    (`django/contrib/admin/widgets.py::AutocompleteSelect`), not this
+    package's, per FR-005."""
+
+    autocomplete_fields = ["rock_type"]
+
+
+class _ConceptSearchAdmin(admin.ModelAdmin):
+    """``Concept`` registered with ``search_fields`` — the one configuration
+    ``autocomplete_fields`` needs to pass ``admin.E039``/``admin.E040`` on the
+    site under test, and the configuration under which the related-object
+    link would render if FR-004 did not still apply to it."""
+
+    search_fields = ["label"]
+
+
+class _RawIdSpecimenAdmin(admin.ModelAdmin):
+    """``rock_type`` named in ``raw_id_fields`` — the one declaration Django
+    itself never wraps (research.md R1), so it needs no ``Concept``
+    registration to check clean."""
+
+    raw_id_fields = ["rock_type"]
+
+
+class _DeclaredWidgetSpecimenForm(forms.ModelForm):
+    """Declares its own widget for ``rock_type`` via ``Meta.widgets`` —
+    reaches ``ModelAdmin.formfield_for_dbfield`` as a ``widget=`` constructor
+    argument the same way ``autocomplete_fields`` does (plan.md "US-4"), so
+    it is wrapped and unwrapped like any other field rather than bypassing
+    ``db_field.formfield()`` the way a form-declared field object would."""
+
+    class Meta:
+        model = Specimen
+        fields = "__all__"
+        widgets = {"rock_type": forms.Select()}
+
+
+class _DeclaredWidgetSpecimenAdmin(admin.ModelAdmin):
+    form = _DeclaredWidgetSpecimenForm
+
+
+@pytest.fixture
+def autocomplete_site():
+    """``Specimen`` with ``rock_type`` in ``autocomplete_fields``, alongside
+    a searchable ``Concept`` registration (T012)."""
+    site = admin.AdminSite(name="us4_autocomplete")
+    site.register(Specimen, _AutocompleteSpecimenAdmin)
+    site.register(Concept, _ConceptSearchAdmin)
+    return site
+
+
+@pytest.fixture
+def raw_id_site():
+    """``Specimen`` with ``rock_type`` in ``raw_id_fields`` (T012)."""
+    site = admin.AdminSite(name="us4_raw_id")
+    site.register(Specimen, _RawIdSpecimenAdmin)
+    return site
+
+
+@pytest.fixture
+def declared_widget_site():
+    """``Specimen`` registered with a form declaring its own widget for
+    ``rock_type`` via ``Meta.widgets``, alongside a registered ``Concept``
+    (T012)."""
+    site = admin.AdminSite(name="us4_declared_widget")
+    site.register(Specimen, _DeclaredWidgetSpecimenAdmin)
+    site.register(Concept, _ConceptSearchAdmin)
+    return site
+
+
+@pytest.mark.django_db
+class TestExplicitDeclarationWins:
+    """T012: FR-005, US-4 scenarios 1-5, SC-004.
+
+    Each of three admin sites gives ``Specimen.rock_type`` its own explicit
+    declaration; each renders what it declared and not this package's
+    control, a valid concept still saves and an ineligible one is still
+    refused through every one, and none of the three sites reports a system
+    check error for its declaration. ``autocomplete_site`` and
+    ``declared_widget_site`` also carry a registered ``Concept`` (plan.md
+    "US-4": both are wrapped like any other field, so FR-004 still applies to
+    whatever renders) and assert no related-object link appears —
+    ``raw_id_site`` is the one declaration Django itself never wraps
+    (research.md R1), so it renders no control this feature owns and needs
+    no such assertion.
+    """
+
+    def test_autocomplete_fields_renders_djangos_own_autocomplete_not_the_concept_control(
+        self, admin_client, autocomplete_site
+    ):
+        with override_settings(ROOT_URLCONF=_URLConf(autocomplete_site)):
+            response = admin_client.get(reverse("admin:testapp_specimen_add"))
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        assert "data-tomselect" not in content
+        assert 'class="admin-autocomplete' in content
+        _assert_no_related_object_affordance(content)
+
+    def test_raw_id_fields_renders_the_raw_identifier_control(self, admin_client, raw_id_site):
+        with override_settings(ROOT_URLCONF=_URLConf(raw_id_site)):
+            response = admin_client.get(reverse("admin:testapp_specimen_add"))
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        assert "data-tomselect" not in content
+        assert 'class="admin-autocomplete' not in content
+        assert 'name="rock_type"' in content
+        assert 'type="text"' in content
+
+    def test_a_forms_declared_widget_renders_in_place_of_the_concept_control(self, admin_client, declared_widget_site):
+        with override_settings(ROOT_URLCONF=_URLConf(declared_widget_site)):
+            response = admin_client.get(reverse("admin:testapp_specimen_add"))
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        assert "data-tomselect" not in content
+        assert 'class="admin-autocomplete' not in content
+        _assert_no_related_object_affordance(content)
+
+    @pytest.mark.parametrize("site_fixture_name", ["autocomplete_site", "raw_id_site", "declared_widget_site"])
+    def test_a_legitimate_concept_still_saves(self, admin_client, request, site_fixture_name):
+        site = request.getfixturevalue(site_fixture_name)
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        concept = ConceptFactory(scheme=scheme)
+
+        with override_settings(ROOT_URLCONF=_URLConf(site)):
+            response = admin_client.post(
+                reverse("admin:testapp_specimen_add"),
+                {"name": f"{site_fixture_name} sample", "rock_type": concept.pk, "_save": "Save"},
+            )
+
+        assert response.status_code == 302
+        specimen = Specimen.objects.get(name=f"{site_fixture_name} sample")
+        assert specimen.rock_type_id == concept.pk
+
+    @pytest.mark.parametrize("site_fixture_name", ["autocomplete_site", "raw_id_site", "declared_widget_site"])
+    def test_an_ineligible_concept_is_still_refused(self, admin_client, request, site_fixture_name):
+        site = request.getfixturevalue(site_fixture_name)
+        other_scheme = ConceptSchemeFactory(name="Mineral")
+        foreign_concept = ConceptFactory(scheme=other_scheme)
+
+        with override_settings(ROOT_URLCONF=_URLConf(site)):
+            response = admin_client.post(
+                reverse("admin:testapp_specimen_add"),
+                {"name": f"{site_fixture_name} wrong vocabulary", "rock_type": foreign_concept.pk, "_save": "Save"},
+            )
+
+        assert response.status_code == 200
+        assert not Specimen.objects.filter(name=f"{site_fixture_name} wrong vocabulary").exists()
+
+    def test_no_declaration_reports_a_check_error(self, autocomplete_site, raw_id_site, declared_widget_site):
+        for site in (autocomplete_site, raw_id_site, declared_widget_site):
+            assert site.check(None) == []

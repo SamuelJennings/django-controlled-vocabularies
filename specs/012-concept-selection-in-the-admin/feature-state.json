@@ -229,8 +229,11 @@
       "tasks": [
         {
           "id": "T012",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": [
+            "poetry run pytest -q tests/test_admin.py::TestExplicitDeclarationWins — 10 passed; tests/test_admin.py (whole file) — 31 passed"
+          ]
         },
         {
           "id": "T013",
