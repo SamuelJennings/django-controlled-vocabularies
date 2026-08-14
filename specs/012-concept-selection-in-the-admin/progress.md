@@ -288,3 +288,30 @@ and no console error on repeated adds).
 Next: T011 — a parent saved with a new inline row keeps its concept.
 
 Watch: none.
+
+## 2026-08-14T10:10:00Z · Implementer US-3 · T011
+
+Did: added `tests/test_admin.py::TestNewInlineRowSavesItsConcept` — POSTs
+the change form of an existing `Locality` (`locality_stacked_site`,
+`extra = 0`, no saved children — the exact shape research.md R4 measured
+the library's own fallback failing on) with `specimens-TOTAL_FORMS` raised
+to `1` and one new, unsaved row (`specimens-0-id=""`) carrying a concept.
+No production code — the server-side "Add another" save path is Django's
+inline formset machinery, unrelated to `concept-inline.js`, which only
+initialises the widget in the browser (decisions.md D12).
+
+Verified: `poetry run pytest -q
+tests/test_admin.py::TestNewInlineRowSavesItsConcept` — 1 passed, on first
+run. Non-vacuous, checked directly: the same POST with `specimens-0-name`
+left blank (a required field) returned `200` with the form re-rendered
+(validation failure), not `302` — confirming the test's `302` + `Specimen
+.objects.get(...)` assertions discriminate a genuine save from a rejected
+one, not a POST that always redirects. `poetry run pytest -q
+tests/test_admin.py` (whole file) — 21 passed. `ruff check`/`ruff format
+--check tests/test_admin.py` — clean.
+
+Next: US-3's last task — the story's full-suite verify and completion
+report, not another task.
+
+Watch: the apostrophe-label finding recorded at T009 remains open, for
+Forge to triage as a separate issue.

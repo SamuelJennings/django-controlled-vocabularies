@@ -515,3 +515,38 @@ class TestEmptyFormRowIsInitialisable:
         assert f'id="{numbered_row_id}"' in content
         assert f'id="{template_row_id}"' in content
         assert re.sub(r"-\d+-", "-__prefix__-", numbered_row_id, count=1) == template_row_id
+
+
+@pytest.mark.django_db
+class TestNewInlineRowSavesItsConcept:
+    """T011: FR-003, US-3 scenario 3, SC-003. The server half of the "Add
+    another" journey — a POST carrying a new, unsaved formset row does not
+    depend on the browser at all."""
+
+    def test_a_new_inline_row_added_to_the_post_creates_the_child_holding_its_concept(
+        self, admin_client, locality_stacked_site
+    ):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        concept = ConceptFactory(scheme=scheme)
+        locality = LocalityFactory()
+
+        data = {
+            "name": locality.name,
+            "primary_mineral": "",
+            "specimens-TOTAL_FORMS": "1",
+            "specimens-INITIAL_FORMS": "0",
+            "specimens-MIN_NUM_FORMS": "0",
+            "specimens-MAX_NUM_FORMS": "1000",
+            "specimens-0-id": "",
+            "specimens-0-name": "Newly added specimen",
+            "specimens-0-rock_type": str(concept.pk),
+            "_save": "Save",
+        }
+
+        with override_settings(ROOT_URLCONF=_URLConf(locality_stacked_site)):
+            response = admin_client.post(reverse("admin:testapp_locality_change", args=[locality.pk]), data)
+
+        assert response.status_code == 302
+        specimen = Specimen.objects.get(name="Newly added specimen")
+        assert specimen.locality_id == locality.pk
+        assert specimen.rock_type_id == concept.pk
