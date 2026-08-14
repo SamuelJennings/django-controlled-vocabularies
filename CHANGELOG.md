@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+## [v0.0.2] - 2026-08-14
+
 ### Added
 
 - Choosing a concept by typing: `ConceptField` and `ConceptsField` now render, by default and in
