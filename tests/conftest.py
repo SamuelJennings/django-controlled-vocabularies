@@ -54,7 +54,7 @@ def single_language_scheme(db):
     return scheme
 
 
-class _StubResponse:
+class StubResponse:
     """One configured answer for a path on :class:`HTTPStub` (T006, research.md R8)."""
 
     def __init__(self, status: int, body: bytes, content_type: str | None, headers: dict[str, str]) -> None:
@@ -64,7 +64,7 @@ class _StubResponse:
         self.headers = headers
 
 
-class _StubRequestHandler(http.server.BaseHTTPRequestHandler):
+class StubRequestHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         response = self.server.responses.get(self.path)  # type: ignore[attr-defined]
         if response is None:
@@ -107,7 +107,7 @@ class HTTPStub:
         content_type: str | None = None,
         headers: dict[str, str] | None = None,
     ) -> None:
-        self._server.responses[path] = _StubResponse(status, body, content_type, headers or {})  # type: ignore[attr-defined]
+        self._server.responses[path] = StubResponse(status, body, content_type, headers or {})  # type: ignore[attr-defined]
 
 
 @pytest.fixture
@@ -115,7 +115,7 @@ def http_stub():
     """A :class:`ThreadingHTTPServer` bound to port 0, serving in a background thread
     (T006, research.md R8). Torn down on teardown — no real network call anywhere in
     this story."""
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _StubRequestHandler)
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), StubRequestHandler)
     server.responses = {}  # type: ignore[attr-defined]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

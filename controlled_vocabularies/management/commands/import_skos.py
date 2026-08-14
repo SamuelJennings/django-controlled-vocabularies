@@ -24,7 +24,7 @@ from controlled_vocabularies.management.rendering import ReportRenderer
 from controlled_vocabularies.management.sources import SourceResolver
 
 
-class _DryRun(Exception):
+class DryRun(Exception):
     """Private sentinel that unwinds a dry run's outer transaction after a successful run,
     carrying the report out with it (`research.md` R5, `decisions.md` D4). Caught immediately
     outside the block it is raised in; never seen outside this module."""
@@ -107,8 +107,8 @@ class Command(BaseCommand):
                         )
                         # This *is* the sentinel-unwind pattern (plan.md "Dry run"): the raise
                         # has to sit here, inside the block it unwinds, not in a helper function.
-                        raise _DryRun(report)  # noqa: TRY301
-                except _DryRun as done:
+                        raise DryRun(report)  # noqa: TRY301
+                except DryRun as done:
                     report = done.report
             else:
                 report = import_skos(resolved.path, serialization=resolved.serialization, base_uri=resolved.base_uri)
