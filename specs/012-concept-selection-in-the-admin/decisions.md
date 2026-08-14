@@ -5,7 +5,6 @@ maintainer. Each entry records what was unclear, what was chosen, and why the ch
 Decisions taken *with* the maintainer live in `spec.md` under `## Clarifications`.
 
 ## D1 — The related-object affordances are refused, not merely absent
-
 **Ambiguous**: Django's admin wraps a foreign-key or many-to-many field in a wrapper that offers to
 add, change, delete and view the related record. It renders those buttons only when the related
 model is registered in the admin and the person holds the matching permission, so today the
@@ -21,8 +20,9 @@ concept" button, with no code changed anywhere and nobody looking. A requirement
 because a precondition happens to be false is not a requirement, and the failure would arrive
 inside an unrelated feature. This is the FR-004 / User Story 2 pair.
 
-## D2 — The scope of "selection-only" covers all four affordances
+**ADR:** docs/adr/0011-a-concept-is-chosen-in-the-admin-never-created-there.md — the standing rule and its mechanism.
 
+## D2 — The scope of "selection-only" covers all four affordances
 **Ambiguous**: the maintainer's decision named creating a concept. The wrapper offers four things.
 
 **Chosen**: none of the four render.
@@ -36,8 +36,9 @@ form for the concept, which is R5's to design and does not exist, and reading a 
 definition is what the browsing interface in R6 is for. Shipping three of four and leaving one
 pointing at a page that does not exist yet would be worse than a clean rule.
 
-## D3 — An explicit `ModelAdmin` declaration wins silently
+**ADR:** none — the scope of the rule graduated in docs/adr/0011-a-concept-is-chosen-in-the-admin-never-created-there.md, recorded there rather than as a second ADR.
 
+## D3 — An explicit `ModelAdmin` declaration wins silently
 **Ambiguous**: a project naming the field in `autocomplete_fields` gets the admin's own autocomplete
 instead of this package's control. That could be treated as a mistake worth reporting — the project
 is passing up the feature — or as an instruction.
@@ -51,8 +52,9 @@ would be noise in `manage.py check` — the same channel the package uses for th
 entries that genuinely are missing when it reports them. Diluting that channel costs more than the
 warning could return.
 
-## D4 — Inline rows added in the browser are in scope
+**ADR:** docs/adr/0012-an-explicit-declaration-wins-and-nothing-is-reported.md
 
+## D4 — Inline rows added in the browser are in scope
 **Ambiguous**: the issue says "admin add and change pages". An inline row created by clicking "Add
 another" is neither, strictly — it is a copy of a hidden template row, made in the browser after
 the page was delivered.
@@ -66,8 +68,9 @@ place the person is working, and this is the single most common way a search-as-
 integrated into the admin goes wrong. Naming it in the specification makes it a tested behaviour
 rather than a discovered defect.
 
-## D5 — The admin remains an optional dependency
+**ADR:** none — a scope call for this feature's user stories; nothing downstream inherits it.
 
+## D5 — The admin remains an optional dependency
 **Ambiguous**: whether the package may now assume `django.contrib.admin` is installed.
 
 **Chosen**: it may not. Nothing added by this feature may be imported at startup in a way that
@@ -81,8 +84,9 @@ argument in the other direction: a feature wired only to `django.contrib.admin.s
 to work in the test project and silently do nothing in a project that runs its own site, which is
 common in exactly the research-infrastructure projects this package targets.
 
-## D6 — Read-only presentation renders no control
+**ADR:** docs/adr/0013-the-django-admin-stays-an-optional-dependency.md
 
+## D6 — Read-only presentation renders no control
 **Ambiguous**: what a field in the admin's read-only list, or a page a person may view but not
 change, should show.
 
@@ -92,8 +96,9 @@ change, should show.
 a person to type into something that cannot accept a change. The label is also the correct value to
 show, because the field's readback is already part of the delivered contract.
 
-## D7 — The changelist is excluded
+**ADR:** none — a boundary of docs/adr/0011-a-concept-is-chosen-in-the-admin-never-created-there.md, stated in that ADR's Decision.
 
+## D7 — The changelist is excluded
 **Ambiguous**: whether searching or filtering a consuming model's admin list page by concept
 belongs here.
 
@@ -104,8 +109,9 @@ tens of thousands of concepts is the same problem this feature exists to solve, 
 it would need its own decisions about what a filter offers before anything is typed. Leaving it
 unstated would have invited it into the implementation as an obvious extra.
 
-## D8 — No admin-specific endpoint, and no second copy of the search rules
+**ADR:** none — a scope boundary of this feature; the changelist is a later question, not a standing constraint.
 
+## D8 — No admin-specific endpoint, and no second copy of the search rules
 **Ambiguous**: the admin could plausibly have justified its own search view, closer to the admin's
 own autocomplete conventions.
 
@@ -117,8 +123,9 @@ one place. A second endpoint would be a second copy of the security-relevant rul
 restriction is derived from the field declaration rather than taken from the request, which is the
 rule Article V cares about most here. One endpoint, one place to get that right.
 
-## D9 — The form field declines the admin's wrapper, rather than a project applying a mixin
+**ADR:** none — reuses the endpoint and the restriction-derivation rule already recorded in docs/adr/0010-a-restriction-is-derived-on-every-path-not-carried-on-one.md; this feature added no new stance.
 
+## D9 — The form field declines the admin's wrapper, rather than a project applying a mixin
 **Ambiguous**: FR-004 says a consuming model registered with a `ModelAdmin` that declares nothing
 gets no related-object affordances. Django wraps every foreign key and many-to-many field in
 `RelatedFieldWidgetWrapper` at `django/contrib/admin/options.py:193`, unconditionally, and offers no
@@ -143,8 +150,9 @@ The cost is honest and recorded in `plan.md` Risks: the setter depends on Django
 attribute. The tests assert the absence of the four links in rendered output rather than the
 mechanism, so a future Django that built the wrapper differently fails a test rather than drifting.
 
-## D10 — The conditional admin import lives in `controlled_vocabularies/admin.py`
+**ADR:** docs/adr/0011-a-concept-is-chosen-in-the-admin-never-created-there.md — the mechanism half of that decision.
 
+## D10 — The conditional admin import lives in `controlled_vocabularies/admin.py`
 **Ambiguous**: FR-006 forbids importing `django.contrib.admin` at startup, but the setter in D9 has
 to know what a `RelatedFieldWidgetWrapper` is.
 
@@ -162,8 +170,9 @@ whether or not the admin is installed. **FR-006 is satisfied by the function imp
 `django.contrib.admin` is absent from `sys.modules` rather than that this module is. The module is
 still the right home; the reason was wrong.
 
-## D11 — ~~The many-to-many field ignores the admin's appended help text~~ *(superseded by D15)*
+**ADR:** none — module placement in service of 0011-a-concept-is-chosen-in-the-admin-never-created-there and docs/adr/0013-the-django-admin-stays-an-optional-dependency.md; the constraint lives in the ADR, not the file it happens to sit in.
 
+## D11 — ~~The many-to-many field ignores the admin's appended help text~~ *(superseded by D15)*
 **Ambiguous**: `formfield_for_manytomany` appends *Hold down "Control", or "Command" on a Mac, to
 select more than one.* to the help text of any `SelectMultiple`. Measured on `Outcrop.minerals`
 (`research.md` R3). The instruction is false under this control.
@@ -181,8 +190,9 @@ be fragile because the string is translated. Rejected: setting `allow_multiple_s
 the widget, which would suppress the message but also stop `Select.get_context` emitting the
 `multiple` attribute, so a real multi-select would stop being one.
 
-## D12 — The inline script's browser behaviour is a documented manual check, not a test
+**ADR:** none — struck within the feature and never implemented; there is no decision left to abide by.
 
+## D12 — The inline script's browser behaviour is a documented manual check, not a test
 **Ambiguous**: US-3 requires a row added by "Add another" to carry a working control. That is
 browser behaviour, and this package has no browser test harness.
 
@@ -222,8 +232,9 @@ A failure at step 1 or 4 with no console error most likely means `concept-inline
 check the rendered page's `<head>` for a `<script>` tag referencing it (declared on both widgets'
 `Media`, T010) before assuming the listener itself is wrong.
 
-## D13 — The test project gains the admin, and the no-admin case is proven out of process
+**ADR:** none — a test-coverage boundary local to this feature, recorded in plan.md Risks.
 
+## D13 — The test project gains the admin, and the no-admin case is proven out of process
 **Ambiguous**: FR-001 through FR-008 need `django.contrib.admin` installed in the test project, and
 FR-006 needs a project without it to be unaffected. One settings module cannot be both.
 
@@ -236,9 +247,9 @@ this shape of assertion, so the idiom is the repo's own rather than invented for
 alternative — running the whole suite twice under two settings modules — doubles CI time to prove
 one negative.
 
+**ADR:** none — test-harness structure serving docs/adr/0013-the-django-admin-stays-an-optional-dependency.md.
 
 ## D14 — FR-004 is scoped to the editable control, not to read-only presentation
-
 **Raised by**: the design review, finding DR-001, verified against Django 5.2.16 before it was
 acted on.
 
@@ -268,8 +279,9 @@ hyperlink.
 **Status**: this narrows a requirement the maintainer approved, so it is raised explicitly in the
 plan notification rather than absorbed quietly, and it is called out again at the merge gate.
 
-## D15 — The admin's false multi-select instruction is left alone
+**ADR:** none — a boundary of docs/adr/0011-a-concept-is-chosen-in-the-admin-never-created-there.md, stated in that ADR's Decision.
 
+## D15 — The admin's false multi-select instruction is left alone
 **Raised by**: the design review, finding DR-002.
 
 **The problem**: `formfield_for_manytomany` appends *Hold down "Control", or "Command" on a Mac, to
@@ -291,8 +303,9 @@ stories had to edit `forms.py`, which is why the design review's own asymmetric 
 work-removing findings as cheap. Carried to the retro as a candidate follow-up issue, where it can
 be judged on its own rather than smuggled into a feature about affordances.
 
-## D16 — Stories are dispatched sequentially onto the feature branch
+**ADR:** none — a dropped task carried as a retro follow-up, not a standing rule.
 
+## D16 — Stories are dispatched sequentially onto the feature branch
 **Raised by**: the design review, finding DR-003.
 
 **The problem**: the task list had six stories and four shared files. `tests/test_admin.py` is
@@ -308,8 +321,9 @@ accident.
 worktrees each creating their own version of a test module that does not exist at the base is a
 four-way conflict at convergence, which costs more than the wall-clock it would have saved.
 
-## D17 — One pre-existing test modified: the middleware check no longer empties `MIDDLEWARE`
+**ADR:** none — a run-process choice; nothing in the codebase inherits it.
 
+## D17 — One pre-existing test modified: the middleware check no longer empties `MIDDLEWARE`
 **Article I requires this to be recorded before the change stands.**
 
 `tests/test_checks.py::TestTheMiddlewareCheckReachesManageCheck::test_the_missing_middleware_is_reported_by_manage_check`
@@ -329,15 +343,17 @@ unregistered or stops firing.
 **Not changed**: the sibling tests that call `check_tomselect_middleware_installed()` directly under
 `MIDDLEWARE=[]`. They never reach the admin's checks, so they still exercise the empty case.
 
-## D18 — T001 was implemented by the orchestrator rather than dispatched
+**ADR:** none — narrowing one test fixture, local to this feature.
 
+## D18 — T001 was implemented by the orchestrator rather than dispatched
 Foundational, not a story: settings entries, a URL mount and three bare `ModelAdmin` registrations,
 with no design content and nothing for an Implementer to decide. The pipeline allows direct
 implementation for work of this shape provided the reason is recorded, and this is the record. Every
 story from US-1 onward is dispatched.
 
-## D19 — T004's refusal tests assert on the errored field, not on message text
+**ADR:** none — a run-process choice; nothing in the codebase inherits it.
 
+## D19 — T004's refusal tests assert on the errored field, not on message text
 **Decision**: `tests/test_admin.py::TestAdminSubmissionSavesAndFieldRulesStillBite`'s two
 foreign-vocabulary tests assert `'id="id_rock_type_error"' in content` / `'id="id_minerals_error"'
 in content`, not any particular error string.
@@ -357,8 +373,9 @@ matches the existing suite's own restraint: `test_forms.py`'s equivalent tests a
 validation only (so the custom message becomes reachable from a form submission) — then these
 tests' assertions should tighten to match, per `craft-tdd`'s "assert outcomes" rule.
 
-## D20 — `# type: ignore[misc]` on both field classes, not a restructure
+**ADR:** none — a test-authoring detail sealed inside two test functions.
 
+## D20 — `# type: ignore[misc]` on both field classes, not a restructure
 **Decision**: `ConceptChoiceField` and `ConceptsChoiceField` each carry `# type: ignore[misc]`
 on their class line, immediately after adding `_DeclinesAdminRelatedWrapper` as their first
 base (T006).
@@ -375,8 +392,9 @@ disappear with it, on the unmodified base branch.
 handling of transitively-inherited base conflicts changes — either would make the ignore
 comments stale, and `mypy --warn-unused-ignores` would then flag them.
 
-## D21 — US-3's inline registrations and factory live outside `tasks.md`'s file list (T008)
+**ADR:** none — a local annotation working around a third-party type conflict.
 
+## D21 — US-3's inline registrations and factory live outside `tasks.md`'s file list (T008)
 **Decision**: `Locality` (the parent model, with its own `ConceptField`) and the `locality`
 foreign key on `Specimen` are declared in `tests/testapp/models.py` as `tasks.md` T008 names, but
 the `TabularInline`/`StackedInline` registrations are on dedicated sites in `tests/test_admin.py`,
@@ -402,8 +420,9 @@ own to contrast against. Without it, T009's second test would have nothing to pr
 reason — at that point a bare registration belongs in `tests/testapp/admin.py` alongside
 `Specimen`/`Outcrop`/`RockSample`, unrelated to this decision.
 
-## D22 — US-4's registrations also live outside `tasks.md`'s file list (T012, T013)
+**ADR:** none — test-file placement, local to this feature.
 
+## D22 — US-4's registrations also live outside `tasks.md`'s file list (T012, T013)
 **Decision**: `tasks.md` names `tests/testapp/admin.py` as a file T012 and T013 touch. Neither
 task does: every registration each declares — `autocomplete_fields`, `raw_id_fields`, a
 form-declared widget, `readonly_fields` — is exactly the kind of declaration
@@ -422,8 +441,9 @@ its docstring says it is: three bare registrations proving the default needs not
 `tests/test_admin.py` — at that point it moves to `tests/testapp/admin.py`, unrelated to this
 decision.
 
-## D24 — T017's README assertion lives in `tests/test_standards.py`, not `tests/test_admin.py`
+**ADR:** none — test-file placement, local to this feature.
 
+## D24 — T017's README assertion lives in `tests/test_standards.py`, not `tests/test_admin.py`
 **Decision**: `tasks.md` names `README.md`, `CONTEXT.md` and `CHANGELOG.md` as T017's files. This
 story adds one more: a `TestReadmeDocumentsTheAdminSection` class in `tests/test_standards.py`,
 checking the shipped README states the four things spec.md's US-6 scenario 1 names.
@@ -439,8 +459,9 @@ one place and follows the established convention exactly rather than inventing a
 `tests/test_standards.py` stops being one module's worth of "does the package meet its written
 standards" — at that point a dedicated `tests/test_docs.py` is the fix, unrelated to this decision.
 
-## D25 — T018's translation-status guard extends the existing sweep; the JS file gets no sweep at all
+**ADR:** none — test-file placement, local to this feature.
 
+## D25 — T018's translation-status guard extends the existing sweep; the JS file gets no sweep at all
 **Decision**: `tasks.md` names `tests/test_admin.py` (plus source "as needed") for T018's
 translation-status half. This story instead adds `admin_module` (`controlled_vocabularies.admin`)
 to `tests/test_standards.py`'s `_FIELDS_CHECKS_MODULES` list, so
@@ -478,8 +499,9 @@ by a mechanism built to check for something that isn't there.
 at that point it needs its own translation mechanism and its own test, not a retrofit of the Python
 AST sweep this decision extends.
 
-## D23 — T014's `_run_django_admin` gains a `settings` parameter, and one file joins its list
+**ADR:** none — test-harness placement; the translatability rule itself is constitution Article XII, not a decision of this feature.
 
+## D23 — T014's `_run_django_admin` gains a `settings` parameter, and one file joins its list
 **Decision**: `tests/test_checks.py:_run_django_admin()` gains a `settings: str = "tests.settings"`
 keyword parameter, threaded into `DJANGO_SETTINGS_MODULE`. Every pre-existing call site is
 unaffected — the default reproduces exactly what the hardcoded value did. `tasks.md` T014 named this
@@ -504,8 +526,9 @@ states — the admin mounted only where a project would actually mount it.
 **Revisit if**: a later story needs the no-admin urlconf to carry more than the one route — at that
 point `tests/urls_no_admin.py` grows with it, unrelated to this decision.
 
-## D26 — the CHANGELOG's override sentence excludes `readonly_fields` from the no-affordance claim
+**ADR:** none — a test-helper signature, backward-compatible and local.
 
+## D26 — the CHANGELOG's override sentence excludes `readonly_fields` from the no-affordance claim
 **Decision**: T017's CHANGELOG entry originally read "`autocomplete_fields`, `raw_id_fields`, a
 form's own declared widget, and `readonly_fields` still work as they would for any other related
 field, each keeping the same no-affordance and validation guarantees." Corrected at the humanizer
@@ -521,3 +544,5 @@ generalised past them.
 
 **Revisit if**: R5 registers `Concept` behind a curator-only permission and the read-only link
 becomes reachable in a way that warrants documenting on its own.
+
+**ADR:** none — a documentation correction restoring what docs/adr/0011-a-concept-is-chosen-in-the-admin-never-created-there.md and docs/adr/0012-an-explicit-declaration-wins-and-nothing-is-reported.md already state.
