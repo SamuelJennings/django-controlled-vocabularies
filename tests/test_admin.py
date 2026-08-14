@@ -849,3 +849,89 @@ class TestReadOnlyPresentationRendersNoControl:
         assert ", ".join(concept.label for concept in concepts) in content
         for concept_change_url in concept_change_urls:
             assert concept_change_url not in content
+
+
+@pytest.fixture
+def custom_admin_site():
+    """A dedicated, non-default ``AdminSite`` instance registering ``Specimen``
+    alongside a registered ``Concept`` — the same configuration
+    ``concept_registered_admin_site`` (T005) uses for the default-adjacent
+    sites this module already builds, so the four related-object affordances
+    would appear here too if FR-007's guarantee were somehow bound to the
+    default site rather than to the form field itself (research.md R2,
+    decisions.md D9)."""
+    site = admin.AdminSite(name="us5_custom")
+    site.register(Specimen)
+    site.register(Concept)
+    return site
+
+
+@pytest.mark.django_db
+class TestCustomAdminSiteGetsTheSameBehaviour:
+    """T015: FR-007, US-5 scenarios 3 and 4.
+
+    ``custom_admin_site`` is a fresh ``AdminSite`` instance, never the
+    default one ``tests/testapp/admin.py`` registers ``Specimen`` on — the
+    declining behaviour (``forms.py``'s ``_DeclinesAdminRelatedWrapper``)
+    lives on the form field, not on any particular site, so nothing here
+    should differ from ``TestConceptControlRendersOnAdminPages`` (T002),
+    ``TestConceptFieldOffersNoRelatedObjectAffordance`` (T005) or
+    ``TestAdminSubmissionSavesAndFieldRulesStillBite`` (T004) beyond which
+    site answers the request.
+    """
+
+    def test_add_page_renders_the_control_with_no_related_object_affordance(self, admin_client, custom_admin_site):
+        with override_settings(ROOT_URLCONF=_URLConf(custom_admin_site)):
+            response = admin_client.get(reverse("admin:testapp_specimen_add"))
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        _assert_control_rendered(content, Specimen, "rock_type")
+        _assert_no_related_object_affordance(content)
+
+    def test_a_legitimate_concept_saves_through_the_custom_sites_add_page(self, admin_client, custom_admin_site):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        concept = ConceptFactory(scheme=scheme)
+
+        with override_settings(ROOT_URLCONF=_URLConf(custom_admin_site)):
+            response = admin_client.post(
+                reverse("admin:testapp_specimen_add"),
+                {"name": "Custom site sample", "rock_type": concept.pk, "_save": "Save"},
+            )
+
+        assert response.status_code == 302
+        specimen = Specimen.objects.get(name="Custom site sample")
+        assert specimen.rock_type_id == concept.pk
+
+    def test_an_ineligible_concept_is_refused_through_the_custom_sites_add_page(self, admin_client, custom_admin_site):
+        other_scheme = ConceptSchemeFactory(name="Mineral")
+        foreign_concept = ConceptFactory(scheme=other_scheme)
+
+        with override_settings(ROOT_URLCONF=_URLConf(custom_admin_site)):
+            response = admin_client.post(
+                reverse("admin:testapp_specimen_add"),
+                {"name": "Custom site wrong vocabulary", "rock_type": foreign_concept.pk, "_save": "Save"},
+            )
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        assert not Specimen.objects.filter(name="Custom site wrong vocabulary").exists()
+        assert 'id="id_rock_type_error"' in content
+
+    def test_a_model_registered_on_both_the_default_site_and_a_custom_one_gets_the_control_on_both(
+        self, admin_client, custom_admin_site
+    ):
+        """``Specimen`` is registered on the default site by
+        ``tests/testapp/admin.py`` already; ``custom_admin_site`` registers
+        it a second time, on a different ``AdminSite`` instance — the one
+        configuration Django itself forbids on the *same* site (US-5
+        scenario 4)."""
+        default_response = admin_client.get(reverse("admin:testapp_specimen_add"))
+
+        with override_settings(ROOT_URLCONF=_URLConf(custom_admin_site)):
+            custom_response = admin_client.get(reverse("admin:testapp_specimen_add"))
+
+        assert default_response.status_code == 200
+        assert custom_response.status_code == 200
+        _assert_control_rendered(default_response.content.decode(), Specimen, "rock_type")
+        _assert_control_rendered(custom_response.content.decode(), Specimen, "rock_type")

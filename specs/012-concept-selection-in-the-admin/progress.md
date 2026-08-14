@@ -421,3 +421,32 @@ the parameterised helper). `ruff check`/`ruff format --check` clean on
 Next: T015 (custom `AdminSite`).
 
 Watch: none.
+
+## 2026-08-14T09:55:00Z · Implementer US-5 · T015
+
+Did: added `custom_admin_site` fixture and `TestCustomAdminSiteGetsTheSameBehaviour` (four
+tests) to `tests/test_admin.py` — a dedicated, non-default `AdminSite` registering `Specimen`
+and `Concept`. Asserts the control renders with no related-object affordance, a legitimate
+concept saves through its add page, a foreign one is refused, and a model registered on both
+the default site and this custom one carries the control on both. No production code — the
+declining mechanism (`decisions.md` D9) is field-level, not site-level, so this pins
+behaviour that already holds, the same shape as T002. Covers FR-007, US-5 scenarios 3-4.
+
+All four passed on first run, as the story's own context predicts. Sanity-checked non-
+vacuousness with a scratch probe (added to `tests/test_admin.py`, run once, then fully
+removed — never committed, confirmed by `git diff` showing a clean end state): the same
+custom site, with `Locality` additionally registered under a bare `ModelAdmin`, was
+requested for `Specimen`'s add page. `rock_type` carried `data-tomselect` and its own field
+reference; `related-widget-wrapper-link` — the ordinary `locality` foreign key's wrapper
+marker — was present on the same page; and the wrong field reference
+(`testapp.specimen.name`) was absent. That confirms `_assert_control_rendered` and
+`_assert_no_related_object_affordance` are discriminating within this exact custom-site
+request, not vacuously true because the markers never appear on any page from this app.
+
+`poetry run pytest -q tests/test_admin.py::TestCustomAdminSiteGetsTheSameBehaviour` — 4
+passed. `poetry run pytest -q tests/test_admin.py` (whole file) — 39 passed (35 + 4).
+`ruff check`/`ruff format --check tests/test_admin.py` — clean.
+
+Next: US-5's full-suite verify and completion report — this story's last task.
+
+Watch: none.
