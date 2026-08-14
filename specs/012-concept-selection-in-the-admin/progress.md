@@ -32,3 +32,15 @@ Watch: `tests/` is globally excluded from this repo's pre-commit hooks
 format` on new test files must be run manually — pre-commit reported "no files to check" and
 did not catch two lint findings (unused imports staged ahead of T004, one long test name) on
 this task's first commit; fixed in two follow-up commits before moving on.
+
+## 2026-08-14T06:01:44Z · Implementer US-1 · T003
+
+Did: added `TestAdminPageRenderingIsBoundedByVocabularySize` to `tests/test_admin.py`,
+mirroring `tests/test_forms.py::TestConceptFieldRenderingIsBoundedByVocabularySize` shape for
+shape. No production code — pins FR-009, SC-006, US-1 scenario 4.
+
+Verified: `poetry run pytest -q tests/test_admin.py::TestAdminPageRenderingIsBoundedByVocabularySize`
+— 1 passed, on first run. `ruff check`/`ruff format --check` clean (run manually, per the T002
+watch item).
+
+Next: T004 (submission saves, foreign-vocabulary refusal, delete protection).
