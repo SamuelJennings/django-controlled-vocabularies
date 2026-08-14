@@ -374,3 +374,30 @@ disappear with it, on the unmodified base branch.
 **Revisit if**: `django_tomselect` fixes the underlying conflict upstream, or mypy's own
 handling of transitively-inherited base conflicts changes — either would make the ignore
 comments stale, and `mypy --warn-unused-ignores` would then flag them.
+
+## D21 — US-3's inline registrations and factory live outside `tasks.md`'s file list (T008)
+
+**Decision**: `Locality` (the parent model, with its own `ConceptField`) and the `locality`
+foreign key on `Specimen` are declared in `tests/testapp/models.py` as `tasks.md` T008 names, but
+the `TabularInline`/`StackedInline` registrations are on dedicated sites in `tests/test_admin.py`,
+not in `tests/testapp/admin.py`. `LocalityFactory` was added to `tests/factories.py`, a file
+`tasks.md` T008 and the task brief's `test_project_ownership` note both omit.
+
+**Why**: `tests/testapp/admin.py`'s own module docstring states the project's convention — bare
+registrations only; anything that declares something (an inline is a declaration) belongs on its
+own site in `tests/test_admin.py`, the pattern every prior story (`concept_registered_admin_site`,
+`bare_admin_site`) already follows. The task brief's own context named this explicitly and asked
+for the departure to be recorded here. `LocalityFactory` follows `craft-tdd`'s one-factory-per-model
+structure rule (constitution Article X) — every other model `tests/testapp/models.py` carries has
+one in `tests/factories.py`, and `Locality` is exercised by `pytest.mark.django_db` tests that need
+a saved instance the same way.
+
+Also decided here: `Locality` carries its own `ConceptField` (`primary_mineral`, vocabulary
+`"mineral"`, distinct from `Specimen.rock_type`'s `"rock-type"`) — not required by T008's acceptance
+text alone, but by `spec.md` US-3 scenario 4 ("an inline row whose field declares a different
+vocabulary **from the parent form's field**"), which presupposes the parent form has a field of its
+own to contrast against. Without it, T009's second test would have nothing to prove.
+
+**Revisit if**: a future story needs `Locality` registered on the default site for some other
+reason — at that point a bare registration belongs in `tests/testapp/admin.py` alongside
+`Specimen`/`Outcrop`/`RockSample`, unrelated to this decision.
