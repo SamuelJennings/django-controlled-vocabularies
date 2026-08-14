@@ -28,6 +28,7 @@ from django.db.models import Model, UniqueConstraint
 from django.utils.functional import Promise
 from django.utils.text import Truncator
 
+from controlled_vocabularies import admin as admin_module
 from controlled_vocabularies import checks as checks_module
 from controlled_vocabularies import fields as fields_module
 from controlled_vocabularies import forms as forms_module
@@ -690,9 +691,9 @@ class TestManagementPackageI18nSweep:
         )
 
 
-# --- FS-009 US-6 (T012), extended FS-011 US-7 (T011): fields.py, checks.py, views.py and
-# --- forms.py carry no bare user-visible literal, and no translated one carries a positional
-# --- placeholder ---
+# --- FS-009 US-6 (T012), extended FS-011 US-7 (T011), extended 012 US-6 (T018): fields.py,
+# --- checks.py, views.py, forms.py and admin.py carry no bare user-visible literal, and no
+# --- translated one carries a positional placeholder ---
 #
 # The management-package sweep above (`_ManagementI18nVisitor`) is built for CommandError,
 # stdout/stderr.write, add_argument(help=...) and a class-level help = "...". None of those
@@ -715,8 +716,13 @@ class TestManagementPackageI18nSweep:
 # `on_delete`/`vocabulary`/`limit_choices_to`/`through` are rejected via bare `TypeError`s in
 # `fields.py`, deliberately outside every one of these sinks — they are developer-facing,
 # import-time diagnostics, not something an end user ever reads (decisions.md D8).
+#
+# `admin.py` (012) joined the set below rather than gaining a parallel sweep of its own
+# (`decisions.md` D25): it is the one production module 012 added that this list did not yet
+# cover, and it carries the same kind of sinks this visitor already recognises — none of them
+# populated, since the module is one lazy lookup function that returns a class or `None`.
 
-_FIELDS_CHECKS_MODULES = [fields_module, checks_module, forms_module, views_module]
+_FIELDS_CHECKS_MODULES = [fields_module, checks_module, forms_module, views_module, admin_module]
 _FIELD_METADATA_KEYWORDS = {"help_text", "verbose_name", "verbose_name_plural"}
 _DIAGNOSTIC_MESSAGE_KEYWORDS = {"msg", "message", "hint"}
 
@@ -909,12 +915,13 @@ class TestFieldsChecksI18nVisitorCatchesAViolation:
 
 
 class TestFieldsChecksI18nSweep:
-    """T012, extended T011 — the sweep itself, run against the real files: ``fields.py``,
-    ``checks.py`` (including the T011 middleware check, ``controlled_vocabularies.W004``),
-    ``views.py`` and ``forms.py``. Every user-visible string these four modules put in front of
-    a person is translatable with only named placeholders; the developer-facing
-    ``on_delete``/``vocabulary`` ``TypeError``s are outside every sink this visitor recognises,
-    so they are exempt by construction (decisions.md D8)."""
+    """T012, extended T011, extended 012 T018 — the sweep itself, run against the real files:
+    ``fields.py``, ``checks.py`` (including the T011 middleware check,
+    ``controlled_vocabularies.W004``), ``views.py``, ``forms.py`` and ``admin.py``. Every
+    user-visible string these five modules put in front of a person is translatable with only
+    named placeholders; the developer-facing ``on_delete``/``vocabulary`` ``TypeError``s are
+    outside every sink this visitor recognises, so they are exempt by construction
+    (decisions.md D8)."""
 
     @pytest.mark.parametrize("module", _FIELDS_CHECKS_MODULES, ids=lambda m: m.__name__)
     def test_module_carries_no_bare_user_visible_literal(self, module):
@@ -931,7 +938,7 @@ class TestFieldsChecksI18nSweep:
 
 class TestFormsMissingRouteMessageIsTranslatable:
     """T011 — ``forms.py``'s ``_MISSING_ROUTE_MESSAGE`` (decisions.md D14) is built once, at
-    import time, and referenced by name where it is raised (``_ConceptWidgetRouteMixin``), so
+    import time, and referenced by name where it is raised (``ConceptWidgetRouteMixin``), so
     the AST sweep above — which only inspects an exception call's own arguments — cannot see
     whether the referenced name is itself translatable. Checked directly here instead, the same
     way the model-level validation messages earlier in this file are."""
@@ -986,3 +993,32 @@ class TestReadmeDocumentsTheConceptSearchControlsWiring:
 
     def test_documents_the_javascript_requirement(self):
         assert "JavaScript" in _README_TEXT
+
+
+# --- 012 US-6 (T017): the README documents the concept fields' admin representation ---
+#
+# spec.md US-6 Acceptance Scenario 1: registering a consuming model in the admin is
+# sufficient, the wiring is the same three entries already documented above and nothing
+# more, concepts are chosen on these pages and never created or edited there, and the
+# ways a project can ask for a different control are documented. Same technique as
+# TestReadmeDocumentsTheConceptSearchControlsWiring above, for the admin section.
+
+
+class TestReadmeDocumentsTheAdminSection:
+    """T017 — spec.md US-6 scenario 1, FR-012."""
+
+    def test_documents_that_registering_is_the_whole_requirement(self):
+        assert "nothing further to configure" in _README_TEXT
+
+    def test_documents_concepts_are_chosen_not_created_or_edited(self):
+        assert "never created or edited" in _README_TEXT
+
+    def test_documents_no_related_object_affordance(self):
+        assert "add, change, delete or view" in _README_TEXT
+
+    def test_documents_read_only_presentation(self):
+        assert "read-only" in _README_TEXT and "preferred label" in _README_TEXT
+
+    def test_documents_the_override_mechanisms(self):
+        for override in ("autocomplete_fields", "raw_id_fields", "readonly_fields", "Meta.widgets"):
+            assert override in _README_TEXT, f"README does not document {override}"

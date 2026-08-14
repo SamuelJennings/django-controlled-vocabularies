@@ -30,6 +30,7 @@ from django_tomselect.app_settings import AllowedCSSFrameworks, TomSelectConfig
 from django_tomselect.forms import TomSelectModelChoiceField, TomSelectModelMultipleChoiceField
 from django_tomselect.widgets import TomSelectModelMultipleWidget, TomSelectModelWidget
 
+from .admin import related_field_widget_wrapper_class
 from .checks import AUTOCOMPLETE_URL_NAME
 from .models import Concept
 
@@ -64,7 +65,7 @@ def _config() -> TomSelectConfig:
     )
 
 
-class _ConceptWidgetValidationMixin:
+class ConceptWidgetValidationMixin:
     """The ``get_queryset()`` override decisions.md D12 exists for.
 
     ``model_field`` is set by the owning form field's ``__init__`` (below), from
@@ -84,13 +85,13 @@ class _ConceptWidgetValidationMixin:
         return Concept.objects.complex_filter(self.model_field.get_limit_choices_to())
 
 
-class _ConceptWidgetReferenceMixin:
+class ConceptWidgetReferenceMixin:
     """The ``get_autocomplete_params()`` override T006 exists for (plan.md
     A6 path one, decisions.md D11).
 
     Appends ``field=<app_label>.<model>.<field_name>`` — a reference to this
     widget's own declaration, read from the same ``model_field`` attribute
-    :class:`_ConceptWidgetValidationMixin` reads — to every autocomplete
+    :class:`ConceptWidgetValidationMixin` reads — to every autocomplete
     request the control's browser plugin makes. It identifies which
     declaration is searching and carries no restriction of its own: the
     restriction is read from that declaration on the server (T006), never
@@ -109,7 +110,7 @@ class _ConceptWidgetReferenceMixin:
         return urlencode({"field": f"{meta.app_label}.{meta.model_name}.{self.model_field.name}"})
 
 
-class _ConceptWidgetRouteMixin:
+class ConceptWidgetRouteMixin:
     """The render-time counterpart to the two ``checks.py`` warnings
     (decisions.md D14): a project that ignores them still reaches a render.
 
@@ -134,11 +135,11 @@ class _ConceptWidgetRouteMixin:
             raise ImproperlyConfigured(_MISSING_ROUTE_MESSAGE) from exc
 
 
-class _ConceptWidgetDisplayMixin:
+class ConceptWidgetDisplayMixin:
     """The two overrides T009 (FR-008, plan.md A8) requires for an
     already-attached concept — the third path, kept apart from both restricted
-    ones (:class:`_ConceptWidgetValidationMixin` narrows what a *submission*
-    may newly contain; :class:`_ConceptWidgetReferenceMixin` carries only a
+    ones (:class:`ConceptWidgetValidationMixin` narrows what a *submission*
+    may newly contain; :class:`ConceptWidgetReferenceMixin` carries only a
     reference for *searching*). What a record already holds is displayed
     unrestricted; this mixin is where that happens, and it touches neither of
     the other two.
@@ -146,7 +147,7 @@ class _ConceptWidgetDisplayMixin:
     ``_get_selected_options()`` (``widgets.py:959``) is where the library
     resolves an already-attached value into what the control renders as
     selected, and it does so through ``self.get_queryset()`` —
-    :class:`_ConceptWidgetValidationMixin`'s narrowed queryset (D12) — so
+    :class:`ConceptWidgetValidationMixin`'s narrowed queryset (D12) — so
     without this override an attached concept whose vocabulary the field no
     longer names would be silently dropped from the render, and the absence
     saved back on the next submission (R1). The swap is scoped to this one
@@ -186,26 +187,88 @@ class _ConceptWidgetDisplayMixin:
 
 
 class ConceptWidget(
-    _ConceptWidgetRouteMixin,
-    _ConceptWidgetReferenceMixin,
-    _ConceptWidgetValidationMixin,
-    _ConceptWidgetDisplayMixin,
+    ConceptWidgetRouteMixin,
+    ConceptWidgetReferenceMixin,
+    ConceptWidgetValidationMixin,
+    ConceptWidgetDisplayMixin,
     TomSelectModelWidget,
 ):
-    """The control :class:`ConceptChoiceField` renders (FR-001)."""
+    """The control :class:`ConceptChoiceField` renders (FR-001).
+
+    ``Media.js`` merges with the base widget's own (``media_property``
+    walks the MRO), adding ``concept-inline.js`` (T010, decisions.md D12) —
+    the listener that initialises this control in an inline row a person
+    adds with "Add another", which the library's own paths do not reach
+    (research.md R4).
+    """
+
+    class Media:
+        js = ["controlled_vocabularies/js/concept-inline.js"]
 
 
 class ConceptsWidget(
-    _ConceptWidgetRouteMixin,
-    _ConceptWidgetReferenceMixin,
-    _ConceptWidgetValidationMixin,
-    _ConceptWidgetDisplayMixin,
+    ConceptWidgetRouteMixin,
+    ConceptWidgetReferenceMixin,
+    ConceptWidgetValidationMixin,
+    ConceptWidgetDisplayMixin,
     TomSelectModelMultipleWidget,
 ):
-    """The control :class:`ConceptsChoiceField` renders (FR-001)."""
+    """The control :class:`ConceptsChoiceField` renders (FR-001). See
+    :class:`ConceptWidget` for ``Media``."""
+
+    class Media:
+        js = ["controlled_vocabularies/js/concept-inline.js"]
 
 
-class ConceptChoiceField(TomSelectModelChoiceField):
+class DeclinesAdminRelatedWrapperMixin:
+    """The T006 mixin (FR-004, plan.md "US-2"): ``widget`` becomes a property
+    whose setter unwraps a ``RelatedFieldWidgetWrapper`` — the admin's add,
+    change, delete and view affordances, applied unconditionally at
+    ``options.py:215`` — back to the widget it holds, and stores every other
+    value unchanged. No Django code is patched: the wrap still happens, this
+    field just declines to keep it, the same way any attribute assignment can
+    be declined by owning a property for it.
+
+    Must come **before** the django-tomselect field class in a subclass's
+    bases. Django's ``ChoiceField`` sets ``widget`` as a plain class
+    attribute (``forms/fields.py``), and a plain attribute earlier in the MRO
+    than this property would shadow it — attribute lookup stops at the first
+    class in the MRO that defines the name, and only a data descriptor found
+    first wins over one found later.
+
+    The getter returns ``None`` before anything has been stored, and both
+    shipped field classes rely on never reaching it. ``django/forms/fields.py``
+    evaluates ``widget = widget or self.widget`` during ``Field.__init__`` and
+    then sets ``widget.is_required`` on the result, so a ``None`` there is an
+    ``AttributeError``, not a tolerated fallback. What keeps it unreachable is
+    ``django_tomselect``'s ``_create_widget``, which assigns the widget before
+    ``Field.__init__`` runs — a third-party invariant, named here so that a
+    library change surfaces as a known coupling rather than a bare
+    ``AttributeError``. A subclass of this mixin that relies on Django's
+    class-level widget default instead would hit exactly that.
+
+    Each field subclass carries ``# type: ignore[misc]``: adding this mixin as
+    a second explicit base makes mypy validate the full inherited MRO, which
+    surfaces an existing conflict between ``django_tomselect``'s own
+    ``BaseTomSelectModelMixin`` and Django's ``ModelChoiceField`` over
+    ``queryset``/``to_field_name`` — third-party, unrelated to this mixin, and
+    silent before this task only because a single-base subclass never
+    triggered the check.
+    """
+
+    @property
+    def widget(self):
+        return getattr(self, "_widget", None)
+
+    @widget.setter
+    def widget(self, value):
+        wrapper_class = related_field_widget_wrapper_class()
+        if wrapper_class is not None and isinstance(value, wrapper_class):
+            value = value.widget
+        self._widget = value
+
+
+class ConceptChoiceField(DeclinesAdminRelatedWrapperMixin, TomSelectModelChoiceField):  # type: ignore[misc]
     """The form field :class:`~controlled_vocabularies.fields.ConceptField`
     renders as, through ``ConceptFieldMixin.formfield()``.
 
@@ -224,7 +287,7 @@ class ConceptChoiceField(TomSelectModelChoiceField):
         self.widget.model_field = model_field
 
 
-class ConceptsChoiceField(TomSelectModelMultipleChoiceField):
+class ConceptsChoiceField(DeclinesAdminRelatedWrapperMixin, TomSelectModelMultipleChoiceField):  # type: ignore[misc]
     """The form field :class:`~controlled_vocabularies.fields.ConceptsField`
     renders as, through ``ConceptFieldMixin.formfield()``. See
     :class:`ConceptChoiceField` for ``model_field``.

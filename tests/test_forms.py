@@ -21,6 +21,8 @@ FR-009 promises nothing already guaranteed was taken away.
 
 import pytest
 from django import forms
+from django.contrib.admin.sites import AdminSite
+from django.contrib.admin.widgets import RelatedFieldWidgetWrapper
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import ImproperlyConfigured
 from django.test import RequestFactory, override_settings
@@ -189,7 +191,7 @@ class TestConceptFieldRenderingWithoutTheRouteIncluded:
 class TestConceptFieldShowsWhatARecordAlreadyHolds:
     """T009, FR-008, plan.md A8, decisions.md D12: an existing record's attached
     concept renders unrestricted, because A6 path two narrows
-    ``_ConceptWidgetValidationMixin.get_queryset()`` to the field's current
+    ``ConceptWidgetValidationMixin.get_queryset()`` to the field's current
     declaration and the library resolves already-selected values through that
     same method (``widgets.py:965``). What a record already holds is displayed
     unrestricted; what a submission newly contains is still validated against
@@ -328,7 +330,7 @@ class TestTheControlIsActuallyInstantiated:
 
 @pytest.mark.django_db
 class TestDisplayingAnAttachedConceptLeavesValidationNarrow:
-    """US-6 repair — ``_ConceptWidgetDisplayMixin`` widens ``get_queryset()`` for
+    """US-6 repair — ``ConceptWidgetDisplayMixin`` widens ``get_queryset()`` for
     the duration of one library call and must leave it exactly as it found it.
     Without the restore, the same widget instance validates every later
     submission against every concept, which is the leak D12 exists to prevent,
@@ -355,3 +357,79 @@ class TestDisplayingAnAttachedConceptLeavesValidationNarrow:
 
         assert "get_queryset" not in widget.__dict__
         assert not widget.get_queryset().filter(pk=foreign.pk).exists()
+
+
+class TestConceptFieldDeclinesTheAdminWrapper:
+    """T007: FR-004, FR-005. ``tests/test_admin.py``'s
+    ``TestConceptFieldOffersNoRelatedObjectAffordance`` (T005) proves the
+    outcome at a rendered admin page; this proves the seam
+    ``DeclinesAdminRelatedWrapperMixin`` owns directly, at the form-field level.
+
+    Each test mirrors exactly what ``options.py:215`` does: wrap the field's
+    own already-built widget, then assign the wrapper back onto ``widget`` —
+    so "model_field binding intact" means the field holds the very same
+    widget instance it already carried, not a freshly constructed one."""
+
+    def test_a_concept_field_unwraps_a_related_field_widget_wrapper_to_its_own_widget(self):
+        model_field = Sample._meta.get_field("mineral")
+        field = ConceptChoiceField(model_field=model_field, required=False)
+        original_widget = field.widget
+        wrapper = RelatedFieldWidgetWrapper(field.widget, model_field.remote_field, AdminSite())
+
+        field.widget = wrapper
+
+        assert field.widget is original_widget
+        assert field.widget.model_field is model_field
+
+    def test_a_concept_field_holds_an_ordinary_widget_as_given(self):
+        model_field = Sample._meta.get_field("mineral")
+        field = ConceptChoiceField(model_field=model_field, required=False)
+        ordinary_widget = forms.TextInput()
+
+        field.widget = ordinary_widget
+
+        assert field.widget is ordinary_widget
+
+    def test_a_concepts_field_unwraps_a_related_field_widget_wrapper_to_its_own_widget(self):
+        model_field = Outcrop._meta.get_field("minerals")
+        field = ConceptsChoiceField(model_field=model_field, required=False)
+        original_widget = field.widget
+        wrapper = RelatedFieldWidgetWrapper(field.widget, model_field.remote_field, AdminSite())
+
+        field.widget = wrapper
+
+        assert field.widget is original_widget
+        assert field.widget.model_field is model_field
+
+    def test_a_concepts_field_holds_an_ordinary_widget_as_given(self):
+        model_field = Outcrop._meta.get_field("minerals")
+        field = ConceptsChoiceField(model_field=model_field, required=False)
+        ordinary_widget = forms.SelectMultiple()
+
+        field.widget = ordinary_widget
+
+        assert field.widget is ordinary_widget
+
+
+class TestConceptWidgetsShipTheInlineInitialisationScript:
+    """T010: FR-003, US-3 scenarios 2 and 5 — the asset ships in the package
+    and is declared in both widgets' ``Media`` (decisions.md D12). The
+    listener itself, ``concept-inline.js``, is browser behaviour and is a
+    documented manual check (D12), not asserted here."""
+
+    _ASSET = "controlled_vocabularies/js/concept-inline.js"
+
+    def test_the_asset_is_discoverable_as_a_static_file(self):
+        from django.contrib.staticfiles.finders import find
+
+        assert find(self._ASSET) is not None
+
+    def test_the_concept_widget_declares_the_asset_in_its_media(self):
+        widget = ConceptChoiceField(model_field=Sample._meta.get_field("mineral"), required=False).widget
+
+        assert self._ASSET in widget.media._js
+
+    def test_the_concepts_widget_declares_the_asset_in_its_media(self):
+        widget = ConceptsChoiceField(model_field=Outcrop._meta.get_field("minerals"), required=False).widget
+
+        assert self._ASSET in widget.media._js

@@ -20,6 +20,7 @@ from controlled_vocabularies.checks import (
     CHECK_ID_MISSING_INSTALLED_APP,
     CHECK_ID_MISSING_MIDDLEWARE,
     CHECK_ID_MISSING_ROUTE,
+    TOMSELECT_MIDDLEWARE,
     check_concept_autocomplete_route_included,
     check_concept_field_vocabularies,
     check_django_tomselect_installed,
@@ -31,11 +32,16 @@ from tests.testapp.models import Specimen
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def _run_django_admin(*args: str) -> subprocess.CompletedProcess:
+def _run_django_admin(*args: str, settings: str = "tests.settings") -> subprocess.CompletedProcess:
     """Run ``django-admin`` in a fresh subprocess against a brand-new, never-migrated
     ``:memory:`` sqlite database (``tests/settings.py``'s ``DATABASES``) — the state
-    the very first ``migrate`` on a real install runs the checks against (T009)."""
-    env = {**os.environ, "DJANGO_SETTINGS_MODULE": "tests.settings"}
+    the very first ``migrate`` on a real install runs the checks against (T009).
+
+    ``settings`` defaults to today's module and is overridden by T014 to run against
+    ``tests.settings_no_admin`` — proving the no-admin case needs a fresh interpreter
+    with a different ``INSTALLED_APPS``, which only a subprocess can give (012
+    decisions.md D13, D-T014)."""
+    env = {**os.environ, "DJANGO_SETTINGS_MODULE": settings}
     poetry = shutil.which("poetry")
     assert poetry is not None, "poetry must be on PATH to run this test"
     return subprocess.run(  # noqa: S603 — fixed argv, no untrusted input
@@ -372,8 +378,14 @@ class TestTheMiddlewareCheckReachesManageCheck:
     a check nobody registered reports nothing, whatever it returns."""
 
     def test_the_missing_middleware_is_reported_by_manage_check(self):
+        # Drop only the middleware under test rather than emptying the list: since
+        # 012 T001 the test project installs django.contrib.admin, whose own checks
+        # refuse an empty MIDDLEWARE and would abort the command before this
+        # assertion (012 decisions.md D17). Isolating the one entry is also the
+        # narrower test — it cannot pass for a reason other than the one it names.
+        remaining = [m for m in settings.MIDDLEWARE if m != TOMSELECT_MIDDLEWARE]
         stderr = io.StringIO()
-        with override_settings(MIDDLEWARE=[]):
+        with override_settings(MIDDLEWARE=remaining):
             call_command("check", stderr=stderr)
 
         assert CHECK_ID_MISSING_MIDDLEWARE in stderr.getvalue()
@@ -383,3 +395,86 @@ class TestTheMiddlewareCheckReachesManageCheck:
         call_command("check", stderr=stderr)
 
         assert CHECK_ID_MISSING_MIDDLEWARE not in stderr.getvalue()
+
+
+_RENDER_FORM_AND_CHECK_ADMIN_UNIMPORTED = """
+import sys
+
+from django import forms
+
+from tests.testapp.models import Specimen
+
+
+class SpecimenForm(forms.ModelForm):
+    class Meta:
+        model = Specimen
+        fields = ["name", "rock_type"]
+
+
+str(SpecimenForm())
+
+assert "django.contrib.admin" not in sys.modules, sorted(sys.modules)
+print("ADMIN_NOT_IMPORTED")
+"""
+
+
+class TestProjectWithoutTheAdminIsUnaffected:
+    """T014 — FR-006, US-5 scenarios 1 and 2, SC-005: a project that never
+    installs ``django.contrib.admin`` sees no change from this feature.
+
+    ``tests/settings_no_admin.py`` mirrors ``tests/settings.py`` minus the
+    admin app and its supporting middleware/apps (``decisions.md`` D13's
+    reasoning extended to this story). Every assertion here runs against it
+    in a fresh subprocess, via ``_run_django_admin``'s new ``settings``
+    parameter — a single process' app registry and ``sys.modules`` are built
+    once at startup, so nothing in-process can prove either absent.
+
+    The two ``check`` tests mirror :class:`TestCheckSurvivesUnmigratedDatabase`'s
+    already-clean baseline under ``tests.settings``: the no-admin
+    configuration must report exactly as little, not merely something.
+
+    The ``sys.modules`` assertion is deliberately not "``controlled_vocabularies.admin``
+    is unimported" — ``forms.py`` calls its lookup on every render, so that
+    module is imported whether or not the admin is installed (``decisions.md``
+    D10). What FR-006 actually forbids is ``django.contrib.admin`` itself
+    reaching ``sys.modules``, which is what the rendered form here is built to
+    prove: the lookup runs, finds the admin not installed, and returns
+    without importing it.
+    """
+
+    def test_check_is_as_clean_without_the_admin_as_it_is_with_it(self):
+        result = _run_django_admin("check", settings="tests.settings_no_admin")
+
+        assert result.returncode == 0, result.stderr
+        assert "System check identified no issues" in result.stdout
+        for check_id in (
+            CHECK_ID,
+            CHECK_ID_MISSING_ROUTE,
+            CHECK_ID_MISSING_INSTALLED_APP,
+            CHECK_ID_MISSING_MIDDLEWARE,
+        ):
+            assert check_id not in result.stdout
+
+    def test_django_contrib_admin_never_reaches_sys_modules_after_a_form_renders(self):
+        result = _run_django_admin(
+            "shell",
+            "--no-startup",
+            "--no-imports",
+            "-c",
+            _RENDER_FORM_AND_CHECK_ADMIN_UNIMPORTED,
+            settings="tests.settings_no_admin",
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "ADMIN_NOT_IMPORTED" in result.stdout
+
+    def test_controlled_vocabularies_admin_registers_nothing_with_the_default_site(self, settings):
+        """With the admin installed (``tests.settings``, this suite's default),
+        ``controlled_vocabularies.admin`` still registers nothing — the module
+        exists only to hold the lazy lookup (``decisions.md`` D10), never a
+        ``@admin.register``."""
+        from django.contrib import admin as django_admin
+
+        assert "django.contrib.admin" in settings.INSTALLED_APPS
+        registered_app_labels = {model._meta.app_label for model in django_admin.site._registry}
+        assert "controlled_vocabularies" not in registered_app_labels
