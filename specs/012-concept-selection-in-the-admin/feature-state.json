@@ -237,8 +237,11 @@
         },
         {
           "id": "T013",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": [
+            "poetry run pytest -q tests/test_admin.py::TestReadOnlyPresentationRendersNoControl — 4 passed; tests/test_admin.py (whole file) — 35 passed"
+          ]
         }
       ]
     },

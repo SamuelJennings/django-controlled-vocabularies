@@ -44,6 +44,8 @@ import re
 import pytest
 from django import forms
 from django.contrib import admin
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from django.db.models import ProtectedError
 from django.test import override_settings
 from django.urls import include, path, reverse
@@ -715,3 +717,135 @@ class TestExplicitDeclarationWins:
     def test_no_declaration_reports_a_check_error(self, autocomplete_site, raw_id_site, declared_widget_site):
         for site in (autocomplete_site, raw_id_site, declared_widget_site):
             assert site.check(None) == []
+
+
+class _ReadOnlyRockTypeSpecimenAdmin(admin.ModelAdmin):
+    """``rock_type`` listed in ``readonly_fields`` — the single-valued case,
+    scenario 6 (T013)."""
+
+    readonly_fields = ["rock_type"]
+
+
+class _ReadOnlyMineralsOutcropAdmin(admin.ModelAdmin):
+    """``minerals`` listed in ``readonly_fields`` — the multi-valued case,
+    scenario 6 (T013)."""
+
+    readonly_fields = ["minerals"]
+
+
+@pytest.fixture
+def readonly_concept_site():
+    """``Specimen`` and ``Outcrop``, each with its concept field explicitly
+    declared read-only, alongside a registered ``Concept`` — the
+    configuration D14 says renders a link for the single-valued relation
+    (T013 scenario 6)."""
+    site = admin.AdminSite(name="us4_readonly")
+    site.register(Specimen, _ReadOnlyRockTypeSpecimenAdmin)
+    site.register(Outcrop, _ReadOnlyMineralsOutcropAdmin)
+    site.register(Concept)
+    return site
+
+
+def _view_only_staff_user(*codenames):
+    """A saved staff user holding exactly the named ``view_*`` permissions —
+    never ``change_*`` — for US-4 scenario 7: a person who may view the page
+    but not change it (T013)."""
+    user = get_user_model().objects.create_user(username="readonly-viewer", password="not-used", is_staff=True)  # noqa: S106
+    for codename in codenames:
+        user.user_permissions.add(Permission.objects.get(codename=codename))
+    return user
+
+
+@pytest.mark.django_db
+class TestReadOnlyPresentationRendersNoControl:
+    """T013: FR-008, US-4 scenarios 6 and 7, decisions.md D14.
+
+    Two independent triggers for the same Django presentation, kept
+    deliberately apart: an explicit ``readonly_fields`` declaration
+    (scenario 6, exercised through ``admin_client`` — a superuser holding
+    full change permission, so the declaration alone is what puts the field
+    into ``AdminReadonlyField`` rather than the person's own permissions),
+    and a person who may view the page but not change it, on
+    ``concept_registered_admin_site`` (T005's fixture) — a bare registration
+    that declares no ``readonly_fields`` at all, so ``ModelAdmin.get_form()``
+    excluding every field once ``has_change_permission()`` is ``False`` is
+    the only thing putting the field into ``AdminReadonlyField`` (scenario
+    7). Both render the concept's preferred label and no control, and both
+    pin what Django then renders: a link to the concept's own change page
+    for the single-valued relation with ``Concept`` registered, plain text
+    for the many-to-many.
+    """
+
+    def test_a_declared_readonly_field_links_to_the_concepts_own_change_page(self, admin_client, readonly_concept_site):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        concept = ConceptFactory(scheme=scheme, label="Granite")
+        specimen = SpecimenFactory(rock_type=concept)
+
+        with override_settings(ROOT_URLCONF=_URLConf(readonly_concept_site)):
+            response = admin_client.get(reverse("admin:testapp_specimen_change", args=[specimen.pk]))
+            concept_change_url = reverse("admin:controlled_vocabularies_concept_change", args=[concept.pk])
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        assert "data-tomselect" not in content
+        assert f'<a href="{concept_change_url}">Granite</a>' in content
+
+    def test_a_declared_readonly_field_renders_plain_text_for_a_many_to_many(self, admin_client, readonly_concept_site):
+        scheme = ConceptSchemeFactory(name="Mineral")
+        concepts = [ConceptFactory(scheme=scheme, label=f"Mineral {i}") for i in range(2)]
+        outcrop = OutcropFactory()
+        outcrop.minerals.add(*concepts)
+
+        with override_settings(ROOT_URLCONF=_URLConf(readonly_concept_site)):
+            response = admin_client.get(reverse("admin:testapp_outcrop_change", args=[outcrop.pk]))
+            concept_change_urls = [
+                reverse("admin:controlled_vocabularies_concept_change", args=[concept.pk]) for concept in concepts
+            ]
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        assert "data-tomselect" not in content
+        assert ", ".join(concept.label for concept in concepts) in content
+        for concept_change_url in concept_change_urls:
+            assert concept_change_url not in content
+
+    def test_a_view_only_users_undeclared_field_links_to_the_concepts_own_change_page(
+        self, client, concept_registered_admin_site
+    ):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        concept = ConceptFactory(scheme=scheme, label="Basalt")
+        specimen = SpecimenFactory(rock_type=concept)
+        viewer = _view_only_staff_user("view_specimen")
+        assert not viewer.has_perm("testapp.change_specimen")
+        client.force_login(viewer)
+
+        with override_settings(ROOT_URLCONF=_URLConf(concept_registered_admin_site)):
+            response = client.get(reverse("admin:testapp_specimen_change", args=[specimen.pk]))
+            concept_change_url = reverse("admin:controlled_vocabularies_concept_change", args=[concept.pk])
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        assert "data-tomselect" not in content
+        assert f'<a href="{concept_change_url}">Basalt</a>' in content
+
+    def test_a_view_only_users_undeclared_field_renders_plain_text_for_a_many_to_many(
+        self, client, concept_registered_admin_site
+    ):
+        scheme = ConceptSchemeFactory(name="Mineral")
+        concepts = [ConceptFactory(scheme=scheme, label=f"Viewer mineral {i}") for i in range(2)]
+        outcrop = OutcropFactory()
+        outcrop.minerals.add(*concepts)
+        client.force_login(_view_only_staff_user("view_outcrop"))
+
+        with override_settings(ROOT_URLCONF=_URLConf(concept_registered_admin_site)):
+            response = client.get(reverse("admin:testapp_outcrop_change", args=[outcrop.pk]))
+            concept_change_urls = [
+                reverse("admin:controlled_vocabularies_concept_change", args=[concept.pk]) for concept in concepts
+            ]
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        assert "data-tomselect" not in content
+        assert ", ".join(concept.label for concept in concepts) in content
+        for concept_change_url in concept_change_urls:
+            assert concept_change_url not in content

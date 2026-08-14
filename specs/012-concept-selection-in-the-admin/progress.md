@@ -346,3 +346,39 @@ tests/test_admin.py` — clean.
 Next: T013 — read-only presentation renders no control.
 
 Watch: none.
+
+## 2026-08-14T09:45:00Z · Implementer US-4 · T013
+
+Did: added `tests/test_admin.py::TestReadOnlyPresentationRendersNoControl` — two independent
+triggers for the same Django read-only presentation, kept deliberately separate rather than
+combined into one configuration: an explicit `readonly_fields` declaration exercised by
+`admin_client` (a superuser with full change permission, so the declaration alone is what is
+under test — `readonly_concept_site`), and a person holding view but not change permission on a
+bare registration that declares no `readonly_fields` at all (`concept_registered_admin_site`,
+T005's fixture — `ModelAdmin.get_form()` excluding every field once `has_change_permission()` is
+`False` is the only thing making it read-only). Both cases cover the single-valued relation
+(`Specimen.rock_type`, asserted against the exact `<a href="...">label</a>` `AdminReadonlyField`
+renders once `Concept` is registered) and the many-to-many (`Outcrop.minerals`, asserted as plain
+comma-joined text with no concept-change URL present). No production code —
+`controlled_vocabularies/` and `tests/testapp/admin.py` both untouched, per `decisions.md` D22.
+
+Verified non-vacuous, three ways, each by temporarily sabotaging the fixture and watching the
+right assertion fail for the right reason, then restoring: (1) both `readonly_fields`-declared
+tests — emptied `readonly_fields` on both `ModelAdmin`s; both failed on `data-tomselect` being
+present (the field became editable again). (2) both view-only-permission tests — granted the
+viewer `change_specimen`/`change_outcrop` alongside `view_*`; both failed the same way (one on my
+own `has_perm` guard, both eventually on `data-tomselect`), confirming the read-only rendering
+genuinely depends on the missing change permission and not on anything else in the fixture.
+(3) the link assertions specifically — commented out `site.register(Concept)` on
+`readonly_concept_site`; both single- and multi-valued tests failed with `NoReverseMatch` on the
+concept change URL, since that route only exists once `Concept` is registered. A separate scratch
+probe (not committed) confirmed the positive side of the same claim: with `Concept` unregistered,
+the label renders as plain text with no `<a href=` wrapper, matching `decisions.md` D14 exactly.
+`poetry run pytest -q tests/test_admin.py::TestReadOnlyPresentationRendersNoControl` — 4 passed on
+restore. `poetry run pytest -q tests/test_admin.py` (whole file) — 35 passed. `ruff check`/`ruff
+format --check tests/test_admin.py` — clean (one `# noqa: S106` on the throwaway view-only user's
+unused password, matching `tests/test_checks.py`'s existing `# noqa: S603` convention).
+
+Next: US-4's full-suite verify and completion report — this story's last task.
+
+Watch: none.
