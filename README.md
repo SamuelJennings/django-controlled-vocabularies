@@ -268,6 +268,39 @@ does not want searched restricts the include instead, at whatever access level f
 The control needs a browser running JavaScript. Without it, both fields still work as an ordinary
 required-relation form field; only the search-as-you-type behaviour is unavailable.
 
+## Choosing a concept in the admin
+
+A model that declares `ConceptField` or `ConceptsField` gets the same search-as-you-type control on
+its Django admin pages once it's registered — nothing further to configure. `ModelAdmin` builds the
+field the same way it builds any other, and the wiring is the three steps above: the route,
+`django_tomselect` in `INSTALLED_APPS`, and its middleware. The admin adds nothing to that list.
+
+A concept is chosen on these pages, never created or edited there. Django ordinarily puts an
+add, change, delete or view link beside a related field so a person filling in a form can manage
+the related record without leaving it; none of the four appears beside a concept field, whether or
+not this package's own models are registered in the admin and whatever permissions the signed-in
+person holds. Authoring stays wherever concepts themselves are curated — a controlled vocabulary
+stops being controlled the moment a data-entry form can invent or edit one.
+
+Where the admin presents the field read-only — listed in `readonly_fields`, or because the
+signed-in person may view the page but not change it — the concept is shown by its preferred label
+and no control renders. This is Django's own read-only presentation, not this package's: with
+`Concept` registered, a single concept links to its own change page; several concepts, on a
+`ConceptsField`, always render as plain text. The package neither adds to this nor suppresses it.
+
+A project can still ask for a different control the way it would for any other related field:
+
+- `autocomplete_fields` renders Django's own autocomplete widget instead — Django requires the
+  related model to be registered and searchable, as it does for any field named this way.
+- `raw_id_fields` renders Django's plain identifier input.
+- A `ModelForm` declaring its own widget for the field via `Meta.widgets`, passed to
+  `ModelAdmin.form`, renders that widget.
+- `readonly_fields` renders the read-only presentation described above.
+
+The first three still refuse the four related-object affordances, the same as the default control,
+and saving and validation carry on unchanged: a concept outside the field's named vocabularies is
+refused, and a legitimate one still saves.
+
 ## Importing a published vocabulary
 
 `import_skos()` reads a SKOS file — Turtle, RDF/XML, or JSON-LD — and creates or updates the

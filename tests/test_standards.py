@@ -986,3 +986,32 @@ class TestReadmeDocumentsTheConceptSearchControlsWiring:
 
     def test_documents_the_javascript_requirement(self):
         assert "JavaScript" in _README_TEXT
+
+
+# --- 012 US-6 (T017): the README documents the concept fields' admin representation ---
+#
+# spec.md US-6 Acceptance Scenario 1: registering a consuming model in the admin is
+# sufficient, the wiring is the same three entries already documented above and nothing
+# more, concepts are chosen on these pages and never created or edited there, and the
+# ways a project can ask for a different control are documented. Same technique as
+# TestReadmeDocumentsTheConceptSearchControlsWiring above, for the admin section.
+
+
+class TestReadmeDocumentsTheAdminSection:
+    """T017 — spec.md US-6 scenario 1, FR-012."""
+
+    def test_documents_that_registering_is_the_whole_requirement(self):
+        assert "nothing further to configure" in _README_TEXT
+
+    def test_documents_concepts_are_chosen_not_created_or_edited(self):
+        assert "never created or edited" in _README_TEXT
+
+    def test_documents_no_related_object_affordance(self):
+        assert "add, change, delete or view" in _README_TEXT
+
+    def test_documents_read_only_presentation(self):
+        assert "read-only" in _README_TEXT and "preferred label" in _README_TEXT
+
+    def test_documents_the_override_mechanisms(self):
+        for override in ("autocomplete_fields", "raw_id_fields", "readonly_fields", "Meta.widgets"):
+            assert override in _README_TEXT, f"README does not document {override}"

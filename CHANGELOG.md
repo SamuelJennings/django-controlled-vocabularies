@@ -24,6 +24,15 @@ All notable changes to this project are documented in this file. The format foll
   renders, under its active-language preferred label, even when its vocabulary is no longer named
   by the field's declaration. The control needs a browser running JavaScript; without one, both
   fields still work as an ordinary required-relation form field. See the README.
+- Choosing a concept in the admin: the same search-as-you-type control now renders on a consuming
+  model's Django admin pages once it's registered, with nothing further to configure — the wiring
+  is the three steps above and the admin adds nothing to them. A concept is chosen there, never
+  created or edited: no add, change, delete or view affordance for the related concept, whatever
+  permissions the signed-in person holds. Where the admin presents the field read-only, the concept
+  is shown by its preferred label and no control renders, Django's own read-only presentation.
+  `autocomplete_fields`, `raw_id_fields`, a form's own declared widget, and `readonly_fields` still
+  work as they would for any other related field, each keeping the same no-affordance and
+  validation guarantees. See the README.
 - New runtime dependency: [`django-tomselect`](https://pypi.org/project/django-tomselect/)
   `^2026.6.2`, which the concept search control above is built on.
 - `ConceptsField`: a `ManyToManyField` field a consuming project declares on its own model, naming

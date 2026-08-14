@@ -450,3 +450,31 @@ passed. `poetry run pytest -q tests/test_admin.py` (whole file) — 39 passed (3
 Next: US-5's full-suite verify and completion report — this story's last task.
 
 Watch: none.
+
+## 2026-08-14T08:10:00Z · Implementer US-6 · T017
+
+Did: added a "Choosing a concept in the admin" section to `README.md`, directly after "Choosing a
+concept by typing" and before "Importing a published vocabulary" — registering a consuming model is
+the whole requirement (the wiring is the same three steps already documented), concepts are chosen
+there and never created or edited (no add, change, delete or view affordance), the read-only
+presentation (Django's own, not this package's), and the four ways a project asks for a different
+control (`autocomplete_fields`, `raw_id_fields`, a form's own declared widget via `Meta.widgets`,
+`readonly_fields`). `CONTEXT.md`'s "Concept search control" row gains a sentence naming the admin
+and a `#89` cross-reference, matching the row's existing `#86`/`#87`/`#88` convention. `CHANGELOG.md`
+gains an `[Unreleased] → Added` entry directly below the existing "Choosing a concept by typing"
+entry, same register. Test-first per `craft-tdd`: added `TestReadmeDocumentsTheAdminSection` to
+`tests/test_standards.py` (mirroring `TestReadmeDocumentsTheConceptSearchControlsWiring`'s
+technique for the sibling documentation story), ran it red against the unmodified README, then wrote
+the section and reran green — `decisions.md` D24 records the file-list departure. `CONTEXT.md` and
+`CHANGELOG.md` are not covered by an assertion; no established precedent tests either, and they are
+short, targeted edits checked by re-reading them against the acceptance text.
+
+Verified: `poetry run pytest -q tests/test_standards.py::TestReadmeDocumentsTheAdminSection
+tests/test_standards.py::TestReadmeDocumentsTheConceptSearchControlsWiring` — 12 passed (the new
+class did not disturb the sibling one it sits beside). `poetry run pytest -q tests/test_standards.py`
+(whole file, narrowest scope covering a README change nothing else in the repo imports) — 87 passed.
+`ruff check`/`ruff format --check tests/test_standards.py` — clean.
+
+Next: T018 (translation status + test-structure conformance).
+
+Watch: none.

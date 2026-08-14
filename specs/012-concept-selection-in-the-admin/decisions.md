@@ -422,6 +422,23 @@ its docstring says it is: three bare registrations proving the default needs not
 `tests/test_admin.py` — at that point it moves to `tests/testapp/admin.py`, unrelated to this
 decision.
 
+## D24 — T017's README assertion lives in `tests/test_standards.py`, not `tests/test_admin.py`
+
+**Decision**: `tasks.md` names `README.md`, `CONTEXT.md` and `CHANGELOG.md` as T017's files. This
+story adds one more: a `TestReadmeDocumentsTheAdminSection` class in `tests/test_standards.py`,
+checking the shipped README states the four things spec.md's US-6 scenario 1 names.
+
+**Why**: `tests/test_standards.py` already carries `TestReadmeDocumentsTheConceptSearchControlsWiring`
+(#88's T011) — the identical technique, for the sibling documentation-only story one feature back:
+read the shipped README rather than trust a docs-writing pass to have said everything the
+acceptance scenario names. Putting the new class beside it keeps every README-content assertion in
+one place and follows the established convention exactly rather than inventing a second one in
+`test_admin.py`, which has no other README-reading test.
+
+**Revisit if**: a future feature's documentation assertions grow numerous enough that
+`tests/test_standards.py` stops being one module's worth of "does the package meet its written
+standards" — at that point a dedicated `tests/test_docs.py` is the fix, unrelated to this decision.
+
 ## D23 — T014's `_run_django_admin` gains a `settings` parameter, and one file joins its list
 
 **Decision**: `tests/test_checks.py:_run_django_admin()` gains a `settings: str = "tests.settings"`
