@@ -3,7 +3,7 @@
   "feature": "012-concept-selection-in-the-admin",
   "branch": "012-concept-selection-in-the-admin",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "DESIGN_REVIEW",
+  "state": "IMPLEMENT",
   "state_history": [
     {
       "state": "INTAKE",
@@ -34,6 +34,11 @@
       "state": "DESIGN_REVIEW",
       "at": "2026-08-14T00:20:00Z",
       "note": "one reviewer, three lenses; verdict request_changes with 7 findings (1 high, 3 medium, 3 low), all verified and all remedied in spec.md, plan.md, research.md and tasks.md; each remedy verified by the orchestrator against the finding's stated evidence rather than a reviewer re-dispatch"
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-14T01:10:00Z",
+      "note": "T001 foundational done by the orchestrator (D18): admin installed in the test project, default site mounted, three bare ModelAdmin registrations; full suite 1298 passed; one pre-existing test narrowed with D17 recorded"
     }
   ],
   "gates": {
@@ -86,13 +91,22 @@
       "id": "US0",
       "priority": "P1",
       "issue": null,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T001",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_checks.py"
+            ],
+            "commands": [
+              "poetry run pytest -q -> 1298 passed",
+              "poetry run python -m django check --settings=tests.settings -> 0 issues"
+            ]
+          }
         }
       ]
     },
@@ -100,7 +114,7 @@
       "id": "US1",
       "priority": "P1",
       "issue": 125,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
