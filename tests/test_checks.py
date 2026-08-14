@@ -405,13 +405,13 @@ from django import forms
 from tests.testapp.models import Specimen
 
 
-class _SpecimenForm(forms.ModelForm):
+class SpecimenForm(forms.ModelForm):
     class Meta:
         model = Specimen
         fields = ["name", "rock_type"]
 
 
-str(_SpecimenForm())
+str(SpecimenForm())
 
 assert "django.contrib.admin" not in sys.modules, sorted(sys.modules)
 print("ADMIN_NOT_IMPORTED")

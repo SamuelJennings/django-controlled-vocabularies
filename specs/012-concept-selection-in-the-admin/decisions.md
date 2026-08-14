@@ -573,3 +573,37 @@ exists only in the cloned DOM. D12's boundary is unchanged, and this is the seco
 boundary has cost. Recorded in the retro as evidence toward a browser harness.
 
 **ADR:** none — an implementation detail of FR-003, inside a decision (D12) that already stands.
+
+## D24 — Underscore-prefixed class names dropped, on the maintainer's instruction
+
+**Raised by**: Sam, at the merge gate, reviewing PR #131: "the use of underscores to denote
+'private' classes ... is ugly and unpythonic. Please rename these without the underscore."
+
+**Changed**: every underscore-prefixed *class* in the files this pull request touches.
+
+| Was | Now |
+|---|---|
+| `_ConceptWidgetValidationMixin` | `ConceptWidgetValidationMixin` |
+| `_ConceptWidgetReferenceMixin` | `ConceptWidgetReferenceMixin` |
+| `_ConceptWidgetRouteMixin` | `ConceptWidgetRouteMixin` |
+| `_ConceptWidgetDisplayMixin` | `ConceptWidgetDisplayMixin` |
+| `_DeclinesAdminRelatedWrapper` | `DeclinesAdminRelatedWrapperMixin` |
+| the twelve test-only helper classes in `tests/test_admin.py` and `tests/test_checks.py` | the same names without the underscore |
+
+The new mixin also gained the `Mixin` suffix its four siblings in the same module already carry —
+consistency inside the file, not an extra change of direction.
+
+**Scope**: classes only, and only in files this pull request already touches. Module-level *functions*
+keep their underscore (`_config`, `_echoed_uri`, `_prepare_static_uri` and the rest), which is
+ordinary Python and was not what the instruction was about. Underscore-prefixed classes elsewhere in
+the package — `_DryRun`, `_Fetched`, `_FatalIdentity`, `_DoNothingContentHandler`,
+`_ConceptReferenceResolverMixin`, and the two AST visitors in `tests/test_standards.py` — are
+untouched here, because renaming them would pull four modules this feature never opened into its
+diff. Worth doing as its own small change.
+
+**Consequence worth naming**: the four widget mixins were module-private and are now part of
+`controlled_vocabularies.forms`'s public surface. That is consistent with Article XV, which treats a
+class as the extension point a consumer subclasses, and the package is at `0.0.x` before its first
+publish, so no compatibility window is owed.
+
+**Verified**: `forge verify` green — conformance, lint, typecheck, 1353 tests, build.

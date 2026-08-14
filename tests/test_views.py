@@ -43,7 +43,7 @@ from tests.testapp.models import Borehole, Sketch, Specimen
 def _field_reference(model, field_name):
     """The ``<app_label>.<model>.<field_name>`` reference the control's
     widget sends (decisions.md D11), built the same way for a test as
-    ``_ConceptWidgetReferenceMixin.get_autocomplete_params()`` builds it."""
+    ``ConceptWidgetReferenceMixin.get_autocomplete_params()`` builds it."""
     return f"{model._meta.app_label}.{model._meta.model_name}.{field_name}"
 
 

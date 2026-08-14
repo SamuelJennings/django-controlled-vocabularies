@@ -938,7 +938,7 @@ class TestFieldsChecksI18nSweep:
 
 class TestFormsMissingRouteMessageIsTranslatable:
     """T011 — ``forms.py``'s ``_MISSING_ROUTE_MESSAGE`` (decisions.md D14) is built once, at
-    import time, and referenced by name where it is raised (``_ConceptWidgetRouteMixin``), so
+    import time, and referenced by name where it is raised (``ConceptWidgetRouteMixin``), so
     the AST sweep above — which only inspects an exception call's own arguments — cannot see
     whether the referenced name is itself translatable. Checked directly here instead, the same
     way the model-level validation messages earlier in this file are."""

@@ -235,11 +235,11 @@ class TestAdminSubmissionSavesAndFieldRulesStillBite:
         assert concept in outcrop.minerals.all()
 
 
-class _URLConf:
+class URLConf:
     """A ``ROOT_URLCONF`` carrying one ``site``'s own admin plus this
     package's own route, mirroring ``tests/urls.py`` — the control's widget
     reverses ``controlled_vocabularies:concept-autocomplete`` while building
-    its render context (``forms.py``'s ``_ConceptWidgetRouteMixin``), so a
+    its render context (``forms.py``'s ``ConceptWidgetRouteMixin``), so a
     urlconf mounting only the admin raises ``ImproperlyConfigured`` before any
     affordance assertion is ever reached. Uses the ``admin:`` app_name every
     ``AdminSite`` uses regardless of instance name, so tests below reuse
@@ -318,7 +318,7 @@ class TestConceptFieldOffersNoRelatedObjectAffordance:
     """
 
     def test_add_page_offers_no_affordance_for_a_concept_field(self, admin_client, concept_registered_admin_site):
-        with override_settings(ROOT_URLCONF=_URLConf(concept_registered_admin_site)):
+        with override_settings(ROOT_URLCONF=URLConf(concept_registered_admin_site)):
             response = admin_client.get(reverse("admin:testapp_specimen_add"))
         content = response.content.decode()
 
@@ -331,7 +331,7 @@ class TestConceptFieldOffersNoRelatedObjectAffordance:
         concept = ConceptFactory(scheme=scheme)
         specimen = SpecimenFactory(rock_type=concept)
 
-        with override_settings(ROOT_URLCONF=_URLConf(concept_registered_admin_site)):
+        with override_settings(ROOT_URLCONF=URLConf(concept_registered_admin_site)):
             response = admin_client.get(reverse("admin:testapp_specimen_change", args=[specimen.pk]))
         content = response.content.decode()
 
@@ -340,7 +340,7 @@ class TestConceptFieldOffersNoRelatedObjectAffordance:
         _assert_control_rendered(content, Specimen, "rock_type")
 
     def test_add_page_offers_no_affordance_for_a_concepts_field(self, admin_client, concept_registered_admin_site):
-        with override_settings(ROOT_URLCONF=_URLConf(concept_registered_admin_site)):
+        with override_settings(ROOT_URLCONF=URLConf(concept_registered_admin_site)):
             response = admin_client.get(reverse("admin:testapp_outcrop_add"))
         content = response.content.decode()
 
@@ -354,7 +354,7 @@ class TestConceptFieldOffersNoRelatedObjectAffordance:
         outcrop = OutcropFactory()
         outcrop.minerals.add(concept)
 
-        with override_settings(ROOT_URLCONF=_URLConf(concept_registered_admin_site)):
+        with override_settings(ROOT_URLCONF=URLConf(concept_registered_admin_site)):
             response = admin_client.get(reverse("admin:testapp_outcrop_change", args=[outcrop.pk]))
         content = response.content.decode()
 
@@ -368,7 +368,7 @@ class TestConceptFieldOffersNoRelatedObjectAffordance:
         unregistered, so this passes with or without the unwrap. The tests
         above it — ``Concept`` registered, superuser, both field kinds, add
         and change — are the ones that go red if the unwrap regresses."""
-        with override_settings(ROOT_URLCONF=_URLConf(bare_admin_site)):
+        with override_settings(ROOT_URLCONF=URLConf(bare_admin_site)):
             response = admin_client.get(reverse("admin:testapp_specimen_add"))
         content = response.content.decode()
 
@@ -377,7 +377,7 @@ class TestConceptFieldOffersNoRelatedObjectAffordance:
         _assert_control_rendered(content, Specimen, "rock_type")
 
 
-class _SpecimenTabularInline(admin.TabularInline):
+class SpecimenTabularInline(admin.TabularInline):
     """The registration T008's acceptance names — ``extra = 1`` — used on
     ``locality_tabular_site``."""
 
@@ -385,7 +385,7 @@ class _SpecimenTabularInline(admin.TabularInline):
     extra = 1
 
 
-class _SpecimenStackedInline(admin.StackedInline):
+class SpecimenStackedInline(admin.StackedInline):
     """The registration T008's acceptance names — ``extra = 0`` — the
     configuration research.md R4 measured the library failing on, used on
     ``locality_stacked_site``."""
@@ -394,12 +394,12 @@ class _SpecimenStackedInline(admin.StackedInline):
     extra = 0
 
 
-class _LocalityTabularAdmin(admin.ModelAdmin):
-    inlines = [_SpecimenTabularInline]
+class LocalityTabularAdmin(admin.ModelAdmin):
+    inlines = [SpecimenTabularInline]
 
 
-class _LocalityStackedAdmin(admin.ModelAdmin):
-    inlines = [_SpecimenStackedInline]
+class LocalityStackedAdmin(admin.ModelAdmin):
+    inlines = [SpecimenStackedInline]
 
 
 @pytest.fixture
@@ -407,7 +407,7 @@ def locality_tabular_site():
     """``Locality`` with its ``Specimen`` inline as a ``TabularInline``,
     ``extra = 1`` (T008)."""
     site = admin.AdminSite(name="us3_locality_tabular")
-    site.register(Locality, _LocalityTabularAdmin)
+    site.register(Locality, LocalityTabularAdmin)
     return site
 
 
@@ -418,7 +418,7 @@ def locality_stacked_site():
     until one is added, the shape research.md R4 measured the library
     failing on."""
     site = admin.AdminSite(name="us3_locality_stacked")
-    site.register(Locality, _LocalityStackedAdmin)
+    site.register(Locality, LocalityStackedAdmin)
     return site
 
 
@@ -449,7 +449,7 @@ class TestInlineRowsCarryTheControl:
         SpecimenFactory(locality=locality, rock_type=first_concept)
         SpecimenFactory(locality=locality, rock_type=second_concept)
 
-        with override_settings(ROOT_URLCONF=_URLConf(locality_tabular_site)):
+        with override_settings(ROOT_URLCONF=URLConf(locality_tabular_site)):
             response = admin_client.get(reverse("admin:testapp_locality_change", args=[locality.pk]))
         content = response.content.decode()
 
@@ -470,7 +470,7 @@ class TestInlineRowsCarryTheControl:
         locality = LocalityFactory(primary_mineral=parent_concept)
         SpecimenFactory(locality=locality, rock_type=row_concept)
 
-        with override_settings(ROOT_URLCONF=_URLConf(locality_tabular_site)):
+        with override_settings(ROOT_URLCONF=URLConf(locality_tabular_site)):
             response = admin_client.get(reverse("admin:testapp_locality_change", args=[locality.pk]))
         content = response.content.decode()
 
@@ -500,7 +500,7 @@ class TestEmptyFormRowIsInitialisable:
     ):
         locality = LocalityFactory()
 
-        with override_settings(ROOT_URLCONF=_URLConf(locality_stacked_site)):
+        with override_settings(ROOT_URLCONF=URLConf(locality_stacked_site)):
             response = admin_client.get(reverse("admin:testapp_locality_change", args=[locality.pk]))
         content = response.content.decode()
 
@@ -528,7 +528,7 @@ class TestEmptyFormRowIsInitialisable:
         inline."""
         locality = LocalityFactory()
 
-        with override_settings(ROOT_URLCONF=_URLConf(locality_tabular_site)):
+        with override_settings(ROOT_URLCONF=URLConf(locality_tabular_site)):
             response = admin_client.get(reverse("admin:testapp_locality_change", args=[locality.pk]))
         content = response.content.decode()
 
@@ -571,7 +571,7 @@ class TestNewInlineRowSavesItsConcept:
             "_save": "Save",
         }
 
-        with override_settings(ROOT_URLCONF=_URLConf(locality_stacked_site)):
+        with override_settings(ROOT_URLCONF=URLConf(locality_stacked_site)):
             response = admin_client.post(reverse("admin:testapp_locality_change", args=[locality.pk]), data)
 
         assert response.status_code == 302
@@ -580,7 +580,7 @@ class TestNewInlineRowSavesItsConcept:
         assert specimen.rock_type_id == concept.pk
 
 
-class _AutocompleteSpecimenAdmin(admin.ModelAdmin):
+class AutocompleteSpecimenAdmin(admin.ModelAdmin):
     """``rock_type`` named in ``autocomplete_fields`` — Django's own control
     (`django/contrib/admin/widgets.py::AutocompleteSelect`), not this
     package's, per FR-005."""
@@ -588,7 +588,7 @@ class _AutocompleteSpecimenAdmin(admin.ModelAdmin):
     autocomplete_fields = ["rock_type"]
 
 
-class _ConceptSearchAdmin(admin.ModelAdmin):
+class ConceptSearchAdmin(admin.ModelAdmin):
     """``Concept`` registered with ``search_fields`` — the one configuration
     ``autocomplete_fields`` needs to pass ``admin.E039``/``admin.E040`` on the
     site under test, and the configuration under which the related-object
@@ -597,7 +597,7 @@ class _ConceptSearchAdmin(admin.ModelAdmin):
     search_fields = ["label"]
 
 
-class _RawIdSpecimenAdmin(admin.ModelAdmin):
+class RawIdSpecimenAdmin(admin.ModelAdmin):
     """``rock_type`` named in ``raw_id_fields`` — the one declaration Django
     itself never wraps (research.md R1), so it needs no ``Concept``
     registration to check clean."""
@@ -605,7 +605,7 @@ class _RawIdSpecimenAdmin(admin.ModelAdmin):
     raw_id_fields = ["rock_type"]
 
 
-class _DeclaredWidgetSpecimenForm(forms.ModelForm):
+class DeclaredWidgetSpecimenForm(forms.ModelForm):
     """Declares its own widget for ``rock_type`` via ``Meta.widgets`` —
     reaches ``ModelAdmin.formfield_for_dbfield`` as a ``widget=`` constructor
     argument the same way ``autocomplete_fields`` does (plan.md "US-4"), so
@@ -618,8 +618,8 @@ class _DeclaredWidgetSpecimenForm(forms.ModelForm):
         widgets = {"rock_type": forms.Select()}
 
 
-class _DeclaredWidgetSpecimenAdmin(admin.ModelAdmin):
-    form = _DeclaredWidgetSpecimenForm
+class DeclaredWidgetSpecimenAdmin(admin.ModelAdmin):
+    form = DeclaredWidgetSpecimenForm
 
 
 @pytest.fixture
@@ -627,8 +627,8 @@ def autocomplete_site():
     """``Specimen`` with ``rock_type`` in ``autocomplete_fields``, alongside
     a searchable ``Concept`` registration (T012)."""
     site = admin.AdminSite(name="us4_autocomplete")
-    site.register(Specimen, _AutocompleteSpecimenAdmin)
-    site.register(Concept, _ConceptSearchAdmin)
+    site.register(Specimen, AutocompleteSpecimenAdmin)
+    site.register(Concept, ConceptSearchAdmin)
     return site
 
 
@@ -636,7 +636,7 @@ def autocomplete_site():
 def raw_id_site():
     """``Specimen`` with ``rock_type`` in ``raw_id_fields`` (T012)."""
     site = admin.AdminSite(name="us4_raw_id")
-    site.register(Specimen, _RawIdSpecimenAdmin)
+    site.register(Specimen, RawIdSpecimenAdmin)
     return site
 
 
@@ -646,8 +646,8 @@ def declared_widget_site():
     ``rock_type`` via ``Meta.widgets``, alongside a registered ``Concept``
     (T012)."""
     site = admin.AdminSite(name="us4_declared_widget")
-    site.register(Specimen, _DeclaredWidgetSpecimenAdmin)
-    site.register(Concept, _ConceptSearchAdmin)
+    site.register(Specimen, DeclaredWidgetSpecimenAdmin)
+    site.register(Concept, ConceptSearchAdmin)
     return site
 
 
@@ -671,7 +671,7 @@ class TestExplicitDeclarationWins:
     def test_autocomplete_fields_renders_djangos_own_autocomplete_not_the_concept_control(
         self, admin_client, autocomplete_site
     ):
-        with override_settings(ROOT_URLCONF=_URLConf(autocomplete_site)):
+        with override_settings(ROOT_URLCONF=URLConf(autocomplete_site)):
             response = admin_client.get(reverse("admin:testapp_specimen_add"))
         content = response.content.decode()
 
@@ -681,7 +681,7 @@ class TestExplicitDeclarationWins:
         _assert_no_related_object_affordance(content)
 
     def test_raw_id_fields_renders_the_raw_identifier_control(self, admin_client, raw_id_site):
-        with override_settings(ROOT_URLCONF=_URLConf(raw_id_site)):
+        with override_settings(ROOT_URLCONF=URLConf(raw_id_site)):
             response = admin_client.get(reverse("admin:testapp_specimen_add"))
         content = response.content.decode()
 
@@ -692,7 +692,7 @@ class TestExplicitDeclarationWins:
         assert 'type="text"' in content
 
     def test_a_forms_declared_widget_renders_in_place_of_the_concept_control(self, admin_client, declared_widget_site):
-        with override_settings(ROOT_URLCONF=_URLConf(declared_widget_site)):
+        with override_settings(ROOT_URLCONF=URLConf(declared_widget_site)):
             response = admin_client.get(reverse("admin:testapp_specimen_add"))
         content = response.content.decode()
 
@@ -707,7 +707,7 @@ class TestExplicitDeclarationWins:
         scheme = ConceptSchemeFactory(name="Rock Type")
         concept = ConceptFactory(scheme=scheme)
 
-        with override_settings(ROOT_URLCONF=_URLConf(site)):
+        with override_settings(ROOT_URLCONF=URLConf(site)):
             response = admin_client.post(
                 reverse("admin:testapp_specimen_add"),
                 {"name": f"{site_fixture_name} sample", "rock_type": concept.pk, "_save": "Save"},
@@ -723,7 +723,7 @@ class TestExplicitDeclarationWins:
         other_scheme = ConceptSchemeFactory(name="Mineral")
         foreign_concept = ConceptFactory(scheme=other_scheme)
 
-        with override_settings(ROOT_URLCONF=_URLConf(site)):
+        with override_settings(ROOT_URLCONF=URLConf(site)):
             response = admin_client.post(
                 reverse("admin:testapp_specimen_add"),
                 {"name": f"{site_fixture_name} wrong vocabulary", "rock_type": foreign_concept.pk, "_save": "Save"},
@@ -737,14 +737,14 @@ class TestExplicitDeclarationWins:
             assert site.check(None) == []
 
 
-class _ReadOnlyRockTypeSpecimenAdmin(admin.ModelAdmin):
+class ReadOnlyRockTypeSpecimenAdmin(admin.ModelAdmin):
     """``rock_type`` listed in ``readonly_fields`` — the single-valued case,
     scenario 6 (T013)."""
 
     readonly_fields = ["rock_type"]
 
 
-class _ReadOnlyMineralsOutcropAdmin(admin.ModelAdmin):
+class ReadOnlyMineralsOutcropAdmin(admin.ModelAdmin):
     """``minerals`` listed in ``readonly_fields`` — the multi-valued case,
     scenario 6 (T013)."""
 
@@ -758,8 +758,8 @@ def readonly_concept_site():
     configuration D14 says renders a link for the single-valued relation
     (T013 scenario 6)."""
     site = admin.AdminSite(name="us4_readonly")
-    site.register(Specimen, _ReadOnlyRockTypeSpecimenAdmin)
-    site.register(Outcrop, _ReadOnlyMineralsOutcropAdmin)
+    site.register(Specimen, ReadOnlyRockTypeSpecimenAdmin)
+    site.register(Outcrop, ReadOnlyMineralsOutcropAdmin)
     site.register(Concept)
     return site
 
@@ -802,7 +802,7 @@ class TestReadOnlyPresentationRendersNoControl:
         concept = ConceptFactory(scheme=scheme, label="Granite")
         specimen = SpecimenFactory(rock_type=concept)
 
-        with override_settings(ROOT_URLCONF=_URLConf(readonly_concept_site)):
+        with override_settings(ROOT_URLCONF=URLConf(readonly_concept_site)):
             response = admin_client.get(reverse("admin:testapp_specimen_change", args=[specimen.pk]))
             concept_change_url = reverse("admin:controlled_vocabularies_concept_change", args=[concept.pk])
         content = response.content.decode()
@@ -817,7 +817,7 @@ class TestReadOnlyPresentationRendersNoControl:
         outcrop = OutcropFactory()
         outcrop.minerals.add(*concepts)
 
-        with override_settings(ROOT_URLCONF=_URLConf(readonly_concept_site)):
+        with override_settings(ROOT_URLCONF=URLConf(readonly_concept_site)):
             response = admin_client.get(reverse("admin:testapp_outcrop_change", args=[outcrop.pk]))
             concept_change_urls = [
                 reverse("admin:controlled_vocabularies_concept_change", args=[concept.pk]) for concept in concepts
@@ -840,7 +840,7 @@ class TestReadOnlyPresentationRendersNoControl:
         assert not viewer.has_perm("testapp.change_specimen")
         client.force_login(viewer)
 
-        with override_settings(ROOT_URLCONF=_URLConf(concept_registered_admin_site)):
+        with override_settings(ROOT_URLCONF=URLConf(concept_registered_admin_site)):
             response = client.get(reverse("admin:testapp_specimen_change", args=[specimen.pk]))
             concept_change_url = reverse("admin:controlled_vocabularies_concept_change", args=[concept.pk])
         content = response.content.decode()
@@ -858,7 +858,7 @@ class TestReadOnlyPresentationRendersNoControl:
         outcrop.minerals.add(*concepts)
         client.force_login(_view_only_staff_user("view_outcrop"))
 
-        with override_settings(ROOT_URLCONF=_URLConf(concept_registered_admin_site)):
+        with override_settings(ROOT_URLCONF=URLConf(concept_registered_admin_site)):
             response = client.get(reverse("admin:testapp_outcrop_change", args=[outcrop.pk]))
             concept_change_urls = [
                 reverse("admin:controlled_vocabularies_concept_change", args=[concept.pk]) for concept in concepts
@@ -893,7 +893,7 @@ class TestCustomAdminSiteGetsTheSameBehaviour:
 
     ``custom_admin_site`` is a fresh ``AdminSite`` instance, never the
     default one ``tests/testapp/admin.py`` registers ``Specimen`` on — the
-    declining behaviour (``forms.py``'s ``_DeclinesAdminRelatedWrapper``)
+    declining behaviour (``forms.py``'s ``DeclinesAdminRelatedWrapperMixin``)
     lives on the form field, not on any particular site, so nothing here
     should differ from ``TestConceptControlRendersOnAdminPages`` (T002),
     ``TestConceptFieldOffersNoRelatedObjectAffordance`` (T005) or
@@ -902,7 +902,7 @@ class TestCustomAdminSiteGetsTheSameBehaviour:
     """
 
     def test_add_page_renders_the_control_with_no_related_object_affordance(self, admin_client, custom_admin_site):
-        with override_settings(ROOT_URLCONF=_URLConf(custom_admin_site)):
+        with override_settings(ROOT_URLCONF=URLConf(custom_admin_site)):
             response = admin_client.get(reverse("admin:testapp_specimen_add"))
         content = response.content.decode()
 
@@ -914,7 +914,7 @@ class TestCustomAdminSiteGetsTheSameBehaviour:
         scheme = ConceptSchemeFactory(name="Rock Type")
         concept = ConceptFactory(scheme=scheme)
 
-        with override_settings(ROOT_URLCONF=_URLConf(custom_admin_site)):
+        with override_settings(ROOT_URLCONF=URLConf(custom_admin_site)):
             response = admin_client.post(
                 reverse("admin:testapp_specimen_add"),
                 {"name": "Custom site sample", "rock_type": concept.pk, "_save": "Save"},
@@ -928,7 +928,7 @@ class TestCustomAdminSiteGetsTheSameBehaviour:
         other_scheme = ConceptSchemeFactory(name="Mineral")
         foreign_concept = ConceptFactory(scheme=other_scheme)
 
-        with override_settings(ROOT_URLCONF=_URLConf(custom_admin_site)):
+        with override_settings(ROOT_URLCONF=URLConf(custom_admin_site)):
             response = admin_client.post(
                 reverse("admin:testapp_specimen_add"),
                 {"name": "Custom site wrong vocabulary", "rock_type": foreign_concept.pk, "_save": "Save"},
@@ -949,7 +949,7 @@ class TestCustomAdminSiteGetsTheSameBehaviour:
         scenario 4)."""
         default_response = admin_client.get(reverse("admin:testapp_specimen_add"))
 
-        with override_settings(ROOT_URLCONF=_URLConf(custom_admin_site)):
+        with override_settings(ROOT_URLCONF=URLConf(custom_admin_site)):
             custom_response = admin_client.get(reverse("admin:testapp_specimen_add"))
 
         assert default_response.status_code == 200

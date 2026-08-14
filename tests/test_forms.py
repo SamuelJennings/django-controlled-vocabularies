@@ -191,7 +191,7 @@ class TestConceptFieldRenderingWithoutTheRouteIncluded:
 class TestConceptFieldShowsWhatARecordAlreadyHolds:
     """T009, FR-008, plan.md A8, decisions.md D12: an existing record's attached
     concept renders unrestricted, because A6 path two narrows
-    ``_ConceptWidgetValidationMixin.get_queryset()`` to the field's current
+    ``ConceptWidgetValidationMixin.get_queryset()`` to the field's current
     declaration and the library resolves already-selected values through that
     same method (``widgets.py:965``). What a record already holds is displayed
     unrestricted; what a submission newly contains is still validated against
@@ -330,7 +330,7 @@ class TestTheControlIsActuallyInstantiated:
 
 @pytest.mark.django_db
 class TestDisplayingAnAttachedConceptLeavesValidationNarrow:
-    """US-6 repair — ``_ConceptWidgetDisplayMixin`` widens ``get_queryset()`` for
+    """US-6 repair — ``ConceptWidgetDisplayMixin`` widens ``get_queryset()`` for
     the duration of one library call and must leave it exactly as it found it.
     Without the restore, the same widget instance validates every later
     submission against every concept, which is the leak D12 exists to prevent,
@@ -363,7 +363,7 @@ class TestConceptFieldDeclinesTheAdminWrapper:
     """T007: FR-004, FR-005. ``tests/test_admin.py``'s
     ``TestConceptFieldOffersNoRelatedObjectAffordance`` (T005) proves the
     outcome at a rendered admin page; this proves the seam
-    ``_DeclinesAdminRelatedWrapper`` owns directly, at the form-field level.
+    ``DeclinesAdminRelatedWrapperMixin`` owns directly, at the form-field level.
 
     Each test mirrors exactly what ``options.py:215`` does: wrap the field's
     own already-built widget, then assign the wrapper back onto ``widget`` —
