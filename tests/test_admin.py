@@ -95,3 +95,22 @@ class TestConceptControlRendersOnAdminPages:
         _assert_control_rendered(content, Outcrop, "minerals")
         for concept in concepts:
             assert concept.label in content
+
+
+@pytest.mark.django_db
+class TestAdminPageRenderingIsBoundedByVocabularySize:
+    """T003: FR-009, SC-006, US-1 scenario 4 — mirrors
+    ``tests/test_forms.py::TestConceptFieldRenderingIsBoundedByVocabularySize``
+    so the two read the same."""
+
+    def test_rendered_length_is_identical_for_a_large_vocabulary(self, admin_client):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        for i in range(5):
+            ConceptFactory(scheme=scheme, label=f"Small vocab concept {i}")
+        small_rendered = admin_client.get(reverse("admin:testapp_specimen_add")).content.decode()
+
+        large_concepts = [ConceptFactory(scheme=scheme, label=f"Large vocab concept {i}") for i in range(2000)]
+        large_rendered = admin_client.get(reverse("admin:testapp_specimen_add")).content.decode()
+
+        assert len(large_rendered) == len(small_rendered)
+        assert not any(concept.label in large_rendered for concept in large_concepts)
