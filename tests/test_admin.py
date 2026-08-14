@@ -70,9 +70,7 @@ class TestConceptControlRendersOnAdminPages:
         assert response.status_code == 200
         _assert_control_rendered(response.content.decode(), Outcrop, "minerals")
 
-    def test_change_page_renders_the_control_and_shows_the_held_concept_under_its_preferred_label(
-        self, admin_client
-    ):
+    def test_change_page_renders_the_control_and_shows_the_held_concept_under_its_preferred_label(self, admin_client):
         scheme = ConceptSchemeFactory(name="Rock Type")
         concept = ConceptFactory(scheme=scheme, label="Granite")
         specimen = SpecimenFactory(rock_type=concept)
