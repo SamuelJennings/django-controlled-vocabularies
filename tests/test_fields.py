@@ -1304,6 +1304,33 @@ class TestConceptsFieldRequiredSet:
 
         assert form.is_valid(), form.errors
 
+    @pytest.mark.django_db
+    def test_a_saved_records_valid_submission_is_accepted_though_its_relation_is_still_empty(self):
+        # #124: ModelForm._post_clean() calls instance.full_clean() before
+        # save_m2m() attaches anything, so a saved record's relation is still
+        # empty in the database at the moment this package's installed check
+        # runs. The check must not read that stale state as a refusal of a
+        # submission that would have populated it.
+        scheme = ConceptSchemeFactory(name="Rock Type", slug="rock-type")
+        concept = ConceptFactory(scheme=scheme)
+        deposit = DepositFactory()
+        assert not deposit.rock_types.exists()
+
+        form = DepositForm(data={"name": deposit.name, "rock_types": [concept.pk]}, instance=deposit)
+
+        assert form.is_valid(), form.errors
+
+    @pytest.mark.django_db
+    def test_a_saved_records_empty_submission_is_still_refused(self):
+        # The form field's own `required` still has to do this job once the
+        # model-level check defers to it during a ModelForm's own clean.
+        deposit = DepositFactory()
+
+        form = DepositForm(data={"name": deposit.name, "rock_types": []}, instance=deposit)
+
+        assert not form.is_valid()
+        assert "rock_types" in form.errors
+
     @isolate_apps("tests.testapp")
     def test_an_inheriting_model_does_not_get_a_second_wrapper(self):
         # The wrapper resolves the instance's own class at call time, so a
