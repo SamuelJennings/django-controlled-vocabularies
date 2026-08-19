@@ -81,28 +81,85 @@
       "tasks": [
         {
           "id": "T006",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_ui/test_urls.py::TestVocabularyListUrl",
+              "tests/test_ui/test_views.py::TestVocabularyList"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_ui/test_urls.py tests/test_ui/test_views.py -q (exit 0, 4 passed)"
+            ],
+            "code": [
+              "controlled_vocabularies/ui/urls.py:14",
+              "controlled_vocabularies/ui/views.py:15"
+            ]
+          }
         },
         {
           "id": "T007",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_ui/test_views.py::TestVocabularyListEntry"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py -k Entry -q (exit 0, 6 passed)"
+            ],
+            "code": [
+              "controlled_vocabularies/ui/views.py:36",
+              "controlled_vocabularies/ui/templates/controlled_vocabularies/ui/conceptscheme_list_item.html:1"
+            ]
+          }
         },
         {
           "id": "T008",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_ui/test_views.py::TestVocabularyListOrdering"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py -k Ordering -q (exit 0, 4 passed)"
+            ],
+            "code": [
+              "controlled_vocabularies/ui/views.py:31"
+            ]
+          }
         },
         {
           "id": "T009",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_ui/test_views.py::TestVocabularyListEmptyState",
+              "tests/test_ui/test_templates.py"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_ui/test_templates.py tests/test_ui/test_views.py -k \"EmptyState or Templates or Link\" -q (exit 0, 7 passed)"
+            ],
+            "code": [
+              "controlled_vocabularies/ui/views.py:38"
+            ]
+          }
         },
         {
           "id": "T010",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pre-commit run --all-files (exit 0)"
+            ],
+            "code": [
+              "README.md:320",
+              "CHANGELOG.md:9"
+            ]
+          }
         }
       ]
     },
