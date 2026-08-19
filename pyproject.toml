@@ -40,6 +40,16 @@ rdflib = "^7.6.0"
 # package's own views.py and forms.py are the code that imports it at runtime
 # (research.md, decisions.md D9).
 django-tomselect = "^2026.6.2"
+# The opt-in browsing front end (013-find-a-vocabulary, FR-012). Optional: the
+# core package carries no UI dependency, only controlled_vocabularies/ui/
+# imports it (test_ui/test_architecture.py, test_ui/test_packaging.py prove
+# the isolation). django-mvp's own floor is Python >=3.12 while this package's
+# is 3.11, so the marker makes the extra unavailable there rather than an
+# install error.
+django-mvp = { version = ">=0.19,<1.0", optional = true, python = ">=3.12" }
+
+[tool.poetry.extras]
+ui = ["django-mvp"]
 
 [tool.poetry.group.dev.dependencies]
 # Family toolchain bundle; the pin tag is the family-standard version. Ships
@@ -140,3 +150,22 @@ extend_exclude = [
 
 [tool.deptry.per_rule_ignores]
 DEP003 = ["controlled_vocabularies"]
+
+# django-mvp installs as `mvp`; without this map deptry looks for a module
+# named `django_mvp` and reports every ui/ import as a missing dependency.
+[tool.deptry.package_module_name_map]
+django-mvp = "mvp"
+
+[tool.forge.conformance]
+# The subject of each of these four is not a Python module under
+# controlled_vocabularies/ui/, so Article X's mirror rule has nothing to
+# check them against: test_architecture.py takes the package boundary as its
+# subject, test_boot.py takes the core booting with the UI app absent,
+# test_packaging.py takes pyproject.toml, and test_templates.py takes the
+# shipped templates directly (013-find-a-vocabulary tasks.md T001, T004).
+non-mirror-paths = [
+    "tests/test_ui/test_architecture.py",
+    "tests/test_ui/test_boot.py",
+    "tests/test_ui/test_packaging.py",
+    "tests/test_ui/test_templates.py",
+]

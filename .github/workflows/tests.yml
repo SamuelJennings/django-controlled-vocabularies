@@ -23,6 +23,9 @@ jobs:
       coverage-package: controlled_vocabularies
       django-versions: '["5.2", "6.0"]'
       # test/lint tooling lives in the single (non-optional) dev group plus the
-      # mvp-shared test extra; empty args install main + dev, which covers pytest.
-      poetry-install-args: ''
+      # mvp-shared test extra. --extras ui installs django-mvp too, so the
+      # 013-find-a-vocabulary ui suite (tests/test_ui/) has its dependency;
+      # the matrix below runs 3.12/3.13 only, both above the extra's
+      # python>=3.12 marker (research.md R6).
+      poetry-install-args: '--extras ui'
     secrets: inherit

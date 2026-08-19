@@ -102,3 +102,47 @@ well as for this page. Recording the limit here means R4 meets it as a known con
 as a bug report from this page. This is FR-003 and the fourth assumption in `spec.md`.
 
 **ADR:** none — R4 will need one if it chooses a mechanism rather than a field.
+
+## D7 — T001 and T005 land in one commit; the repo's own pre-commit gate requires it
+**Ambiguous**: T001 declares `django-mvp` as an optional dependency and its acceptance says
+`deptry` runs clean. But nothing under `controlled_vocabularies/` imports `mvp` until T005's
+`ui/checks.py` does, and this repo's `.pre-commit-config.yaml` runs `deptry` as a commit-time hook
+— not just a story-end check. A first attempt to commit T001's `pyproject.toml`/`poetry.lock`
+alone was rejected by the hook: `DEP002 'django-mvp' defined as a dependency but not used in the
+codebase`. Committing `checks.py`'s import without T001's dependency declaration fails the inverse
+way — `DEP001`, an import with nothing declaring it. The two halves are only ever valid together.
+
+**Chosen**: `ui/checks.py` genuinely does `try: import mvp` inside `check_mvp_installed` (not
+`importlib.util.find_spec`, which `deptry`'s static scan does not count as usage), and T001's
+`pyproject.toml`/`poetry.lock`/workflow changes land in the same commit as T005's `checks.py` and
+`apps.py`. T002, T003 and T004 land as their own separate commits in between — none of them touch
+`pyproject.toml` or import `mvp`, so the gate has no opinion on them. Task IDs T001 and T005 both
+appear in that commit's subject and body so the mapping from commit to task stays traceable.
+
+**Why defensible**: this is a tooling constraint discovered while implementing, not a design
+choice — the gate is correct (an optional dependency nobody imports yet, and an import nobody
+declared, are both real defects to catch in a shipped commit) and there is no way to satisfy it
+one task at a time without a throwaway import or a temporary `per_rule_ignores` entry, either of
+which is scope invented purely to appease the hook and removed moments later.
+
+**ADR:** none — a Phase 1 commit-sequencing note, not a design choice future work revisits.
+
+## D8 — `tests/urls.py` is untouched by T003; the ui mount waits for T006
+**Ambiguous**: T003's own text in `tasks.md` says `tests/urls.py` should mount
+`controlled_vocabularies.ui.urls` under a non-empty prefix. But that module is created by T006
+(Phase 2, US-1), which is out of Phase 1's scope — my brief's prohibitions name "the ui view,
+templates, urls" as US-1's work, not Phase 1's, and T003's acceptance criterion in the brief
+tests only `INSTALLED_APPS` and `manage.py check`, not a urls.py mount.
+
+**Chosen**: leave `tests/urls.py` exactly as it was before this story. `tests/settings.py`'s
+`ROOT_URLCONF` still resolves to it unchanged. T006 adds the `include()` line when
+`controlled_vocabularies/ui/urls.py` exists to point it at.
+
+**Why defensible**: `include("controlled_vocabularies.ui.urls")` imports its target the moment
+`tests/urls.py` itself is loaded (Django's URL resolver, unlike a settings string, is not lazy
+about a string `include()` target) — mounting it now would raise `ModuleNotFoundError` from
+`manage.py check`'s own URL-resolution checks, failing T003's actual, brief-given acceptance
+before it could ever pass. Nothing downstream in this phase reads `tests/urls.py`'s ui mount;
+T004's boot proof resolves against `tests.urls_core` instead.
+
+**ADR:** none — a scope boundary already drawn by the brief's own prohibitions, not a new choice.

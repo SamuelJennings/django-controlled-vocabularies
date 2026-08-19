@@ -70,3 +70,130 @@ no action: did not dispatch a second Implementer into the same scope, did not to
 did not edit any story or task status. This is live in-progress work, not a stalled one — left
 alone for whoever holds that session to report back through the normal S4 acceptance path
 (`check-receipts`, independent re-verify, `story-done`).
+## 2026-08-19T00:00:00Z · Implementer US0 · T001
+
+Did: declared `django-mvp` as an optional dependency (`>=0.19,<1.0`, `python = ">=3.12"` marker),
+added `[tool.poetry.extras] ui = ["django-mvp"]`, `[tool.deptry.package_module_name_map]
+django-mvp = "mvp"`, and `[tool.forge.conformance] non-mirror-paths` naming the four T001/T004
+test files. Regenerated `poetry.lock`. Changed `.github/workflows/tests.yml`'s
+`poetry-install-args` from `''` to `'--extras ui'`.
+
+Verified: `poetry lock` (clean write), `poetry check` exit 0 (pre-existing legacy-format
+deprecation warnings only, unrelated to this change), `poetry install --extras ui` (8 packages
+installed: django-mvp + its own deps), `poetry run pytest -q` — 1355 passed. `poetry run deptry .`
+reports `DEP002 'django-mvp' defined as a dependency but not used` — expected per decisions.md D7:
+nothing imports `mvp` until T005's `ui/checks.py` does. The pyproject/lock/workflow changes stay
+uncommitted until then (see D7's revision below, after the first commit attempt was rejected).
+
+Next: T002 — the ui app and its registration test.
+Watch: this repo's pre-commit hook runs `deptry` at commit time, not only at story end — the
+`django-mvp` declaration cannot be committed on its own (see D7, revised after the first commit
+attempt was rejected). T001's `pyproject.toml`/`poetry.lock`/workflow changes land in the same
+commit as T005's, once `checks.py` gives `deptry` a real import to find.
+
+## 2026-08-19T00:05:00Z · Implementer US0 · T002
+
+Did: `controlled_vocabularies/ui/__init__.py` (docstring only), `controlled_vocabularies/ui/apps.py`
+(`ControlledVocabulariesUIConfig`, `name="controlled_vocabularies.ui"`,
+`label="controlled_vocabularies_ui"`, distinct from the core app's `controlled_vocabularies`
+label). Test first: `tests/test_ui/test_apps.py`'s `TestUIAppConfig`, run and observed failing
+(`LookupError: No installed app with label 'controlled_vocabularies_ui'` and
+`FileNotFoundError` for `__init__.py`) before either file existed.
+
+Verified: `poetry run pytest tests/test_ui/test_apps.py -q` — 2 passed. `poetry run ruff check
+controlled_vocabularies/ui/ tests/test_ui/` — all checks passed.
+
+Next: T003 — the widened test settings and the core-only settings module.
+
+## 2026-08-19T00:10:00Z · Implementer US0 · T003
+
+Did: `tests/settings_core.py` (new) — today's `tests/settings.py` contents verbatim, with
+`ROOT_URLCONF` pointed at a new empty `tests/urls_core.py`. `tests/settings.py` now star-imports
+`tests.settings_core` and appends the ui stack — `django_cotton`, `easy_icons`, `flex_menu`,
+`mvp`, `crispy_forms`, `crispy_tailwind`, `controlled_vocabularies.ui` in `INSTALLED_APPS`
+(django-literature's order, filtered per decisions.md: `django.contrib.sites`,
+`django.contrib.staticfiles` and `django_tables2` dropped — the first two are already in the
+core list or unneeded, and this page is a card grid, not a table), `mvp.context_processors.
+mvp_config` appended to `TEMPLATES`, `CRISPY_TEMPLATE_PACK`, `CRISPY_ALLOWED_TEMPLATE_PACKS`,
+`EASY_ICONS`, `FLEX_MENUS`, and `ROOT_URLCONF` reset to `tests.urls` (settings_core points it at
+`tests.urls_core`).
+
+**Deviation from tasks.md's literal text**: did not touch `tests/urls.py`. T003's own description
+says it should mount `controlled_vocabularies.ui.urls` under a prefix, but that module is created
+by T006 (Phase 2, `US-1`), which is out of this story's scope — my brief's prohibitions name "the
+ui view, templates, urls" as US-1's work, and its T003 acceptance criterion for this task tests
+only `INSTALLED_APPS` and `manage.py check`, not a urls.py mount. Mounting an `include()` of a
+module that does not exist yet would also fail `manage.py check`'s own URL-resolution checks
+immediately, contradicting the "clean under both settings modules" requirement. Left for T006.
+
+Verified: `poetry run pytest -q` — 1357 passed (2 more than T001's baseline: T002's
+`test_ui/test_apps.py`). `DJANGO_SETTINGS_MODULE=tests.settings poetry run django-admin check` —
+"System check identified no issues (0 silenced)". `DJANGO_SETTINGS_MODULE=tests.settings_core
+poetry run django-admin check` — exit 0, one pre-existing warning (`controlled_vocabularies.W002`,
+the core's own check reporting its route absent from the deliberately empty `urls_core.py` —
+matches django-literature's own `tests/urls_core.py`, `urlpatterns = []`). `poetry run ruff check
+tests/settings.py tests/settings_core.py tests/urls_core.py` — ruff's autofix removed two
+now-redundant `# noqa: F403`/`F405` comments (F403/F405 are already in this repo's global
+`ignore` list), all checks pass after.
+
+Next: T004 — the three isolation proofs.
+
+## 2026-08-19T00:15:00Z · Implementer US0 · T004
+
+Did: `tests/test_ui/test_architecture.py` (AST-parses every `controlled_vocabularies/**/*.py`
+outside `ui/`, asserts none imports `mvp`, `django_cotton`, `crispy_forms`, `easy_icons`,
+`flex_menu` or `controlled_vocabularies.ui`), `tests/test_ui/test_boot.py` (fresh subprocess,
+`DJANGO_SETTINGS_MODULE=tests.settings_core`, `django.setup()` + `call_command("check")` +
+imports every core module, asserts `"controlled_vocabularies.ui" not in sys.modules`),
+`tests/test_ui/test_packaging.py` (`tomllib`-parses `pyproject.toml`, asserts `django-mvp` is
+`optional`, is exactly `[tool.poetry.extras] ui`, and is absent from every other extra and every
+poetry dependency group).
+
+All three passed immediately given T001–T003 (nothing to make green through new production code —
+these are standing proofs, not TDD in the red/code/green sense). Proved each catches a real
+violation before trusting it (craft-tdd's reproduce-first discipline, applied to the gate itself):
+temporarily added `import mvp` to `controlled_vocabularies/apps.py` — `test_architecture.py`
+failed naming `apps.py`; changed the import to `import controlled_vocabularies.ui` —
+`test_boot.py` failed with `"controlled_vocabularies.ui was imported by the core boot"`; flipped
+`django-mvp`'s `optional` to `false` in `pyproject.toml` — `test_packaging.py` failed. Reverted
+all three mutations (`git diff` on `controlled_vocabularies/apps.py` empty after revert;
+`pyproject.toml`'s `django-mvp` line unchanged).
+
+Verified: `poetry run pytest tests/test_ui/test_architecture.py tests/test_ui/test_boot.py
+tests/test_ui/test_packaging.py -q` — 35 passed. `poetry run ruff check
+tests/test_ui/test_architecture.py tests/test_ui/test_boot.py tests/test_ui/test_packaging.py` —
+all checks passed.
+
+Next: T005 — the missing-extra system check, and the commit that lands T001 alongside it.
+
+## 2026-08-19T00:20:00Z · Implementer US0 · T001 (commit) + T005
+
+Did: `controlled_vocabularies/ui/checks.py` (`check_mvp_installed`, a real `try: import mvp`,
+returns one `checks.Error` with a stable id `controlled_vocabularies.ui.E001` naming both the
+`ui` extra and `controlled_vocabularies.ui` when the import fails) registered from
+`ControlledVocabulariesUIConfig.ready()`. Test first: `tests/test_ui/test_checks.py`, run and
+observed failing (`ModuleNotFoundError: No module named 'controlled_vocabularies.ui.checks'`)
+before the module existed.
+
+This is also the commit where T001's `pyproject.toml`/`poetry.lock`/`.github/workflows/tests.yml`
+changes finally land (decisions.md D7): `checks.py`'s import is the first thing in this phase for
+`deptry` to find, so `git commit` only succeeds once both are staged together.
+
+Verified: `poetry run pytest tests/test_ui/test_checks.py -q` — 3 passed, using
+`monkeypatch.setitem(sys.modules, "mvp", None)` to force the real `import mvp` statement to
+raise, per the CPython import system's own `sys.modules[name] = None` convention (rather than
+`importlib.util.find_spec`, which `deptry`'s static scan does not count as usage — decisions.md
+D7). `poetry run ruff check controlled_vocabularies/ui/ tests/test_ui/test_checks.py` — all
+checks passed. `poetry run deptry .` — "Success! No dependency issues found." (T001's own
+acceptance, now satisfied). `poetry run pytest -q` — 1395 passed (full suite, T001 baseline
+1355 + 40 across T002–T005's new test files).
+`DJANGO_SETTINGS_MODULE=tests.settings poetry run django-admin check` — "System check identified
+no issues (0 silenced)" (`mvp` genuinely importable, the new check reports nothing).
+`DJANGO_SETTINGS_MODULE=tests.settings_core poetry run django-admin check` — exit 0, the same
+single pre-existing `controlled_vocabularies.W002` warning as T003 (the ui app, and its check,
+are not installed under `settings_core` at all).
+
+Phase 1 (T001–T005) complete. Concern for the story report: `feature-state.json`'s `stories`
+array has no `US0`/foundational entry at all — only `US1` (T006–T010) and `US2` (T011–T014) —
+so there was nothing of my own to flip `status`/`attempts`/`evidence` on. Left the ledger
+untouched rather than adding a structural entry outside my mandate.
