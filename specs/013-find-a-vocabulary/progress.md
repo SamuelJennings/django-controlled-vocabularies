@@ -52,3 +52,37 @@ Three editorial notes also applied: `paginate_by = 24` restated an inherited def
 search is multi-word OR, so a second word widens the list, which T014 now documents; and the
 `tests/test_ui/conftest.py` in the plan's tree was unwanted, since the root conftest already
 exposes the `scheme` fixture.
+
+## 2026-08-19T00:00:00Z · Implementer US0 · T001
+
+Did: declared `django-mvp` as an optional dependency (`>=0.19,<1.0`, `python = ">=3.12"` marker),
+added `[tool.poetry.extras] ui = ["django-mvp"]`, `[tool.deptry.package_module_name_map]
+django-mvp = "mvp"`, and `[tool.forge.conformance] non-mirror-paths` naming the four T001/T004
+test files. Regenerated `poetry.lock`. Changed `.github/workflows/tests.yml`'s
+`poetry-install-args` from `''` to `'--extras ui'`.
+
+Verified: `poetry lock` (clean write), `poetry check` exit 0 (pre-existing legacy-format
+deprecation warnings only, unrelated to this change), `poetry install --extras ui` (8 packages
+installed: django-mvp + its own deps), `poetry run pytest -q` — 1355 passed. `poetry run deptry .`
+reports `DEP002 'django-mvp' defined as a dependency but not used` — expected per decisions.md D7:
+nothing imports `mvp` until T005's `ui/checks.py` does; re-verified clean after T005 below.
+
+Next: T002 — the ui app and its registration test.
+Watch: this repo's pre-commit hook runs `deptry` at commit time, not only at story end — the
+`django-mvp` declaration cannot be committed on its own (see D7, revised after the first commit
+attempt was rejected). T001's `pyproject.toml`/`poetry.lock`/workflow changes land in the same
+commit as T005's, once `checks.py` gives `deptry` a real import to find.
+
+## 2026-08-19T00:05:00Z · Implementer US0 · T002
+
+Did: `controlled_vocabularies/ui/__init__.py` (docstring only), `controlled_vocabularies/ui/apps.py`
+(`ControlledVocabulariesUIConfig`, `name="controlled_vocabularies.ui"`,
+`label="controlled_vocabularies_ui"`, distinct from the core app's `controlled_vocabularies`
+label). Test first: `tests/test_ui/test_apps.py`'s `TestUIAppConfig`, run and observed failing
+(`LookupError: No installed app with label 'controlled_vocabularies_ui'` and
+`FileNotFoundError` for `__init__.py`) before either file existed.
+
+Verified: `poetry run pytest tests/test_ui/test_apps.py -q` — 2 passed. `poetry run ruff check
+controlled_vocabularies/ui/ tests/test_ui/` — all checks passed.
+
+Next: T003 — the widened test settings and the core-only settings module.
