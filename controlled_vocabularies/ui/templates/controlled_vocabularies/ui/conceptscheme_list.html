@@ -1,0 +1,7 @@
+{% extends "list_view.html" %}
+{% comment %}
+  This story wants search alone, and only later (T011-T014): for now the block renders
+  nothing, in place of django-mvp's default search/sort/filter/create toolbar, none of
+  which this page has yet (plan.md Key design decisions #2, T006).
+{% endcomment %}
+{% block page.actions %}{% endblock page.actions %}
