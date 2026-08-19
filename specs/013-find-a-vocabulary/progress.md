@@ -197,3 +197,39 @@ Phase 1 (T001–T005) complete. Concern for the story report: `feature-state.jso
 array has no `US0`/foundational entry at all — only `US1` (T006–T010) and `US2` (T011–T014) —
 so there was nothing of my own to flip `status`/`attempts`/`evidence` on. Left the ledger
 untouched rather than adding a structural entry outside my mandate.
+
+## 2026-08-19T21:43:27Z · Implementer US1 · T006
+
+Did: `controlled_vocabularies/ui/urls.py` (new — `app_name = "controlled_vocabularies_ui"`,
+one route at the empty path named `vocabulary-list`), `controlled_vocabularies/ui/views.py`
+(new — `VocabularyListView(MVPListView)` over `ConceptScheme`, `list_item_template` and
+`template_name` set explicitly), `controlled_vocabularies/ui/templates/controlled_vocabularies/
+ui/conceptscheme_list.html` (new — extends django-mvp's `list_view.html`, overrides
+`page.actions` to render nothing) and `.../conceptscheme_list_item.html` (new — a Cotton
+`c-card` rendering the vocabulary's name and description only; count and origin arrive in
+T007). Added the `include("controlled_vocabularies.ui.urls")` line to `tests/urls.py` under
+`browse/` (decisions.md D8 — this is the task D8 said would add it, now that
+`controlled_vocabularies/ui/urls.py` exists to point at).
+
+Test first: `tests/test_ui/test_urls.py::TestVocabularyListUrl` and
+`tests/test_ui/test_views.py::TestVocabularyList` (3 cases: every vocabulary appears exactly
+once, one added after the first request appears on the next, the page renders no `q`/`o`
+search-or-sort control and no "Add new" create control). Run and observed failing —
+`NoReverseMatch: 'controlled_vocabularies_ui' is not a registered namespace` — before the
+namespace existed.
+
+Verified: `poetry run pytest tests/test_ui/test_urls.py tests/test_ui/test_views.py -q` — 4
+passed. `poetry run ruff check controlled_vocabularies/ui/urls.py
+controlled_vocabularies/ui/views.py tests/test_ui/test_urls.py tests/test_ui/test_views.py
+tests/urls.py` — all checks passed. Committed via `git commit` — the full local pre-commit
+gate (trailing-whitespace, end-of-file-fixer, ruff lint, ruff format, mypy, deptry) passed
+clean on the first attempt.
+
+No create control needed suppressing explicitly: `CRUDDirectoryMixin.show_create_action`
+defaults to `False`, so `MVPListViewMixin`'s own `directory = ["create"]` never resolves a
+`create_url` and neither the actions bar (already emptied) nor the empty-state partial's
+"Add new" button can appear — confirmed by reading `mvp/views/detail.py`'s `show_action()`
+before writing the assertion, not by assuming it.
+
+Next: T007 — `get_queryset()` annotates `concept_count`, the row partial adds count and
+origin (imported vs. held here, publisher identifier as text never a link).
