@@ -21,6 +21,19 @@ typing_extensions = {version = ">=4.5", markers = "python_version < \"3.13\""}
 trio = ["trio (>=0.32.0)"]
 
 [[package]]
+name = "anytree"
+version = "2.13.0"
+description = "Powerful and Lightweight Python Tree Data Structure with various plugins"
+optional = true
+python-versions = "<4.0,>=3.9.2"
+groups = ["main"]
+markers = "python_version >= \"3.12\" and extra == \"ui\""
+files = [
+    {file = "anytree-2.13.0-py3-none-any.whl", hash = "sha256:4cbcf10df36b1f1cba131b7e487ff3edafc9d6e932a3c70071b5b768bab901ff"},
+    {file = "anytree-2.13.0.tar.gz", hash = "sha256:c9d3aa6825fdd06af7ebb05b4ef291d2db63e62bb1f9b7d9b71354be9d362714"},
+]
+
+[[package]]
 name = "asgiref"
 version = "3.12.1"
 description = "ASGI specs, helper code, and adapters"
@@ -271,6 +284,26 @@ files = [
 toml = ["tomli ; python_full_version <= \"3.11.0a6\""]
 
 [[package]]
+name = "crispy-tailwind"
+version = "1.0.3"
+description = "Tailwind CSS for Django Crispy Forms"
+optional = true
+python-versions = ">=3.8"
+groups = ["main"]
+markers = "python_version >= \"3.12\" and extra == \"ui\""
+files = [
+    {file = "crispy-tailwind-1.0.3.tar.gz", hash = "sha256:2bc9f616d406e4b003f25d46fcb0079f1c2522719d97adb107667271d849459a"},
+    {file = "crispy_tailwind-1.0.3-py3-none-any.whl", hash = "sha256:31427f66b1c4fd0d6fb040f4197cfb97d104cdbe7641ea2dea940c0057c4db4b"},
+]
+
+[package.dependencies]
+django = ">=4.2"
+django-crispy-forms = ">=2.0"
+
+[package.extras]
+test = ["pytest", "pytest-django"]
+
+[[package]]
 name = "cssbeautifier"
 version = "2.0.3"
 description = "CSS unobfuscator and beautifier."
@@ -370,7 +403,7 @@ files = [
     {file = "django-5.2.16-py3-none-any.whl", hash = "sha256:04f354bf9d807a86ad1a8392fe3808d362358a8eafc322848e0e43e59b24371d"},
     {file = "django-5.2.16.tar.gz", hash = "sha256:59ea02020c3136fce14bef0bbece21a10a4febef5eed1c51c22ae468efa22200"},
 ]
-markers = {main = "python_version < \"3.15\"", dev = "python_version < \"3.15\" and python_version >= \"3.12\""}
+markers = {dev = "python_version >= \"3.12\""}
 
 [package.dependencies]
 asgiref = ">=3.8.1"
@@ -380,28 +413,6 @@ tzdata = {version = "*", markers = "sys_platform == \"win32\""}
 [package.extras]
 argon2 = ["argon2-cffi (>=19.1.0)"]
 bcrypt = ["bcrypt"]
-
-[[package]]
-name = "django"
-version = "6.0.7"
-description = "A high-level Python web framework that encourages rapid development and clean, pragmatic design."
-optional = false
-python-versions = ">=3.12"
-groups = ["main", "dev"]
-markers = "python_version >= \"3.15\""
-files = [
-    {file = "django-6.0.7-py3-none-any.whl", hash = "sha256:a037427c2288443a8c02a1b02295a31c239663aa682bc50b1976afb7cf6a769e"},
-    {file = "django-6.0.7.tar.gz", hash = "sha256:2998503fc083124fb58037084bfa00de323c7c743f05f1b4284e77bff0ab8890"},
-]
-
-[package.dependencies]
-asgiref = ">=3.9.1"
-sqlparse = ">=0.5.0"
-tzdata = {version = "*", markers = "sys_platform == \"win32\""}
-
-[package.extras]
-argon2 = ["argon2-cffi (>=23.1.0)"]
-bcrypt = ["bcrypt (>=4.1.1)"]
 
 [[package]]
 name = "django-browser-reload"
@@ -421,6 +432,22 @@ asgiref = ">=3.6"
 django = ">=4.2"
 
 [[package]]
+name = "django-cotton"
+version = "2.6.1"
+description = "Enabling Modern UI Composition in Django."
+optional = true
+python-versions = "<4,>=3.8"
+groups = ["main"]
+markers = "python_version >= \"3.12\" and extra == \"ui\""
+files = [
+    {file = "django_cotton-2.6.1-py3-none-any.whl", hash = "sha256:775dda0336c08d33a6daf10557eb261746b1b8e5f260b669cc6b37115571cb08"},
+    {file = "django_cotton-2.6.1.tar.gz", hash = "sha256:bedfa4561e2505fca5b88396acb9bdfaea85167eeef11813676fedab45906088"},
+]
+
+[package.dependencies]
+django = ">=4.2,<7.0"
+
+[[package]]
 name = "django-coverage-plugin"
 version = "3.2.2"
 description = "Django template coverage.py plugin"
@@ -436,6 +463,22 @@ files = [
 [package.dependencies]
 coverage = "*"
 Django = "*"
+
+[[package]]
+name = "django-crispy-forms"
+version = "2.7"
+description = "Best way to have Django DRY forms"
+optional = true
+python-versions = ">=3.10"
+groups = ["main"]
+markers = "python_version >= \"3.12\" and extra == \"ui\""
+files = [
+    {file = "django_crispy_forms-2.7-py3-none-any.whl", hash = "sha256:42a7ecb05ac3fd050d006dfe7aeceb7f318c30e5b5124ff619e2be252f36f096"},
+    {file = "django_crispy_forms-2.7.tar.gz", hash = "sha256:4c59bed60417375cba26cebb2c67ab350b655934670270b1c89dbcd7e60f1b4c"},
+]
+
+[package.dependencies]
+django = ">=5.2"
 
 [[package]]
 name = "django-debug-toolbar"
@@ -472,6 +515,22 @@ django-debug-toolbar = ">=2.0"
 wrapt = "*"
 
 [[package]]
+name = "django-easy-icons"
+version = "0.6.0"
+description = "Easy, flexible icons for Django"
+optional = true
+python-versions = "<4.0,>=3.11"
+groups = ["main"]
+markers = "python_version >= \"3.12\" and extra == \"ui\""
+files = [
+    {file = "django_easy_icons-0.6.0-py3-none-any.whl", hash = "sha256:ddddbfa7dd9cb1112310018d7be212cf057db200e69a06c4dc4b66bbebbd30df"},
+    {file = "django_easy_icons-0.6.0.tar.gz", hash = "sha256:7be23b3d8e16022c382c3e35ae38a6ea547bf3741da1e58258b83c7b242602c2"},
+]
+
+[package.dependencies]
+django = "*"
+
+[[package]]
 name = "django-extensions"
 version = "4.1"
 description = "Extensions for Django"
@@ -486,6 +545,23 @@ files = [
 
 [package.dependencies]
 django = ">=4.2"
+
+[[package]]
+name = "django-flex-menus"
+version = "0.4.3"
+description = "Flexible site menus for Django"
+optional = true
+python-versions = "<4.0,>=3.11"
+groups = ["main"]
+markers = "python_version >= \"3.12\" and extra == \"ui\""
+files = [
+    {file = "django_flex_menus-0.4.3-py3-none-any.whl", hash = "sha256:35de7cdbc3d7798ac35cd661f87b0197bcaba35f5f5bd62732ab3654d9f9f534"},
+    {file = "django_flex_menus-0.4.3.tar.gz", hash = "sha256:26a6f0d627c8e6108041cfc1f997bd09d130b86ab07ace78349f6dbe312e3417"},
+]
+
+[package.dependencies]
+anytree = ">2"
+django = ">=4.2,<5.3"
 
 [[package]]
 name = "django-model-info"
@@ -505,6 +581,28 @@ django = ">=4.2"
 networkx = ">=3.4.2"
 pydot = ">=3.0.2"
 rich = ">=13"
+
+[[package]]
+name = "django-mvp"
+version = "0.19.1"
+description = "MVP framework for Django - scaffold production-ready applications with sophisticated layouts and UI patterns designed for data-centric applications."
+optional = true
+python-versions = "<4.0,>=3.12"
+groups = ["main"]
+markers = "python_version >= \"3.12\" and extra == \"ui\""
+files = [
+    {file = "django_mvp-0.19.1-py3-none-any.whl", hash = "sha256:d21df16a771be9eaed1e2ad08ee815013ed93523987aec304d4cf55800a93127"},
+    {file = "django_mvp-0.19.1.tar.gz", hash = "sha256:3ba67909f4209ba8832d5468ef7af91808e1e74434c237f22109c15a5441f846"},
+]
+
+[package.dependencies]
+crispy-tailwind = ">=1.0.3,<2.0"
+django = ">=5.2"
+django-cotton = "2.6.1"
+django-crispy-forms = ">=2.7,<3.0"
+django-easy-icons = ">=0.6"
+django-flex-menus = ">=0.4.3"
+mergedeep = ">=1.3,<2.0"
 
 [[package]]
 name = "django-stubs"
@@ -1081,6 +1179,19 @@ markers = "python_version >= \"3.12\""
 files = [
     {file = "mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8"},
     {file = "mdurl-0.1.2.tar.gz", hash = "sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba"},
+]
+
+[[package]]
+name = "mergedeep"
+version = "1.3.4"
+description = "A deep merge function for 🐍."
+optional = true
+python-versions = ">=3.6"
+groups = ["main"]
+markers = "python_version >= \"3.12\" and extra == \"ui\""
+files = [
+    {file = "mergedeep-1.3.4-py3-none-any.whl", hash = "sha256:70775750742b25c0d8f36c55aed03d24c3384d17c951b3175d898bd778ef0307"},
+    {file = "mergedeep-1.3.4.tar.gz", hash = "sha256:0096d52e9dad9939c3d975a774666af186eda617e6ca84df4c94dec30004f2a8"},
 ]
 
 [[package]]
@@ -2443,7 +2554,10 @@ files = [
 [package.extras]
 dev = ["pytest", "setuptools"]
 
+[extras]
+ui = ["django-mvp"]
+
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<4.0"
-content-hash = "71441c0091b45d73c429ae277634bac54d30e07600251b41c452ff4d5dda6e35"
+content-hash = "c6192c9efd8f3d334f1520d1a8c32ea8e96c393476a24b33cde56444b56e933f"

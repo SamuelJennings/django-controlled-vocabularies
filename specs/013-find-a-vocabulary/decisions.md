@@ -102,3 +102,27 @@ well as for this page. Recording the limit here means R4 meets it as a known con
 as a bug report from this page. This is FR-003 and the fourth assumption in `spec.md`.
 
 **ADR:** none — R4 will need one if it chooses a mechanism rather than a field.
+
+## D7 — T001 and T005 land in one commit; the repo's own pre-commit gate requires it
+**Ambiguous**: T001 declares `django-mvp` as an optional dependency and its acceptance says
+`deptry` runs clean. But nothing under `controlled_vocabularies/` imports `mvp` until T005's
+`ui/checks.py` does, and this repo's `.pre-commit-config.yaml` runs `deptry` as a commit-time hook
+— not just a story-end check. A first attempt to commit T001's `pyproject.toml`/`poetry.lock`
+alone was rejected by the hook: `DEP002 'django-mvp' defined as a dependency but not used in the
+codebase`. Committing `checks.py`'s import without T001's dependency declaration fails the inverse
+way — `DEP001`, an import with nothing declaring it. The two halves are only ever valid together.
+
+**Chosen**: `ui/checks.py` genuinely does `try: import mvp` inside `check_mvp_installed` (not
+`importlib.util.find_spec`, which `deptry`'s static scan does not count as usage), and T001's
+`pyproject.toml`/`poetry.lock`/workflow changes land in the same commit as T005's `checks.py` and
+`apps.py`. T002, T003 and T004 land as their own separate commits in between — none of them touch
+`pyproject.toml` or import `mvp`, so the gate has no opinion on them. Task IDs T001 and T005 both
+appear in that commit's subject and body so the mapping from commit to task stays traceable.
+
+**Why defensible**: this is a tooling constraint discovered while implementing, not a design
+choice — the gate is correct (an optional dependency nobody imports yet, and an import nobody
+declared, are both real defects to catch in a shipped commit) and there is no way to satisfy it
+one task at a time without a throwaway import or a temporary `per_rule_ignores` entry, either of
+which is scope invented purely to appease the hook and removed moments later.
+
+**ADR:** none — a Phase 1 commit-sequencing note, not a design choice future work revisits.

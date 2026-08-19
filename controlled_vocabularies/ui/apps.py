@@ -14,3 +14,10 @@ class ControlledVocabulariesUIConfig(AppConfig):
     name = "controlled_vocabularies.ui"
     label = "controlled_vocabularies_ui"
     verbose_name = _("Controlled Vocabularies UI")
+
+    def ready(self):
+        from django.core.checks import register
+
+        from .checks import check_mvp_installed
+
+        register(check_mvp_installed)

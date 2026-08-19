@@ -148,3 +148,35 @@ tests/test_ui/test_architecture.py tests/test_ui/test_boot.py tests/test_ui/test
 all checks passed.
 
 Next: T005 — the missing-extra system check, and the commit that lands T001 alongside it.
+
+## 2026-08-19T00:20:00Z · Implementer US0 · T001 (commit) + T005
+
+Did: `controlled_vocabularies/ui/checks.py` (`check_mvp_installed`, a real `try: import mvp`,
+returns one `checks.Error` with a stable id `controlled_vocabularies.ui.E001` naming both the
+`ui` extra and `controlled_vocabularies.ui` when the import fails) registered from
+`ControlledVocabulariesUIConfig.ready()`. Test first: `tests/test_ui/test_checks.py`, run and
+observed failing (`ModuleNotFoundError: No module named 'controlled_vocabularies.ui.checks'`)
+before the module existed.
+
+This is also the commit where T001's `pyproject.toml`/`poetry.lock`/`.github/workflows/tests.yml`
+changes finally land (decisions.md D7): `checks.py`'s import is the first thing in this phase for
+`deptry` to find, so `git commit` only succeeds once both are staged together.
+
+Verified: `poetry run pytest tests/test_ui/test_checks.py -q` — 3 passed, using
+`monkeypatch.setitem(sys.modules, "mvp", None)` to force the real `import mvp` statement to
+raise, per the CPython import system's own `sys.modules[name] = None` convention (rather than
+`importlib.util.find_spec`, which `deptry`'s static scan does not count as usage — decisions.md
+D7). `poetry run ruff check controlled_vocabularies/ui/ tests/test_ui/test_checks.py` — all
+checks passed. `poetry run deptry .` — "Success! No dependency issues found." (T001's own
+acceptance, now satisfied). `poetry run pytest -q` — 1395 passed (full suite, T001 baseline
+1355 + 40 across T002–T005's new test files).
+`DJANGO_SETTINGS_MODULE=tests.settings poetry run django-admin check` — "System check identified
+no issues (0 silenced)" (`mvp` genuinely importable, the new check reports nothing).
+`DJANGO_SETTINGS_MODULE=tests.settings_core poetry run django-admin check` — exit 0, the same
+single pre-existing `controlled_vocabularies.W002` warning as T003 (the ui app, and its check,
+are not installed under `settings_core` at all).
+
+Phase 1 (T001–T005) complete. Concern for the story report: `feature-state.json`'s `stories`
+array has no `US0`/foundational entry at all — only `US1` (T006–T010) and `US2` (T011–T014) —
+so there was nothing of my own to flip `status`/`attempts`/`evidence` on. Left the ledger
+untouched rather than adding a structural entry outside my mandate.
