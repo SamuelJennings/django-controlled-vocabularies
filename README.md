@@ -1,5 +1,14 @@
 # django-controlled-vocabularies
 
+[![Tests](https://github.com/SamuelJennings/django-controlled-vocabularies/actions/workflows/tests.yml/badge.svg)](https://github.com/SamuelJennings/django-controlled-vocabularies/actions/workflows/tests.yml)
+[![Build](https://github.com/SamuelJennings/django-controlled-vocabularies/actions/workflows/build.yml/badge.svg)](https://github.com/SamuelJennings/django-controlled-vocabularies/actions/workflows/build.yml)
+[![Publish](https://github.com/SamuelJennings/django-controlled-vocabularies/actions/workflows/publish.yml/badge.svg)](https://github.com/SamuelJennings/django-controlled-vocabularies/actions/workflows/publish.yml)
+[![PyPI](https://img.shields.io/pypi/v/django-controlled-vocabularies.svg)](https://pypi.org/project/django-controlled-vocabularies/)
+[![codecov](https://codecov.io/gh/SamuelJennings/django-controlled-vocabularies/branch/main/graph/badge.svg)](https://codecov.io/gh/SamuelJennings/django-controlled-vocabularies)
+[![Python Versions](https://img.shields.io/pypi/pyversions/django-controlled-vocabularies.svg)](https://pypi.org/project/django-controlled-vocabularies/)
+[![Django Versions](https://img.shields.io/pypi/djversions/django-controlled-vocabularies.svg)](https://pypi.org/project/django-controlled-vocabularies/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A Django app for **managing, publishing, and consuming SKOS controlled vocabularies** — built for
 research organisations. Curators create and edit vocabularies through a web interface; developers
 attach concepts to their own models and serve standards-compliant RDF at stable URIs. No hand-edited
