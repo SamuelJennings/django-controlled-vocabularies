@@ -1,0 +1,144 @@
+{
+  "$schema": "https://openclaw.local/schemas/feature-state.schema.json",
+  "feature": "013-find-a-vocabulary",
+  "branch": "013-find-a-vocabulary",
+  "repo": "SamuelJennings/django-controlled-vocabularies",
+  "state": "PLAN",
+  "state_history": [
+    {
+      "state": "INTAKE",
+      "at": "2026-08-19T09:00:00Z",
+      "note": "issue #140 grilled against R6; four decisions with the maintainer - search covers vocabularies not concepts, no filtering, a four-item entry, and no access rule of the package's own"
+    },
+    {
+      "state": "SPECIFY",
+      "at": "2026-08-19T09:20:00Z",
+      "note": "spec.md written, 2 stories, FR-001..013, SC-001..006; coverage scan resolved five ambiguities into ## Clarifications, six entries in decisions.md"
+    },
+    {
+      "state": "SETUP",
+      "at": "2026-08-19T09:40:00Z",
+      "note": "#140 promoted to epic FS-013, stories #143 and #144 created and linked, draft PR #145 opened by the bot"
+    },
+    {
+      "state": "GATE_SPEC",
+      "at": "2026-08-19T09:50:00Z",
+      "note": "approved in session, no changes requested"
+    },
+    {
+      "state": "PLAN",
+      "at": "2026-08-19T10:30:00Z",
+      "note": "research read django-mvp v0.19.1 and django-literature's inner ui app; plan.md and tasks.md authored, 14 tasks across 3 phases"
+    }
+  ],
+  "gates": {
+    "spec": {
+      "approved_by": "SamuelJennings",
+      "at": "2026-08-19T09:50:00Z",
+      "self_resolved": [
+        "entries do not link to a vocabulary until #141 serves one",
+        "alphabetical order by name, case-insensitive and stable",
+        "the concept count counts concepts only and excludes nothing",
+        "an empty site and a search that matched nothing say different things",
+        "search selects from the whole set before the results are paged"
+      ]
+    },
+    "plan": {
+      "approved_by": null,
+      "at": null
+    },
+    "merge": {
+      "approved_by": null,
+      "at": null
+    }
+  },
+  "stories": [
+    {
+      "id": "US1",
+      "priority": "P1",
+      "issue": 143,
+      "status": "todo",
+      "replans": 0,
+      "worktree": null,
+      "tasks": [
+        {
+          "id": "T006",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T007",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T008",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T009",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T010",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
+    },
+    {
+      "id": "US2",
+      "priority": "P2",
+      "issue": 144,
+      "status": "todo",
+      "replans": 0,
+      "worktree": null,
+      "tasks": [
+        {
+          "id": "T011",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T012",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T013",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T014",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
+    }
+  ],
+  "budgets": {
+    "converge_cycles": {
+      "max": 2,
+      "used": 0
+    },
+    "review_cycles": {
+      "max": 1,
+      "used": 0
+    },
+    "design_review_cycles": {
+      "max": 1,
+      "used": 0
+    },
+    "tokens": {
+      "max": 120,
+      "used": 0
+    }
+  },
+  "pr": {
+    "number": 145,
+    "draft": true
+  }
+}
