@@ -1,7 +1,9 @@
 """Tests for :mod:`controlled_vocabularies.ui.views` (T006-T009)."""
 
 import pytest
+from django.db import connection
 from django.template.loader import render_to_string
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from tests.factories import ConceptFactory, ConceptSchemeFactory
@@ -111,3 +113,82 @@ class TestVocabularyListEntry:
         # Only the concept-count line renders as a <p> — nothing stands in for the
         # missing description, no empty label and no trailing punctuation.
         assert html.count("<p") == 1
+
+
+class TestVocabularyListOrdering:
+    """Alphabetical, stable order at a flat query cost (FR-004, SC-005, User Story 1 scenario 6).
+
+    Every case here deliberately gives the vocabulary whose *name* should sort last a *slug*
+    that would sort it first — ``ConceptScheme.slug`` is unique and Django's ``Count()``
+    annotation forces a ``GROUP BY`` on every selected column including it, which this
+    repo's SQLite test database satisfies through the unique index on ``slug`` when no
+    explicit ordering says otherwise. A slugified name and its own name normally sort the
+    same way, so a naive test would pass on that coincidence alone and prove nothing about
+    the ordering this task adds — a manually diverging slug (``set_slug()``) is what makes
+    the two cases distinguishable.
+    """
+
+    @pytest.mark.django_db
+    def test_a_name_beginning_with_a_lowercase_letter_still_sorts_before_an_uppercase_one_later_in_the_alphabet(
+        self, client
+    ):
+        zebra = ConceptSchemeFactory(name="Zebra")
+        zebra.set_slug("aaa-sorts-first-by-slug")
+        ConceptSchemeFactory(name="antelope")
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-list"))
+
+        names = [vocabulary.name for vocabulary in response.context["object_list"]]
+        # Byte order (capital Z = 0x5A, lowercase a = 0x61) would sort "Zebra" first, and
+        # so would zebra's own (deliberately mis-set) slug; case-insensitive order by name
+        # puts "antelope" first, as a reader expects.
+        assert names == ["antelope", "Zebra"]
+
+    @pytest.mark.django_db
+    def test_two_requests_return_the_same_sequence(self, client):
+        ConceptSchemeFactory.create_batch(5)
+        url = reverse("controlled_vocabularies_ui:vocabulary-list")
+
+        first = [vocabulary.pk for vocabulary in client.get(url).context["object_list"]]
+        second = [vocabulary.pk for vocabulary in client.get(url).context["object_list"]]
+
+        assert first == second
+
+    @pytest.mark.django_db
+    def test_two_vocabularies_sharing_a_name_still_produce_a_deterministic_order(self, client):
+        first = ConceptSchemeFactory(name="Duplicate")
+        # The slug is derived from the name and is unique app-wide, so a second same-named
+        # scheme needs its own explicit slug to save at all — set_slug() is the model's own
+        # supported way to give it one without touching the name under test. Set to sort
+        # first by slug (and so, by the class docstring's mechanism, first if the tiebreak
+        # were accidentally slug-based) while its pk sorts second — only a real `pk`
+        # tiebreak on identical names produces [first.pk, second.pk] here.
+        second = ConceptSchemeFactory.build(name="Duplicate")
+        second.set_slug("aaa-sorts-first-by-slug")
+        url = reverse("controlled_vocabularies_ui:vocabulary-list")
+
+        first_request = [vocabulary.pk for vocabulary in client.get(url).context["object_list"]]
+        second_request = [vocabulary.pk for vocabulary in client.get(url).context["object_list"]]
+
+        assert first_request == second_request == [first.pk, second.pk]
+
+    @pytest.mark.django_db
+    def test_query_count_is_flat_regardless_of_how_many_vocabularies_the_site_holds(
+        self, client, django_assert_num_queries
+    ):
+        # Page size is django-mvp's own inherited default (24, not restated — plan.md item 1),
+        # so this proves what SC-005 actually asks: the *annotation* costs a flat number of
+        # queries as the source table grows, not a query per row (an N+1 the SQLite-only test
+        # DB is otherwise too small to expose). It is not a claim that thirty rows render on
+        # one page.
+        ConceptSchemeFactory.create_batch(3)
+        url = reverse("controlled_vocabularies_ui:vocabulary-list")
+
+        with CaptureQueriesContext(connection) as captured:
+            client.get(url)
+        baseline = len(captured.captured_queries)
+
+        ConceptSchemeFactory.create_batch(27)
+
+        with django_assert_num_queries(baseline):
+            client.get(url)
