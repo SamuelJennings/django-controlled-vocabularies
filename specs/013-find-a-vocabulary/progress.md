@@ -120,3 +120,31 @@ now-redundant `# noqa: F403`/`F405` comments (F403/F405 are already in this repo
 `ignore` list), all checks pass after.
 
 Next: T004 — the three isolation proofs.
+
+## 2026-08-19T00:15:00Z · Implementer US0 · T004
+
+Did: `tests/test_ui/test_architecture.py` (AST-parses every `controlled_vocabularies/**/*.py`
+outside `ui/`, asserts none imports `mvp`, `django_cotton`, `crispy_forms`, `easy_icons`,
+`flex_menu` or `controlled_vocabularies.ui`), `tests/test_ui/test_boot.py` (fresh subprocess,
+`DJANGO_SETTINGS_MODULE=tests.settings_core`, `django.setup()` + `call_command("check")` +
+imports every core module, asserts `"controlled_vocabularies.ui" not in sys.modules`),
+`tests/test_ui/test_packaging.py` (`tomllib`-parses `pyproject.toml`, asserts `django-mvp` is
+`optional`, is exactly `[tool.poetry.extras] ui`, and is absent from every other extra and every
+poetry dependency group).
+
+All three passed immediately given T001–T003 (nothing to make green through new production code —
+these are standing proofs, not TDD in the red/code/green sense). Proved each catches a real
+violation before trusting it (craft-tdd's reproduce-first discipline, applied to the gate itself):
+temporarily added `import mvp` to `controlled_vocabularies/apps.py` — `test_architecture.py`
+failed naming `apps.py`; changed the import to `import controlled_vocabularies.ui` —
+`test_boot.py` failed with `"controlled_vocabularies.ui was imported by the core boot"`; flipped
+`django-mvp`'s `optional` to `false` in `pyproject.toml` — `test_packaging.py` failed. Reverted
+all three mutations (`git diff` on `controlled_vocabularies/apps.py` empty after revert;
+`pyproject.toml`'s `django-mvp` line unchanged).
+
+Verified: `poetry run pytest tests/test_ui/test_architecture.py tests/test_ui/test_boot.py
+tests/test_ui/test_packaging.py -q` — 35 passed. `poetry run ruff check
+tests/test_ui/test_architecture.py tests/test_ui/test_boot.py tests/test_ui/test_packaging.py` —
+all checks passed.
+
+Next: T005 — the missing-extra system check, and the commit that lands T001 alongside it.
