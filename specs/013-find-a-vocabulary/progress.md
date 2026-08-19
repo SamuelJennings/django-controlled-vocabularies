@@ -265,3 +265,35 @@ attempt.
 
 Next: T008 — `ordering = [Lower("name"), "pk"]` as a class attribute (not `.order_by()` in
 `get_queryset()` — plan.md item 1's rationale, load-bearing).
+
+## 2026-08-19T21:51:53Z · Implementer US1 · T008
+
+Did: `controlled_vocabularies/ui/views.py` — `ordering = [Lower("name"), "pk"]` as a class
+attribute (plan.md item 1, decisions.md D2 — never an `.order_by()` call inside
+`get_queryset()`, which Django would apply after both django-mvp mixins rather than before).
+
+Test first, and this task earned its RED the hard way: the first draft of
+`test_names_differing_only_in_case_sort_as_a_reader_would_expect` and
+`test_two_vocabularies_sharing_a_name_still_produce_a_deterministic_order` **passed before
+`ordering` existed** — a false green (craft-tdd's "a test that passes on first run is
+testing nothing you just wrote"). Diagnosed rather than accepted: T007's `Count()`
+annotation forces a `GROUP BY` on every selected column, and this repo's SQLite test
+database was satisfying that `GROUP BY` via the unique index on `slug` — which, for
+ordinary slugified names, sorts the same way as case-insensitive name order, so the
+original test data (`"banana"`/`"Apple"`/`"cherry"`, then `"Zebra"`/`"antelope"`) couldn't
+tell a real ordering from that coincidence. Rewrote both cases so the vocabulary whose
+*name* should sort last carries a `set_slug()`-assigned slug that would sort it *first* —
+only a genuine `Lower("name")`/`pk` ordering can put it last regardless. Both then failed
+for the right reason (`assert ['Zebra', 'antelope'] == ['antelope', 'Zebra']` and
+`assert [2, 1] == [1, 2]`) before this commit's `ordering` attribute existed, and pass now
+that it does. Recorded as a `decisions.md`-worthy note for whoever next writes an ordering
+test against an annotated queryset in this repo — see `concerns` in the eventual completion
+report.
+
+Verified: `poetry run pytest tests/test_ui/test_views.py -k Ordering -q` — 4 passed.
+`poetry run pytest tests/test_ui -q` — 54 passed (full `test_ui` scope). `poetry run ruff
+check controlled_vocabularies/ui/views.py tests/test_ui/test_views.py` — all checks
+passed. Committed via `git commit` — full local pre-commit gate passed clean on the first
+attempt.
+
+Next: T009 — empty-state overrides and the no-link proof (`test_templates.py`, new).
