@@ -3,7 +3,7 @@
   "feature": "012-concept-selection-in-the-admin",
   "branch": "012-concept-selection-in-the-admin",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "IMPLEMENT",
+  "state": "MERGED",
   "state_history": [
     {
       "state": "INTAKE",
@@ -39,6 +39,11 @@
       "state": "IMPLEMENT",
       "at": "2026-08-14T01:10:00Z",
       "note": "T001 foundational done by the orchestrator (D18): admin installed in the test project, default site mounted, three bare ModelAdmin registrations; full suite 1298 passed; one pre-existing test narrowed with D17 recorded"
+    },
+    {
+      "state": "MERGED",
+      "at": "2026-08-14T13:09:07Z",
+      "note": "PR #131 merged; approved by SamuelJennings"
     }
   ],
   "gates": {
@@ -67,8 +72,8 @@
       ]
     },
     "merge": {
-      "approved_by": null,
-      "at": null
+      "approved_by": "SamuelJennings",
+      "at": "2026-08-14T13:07:03Z"
     },
     "design_review": {
       "approved_by": "forge design reviewer (subagent)",
@@ -123,7 +128,7 @@
           "attempts": 1,
           "evidence": {
             "commands": [
-              "poetry run pytest -q tests/test_admin.py::TestConceptControlRendersOnAdminPages — 4 passed"
+              "poetry run pytest -q tests/test_admin.py::TestConceptControlRendersOnAdminPages \u2014 4 passed"
             ]
           }
         },
@@ -133,7 +138,7 @@
           "attempts": 1,
           "evidence": {
             "commands": [
-              "poetry run pytest -q tests/test_admin.py::TestAdminPageRenderingIsBoundedByVocabularySize — 1 passed"
+              "poetry run pytest -q tests/test_admin.py::TestAdminPageRenderingIsBoundedByVocabularySize \u2014 1 passed"
             ]
           }
         },
@@ -143,7 +148,7 @@
           "attempts": 2,
           "evidence": {
             "commands": [
-              "poetry run pytest -q tests/test_admin.py::TestAdminSubmissionSavesAndFieldRulesStillBite — attempt 1: 2 failed, 4 passed (wrong assumed message text, D19); attempt 2 (after fix): 6 passed"
+              "poetry run pytest -q tests/test_admin.py::TestAdminSubmissionSavesAndFieldRulesStillBite \u2014 attempt 1: 2 failed, 4 passed (wrong assumed message text, D19); attempt 2 (after fix): 6 passed"
             ]
           }
         }
@@ -162,7 +167,7 @@
           "attempts": 1,
           "evidence": {
             "commands": [
-              "poetry run pytest -q tests/test_admin.py::TestConceptFieldOffersNoRelatedObjectAffordance — 4 failed, 1 passed (RED, expected: research.md R1's measured table)"
+              "poetry run pytest -q tests/test_admin.py::TestConceptFieldOffersNoRelatedObjectAffordance \u2014 4 failed, 1 passed (RED, expected: research.md R1's measured table)"
             ]
           }
         },
@@ -172,9 +177,9 @@
           "attempts": 1,
           "evidence": {
             "commands": [
-              "poetry run pytest -q tests/test_admin.py::TestConceptFieldOffersNoRelatedObjectAffordance — 5 passed",
-              "poetry run pytest -q tests/test_forms.py — 22 passed (unchanged)",
-              "poetry run mypy controlled_vocabularies/admin.py controlled_vocabularies/forms.py — 4 errors then fixed (D20), clean"
+              "poetry run pytest -q tests/test_admin.py::TestConceptFieldOffersNoRelatedObjectAffordance \u2014 5 passed",
+              "poetry run pytest -q tests/test_forms.py \u2014 22 passed (unchanged)",
+              "poetry run mypy controlled_vocabularies/admin.py controlled_vocabularies/forms.py \u2014 4 errors then fixed (D20), clean"
             ]
           }
         },
@@ -184,8 +189,8 @@
           "attempts": 1,
           "evidence": {
             "commands": [
-              "poetry run pytest -q tests/test_forms.py::TestConceptFieldDeclinesTheAdminWrapper — 4 passed",
-              "poetry run pytest -q tests/test_forms.py — 26 passed (whole file)"
+              "poetry run pytest -q tests/test_forms.py::TestConceptFieldDeclinesTheAdminWrapper \u2014 4 passed",
+              "poetry run pytest -q tests/test_forms.py \u2014 26 passed (whole file)"
             ]
           }
         }
@@ -204,7 +209,7 @@
           "attempts": 1,
           "evidence": {
             "commands": [
-              "poetry run django-admin makemigrations --check --dry-run — clean; poetry run django-admin check — 0 issues"
+              "poetry run django-admin makemigrations --check --dry-run \u2014 clean; poetry run django-admin check \u2014 0 issues"
             ]
           }
         },
@@ -214,7 +219,7 @@
           "attempts": 1,
           "evidence": {
             "commands": [
-              "poetry run pytest -q tests/test_admin.py::TestInlineRowsCarryTheControl — 2 passed"
+              "poetry run pytest -q tests/test_admin.py::TestInlineRowsCarryTheControl \u2014 2 passed"
             ]
           }
         },
@@ -224,7 +229,7 @@
           "attempts": 1,
           "evidence": {
             "commands": [
-              "poetry run pytest -q tests/test_forms.py::TestConceptWidgetsShipTheInlineInitialisationScript — 3 passed (red before Media added); tests/test_admin.py::TestEmptyFormRowIsInitialisable — 2 passed"
+              "poetry run pytest -q tests/test_forms.py::TestConceptWidgetsShipTheInlineInitialisationScript \u2014 3 passed (red before Media added); tests/test_admin.py::TestEmptyFormRowIsInitialisable \u2014 2 passed"
             ]
           }
         },
@@ -234,7 +239,7 @@
           "attempts": 1,
           "evidence": {
             "commands": [
-              "poetry run pytest -q tests/test_admin.py::TestNewInlineRowSavesItsConcept — 1 passed"
+              "poetry run pytest -q tests/test_admin.py::TestNewInlineRowSavesItsConcept \u2014 1 passed"
             ]
           }
         }
@@ -253,7 +258,7 @@
           "attempts": 1,
           "evidence": {
             "commands": [
-              "poetry run pytest -q tests/test_admin.py::TestExplicitDeclarationWins — 10 passed; tests/test_admin.py (whole file) — 31 passed"
+              "poetry run pytest -q tests/test_admin.py::TestExplicitDeclarationWins \u2014 10 passed; tests/test_admin.py (whole file) \u2014 31 passed"
             ]
           }
         },
@@ -263,7 +268,7 @@
           "attempts": 1,
           "evidence": {
             "commands": [
-              "poetry run pytest -q tests/test_admin.py::TestReadOnlyPresentationRendersNoControl — 4 passed; tests/test_admin.py (whole file) — 35 passed"
+              "poetry run pytest -q tests/test_admin.py::TestReadOnlyPresentationRendersNoControl \u2014 4 passed; tests/test_admin.py (whole file) \u2014 35 passed"
             ]
           }
         }
@@ -282,7 +287,7 @@
           "attempts": 1,
           "evidence": {
             "commands": [
-              "poetry run pytest -q tests/test_checks.py::TestProjectWithoutTheAdminIsUnaffected — 3 passed",
+              "poetry run pytest -q tests/test_checks.py::TestProjectWithoutTheAdminIsUnaffected \u2014 3 passed",
               "gate tested against the defect: making the admin import unconditional turns the sys.modules assertion red"
             ]
           }
@@ -293,7 +298,7 @@
           "attempts": 1,
           "evidence": {
             "commands": [
-              "poetry run pytest -q tests/test_admin.py::TestCustomAdminSiteGetsTheSameBehaviour — 4 passed"
+              "poetry run pytest -q tests/test_admin.py::TestCustomAdminSiteGetsTheSameBehaviour \u2014 4 passed"
             ]
           }
         }
@@ -312,7 +317,7 @@
           "attempts": 1,
           "evidence": {
             "commands": [
-              "poetry run pytest -q tests/test_standards.py::TestReadmeDocumentsTheAdminSection — 5 passed; tests/test_standards.py (whole file) — 88 passed"
+              "poetry run pytest -q tests/test_standards.py::TestReadmeDocumentsTheAdminSection \u2014 5 passed; tests/test_standards.py (whole file) \u2014 88 passed"
             ]
           }
         },
@@ -322,7 +327,7 @@
           "attempts": 1,
           "evidence": {
             "commands": [
-              "poetry run pytest -q tests/test_standards.py::TestFieldsChecksI18nSweep — 5 passed; gate tested against the defect: ImproperlyConfigured('boom') spliced into admin.py turns the sweep red, reverted"
+              "poetry run pytest -q tests/test_standards.py::TestFieldsChecksI18nSweep \u2014 5 passed; gate tested against the defect: ImproperlyConfigured('boom') spliced into admin.py turns the sweep red, reverted"
             ]
           }
         }
@@ -346,5 +351,9 @@
       "max": 4000000,
       "used": 0
     }
+  },
+  "pr": {
+    "number": 131,
+    "draft": false
   }
 }
