@@ -233,3 +233,35 @@ before writing the assertion, not by assuming it.
 
 Next: T007 — `get_queryset()` annotates `concept_count`, the row partial adds count and
 origin (imported vs. held here, publisher identifier as text never a link).
+
+## 2026-08-19T21:46:32Z · Implementer US1 · T007
+
+Did: `controlled_vocabularies/ui/views.py` — `get_queryset()` now annotates
+`concept_count=Count("concepts")` (collections excluded — decisions.md D3). The row
+partial (`conceptscheme_list_item.html`) adds a `badges` slot showing "Imported" when
+`static_uri` is set and "Held here" when it is not (decisions.md D6), the identifier itself
+as plain `<c-text>` (never a link — D6, and never `mark_safe`/`format_html` — D4's rule
+applies here too even though D4 is about the empty states), and the concept count via
+`{% blocktrans count %}`, always rendered including at zero.
+
+Test first: `tests/test_ui/test_views.py::TestVocabularyListEntry` (6 cases). The count
+annotation is proven through the full view (`client.get`, reading
+`response.context["object_list"][...].concept_count`); the row's own rendering (identifier
+text, imported/held-here wording, count wording, no stray element for a missing
+description) is proven by calling `render_to_string()` on the row template directly with a
+built (unsaved, for the pure-rendering cases) or saved (for the DB-backed annotation case)
+`ConceptScheme` — the same template the page renders the row from, isolated from the
+page's own `<c-text>`-based chrome (pagination summary, empty state) so an assertion about
+one row's markup cannot be satisfied by unrelated markup elsewhere on the page. Run and
+observed failing first — `AttributeError: 'ConceptScheme' object has no attribute
+'concept_count'` and four content-assertion failures against the T006 row (no badge, no
+identifier, no count) — before the annotation and the new partial markup existed.
+
+Verified: `poetry run pytest tests/test_ui/test_views.py -k Entry -q` — 6 passed.
+`poetry run pytest tests/test_ui -q` — 50 passed (full `test_ui` scope). `poetry run ruff
+check controlled_vocabularies/ui/views.py tests/test_ui/test_views.py` — all checks passed.
+Committed via `git commit` — the full local pre-commit gate passed clean on the first
+attempt.
+
+Next: T008 — `ordering = [Lower("name"), "pk"]` as a class attribute (not `.order_by()` in
+`get_queryset()` — plan.md item 1's rationale, load-bearing).
