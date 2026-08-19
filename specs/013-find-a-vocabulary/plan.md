@@ -38,7 +38,9 @@ test project.
 **Constraints**: no JavaScript requirement — the page works without it. No access rule of the
 package's own. No link to a vocabulary's own page until #141 serves one.
 
-**Scale/Scope**: two user stories, one new app, one view, two templates, one route, one extra.
+**Scale/Scope**: two user stories, one new app, one view, two templates, one route, one extra. The
+two stories run **in sequence, not in parallel** — US-2 extends the same view class and rewrites the
+same template block US-1 writes, so parallel worktrees would collide at convergence.
 
 ## Constitution Check
 
@@ -57,7 +59,7 @@ package's own. No link to a vocabulary's own page until #141 serves one.
 | XI RDF fidelity | Untouched. | N/A |
 | XII Internationalization | Every string the page shows is `{% trans %}` in templates and `gettext_lazy` in Python, including both empty-state messages. SC-006 is a test. | Follows |
 | XIII Data-model conventions | No field added, so no indexing decision. Ordering is `Lower("name")` on an unindexed column, which is correct at this scale and is R7's to revisit. | Follows |
-| XIV Test structure | `tests/test_ui/` mirrors `controlled_vocabularies/ui/`, one class per subject, factories reused from `tests/factories.py`. Template and packaging tests have no source module to mirror and are declared under `[tool.forge.conformance] non-mirror-paths`. | Follows |
+| XIV Test structure | `tests/test_ui/` mirrors `controlled_vocabularies/ui/`, one class per subject, factories reused from `tests/factories.py`. Template and packaging tests have no source module to mirror; T001 declares those four files under `[tool.forge.conformance] non-mirror-paths`. | Follows |
 | XV Cohesion | One view class holds the list behaviour; no free functions. | Follows |
 
 ## Project Structure
@@ -96,7 +98,6 @@ tests/
 ├── urls_core.py                         # new — empty
 └── test_ui/
     ├── __init__.py
-    ├── conftest.py
     ├── test_apps.py
     ├── test_architecture.py             # core imports none of the ui stack (AST)
     ├── test_boot.py                     # core boots in a fresh subprocess
@@ -116,14 +117,25 @@ stack.
 ## Key design decisions
 
 1. **`VocabularyListView(MVPListView)`** over `ConceptScheme`, with `search_fields = ["name",
-   "description"]`, `paginate_by = 24`, `get_queryset()` returning
-   `.annotate(concept_count=Count("concepts")).order_by(Lower("name"), "pk")`, and
-   `list_item_template` naming the row partial. The two empty states are
-   `get_empty_state_heading()` / `get_empty_state_message()` branching on `?q=`.
-2. **The page template exists only to fix the actions block.** django-mvp renders search, sort,
-   filter and create by default; this page wants search alone, and django-mvp's search input
-   targets a form its filter action defines (research R4). The template overrides the block with a
-   `GET` form of our own wrapping django-mvp's search action. Everything else is inherited.
+   "description"]`, `ordering = [Lower("name"), "pk"]` as a class attribute, `get_queryset()`
+   returning `.annotate(concept_count=Count("concepts"))`, and `list_item_template` naming the row
+   partial. Page size is django-mvp's inherited default and is not restated. The ordering is a class
+   attribute rather than an `.order_by()` call in `get_queryset()` because Django applies
+   `self.ordering` innermost, before both django-mvp mixins — calling `.order_by()` in our own
+   `get_queryset()` would apply it *after* the search mixin's `.distinct()`, which is the operand
+   order upstream's own docstring says its mixin order exists to avoid.
+   The two empty states are `get_empty_state_heading()` / `get_empty_state_message()` branching on
+   `?q=`. Both return plain translatable text — never `mark_safe`, never `format_html`. They cannot
+   carry a link: django-mvp's empty-state component renders both strings autoescaped with no slot,
+   so markup in them would show as literal text, and marking them safe would emit the search term
+   unescaped.
+2. **The page template owns the actions block.** django-mvp renders search, sort, filter and create
+   by default; this page wants search alone, and django-mvp's search input targets a form its filter
+   action defines (research R4). The template overrides the block with a `GET` form of our own
+   wrapping django-mvp's search action, our own `{% trans %}`d submit button (django-mvp's ships a
+   hard-coded English label its component does not expose), and — when a search term is set — the
+   link back to the unsearched list that FR-009 requires. Everything else is inherited;
+   `{% block page.content %}` is not overridden.
 3. **The row is a Cotton card partial** — name, description, concept count, and origin. Imported
    vocabularies show the publisher's identifier as text, never as a link. No element links to the
    vocabulary itself (FR-013).
@@ -146,8 +158,10 @@ stack.
 - **django-mvp's INSTALLED_APPS surface is wide** — cotton, icons, menus, crispy and its own app.
   A consuming project must install all of them, and the README has to say so exactly. Mitigation:
   the test project's settings are the working example, and the README quotes them.
-- **The search-box defect (research R4) is upstream.** The workaround lives in our page template
-  and will look redundant once django-mvp fixes it. Mitigation: an issue filed upstream, and a
-  comment in the template pointing at it.
+- **Two upstream defects are worked around in our page template** — the search input targets a form
+  only the filter action defines (research R4), and the search component's submit button carries a
+  hard-coded English label it does not expose as a variable. Both workarounds will look redundant
+  once django-mvp fixes them. Mitigation: one issue filed upstream covering both, and a comment in
+  the template pointing at it.
 - **Coverage floors** (project 90%, patch 85%) with a new app that is mostly templates. Mitigation:
   the view and check carry real tests; template behaviour is asserted through rendered HTML.

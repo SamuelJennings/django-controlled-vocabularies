@@ -24,6 +24,22 @@ lock. Change the tests workflow's `poetry-install-args` from `''` to `'--extras 
 `controlled_vocabularies/ui/**` to nothing — the workflow's push path filter already covers
 `controlled_vocabularies/**`.
 
+Also declare the four test modules that mirror no source module, or the conformance check reads them
+as Article XIV violations once T004 and T009 land:
+
+```toml
+[tool.forge.conformance]
+non-mirror-paths = [
+    "tests/test_ui/test_architecture.py",
+    "tests/test_ui/test_boot.py",
+    "tests/test_ui/test_packaging.py",
+    "tests/test_ui/test_templates.py",
+]
+```
+
+Name the four files, not the `tests/test_ui/` prefix — the rest of that directory does mirror
+modules and must stay checked.
+
 **Proves**: nothing on its own. **Verify**: `poetry install --extras ui` succeeds, `poetry check`
 clean, `deptry` clean, the existing suite green.
 
@@ -61,11 +77,17 @@ exactly one statement whose value is a string constant.
 `tests/settings_core.py` holds what the package needs on its own — the current contents of
 `tests/settings.py`, with `ROOT_URLCONF = "tests.urls_core"` pointing at an empty urlconf.
 `tests/settings.py` becomes a star-import of it plus the ui stack: `django_cotton`, `easy_icons`,
-`flex_menu`, `django_tables2`, `crispy_forms`, `crispy_tailwind`, `mvp` and
-`controlled_vocabularies.ui` in `INSTALLED_APPS`, django-mvp's context processor appended to
-`TEMPLATES`, and the `CRISPY_TEMPLATE_PACK`, `CRISPY_ALLOWED_TEMPLATE_PACKS`, `EASY_ICONS`,
-`FLEX_MENUS` and `SITE_ID` settings django-mvp expects.
-`django-literature`'s `tests/settings.py` is the working list — copy it, do not invent it.
+`flex_menu`, `crispy_forms`, `crispy_tailwind`, `mvp` and `controlled_vocabularies.ui` in
+`INSTALLED_APPS`, django-mvp's context processor appended to `TEMPLATES`, and the
+`CRISPY_TEMPLATE_PACK`, `CRISPY_ALLOWED_TEMPLATE_PACKS`, `EASY_ICONS` and `FLEX_MENUS` settings
+django-mvp expects.
+`django-literature`'s `tests/settings.py` is the working list — copy it, do not invent it, but
+**filter the copy to django-mvp's own declared dependencies**. In particular it installs
+`django_tables2`, which django-mvp does not depend on (it is a guarded optional integration there)
+and `--extras ui` does not install; this page is a card grid, not a table, and because
+`tests/settings.py` is the settings module for the whole repo, naming an uninstalled app there
+fails collection of every test in the suite, not only these. `SITE_ID` goes the same way —
+django-mvp uses no `django.contrib.sites`, so the setting is inert.
 `tests/urls.py` mounts `controlled_vocabularies.ui.urls` under a non-empty prefix of the test
 project's choosing, so a hard-coded path in a view is caught rather than accidentally matching.
 
@@ -84,9 +106,8 @@ project's choosing, so a hard-coded path in a view is caught rather than acciden
 Three independent proofs, each of which fails for a different mistake:
 
 - **Architecture**: parse every `controlled_vocabularies/**/*.py` outside `ui/` with `ast` and
-  assert none imports `mvp`, `django_cotton`, `crispy_forms`, `easy_icons`, `flex_menu`,
-  `django_tables2` or `controlled_vocabularies.ui`. Parsed, not grepped, so a mention in a
-  docstring cannot fail it.
+  assert none imports `mvp`, `django_cotton`, `crispy_forms`, `easy_icons`, `flex_menu` or
+  `controlled_vocabularies.ui`. Parsed, not grepped, so a mention in a docstring cannot fail it.
 - **Boot**: in a fresh subprocess forcing `DJANGO_SETTINGS_MODULE=tests.settings_core` inside the
   script (pytest-django exports the other one), run `django.setup()` and `call_command("check")`,
   import every core module, then assert `"controlled_vocabularies.ui" not in sys.modules`.
@@ -174,8 +195,15 @@ vocabulary with no description renders without a stray label or punctuation.
 
 **Files**: `controlled_vocabularies/ui/views.py`, `tests/test_ui/test_views.py`
 
-Order by `Lower("name")` with `pk` last. The tiebreaker is not decoration: an order without a total
-order lets a row appear on two pages or on neither once pagination is in play. Set `paginate_by`.
+Set `ordering = [Lower("name"), "pk"]` as a **class attribute**, not an `.order_by()` call inside
+`get_queryset()`. Django applies `self.ordering` innermost, ahead of both django-mvp mixins; ordering
+from our own `get_queryset()` would land after the search mixin's `.distinct()`, which is the operand
+order upstream's docstring says its mixin order exists to avoid, and this repo's SQLite-only suite
+could not catch the consequence. The `Count("concepts")` annotation stays in `get_queryset()`.
+
+The `pk` tiebreaker is not decoration: an order without a total order lets a row appear on two pages
+or on neither once pagination is in play. Page size is django-mvp's inherited default — do not
+restate it.
 
 Test, in `TestVocabularyListOrdering`: vocabularies whose names differ only in case sort as a reader
 would expect and not as byte order would; two requests return the same sequence; two vocabularies
@@ -231,6 +259,10 @@ produce the page.
 
 ## Phase 3 — US-2: Narrow the list to the one you are after (P2, #144)
 
+**This phase starts only after US-1 has landed.** The two stories are not independent: they edit the
+same view module, the same page template and the same test module, and T011 rewrites the actions
+block T006 writes. Dispatch them in sequence, in one checkout — not into parallel worktrees.
+
 ### T011 — A search narrows the list by name and by description
 
 **Files**: `controlled_vocabularies/ui/views.py`,
@@ -241,17 +273,20 @@ Set `search_fields = ["name", "description"]`; django-mvp's mixin reads `?q=`, s
 case-insensitive substring matching across those fields. Replace the page template's empty actions
 block with a `GET` form of our own wrapping django-mvp's search action — the shipped search input
 targets a form defined by the *filter* action, so rendering search alone yields a box that submits
-nothing (research R4). Leave a comment naming the upstream issue.
+nothing (research R4). Render the submit button in our own template as `{% trans "Search" %}` rather
+than relying on django-mvp's, whose label is a hard-coded English literal the component exposes no
+variable for. Leave a comment naming the upstream issue covering both.
 
 Test, in `TestVocabularySearch`: a word from a name narrows to that vocabulary; a word appearing only
 in a description does too; matching ignores case; a term containing `%`, `_` or a quote is looked for
 literally and matches nothing rather than everything; a non-Latin term matches its vocabulary. Assert
-the rendered page carries the search input and no sort or filter control.
+the rendered page carries the search input and no sort or filter control, and that submitting the
+form reaches the view with `?q=` set — the defect being worked around is silent otherwise.
 
-**Proves**: FR-006, User Story 2 scenarios 1 to 3 and 7.
+**Proves**: FR-006, SC-006, User Story 2 scenarios 1 to 3 and 7.
 **Verify**: `pytest tests/test_ui/test_views.py -k Search`.
 
-**Depends on**: T010.
+**Depends on**: T009.
 
 ---
 
@@ -278,17 +313,27 @@ the full one.
 
 ### T013 — A search matching nothing says so, in its own words
 
-**Files**: `controlled_vocabularies/ui/views.py`, `tests/test_ui/test_views.py`
+**Files**: `controlled_vocabularies/ui/views.py`,
+`controlled_vocabularies/ui/templates/controlled_vocabularies/ui/conceptscheme_list.html`,
+`tests/test_ui/test_views.py`
 
-Branch both empty-state methods on whether a search term was given: with one, say nothing matched,
-repeat the term, and offer the way back to the full list; without one, keep T009's wording. A
-mistyped word is invisible once the search box is the only record of it, and telling someone whose
-search missed that the site is empty is a false statement the page has the information to avoid.
-The echoed term is escaped by the template layer.
+Branch both empty-state methods on whether a search term was given: with one, say nothing matched and
+repeat the term; without one, keep T009's wording. A mistyped word is invisible once the search box
+is the only record of it, and telling someone whose search missed that the site is empty is a false
+statement the page has the information to avoid. The echoed term is escaped by the template layer.
+
+**The way back to the full list is a link in the actions block T011 owns**, not markup inside the
+message. django-mvp's empty-state component renders heading and message as autoescaped strings with
+no slot and no block, so an anchor in the message would render as literal text — and the obvious
+repair, `mark_safe` over a string that also carries the search term, would emit an attacker-supplied
+term unescaped. Both methods return plain translatable text; neither uses `mark_safe` or
+`format_html`. Do not override `{% block page.content %}`.
 
 Test: a search matching nothing returns 200 with the no-match wording, the term echoed, and a link
-to the unsearched page; an empty database with no search keeps T009's wording; the two messages are
-different strings; and a term containing markup is escaped in the response.
+to the unsearched page; an empty database with no search keeps T009's wording, and shows no such
+link; the two messages are different strings; and a term containing markup is escaped in the
+response — assert on the escaped form, since a message rendered through `mark_safe` would pass a
+substring check for the raw term.
 
 **Proves**: FR-009, FR-011, User Story 2 scenario 4.
 **Verify**: `pytest tests/test_ui/test_views.py -k Search`.
@@ -303,8 +348,9 @@ different strings; and a term containing markup is escaped in the response.
 
 Extend the browsing section: what the search covers (names and descriptions, not concepts), that
 it travels in the address so a narrowed list can be shared, and that there is no filtering. Say
-what it does not do — finding a concept without knowing its vocabulary — so a reader is not left
-inferring it.
+that a second word **widens** rather than narrows — matching is OR across every word and both
+fields — because the opposite is what a reader assumes. Say what it does not do — finding a concept
+without knowing its vocabulary — so a reader is not left inferring it.
 
 **Proves**: Article VI. **Verify**: the documented behaviour matches the tests.
 
