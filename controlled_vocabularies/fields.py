@@ -452,20 +452,45 @@ def _install_required_set_check(cls):
     ``full_clean``'s own errors survive — this only adds to the error
     dictionary it raises, under each empty required field's own name, and
     re-raises the merged whole.
+
+    A *saved* record is skipped too, but only for the call
+    ``ModelForm._post_clean()`` makes (#124). That call happens before
+    ``save_m2m()`` attaches anything a submission carries, so this check
+    would otherwise read the relation exactly as it stood before the
+    submission — refusing the one write that would have populated it, on an
+    existing record whose relation happens to still be empty. Django's own
+    ``forms/models.py`` has exactly one caller of ``Model.full_clean()``
+    (``BaseModelForm._post_clean``, confirmed against the installed wheel),
+    and it is the only caller that passes ``validate_unique=False`` — every
+    other path, direct or otherwise, takes that parameter's default of
+    ``True``. That makes it the one signal available to tell a ModelForm's
+    own call apart from a direct one without threading form state through
+    ``full_clean``'s call chain. It is safe to key off: the required half of
+    FR-010's "by any form built from the model" clause is already carried by
+    ``ManyToManyField.formfield()``'s own ``required=not blank``, which
+    Django's ``ModelMultipleChoiceField`` checks against the *submitted*
+    data rather than the instance, so it is unaffected by where ``save_m2m``
+    falls in the lifecycle. A direct ``full_clean()`` call — the other half
+    of FR-010 — keeps ``validate_unique`` at its default and stays checked.
     """
     if getattr(cls.full_clean, "_concepts_field_required_set_check", False):
         return
     original_full_clean = cls.full_clean
 
-    def full_clean(self, *args, **kwargs):
+    def full_clean(self, exclude=None, validate_unique=True, validate_constraints=True):
         try:
-            original_full_clean(self, *args, **kwargs)
+            original_full_clean(
+                self,
+                exclude=exclude,
+                validate_unique=validate_unique,
+                validate_constraints=validate_constraints,
+            )
         except ValidationError as exc:
             errors = exc.update_error_dict({})
         else:
             errors = {}
 
-        if self.pk is not None:
+        if self.pk is not None and validate_unique:
             for field in type(self)._meta.get_fields():
                 if isinstance(field, ConceptsField) and not field.blank and not getattr(self, field.name).exists():
                     errors.setdefault(field.name, []).append(

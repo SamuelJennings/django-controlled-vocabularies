@@ -6,6 +6,16 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+### Fixed
+
+- `ConceptsField`: a required field on an existing record no longer refuses a valid submission
+  through a `ModelForm` when the relation is still empty. The required-set check installed on
+  `full_clean()` ran before `ModelForm._post_clean()`'s own `save_m2m()` attached anything a
+  submission carried, so it read the relation exactly as it stood before the submission — the one
+  path that would have populated it. The form field's own `required` flag already validates the
+  submitted data correctly; the model-level check now defers to it during a `ModelForm`'s own
+  clean and still applies in full to a direct `full_clean()` call. (#124)
+
 ## [v0.0.2] - 2026-08-14
 
 ### Added
