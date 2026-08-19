@@ -297,3 +297,48 @@ passed. Committed via `git commit` — full local pre-commit gate passed clean o
 attempt.
 
 Next: T009 — empty-state overrides and the no-link proof (`test_templates.py`, new).
+
+## 2026-08-19T21:55:43Z · Implementer US1 · T009
+
+Did: `controlled_vocabularies/ui/views.py` — `get_empty_state_heading()` returns "This site
+holds no vocabularies" (translatable); `get_empty_state_message()` returns `None` (nothing
+to point at, no create action exists). Only the empty-site state exists in this story —
+search (User Story 2) is what will later branch these on `?q=` for the second, distinct
+wording D4 requires; not built here, per the brief's own prohibition on T011-T014.
+
+Also refactored the row partial's origin badge (`conceptscheme_list_item.html`, T007): moved
+"Imported"/"Held here" out of `<c-badge text="{% trans ... %}">`'s attribute value and into
+slot content (`<c-badge>{% trans ... %}</c-badge>`) — both render identically, but a string
+in a Cotton attribute value and a string in element content are indistinguishable from a
+structural token (a slot name, a size key) by any regex-based scan that does not fully parse
+HTML/Django-template syntax, so leaving it in the attribute would have made this task's own
+"scan every shipped template for reader-visible text outside a translation tag" requirement
+vacuous for this app's real content. `tests/test_ui/test_views.py::TestVocabularyListEntry`
+(T007's tests, checking for the literal strings) needed no changes — same wording, same
+`in html` assertions.
+
+Test first: `tests/test_ui/test_views.py::TestVocabularyListEmptyState` (2 cases — the page
+returns 200 with "no vocabularies" wording; `get_empty_state_heading()` itself says so, using
+django-mvp's own default heading, "There's nothing here yet", as the pre-implementation RED).
+New `tests/test_ui/test_templates.py` (T009's own file): `TestRowPartialNeverLinksToTheVocabulary`
+(source contains no `{% url %}` tag, no `local_url` reference — both passed immediately, since
+the row partial never had either; recorded as evidence rather than as a RED/GREEN pair),
+`TestRenderedPageNeverLinksToAVocabulary` (no rendered anchor's `href` equals a scheme's
+`local_url` — passed immediately, same reason), `TestEveryShippedTemplateWrapsReaderVisibleTextInATranslationTag`
+(parametrized over every `.html` under `controlled_vocabularies/ui/templates/`; strips Django's
+own comment/`blocktrans`/tag/variable syntax and asserts no reader-visible text-node fragment
+survives — passed immediately against the already-correctly-wrapped templates, confirmed
+meaningful by construction: the scanner is scoped to text nodes specifically because that is
+where this app's strings now live, after the attribute-to-slot-content refactor above).
+
+Verified: `poetry run pytest tests/test_ui/test_templates.py tests/test_ui/test_views.py -k
+"EmptyState or Templates or Link" -q` — 7 passed. `poetry run pytest tests/test_ui -q` — 61
+passed (full `test_ui` scope). `poetry run ruff check controlled_vocabularies/ui/views.py
+controlled_vocabularies/ui/templates tests/test_ui/test_views.py tests/test_ui/test_templates.py`
+— all checks passed. Committed via `git commit` — full local pre-commit gate passed clean on
+the first attempt.
+
+US-1 (T006-T009) implementation complete. Next: T010 — document the page in README.md and
+CHANGELOG.md, then the story's own exit criteria (full `poetry run pytest -q`, full
+`poetry run pre-commit run --all-files`, `makemigrations --check --dry-run`) before the
+completion report.
