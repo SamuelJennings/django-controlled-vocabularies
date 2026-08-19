@@ -65,7 +65,8 @@ Verified: `poetry lock` (clean write), `poetry check` exit 0 (pre-existing legac
 deprecation warnings only, unrelated to this change), `poetry install --extras ui` (8 packages
 installed: django-mvp + its own deps), `poetry run pytest -q` — 1355 passed. `poetry run deptry .`
 reports `DEP002 'django-mvp' defined as a dependency but not used` — expected per decisions.md D7:
-nothing imports `mvp` until T005's `ui/checks.py` does; re-verified clean after T005 below.
+nothing imports `mvp` until T005's `ui/checks.py` does. The pyproject/lock/workflow changes stay
+uncommitted until then (see D7's revision below, after the first commit attempt was rejected).
 
 Next: T002 — the ui app and its registration test.
 Watch: this repo's pre-commit hook runs `deptry` at commit time, not only at story end — the
@@ -86,3 +87,36 @@ Verified: `poetry run pytest tests/test_ui/test_apps.py -q` — 2 passed. `poetr
 controlled_vocabularies/ui/ tests/test_ui/` — all checks passed.
 
 Next: T003 — the widened test settings and the core-only settings module.
+
+## 2026-08-19T00:10:00Z · Implementer US0 · T003
+
+Did: `tests/settings_core.py` (new) — today's `tests/settings.py` contents verbatim, with
+`ROOT_URLCONF` pointed at a new empty `tests/urls_core.py`. `tests/settings.py` now star-imports
+`tests.settings_core` and appends the ui stack — `django_cotton`, `easy_icons`, `flex_menu`,
+`mvp`, `crispy_forms`, `crispy_tailwind`, `controlled_vocabularies.ui` in `INSTALLED_APPS`
+(django-literature's order, filtered per decisions.md: `django.contrib.sites`,
+`django.contrib.staticfiles` and `django_tables2` dropped — the first two are already in the
+core list or unneeded, and this page is a card grid, not a table), `mvp.context_processors.
+mvp_config` appended to `TEMPLATES`, `CRISPY_TEMPLATE_PACK`, `CRISPY_ALLOWED_TEMPLATE_PACKS`,
+`EASY_ICONS`, `FLEX_MENUS`, and `ROOT_URLCONF` reset to `tests.urls` (settings_core points it at
+`tests.urls_core`).
+
+**Deviation from tasks.md's literal text**: did not touch `tests/urls.py`. T003's own description
+says it should mount `controlled_vocabularies.ui.urls` under a prefix, but that module is created
+by T006 (Phase 2, `US-1`), which is out of this story's scope — my brief's prohibitions name "the
+ui view, templates, urls" as US-1's work, and its T003 acceptance criterion for this task tests
+only `INSTALLED_APPS` and `manage.py check`, not a urls.py mount. Mounting an `include()` of a
+module that does not exist yet would also fail `manage.py check`'s own URL-resolution checks
+immediately, contradicting the "clean under both settings modules" requirement. Left for T006.
+
+Verified: `poetry run pytest -q` — 1357 passed (2 more than T001's baseline: T002's
+`test_ui/test_apps.py`). `DJANGO_SETTINGS_MODULE=tests.settings poetry run django-admin check` —
+"System check identified no issues (0 silenced)". `DJANGO_SETTINGS_MODULE=tests.settings_core
+poetry run django-admin check` — exit 0, one pre-existing warning (`controlled_vocabularies.W002`,
+the core's own check reporting its route absent from the deliberately empty `urls_core.py` —
+matches django-literature's own `tests/urls_core.py`, `urlpatterns = []`). `poetry run ruff check
+tests/settings.py tests/settings_core.py tests/urls_core.py` — ruff's autofix removed two
+now-redundant `# noqa: F403`/`F405` comments (F403/F405 are already in this repo's global
+`ignore` list), all checks pass after.
+
+Next: T004 — the three isolation proofs.
