@@ -342,3 +342,38 @@ US-1 (T006-T009) implementation complete. Next: T010 — document the page in RE
 CHANGELOG.md, then the story's own exit criteria (full `poetry run pytest -q`, full
 `poetry run pre-commit run --all-files`, `makemigrations --check --dry-run`) before the
 completion report.
+
+## 2026-08-19T21:58:29Z · Implementer US1 · T010
+
+Did: `README.md` — new "Finding a vocabulary" section (placed after "Choosing a concept in
+the admin", before "Importing a published vocabulary"): what the page shows, the `pip
+install django-controlled-vocabularies[ui]` install step, the full `INSTALLED_APPS` block
+plus `CRISPY_TEMPLATE_PACK`/`CRISPY_ALLOWED_TEMPLATE_PACKS`/the `mvp_config` context
+processor/`EASY_ICONS`/`FLEX_MENUS` settings — quoted verbatim from `tests/settings.py`,
+mounting with `include("controlled_vocabularies.ui.urls")`, and reversing
+`controlled_vocabularies_ui:vocabulary-list` by name. States plainly that an entry does not
+yet link to its vocabulary, and why (`ConceptScheme.local_url` exists but nothing serves it
+yet — #141 is what will). `CHANGELOG.md` — new `### Added` entry under `[Unreleased]`.
+
+No new test file: this task's own acceptance is "the README's own instructions followed
+against the test project produce the page," and the instructions are a byte-for-byte quote
+of `tests/settings.py`'s ui-specific block — the same configuration
+`tests/test_ui/test_views.py`, `test_templates.py` and `test_urls.py` already exercise the
+real page against, 20 passing test cases across T006-T009. Confirmed this by first trying
+to write a *slimmed-down* settings module for the README (omitting `EASY_ICONS` and
+`FLEX_MENUS`, guessing they were test-suite-only concerns) and running it manually against
+the view: it failed deep inside django-mvp's base chrome (`ImproperlyConfigured` from
+`<c-icon>` with no `EASY_ICONS["default"]` renderer configured, cascading through a
+production 500 page that itself needs the same chrome to render, since the scratch settings
+module also left `DEBUG` at its `tests.settings_core` default of unset). That failed
+experiment is why the README quotes the *whole* block rather than a hand-trimmed one — it is
+evidence, not assumption, that every setting listed is load-bearing for this page. The
+scratch settings module was not committed.
+
+Verified: `poetry run ruff check` — no Python changed by this task. Committed via `git
+commit` — full local pre-commit gate (including the two markdown-touching hooks,
+trailing-whitespace and end-of-file-fixer) passed clean on the first attempt.
+
+US-1 (T006-T010) implementation complete. Running the story's exit criteria next: full
+`poetry run pytest -q`, full `poetry run pre-commit run --all-files`,
+`makemigrations --check --dry-run`, then the completion report.
