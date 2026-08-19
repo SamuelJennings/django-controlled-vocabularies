@@ -126,3 +126,23 @@ one task at a time without a throwaway import or a temporary `per_rule_ignores` 
 which is scope invented purely to appease the hook and removed moments later.
 
 **ADR:** none — a Phase 1 commit-sequencing note, not a design choice future work revisits.
+
+## D8 — `tests/urls.py` is untouched by T003; the ui mount waits for T006
+**Ambiguous**: T003's own text in `tasks.md` says `tests/urls.py` should mount
+`controlled_vocabularies.ui.urls` under a non-empty prefix. But that module is created by T006
+(Phase 2, US-1), which is out of Phase 1's scope — my brief's prohibitions name "the ui view,
+templates, urls" as US-1's work, not Phase 1's, and T003's acceptance criterion in the brief
+tests only `INSTALLED_APPS` and `manage.py check`, not a urls.py mount.
+
+**Chosen**: leave `tests/urls.py` exactly as it was before this story. `tests/settings.py`'s
+`ROOT_URLCONF` still resolves to it unchanged. T006 adds the `include()` line when
+`controlled_vocabularies/ui/urls.py` exists to point it at.
+
+**Why defensible**: `include("controlled_vocabularies.ui.urls")` imports its target the moment
+`tests/urls.py` itself is loaded (Django's URL resolver, unlike a settings string, is not lazy
+about a string `include()` target) — mounting it now would raise `ModuleNotFoundError` from
+`manage.py check`'s own URL-resolution checks, failing T003's actual, brief-given acceptance
+before it could ever pass. Nothing downstream in this phase reads `tests/urls.py`'s ui mount;
+T004's boot proof resolves against `tests.urls_core` instead.
+
+**ADR:** none — a scope boundary already drawn by the brief's own prohibitions, not a new choice.
