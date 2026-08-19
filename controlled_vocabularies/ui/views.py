@@ -6,13 +6,16 @@ narrows the same view rather than adding another (T011-T014, dispatched separate
 
 from django.db.models import Count
 from django.db.models.functions import Lower
+from django.utils.translation import gettext_lazy as _
 from mvp.views import MVPListView
 
 from controlled_vocabularies.models import ConceptScheme
 
 
 class VocabularyListView(MVPListView):
-    """Every vocabulary the site holds — FR-001 through FR-004, FR-012, User Story 1 scenarios 1-6."""
+    """Every vocabulary the site holds — FR-001 through FR-004, FR-011 through FR-013,
+    User Story 1 scenarios 1-7.
+    """
 
     model = ConceptScheme
     list_item_template = "controlled_vocabularies/ui/conceptscheme_list_item.html"
@@ -31,3 +34,16 @@ class VocabularyListView(MVPListView):
         # Collections are not counted (decisions.md D3) — Count("concepts") reaches the
         # concepts related_name only, never collection_members or any other relation.
         return super().get_queryset().annotate(concept_count=Count("concepts"))
+
+    def get_empty_state_heading(self):
+        # This story has no search yet (T011-T014, User Story 2), so there is only one
+        # empty state to report — the site itself holds nothing. Once search exists, the
+        # second state (a search matching nothing, distinct wording — decisions.md D4)
+        # branches here on the ``?q=`` value.
+        return _("This site holds no vocabularies")
+
+    def get_empty_state_message(self):
+        # No message: the base class's own default points at a create button this page
+        # does not show (show_create_action is never set), and this empty state has
+        # nothing else useful to add beyond the heading.
+        return None

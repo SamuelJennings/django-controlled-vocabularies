@@ -2,9 +2,9 @@
 <c-card title="{{ object.name }}">
   <c-slot name="badges">
     {% if object.static_uri %}
-      <c-badge text="{% trans "Imported" %}" />
+      <c-badge>{% trans "Imported" %}</c-badge>
     {% else %}
-      <c-badge text="{% trans "Held here" %}" />
+      <c-badge>{% trans "Held here" %}</c-badge>
     {% endif %}
   </c-slot>
   {% if object.description %}

@@ -6,6 +6,7 @@ from django.template.loader import render_to_string
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
+from controlled_vocabularies.ui.views import VocabularyListView
 from tests.factories import ConceptFactory, ConceptSchemeFactory
 
 ROW_TEMPLATE = "controlled_vocabularies/ui/conceptscheme_list_item.html"
@@ -192,3 +193,25 @@ class TestVocabularyListOrdering:
 
         with django_assert_num_queries(baseline):
             client.get(url)
+
+
+class TestVocabularyListEmptyState:
+    """A site holding no vocabularies says so (FR-011, SC-006, User Story 1 scenario 7).
+
+    US-2's second empty state (a search matching nothing) does not exist yet — this story
+    has no search — so both hooks return the empty-site wording unconditionally for now.
+    """
+
+    @pytest.mark.django_db
+    def test_an_empty_site_returns_200_with_wording_that_says_the_site_holds_no_vocabularies(self, client):
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-list"))
+
+        assert response.status_code == 200
+        assert "no vocabularies" in response.content.decode()
+
+    @pytest.mark.django_db
+    def test_get_empty_state_heading_names_the_site_as_holding_none(self, rf):
+        view = VocabularyListView()
+        view.request = rf.get("/")
+
+        assert "no vocabularies" in str(view.get_empty_state_heading())
