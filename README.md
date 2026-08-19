@@ -317,6 +317,89 @@ the admin adds *Hold down "Control", or "Command" on a Mac, to select more than 
 same sentence the admin puts under any multiple-select field, and it does not describe this
 control: concepts are added by typing and picking, and removed one at a time.
 
+## Finding a vocabulary
+
+The `ui` extra adds one reader-facing page: every vocabulary the site holds, in alphabetical
+order, each entry showing its description, how many concepts it holds, and whether it was
+authored here or imported from a publisher — with the publisher's own identifier shown for an
+imported one. A site holding no vocabularies says so rather than showing an empty list.
+
+```bash
+pip install django-controlled-vocabularies[ui]
+```
+
+Add the ui app and django-mvp's own stack to `INSTALLED_APPS` — quoted from this package's own
+test project, so the list below is one that demonstrably works:
+
+```python
+INSTALLED_APPS = [
+    ...
+    "controlled_vocabularies",
+    "django_cotton",
+    "easy_icons",
+    "flex_menu",
+    # "mvp" before "crispy_tailwind": django-mvp ships an override of crispy-tailwind's
+    # help-text template, and the first app to declare a template path wins.
+    "mvp",
+    "crispy_forms",
+    "crispy_tailwind",
+    "controlled_vocabularies.ui",
+]
+
+# crispy-forms 2.7's get_template_pack() has no default, and the {% crispy %} tag validates
+# the pack against CRISPY_ALLOWED_TEMPLATE_PACKS at template-compile time — django-mvp's own
+# templates carry the tag, so both settings are required even though this page renders no
+# form of its own.
+CRISPY_TEMPLATE_PACK = "tailwind"
+CRISPY_ALLOWED_TEMPLATE_PACKS = ["tailwind"]
+
+TEMPLATES[0]["OPTIONS"]["context_processors"] += ["mvp.context_processors.mvp_config"]
+
+# django-mvp's base template renders icons through django-easy-icons and its own sidebar and
+# mobile-dock chrome through django-flex-menus; both raise at render time without these.
+EASY_ICONS = {
+    "default": {
+        "renderer": "easy_icons.renderers.ProviderRenderer",
+        "config": {"tag": "i"},
+        "packs": ["mvp.utils.BS5_ICONS"],
+    },
+}
+FLEX_MENUS = {
+    "renderers": {
+        "sidebar": "mvp.renderers.SidebarRenderer",
+        "dock": "mvp.renderers.MobileFooterNavRenderer",
+    },
+}
+```
+
+Mount the routes at an address of your choosing:
+
+```python
+from django.urls import include, path
+
+urlpatterns = [
+    ...
+    path("browse/", include("controlled_vocabularies.ui.urls")),
+]
+```
+
+Reverse the page by name, under its own namespace — `controlled_vocabularies_ui`, distinct from
+the core package's own `controlled_vocabularies` namespace, so both can be mounted in one
+project without either shadowing the other's reverses:
+
+```python
+reverse("controlled_vocabularies_ui:vocabulary-list")
+```
+
+`manage.py check` reports `controlled_vocabularies.ui.E001`, naming the extra to install, if
+`django-mvp` is not importable.
+
+**An entry names a vocabulary — it does not yet link to it.** Every vocabulary already has an
+address on this site (`ConceptScheme.local_url`), but nothing serves that address yet. Shipping
+a list whose every entry led to a missing page would ship a broken front door rather than a
+working one; a later feature turns the name into a link in the same change that gives it
+somewhere to lead.
+
 ## Importing a published vocabulary
 
 `import_skos()` reads a SKOS file — Turtle, RDF/XML, or JSON-LD — and creates or updates the

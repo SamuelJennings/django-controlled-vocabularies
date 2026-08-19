@@ -6,6 +6,16 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+### Added
+
+- Finding a vocabulary: an opt-in `ui` extra (`pip install django-controlled-vocabularies[ui]`)
+  adds one page listing every vocabulary the site holds, alphabetically and stably, each entry
+  showing its description, its concept count, and whether it was authored here or imported from
+  a publisher — with the publisher's own identifier shown for an imported one. A site holding
+  none says so, in wording distinct from a search that matches nothing. No entry links to the
+  vocabulary it names yet — nothing serves that address on the site until a later feature adds
+  it. See the README.
+
 ### Fixed
 
 - `ConceptsField`: a required field on an existing record no longer refuses a valid submission
