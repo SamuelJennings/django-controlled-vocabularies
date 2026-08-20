@@ -649,3 +649,22 @@ Watch: `manage.py check` reports non-fatal warnings (`controlled_vocabularies.W0
 deliberately matches only the README's "Finding a vocabulary" section, which does not include
 them — that feature (typed concept search) is not part of this page. Not a blocker; noted in
 `concerns` for the completion report.
+
+## 2026-08-20T00:20Z · Implementer US-3 · T016
+
+Did: added `demo/seed/dcmi_types.ttl` (the real DCMI Type Vocabulary, five concepts, declaring
+its own `skos:ConceptScheme` at `http://purl.org/dc/dcmitype/` — lands as imported) and
+`demo/seed/research_methods.ttl` (four concepts, no `skos:ConceptScheme` declared — loaded
+against a vocabulary `seed_demo` creates directly, lands as authored here), and
+`demo/management/commands/seed_demo.py`, which deletes every vocabulary and reloads both
+through `controlled_vocabularies.exchange.import_skos`. Test-first:
+`tests/test_demo/test_seed.py` (`TestSeedDemo`), four tests covering both vocabularies existing
+with concepts after one run, identical counts after a second run, a hand-added vocabulary gone
+after a rerun, and one vocabulary reading as imported and the other as authored here.
+
+Verified: `poetry run pytest tests/test_demo/test_seed.py -q` — 4 passed. `poetry run pytest
+tests/test_demo/ -q` — 5 passed. `ruff check demo/ tests/test_demo/` — clean.
+
+Next: T017 — the unattended walk.
+
+Watch: none new.

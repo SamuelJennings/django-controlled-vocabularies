@@ -348,3 +348,30 @@ between them.
 point it should assert less, not more.
 
 **ADR:** none — one test's own method, not a package-wide rule.
+
+## D18 — `seed_demo` is tested by passing a `Command` instance to `call_command`
+
+**Ambiguous**: T016's test needs to run the real `seed_demo` command against the test database
+and assert on what it left behind. The ordinary way, `call_command("seed_demo")`, resolves the
+command by name through `django.core.management.get_commands()`, which walks `INSTALLED_APPS`
+— and `demo` is deliberately not one of `tests.settings`' installed apps (T015, D17): it carries
+only the front end's own settings and urlconf for the pytest process, not the demo project's.
+
+**Chosen**: `call_command(Command())` — passing an already-imported `Command` instance rather
+than a name string. This is `call_command`'s own documented second calling convention, not a
+workaround: it runs the identical `execute()`/`handle()` path — argument parsing, `self.style`,
+`self.stdout` — that `manage.py seed_demo` runs, against a command object the test imports
+directly (`from demo.management.commands.seed_demo import Command`).
+
+**Why defensible**: nothing about the command is faked — the same `ConceptScheme`/`Concept`
+models, the same `import_skos`, the same file paths a real run uses (craft-tdd, "real over fake
+over stub over mock"). The only thing bypassed is command-name *discovery*, which depends on
+`demo` being an installed app and has nothing to do with what the command itself does. T017's
+unattended walk additionally proves the command runs correctly through the real
+`manage.py seed_demo` CLI, over a live server, so the discovery path this test skips is proved
+elsewhere.
+
+**Revisit if**: `demo` is ever added to a shared test settings module for an unrelated reason —
+at that point `call_command("seed_demo")` becomes available and this indirection can go.
+
+**ADR:** none — one test's own method.
