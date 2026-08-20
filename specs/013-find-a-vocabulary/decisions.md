@@ -146,3 +146,20 @@ before it could ever pass. Nothing downstream in this phase reads `tests/urls.py
 T004's boot proof resolves against `tests.urls_core` instead.
 
 **ADR:** none — a scope boundary already drawn by the brief's own prohibitions, not a new choice.
+
+## D9 — The two tamper flags on US-1's diff are the plan's own instruction
+**Ambiguous**: the guardrail flags `tests/settings.py` and `tests/urls.py` as pre-existing test
+files this branch modified. That is the shape of a suite being bent to fit the code, and it is
+checked precisely because a plausible reason is always available.
+
+**Chosen**: both accepted, neither escalated.
+
+**Why defensible**: they are test *configuration*, not assertions, and both changes are the ones
+T003 and T006 were written to make — the test project cannot render a page whose app it does not
+install or whose routes it does not mount. Read against `main`, the diff on both files is additive:
+the ui stack appended to `INSTALLED_APPS`, django-mvp's context processor and settings added, and
+one `include()` added under a prefix. No existing assertion, fixture or setting was weakened or
+removed, and the full suite that ran against the old configuration still passes — 1395 tests before
+US-1's own, and green afterwards. Verified by reading the diff, not by the flag's own explanation.
+
+**ADR:** none — a triage record, not a design decision.

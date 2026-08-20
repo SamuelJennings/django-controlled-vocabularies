@@ -400,6 +400,19 @@ a list whose every entry led to a missing page would ship a broken front door ra
 working one; a later feature turns the name into a link in the same change that gives it
 somewhere to lead.
 
+The page is served by `VocabularyListView`, in `controlled_vocabularies.ui.views`. A project that
+wants a different presentation subclasses it and routes its own path at the same view — the
+queryset, its ordering and its concept count come with the class, so an override that only changes
+`list_item_template` keeps every guarantee above:
+
+```python
+from controlled_vocabularies.ui.views import VocabularyListView
+
+
+class BrandedVocabularyListView(VocabularyListView):
+    list_item_template = "myproject/vocabulary_card.html"
+```
+
 ## Importing a published vocabulary
 
 `import_skos()` reads a SKOS file — Turtle, RDF/XML, or JSON-LD — and creates or updates the
