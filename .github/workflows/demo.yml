@@ -1,0 +1,79 @@
+name: Demo
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'demo/**'
+      - 'controlled_vocabularies/**'
+      - 'pyproject.toml'
+      - 'poetry.lock'
+      - '.github/workflows/demo.yml'
+  # No paths filter on pull_request: this check is ruleset-required, and a
+  # path-filtered required check never reports on out-of-scope PRs, blocking
+  # merge (FR-017), as tests.yml and build.yml already explain.
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+# This job runs the pull request head's own code, which build.yml and tests.yml do not. It
+# needs nothing but the checkout: it installs from the public index and asserts locally, so it
+# takes no secrets and read-only contents.
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Walk the demo
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up Poetry env
+        uses: django-mvp/shared/.github/actions/setup-poetry@v0.3.3
+        with:
+          python-version: '3.13'
+          poetry-install-args: '--extras ui'
+
+      - name: Build and seed the demo database
+        # The same commands, in the same order, that README.md documents. There is no
+        # composite command to run instead, so keeping this list and the README in step is
+        # what FR-015/SC-007 are about.
+        run: |
+          poetry run python manage.py migrate --noinput
+          poetry run python manage.py seed_demo
+        env:
+          DEMO_DB_PATH: ${{ runner.temp }}/demo-db.sqlite3
+
+      - name: Start the demo
+        # --noreload makes this the one process the job polls and stops below; with the
+        # autoreloader on, the pid recorded here is the parent and the kill at the end
+        # leaves the child serving.
+        run: |
+          poetry run python manage.py runserver --noreload &
+          echo $! > "${RUNNER_TEMP}/demo.pid"
+        env:
+          DEMO_DB_PATH: ${{ runner.temp }}/demo-db.sqlite3
+
+      - name: Wait for the demo to become ready
+        # A bounded poll, never a sleep: the demo is ready when it answers, and how long
+        # that takes is not something this job should have to guess.
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf -o /dev/null http://127.0.0.1:8000/browse/; then
+              echo "ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "the demo did not become ready within 30s" >&2
+          exit 1
+
+      - name: Walk the demo (demo/smoke.py)
+        run: poetry run python demo/smoke.py http://127.0.0.1:8000
+
+      - name: Stop the demo
+        if: always()
+        run: kill "$(cat "${RUNNER_TEMP}/demo.pid")" 2>/dev/null || true

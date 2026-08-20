@@ -166,9 +166,17 @@ django-mvp = "mvp"
 # subject, test_boot.py takes the core booting with the UI app absent,
 # test_packaging.py takes pyproject.toml, and test_templates.py takes the
 # shipped templates directly (013-find-a-vocabulary tasks.md T001, T004).
+# Each tests/test_demo/ module below has the same shape of exception: its subject is the demo
+# project as a whole — booting, seeding, or being served — not one module under
+# controlled_vocabularies/ (013-find-a-vocabulary T015). Listed as exact files rather than a
+# directory prefix so a stray new test under tests/test_demo/ is still checked.
 non-mirror-paths = [
     "tests/test_ui/test_architecture.py",
     "tests/test_ui/test_boot.py",
     "tests/test_ui/test_packaging.py",
     "tests/test_ui/test_templates.py",
+    "tests/test_demo/test_demo.py",
+    "tests/test_demo/test_documented_commands.py",
+    "tests/test_demo/test_seed.py",
+    "tests/test_demo/test_smoke.py",
 ]

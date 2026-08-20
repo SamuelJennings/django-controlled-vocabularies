@@ -322,3 +322,115 @@ The first makes this redundant rather than wrong; the second changes what trunca
 
 **ADR:** none — one view's input handling against a named upstream defect, expected to outlive the
 defect but not to bind anything else.
+
+## D17 — The demo's boot test proves the root redirect by URL resolution, not by request
+
+**Ambiguous**: T015's test needs to prove the demo's root address is wired to the vocabulary
+list (FR-015, scenario 4). The obvious way is `django.test.Client().get("/", follow=True)` and
+asserting on the redirect chain — but that requires a migrated database (the view queries
+`ConceptScheme`) and `"testserver"` in `ALLOWED_HOSTS`, neither of which the demo's own
+settings should carry only to satisfy this test: a migrated scratch database duplicates what
+T016's seed test already proves, and `"testserver"` in a settings file a reader treats as the
+real configuration is exactly the kind of test-only value plan.md's Complexity Tracking already
+rules out for this module.
+
+**Chosen**: `django.urls.resolve("/")` against the demo's own urlconf, asserting the matched
+view is `RedirectView` with `pattern_name="controlled_vocabularies_ui:vocabulary-list"` and
+`url_name="home"`. No database, no test client, no settings changed to accommodate the test.
+
+**Why defensible**: this proves exactly what FR-015 requires — the root address is configured to
+lead to the list — without asserting anything about the view's runtime behaviour, which is
+already covered by `test_ui/test_views.py` and, end to end over real HTTP, by T017's unattended
+walk (FR-017). A resolution check and a live-server walk are complementary evidence, not a gap
+between them.
+
+**Revisit if**: this test starts standing in for the smoke walk rather than beside it — at that
+point it should assert less, not more.
+
+**ADR:** none — one test's own method, not a package-wide rule.
+
+## D18 — `seed_demo` is tested by passing a `Command` instance to `call_command`
+
+**Ambiguous**: T016's test needs to run the real `seed_demo` command against the test database
+and assert on what it left behind. The ordinary way, `call_command("seed_demo")`, resolves the
+command by name through `django.core.management.get_commands()`, which walks `INSTALLED_APPS`
+— and `demo` is deliberately not one of `tests.settings`' installed apps (T015, D17): it carries
+only the front end's own settings and urlconf for the pytest process, not the demo project's.
+
+**Chosen**: `call_command(Command())` — passing an already-imported `Command` instance rather
+than a name string. This is `call_command`'s own documented second calling convention, not a
+workaround: it runs the identical `execute()`/`handle()` path — argument parsing, `self.style`,
+`self.stdout` — that `manage.py seed_demo` runs, against a command object the test imports
+directly (`from demo.management.commands.seed_demo import Command`).
+
+**Why defensible**: nothing about the command is faked — the same `ConceptScheme`/`Concept`
+models, the same `import_skos`, the same file paths a real run uses (craft-tdd, "real over fake
+over stub over mock"). The only thing bypassed is command-name *discovery*, which depends on
+`demo` being an installed app and has nothing to do with what the command itself does. T017's
+unattended walk additionally proves the command runs correctly through the real
+`manage.py seed_demo` CLI, over a live server, so the discovery path this test skips is proved
+elsewhere.
+
+**Revisit if**: `demo` is ever added to a shared test settings module for an unrelated reason —
+at that point `call_command("seed_demo")` becomes available and this indirection can go.
+
+**ADR:** none — one test's own method.
+
+## D19 — `demo/settings.py` sets `LANGUAGE_CODE` explicitly, one line past the README
+
+**Ambiguous**: `seed_demo` failed by hand — `SkosImportFailed`,
+`DEFAULT_LANGUAGE_UNCONFIGURED` — even though the identical import already passed under
+`tests.settings` in every automated test. The difference is `LANGUAGE_CODE`: Django's own
+default is `"en-us"`, and Django's own default `LANGUAGES` list does not contain `"en-us"` as an
+exact member (it holds `"en"` and several regional variants, not that one) — so
+`ConceptScheme.effective_default_language` resolves to a code the importer's own configuration
+check refuses to import against, before a single concept is stored. `tests.settings` never hits
+this because it sets `LANGUAGE_CODE = "en"` explicitly; `demo/settings.py`, written to match only
+README.md's "Finding a vocabulary" section, did not set it at all and inherited Django's
+default.
+
+**Chosen**: `LANGUAGE_CODE = "en"` in `demo/settings.py`, with a comment naming the failure it
+prevents.
+
+**Why defensible**: this is not a disagreement with the README — the "Finding a vocabulary"
+section documents the `ui` stack's own requirements, not the general Django project settings a
+`startproject` scaffold already supplies (`ALLOWED_HOSTS`, `TIME_ZONE`, `USE_I18N`, all of which
+`demo/settings.py` also sets without README backing). `LANGUAGE_CODE` belongs in that same
+category: ordinary project boilerplate, needed here only because Django's own default happens to
+be a code its own default `LANGUAGES` list does not contain. No package behaviour changed;
+`controlled_vocabularies/` is untouched.
+
+**Revisit if**: the package ever tolerates an unconfigured default language (a design change,
+not a demo one) — at that point this line stops being load-bearing rather than becoming wrong.
+
+**ADR:** none — one settings module's own value, discovered by the by-hand verification T017
+requires and folded into that task's commit since T015 (where `demo/settings.py` was written)
+is already landed.
+
+## D20 — `non-mirror-paths` entries are exact files, an apostrophe broke the array
+
+**Ambiguous**: `forge verify`'s conformance step flagged `tests/test_demo/test_demo.py` and
+`tests/test_demo/test_seed.py` as mirroring no source module, even though T015 declared
+`"tests/test_demo/"` as a directory-prefix exception in `pyproject.toml`. The parser
+(`forgekit/conformance.py`) extracts the array's text and then matches quoted strings with a
+regex too naive to know TOML comments from string literals — an apostrophe in an in-array
+comment ("module's subject") was read as a string delimiter, corrupting every entry after it.
+`test_smoke.py` was never actually covered by the declaration at all; it passed only because
+it is a standing, cross-repo exception hard-coded in the tool itself (`NON_MIRROR_FILES`),
+unrelated to anything this story wrote.
+
+**Chosen**: list the three `tests/test_demo/` files explicitly, and move the explanatory
+comment above the array (matching the file's own existing style for the `test_ui/` entries),
+written with no apostrophe.
+
+**Why defensible**: matches the tool's own documented convention exactly (explicit files,
+comment outside the array) rather than inventing a directory-prefix shorthand the tool's
+regex-based parser cannot safely round-trip. Confirmed by importing
+`forgekit.conformance.declared_non_mirror_paths` directly and reading its output before and
+after.
+
+**Revisit if**: the parser is ever hardened past regex extraction — this workaround for its
+current form should not be read as guidance beyond it.
+
+**ADR:** none — one repo's own `pyproject.toml` entry, discovered by running the org's own
+verify tool rather than by reading its source in advance.

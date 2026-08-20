@@ -627,3 +627,127 @@ and, separately and explicitly, the demo's CI workflow file.
 
 The workflow file remains unpushable by the bot. That constraint is now written into T017 as
 something to report rather than route around.
+
+## 2026-08-20T00:00Z · Implementer US-3 · T015
+
+Did: added `manage.py`, `demo/__init__.py`, `demo/settings.py` and `demo/urls.py` — the demo
+project boots against the exact `INSTALLED_APPS`/settings README.md's "Finding a vocabulary"
+section documents, plus the Django/django-mvp boilerplate a runnable project needs beyond it. A
+root route named `home` redirects to the vocabulary list, satisfying django-mvp's footer menu
+reversal and FR-015. Test-first: `tests/test_demo/test_demo.py` (`TestDemoProject`) boots the
+demo settings module in a subprocess, runs `manage.py check`, and asserts `DEBUG`/local-database
+and the root's URL resolution — declared a non-mirror path in `pyproject.toml` (its subject is
+the whole project, not one module).
+
+Verified: `poetry run pytest tests/test_demo/ -q` — 1 passed. `ruff check manage.py demo/
+tests/test_demo/ pyproject.toml` — clean.
+
+Next: T016 — seeding.
+
+Watch: `manage.py check` reports non-fatal warnings (`controlled_vocabularies.W002-W004`) for
+`django_tomselect` and the core app's own URL mount, because the demo's `INSTALLED_APPS`
+deliberately matches only the README's "Finding a vocabulary" section, which does not include
+them — that feature (typed concept search) is not part of this page. Not a blocker; noted in
+`concerns` for the completion report.
+
+## 2026-08-20T00:20Z · Implementer US-3 · T016
+
+Did: added `demo/seed/dcmi_types.ttl` (the real DCMI Type Vocabulary, five concepts, declaring
+its own `skos:ConceptScheme` at `http://purl.org/dc/dcmitype/` — lands as imported) and
+`demo/seed/research_methods.ttl` (four concepts, no `skos:ConceptScheme` declared — loaded
+against a vocabulary `seed_demo` creates directly, lands as authored here), and
+`demo/management/commands/seed_demo.py`, which deletes every vocabulary and reloads both
+through `controlled_vocabularies.exchange.import_skos`. Test-first:
+`tests/test_demo/test_seed.py` (`TestSeedDemo`), four tests covering both vocabularies existing
+with concepts after one run, identical counts after a second run, a hand-added vocabulary gone
+after a rerun, and one vocabulary reading as imported and the other as authored here.
+
+Verified: `poetry run pytest tests/test_demo/test_seed.py -q` — 4 passed. `poetry run pytest
+tests/test_demo/ -q` — 5 passed. `ruff check demo/ tests/test_demo/` — clean.
+
+Next: T017 — the unattended walk.
+
+Watch: none new.
+
+## 2026-08-20T00:45Z · Implementer US-3 · T017
+
+Did: added `demo/smoke.py` (assertion logic in `check_list`/`check_search`, kept separate from
+the HTTP transport in `get`/`walk` so the assertions are exercised in-process by pytest, per the
+task brief) and `.github/workflows/demo.yml`, modelled on
+`/home/sam/projects/fairdm/django-literature`'s `demo.yml` (checkout, Poetry env with `--extras
+ui`, migrate + seed, start `runserver --noreload`, poll `/browse/` until ready, run
+`demo/smoke.py`, stop the server). No paths filter on `pull_request`, matching this repo's other
+required checks. Test-first: `tests/test_demo/test_smoke.py` (`TestCheckList`,
+`TestCheckSearch`), six tests — the passing case and three failure modes for the list, the
+passing case and the not-narrowed failure for search — all against a page Django's test client
+actually rendered from a real `seed_demo` run, never a hand-built body.
+
+While running the three documented commands by hand for this task's own "Verify" line
+(`python -m demo.smoke` end to end), `seed_demo` failed under `demo/settings.py` even though
+the identical import passes in every automated test — `DEFAULT_LANGUAGE_UNCONFIGURED`, because
+Django's default `LANGUAGE_CODE` is not a member of Django's own default `LANGUAGES` list.
+`tests.settings` sets `LANGUAGE_CODE` explicitly and never hits this. Fixed in this commit by
+setting `LANGUAGE_CODE = "en"` in `demo/settings.py` (decisions.md D19) — one line of ordinary
+project boilerplate, no package behaviour touched.
+
+Verified by hand, in order, against a throwaway `DEMO_DB_PATH`: `python manage.py migrate`,
+`python manage.py seed_demo` (loaded 2 vocabularies), `python manage.py runserver`. Confirmed
+by curl against the running server: `/` redirects (302) to `/browse/`; the list page's body
+contains both `DCMI Type Vocabulary` and `Data Collection Methods`, both concept counts (`5
+concepts`, `4 concepts`), and both badges (`Imported`, `Held here`); `/browse/?q=DCMI` narrows
+to `DCMI Type Vocabulary` only. `python -m demo.smoke http://127.0.0.1:8000` printed `OK: walked
+the demo vocabulary list and a search, at http://127.0.0.1:8000`. Browser control was not
+reachable from this sandbox (`Unable to connect`), so the visual look was curl against the live
+response body, not a rendered screenshot — noted in concerns.
+
+Verified (automated): `poetry run pytest tests/test_demo/ -q` — 11 passed. `ruff check demo/
+tests/test_demo/` — clean.
+
+Next: T018 — document the demo.
+
+Watch: `.github/workflows/demo.yml` cannot be pushed by the bot (no `workflows` permission) —
+flagged in the completion report per the task brief; the maintainer pushes this branch.
+
+## 2026-08-20T01:00Z · Implementer US-3 · T018
+
+Did: added a "Try it: the demo project" subsection to README.md, nested under "Finding a
+vocabulary" right after the page's own documentation (matching django-literature's placement
+under its own browsing section) — the three commands in order, the address they lead to
+(`http://127.0.0.1:8000/`, redirecting to `/browse/`), what the seeded content holds (the DCMI
+Type Vocabulary, imported, and Data Collection Methods, authored here), that seeding is
+destructive and idempotent, and that the demo is not a production configuration. Added a
+CHANGELOG.md entry under `[Unreleased] > Added` naming the demo, its three commands and the
+unattended check.
+
+Verified: followed the section from the throwaway state used for T017's by-hand walk (already
+run this session — see the T017 entry for the exact output) rather than re-running it, since
+nothing about the commands or the address changed, only their documentation. `poetry run pytest
+tests/test_demo/ -q` — 11 passed (unaffected, as expected — docs only).
+
+Next: full verify, then the completion report.
+
+Watch: none new.
+
+## 2026-08-20T01:30Z · Implementer US-3 · full verify and by-hand walk
+
+Did: ran the three documented commands by hand end to end against a fresh throwaway
+`DEMO_DB_PATH`, on a clean server: `migrate`, `seed_demo` ("seed_demo loaded 2 vocabularies"),
+`runserver`. Confirmed by curl against the live server: `/` redirects (302) to `/browse/`; the
+list page's body carries both vocabulary names, both descriptions, both concept counts (`5
+concepts`, `4 concepts`), and both badges (`Imported`, `Held here`); `/browse/?q=DCMI` narrows
+to `DCMI Type Vocabulary` only. `python -m demo.smoke http://127.0.0.1:8001` printed `OK: walked
+the demo vocabulary list and a search`. Server stopped and throwaway files removed.
+
+Ran the story's full verify command once:
+`/home/sam/.openclaw/workspaces/forge/engineering-org/kit/forge verify --repo . --base
+013-find-a-vocabulary`. First run failed conformance: `tests/test_demo/test_demo.py` and
+`tests/test_demo/test_seed.py` reported as mirroring no source module, despite T015's
+`"tests/test_demo/"` directory-prefix declaration in `pyproject.toml`. Root cause: the tool's
+non-mirror-paths parser is regex-based and an apostrophe in my own in-array comment corrupted
+its parsing of every following entry (decisions.md D20). Fixed by listing the three files
+explicitly and moving the comment above the array, matching the file's own existing convention;
+confirmed by calling `forgekit.conformance.declared_non_mirror_paths` directly before and after.
+
+Verified: `forge verify` — conformance passed, docs passed, `poetry:lint` passed, `poetry:
+typecheck` passed, `poetry:test` passed (all 1451 tests — the suite this story added 15 to),
+`poetry:build` passed.

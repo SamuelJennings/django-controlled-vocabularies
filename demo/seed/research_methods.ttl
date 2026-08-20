@@ -1,0 +1,27 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+# No skos:ConceptScheme is declared in this file — demo/management/commands/seed_demo.py loads
+# it against a vocabulary created directly here, in the demo, so it lands as authored here
+# rather than imported from a publisher: the same no_scheme_declared.ttl shape this package's
+# own test suite uses (013-find-a-vocabulary task brief, T016).
+
+<http://example.org/research-methods/fieldwork>
+    a skos:Concept ;
+    skos:prefLabel "Fieldwork"@en ;
+    skos:definition "Data collected through direct observation or measurement at a study site."@en .
+
+<http://example.org/research-methods/laboratory-experiment>
+    a skos:Concept ;
+    skos:prefLabel "Laboratory experiment"@en ;
+    skos:definition "Data produced under controlled conditions in a laboratory setting."@en .
+
+<http://example.org/research-methods/survey>
+    a skos:Concept ;
+    skos:prefLabel "Survey"@en ;
+    skos:definition "Data gathered by questionnaire or structured interview."@en .
+
+<http://example.org/research-methods/remote-sensing>
+    a skos:Concept ;
+    skos:prefLabel "Remote sensing"@en ;
+    skos:definition "Data captured from a distance, typically by satellite or aircraft instrument."@en .
