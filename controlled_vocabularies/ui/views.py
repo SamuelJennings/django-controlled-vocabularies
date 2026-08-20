@@ -1,7 +1,7 @@
 """Views for the opt-in vocabulary-browsing front end (013-find-a-vocabulary).
 
-Filled in one view per story: ``VocabularyListView`` (US-1). User Story 2's search
-narrows the same view rather than adding another (T011-T014, dispatched separately).
+One view: ``VocabularyListView``. Search narrows that same view rather than adding
+another, so both user stories land here.
 """
 
 from django.db.models import Count
@@ -13,8 +13,8 @@ from controlled_vocabularies.models import ConceptScheme
 
 
 class VocabularyListView(MVPListView):
-    """Every vocabulary the site holds — FR-001 through FR-004, FR-011 through FR-013,
-    User Story 1 scenarios 1-7.
+    """Every vocabulary the site holds, narrowed by an optional search — FR-001 through
+    FR-013, User Story 1 scenarios 1-7 and User Story 2 scenarios 1-6.
     """
 
     model = ConceptScheme
@@ -39,22 +39,28 @@ class VocabularyListView(MVPListView):
         # concepts related_name only, never collection_members or any other relation.
         return super().get_queryset().annotate(concept_count=Count("concepts"))
 
+    def get_search_term(self):
+        # Read and stripped exactly as django-mvp's own search mixin does it before
+        # filtering (`mvp/views/list.py`), so "a search is in force" means the same thing
+        # to the empty states as it does to the queryset. The `search_query` the mixin puts
+        # in the context is the raw value, unstripped, and is not a substitute here.
+        return self.request.GET.get("q", "").strip()
+
     def get_empty_state_heading(self):
-        # Two distinct empty states, never one (T013, decisions.md D4): a search matching
-        # nothing says so and repeats the term; a genuinely empty site keeps T009's wording.
-        # Both branches return plain translatable text — never mark_safe, never
+        # Two distinct empty states, never one (decisions.md D4): a search matching
+        # nothing says so and repeats the term; a genuinely empty site keeps its own
+        # wording. Both branches return plain translatable text — never mark_safe, never
         # format_html. The way back to the full list is the link the actions block renders
         # (conceptscheme_list.html), not markup here — django-mvp's empty-state component
         # renders this string autoescaped with no slot, so an anchor here would show as
         # literal text, and marking it safe would emit the search term unescaped.
-        search_term = self.request.GET.get("q", "").strip()
+        search_term = self.get_search_term()
         if search_term:
             return _("Nothing matches “%(term)s”") % {"term": search_term}
         return _("This site holds no vocabularies")
 
     def get_empty_state_message(self):
-        search_term = self.request.GET.get("q", "").strip()
-        if search_term:
+        if self.get_search_term():
             return _("Try a different search term.")
         # No message: the base class's own default points at a create button this page
         # does not show (show_create_action is never set), and this empty state has
