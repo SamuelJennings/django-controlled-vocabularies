@@ -427,7 +427,8 @@ somewhere to lead.
 
 **One thing does not work yet.** The search box on the page cannot be submitted: the control comes
 from django-mvp, and in the released version its input is tied to a form that only its filter
-control creates ([django-mvp#282](https://github.com/django-mvp/django-mvp/issues/282)). Searching
+control creates ([django-mvp#282](https://github.com/django-mvp/django-mvp/issues/282), tracked here as
+[#147](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/147)). Searching
 by address works exactly as documented — `?q=soil` narrows the list, and the narrowed address can be
 shared and bookmarked — but typing in the box and pressing the button does nothing until that fix
 ships. The same fault is why a page whose search matched nothing names the term but offers no link

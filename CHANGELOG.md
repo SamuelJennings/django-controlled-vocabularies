@@ -28,7 +28,8 @@ All notable changes to this project are documented in this file. The format foll
 - The search box on the page cannot be submitted, and a search matching nothing offers no link
   back to the full list. Both come from the released django-mvp's search control, whose input is
   tied to a form only its filter control creates
-  ([django-mvp#282](https://github.com/django-mvp/django-mvp/issues/282)). Searching by address is
+  ([django-mvp#282](https://github.com/django-mvp/django-mvp/issues/282), tracked here as #147).
+  Searching by address is
   unaffected: `?q=soil` narrows the list and the narrowed address can be shared. We are waiting on
   the upstream fix rather than shipping a patched copy of django-mvp's page — see
   `docs/adr/0015-upstream-defects-are-waited-on-not-worked-around.md`.

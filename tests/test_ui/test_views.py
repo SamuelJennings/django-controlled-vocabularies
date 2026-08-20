@@ -370,7 +370,7 @@ class TestVocabularySearch:
 
     @pytest.mark.skip(
         reason=(
-            "Waiting on django-mvp/django-mvp#282. The search box prefills itself from the raw "
+            "Waiting on django-mvp/django-mvp#282 (tracked here as #147). The search box prefills itself from the raw "
             "?q= value rather than the stripped one, so a whitespace-only query comes back in the "
             "box as whitespace while filtering nothing — the page reads as searched when it is "
             "not. The prefill belongs to django-mvp's own search component, and correcting it "
@@ -405,7 +405,7 @@ class TestVocabularySearch:
 
     @pytest.mark.skip(
         reason=(
-            "Waiting on django-mvp/django-mvp#282: the shipped search control's input and button "
+            "Waiting on django-mvp/django-mvp#282 (tracked here as #147): the shipped search control's input and button "
             "carry form=\"filterForm\", and the only element with that id lives inside the filter "
             "action, so a page rendering search alone has a box wired to nothing. Fixing it here "
             "would mean overriding django-mvp's page template, which is the thing django-mvp exists "
@@ -505,7 +505,7 @@ class TestVocabularySearchEmptyState:
 
     @pytest.mark.skip(
         reason=(
-            "Waiting on django-mvp/django-mvp#282. The way back to the unsearched list has to be a "
+            "Waiting on django-mvp/django-mvp#282 (tracked here as #147). The way back to the unsearched list has to be a "
             "link in the page's actions area: django-mvp renders the empty-state heading and message "
             "as autoescaped strings with no slot, so an anchor inside the message would render as "
             "literal text, and mark_safe over a string that also carries the search term would emit "
