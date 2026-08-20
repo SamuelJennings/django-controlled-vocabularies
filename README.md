@@ -434,6 +434,32 @@ class BrandedVocabularyListView(VocabularyListView):
     list_item_template = "myproject/vocabulary_card.html"
 ```
 
+### Try it: the demo project
+
+The repository carries a runnable demo of the page above, wired the same way this section
+documents. From a fresh clone, with dependencies installed:
+
+```bash
+poetry install --extras ui
+python manage.py migrate
+python manage.py seed_demo
+python manage.py runserver
+```
+
+`migrate` builds the database, `seed_demo` loads two small vocabularies into it, and `runserver`
+serves the site at `http://127.0.0.1:8000/`, which redirects straight to the populated,
+searchable vocabulary list at `http://127.0.0.1:8000/browse/`. The seeded content shows both
+kinds of entry the list distinguishes: the DCMI Type Vocabulary, a real vocabulary published by
+the Dublin Core Metadata Initiative, imported from a SKOS file; and Data Collection Methods, a
+short vocabulary authored here, with no publisher of its own.
+
+`seed_demo` is destructive and idempotent: it clears every vocabulary before loading, so running
+it again returns the demo to the same seeded state whatever was added or removed before —
+including anything entered through the admin.
+
+The demo is not a production configuration: `DEBUG` is on, the database is a local SQLite file,
+and the secret key is a throwaway value committed in `demo/settings.py`. Do not deploy it as-is.
+
 ## Importing a published vocabulary
 
 `import_skos()` reads a SKOS file — Turtle, RDF/XML, or JSON-LD — and creates or updates the

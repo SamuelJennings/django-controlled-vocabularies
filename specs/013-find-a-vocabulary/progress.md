@@ -707,3 +707,23 @@ Next: T018 — document the demo.
 
 Watch: `.github/workflows/demo.yml` cannot be pushed by the bot (no `workflows` permission) —
 flagged in the completion report per the task brief; the maintainer pushes this branch.
+
+## 2026-08-20T01:00Z · Implementer US-3 · T018
+
+Did: added a "Try it: the demo project" subsection to README.md, nested under "Finding a
+vocabulary" right after the page's own documentation (matching django-literature's placement
+under its own browsing section) — the three commands in order, the address they lead to
+(`http://127.0.0.1:8000/`, redirecting to `/browse/`), what the seeded content holds (the DCMI
+Type Vocabulary, imported, and Data Collection Methods, authored here), that seeding is
+destructive and idempotent, and that the demo is not a production configuration. Added a
+CHANGELOG.md entry under `[Unreleased] > Added` naming the demo, its three commands and the
+unattended check.
+
+Verified: followed the section from the throwaway state used for T017's by-hand walk (already
+run this session — see the T017 entry for the exact output) rather than re-running it, since
+nothing about the commands or the address changed, only their documentation. `poetry run pytest
+tests/test_demo/ -q` — 11 passed (unaffected, as expected — docs only).
+
+Next: full verify, then the completion report.
+
+Watch: none new.
