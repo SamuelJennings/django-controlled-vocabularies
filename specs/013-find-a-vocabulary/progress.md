@@ -432,3 +432,22 @@ not author, left as-is rather than fixed — decisions.md D11 has the full reaso
 show as the one failure in the story-end full-suite run.
 
 Next: T012 — prove search survives linking and paging (test-only).
+
+## 2026-08-20T07:41:11Z · Implementer US2 · T012
+
+Did: `tests/test_ui/test_views.py` — new `TestVocabularySearchAcrossRequestsAndPages` (2
+tests), test-only per the task (no production change expected: django-mvp's pagination
+links already build with Django's `{% querystring %}` tag on the installed 0.19.1, which
+keeps every current parameter but `page`). One test requests the same `?q=` address twice
+and asserts the same pks in the same order; the other seeds 30 matching vocabularies plus 5
+non-matching, requests page one, reads the "page two" `href` straight out of the rendered
+markup (`BeautifulSoup`, `"page=2" in href and "q=" in href` — never a hand-built
+`?page=2`), follows it, and asserts the second page's pks are disjoint from the first
+page's, a subset of the matching set, and together with page one account for exactly the
+30 matches and nothing from the other 5.
+
+Verified: `poetry run pytest tests/test_ui/test_views.py -k Search -q` — 11 passed, 15
+deselected (9 from T011 plus these 2). Both new tests passed on first run, confirming
+rather than fixing — matches the task's own framing.
+
+Next: T013 — a search matching nothing says so, in its own words.

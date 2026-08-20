@@ -305,3 +305,53 @@ class TestVocabularySearch:
         assert form.get("method", "").lower() == "get"
         assert form.find("input", attrs={"name": "q"}) is not None
         assert form.find(attrs={"type": "submit"}) is not None
+
+
+class TestVocabularySearchAcrossRequestsAndPages:
+    """A search survives being linked to, and being paged through (FR-007, FR-008, FR-010,
+    User Story 2 scenarios 5 and 6). No production change expected: django-mvp builds
+    pagination links with Django's ``{% querystring %}`` tag, which keeps every parameter but
+    ``page`` — this proves that rather than assuming it.
+    """
+
+    @pytest.mark.django_db
+    def test_requesting_the_same_search_address_twice_returns_the_same_set_in_the_same_order(self, client):
+        ConceptSchemeFactory(name="Stratigraphy Unit A")
+        ConceptSchemeFactory(name="Stratigraphy Unit B")
+        ConceptSchemeFactory(name="Soil Classification")
+        url = reverse("controlled_vocabularies_ui:vocabulary-list")
+
+        first = [vocabulary.pk for vocabulary in client.get(url, {"q": "Stratigraphy"}).context["object_list"]]
+        second = [vocabulary.pk for vocabulary in client.get(url, {"q": "Stratigraphy"}).context["object_list"]]
+
+        assert first == second
+        assert len(first) == 2
+
+    @pytest.mark.django_db
+    def test_following_the_rendered_link_to_page_two_keeps_the_search_applied(self, client):
+        matching = [ConceptSchemeFactory(name=f"Stratigraphy Unit {i:02d}") for i in range(30)]
+        ConceptSchemeFactory.create_batch(5)
+        url = reverse("controlled_vocabularies_ui:vocabulary-list")
+
+        first_page = client.get(url, {"q": "Stratigraphy"})
+        first_page_pks = {vocabulary.pk for vocabulary in first_page.context["object_list"]}
+        assert len(first_page_pks) == first_page.context["paginator"].per_page
+
+        # Read the link out of the markup rather than constructing ?page=2 by hand — that
+        # is the only way a broken query-string tag on the pagination link would show up.
+        soup = BeautifulSoup(first_page.content, "html.parser")
+        page_two_href = next(
+            a["href"] for a in soup.find_all("a", href=True) if "page=2" in a["href"] and "q=" in a["href"]
+        )
+
+        second_page = client.get(url + page_two_href)
+
+        assert second_page.status_code == 200
+        second_page_pks = {vocabulary.pk for vocabulary in second_page.context["object_list"]}
+        matching_pks = {vocabulary.pk for vocabulary in matching}
+        # The second page continues the narrowed (30-vocabulary) set, not the full one —
+        # no overlap with page one, entirely inside the matched set, and together the two
+        # pages account for every matching vocabulary and nothing else.
+        assert second_page_pks.isdisjoint(first_page_pks)
+        assert second_page_pks <= matching_pks
+        assert first_page_pks | second_page_pks == matching_pks
