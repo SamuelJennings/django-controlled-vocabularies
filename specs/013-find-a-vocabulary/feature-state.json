@@ -173,8 +173,23 @@
       "tasks": [
         {
           "id": "T011",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_ui/test_views.py::TestVocabularySearch"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py -k Search -q (exit 0, 9 passed, 15 deselected)"
+            ],
+            "code": [
+              "controlled_vocabularies/ui/views.py:26",
+              "controlled_vocabularies/ui/templates/controlled_vocabularies/ui/conceptscheme_list.html:9"
+            ],
+            "concerns": [
+              "TestVocabularyList::test_page_renders_no_sort_filter_or_create_control (T006, pre-existing) now fails at 'name=\"q\" not in content' — decisions.md D11"
+            ]
+          }
         },
         {
           "id": "T012",

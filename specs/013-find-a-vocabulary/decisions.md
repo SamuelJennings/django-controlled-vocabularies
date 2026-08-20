@@ -163,3 +163,55 @@ removed, and the full suite that ran against the old configuration still passes 
 US-1's own, and green afterwards. Verified by reading the diff, not by the flag's own explanation.
 
 **ADR:** none — a triage record, not a design decision.
+
+## D10 — The wrapping form owns `id="filterForm"`; the submit button is written by hand, not inherited
+**Ambiguous**: research R4's chosen fix ("wrap django-mvp's search action in a `GET` form of our
+own") reads as inheriting `cotton/page/list/actions/search.html` wholesale. Rendering it wholesale
+does fix the submission defect, but it also brings the component's own submit button, whose label
+is `text="Search"` — a bare string literal, not `{% trans %}`d, with no `c-vars` exposed to override
+it. Plan.md's own key design decision #2 additionally commits to "our own `{% trans %}`d submit
+button", which the component cannot produce no matter how it is called.
+
+**Chosen**: the block builds the field directly with `<c-form.field>` — the same primitive
+`actions/search.html` itself calls, with the same `name="q"`, `value`, `aria-label` and icon-prelabel
+slot — inside our own `<form method="get" id="filterForm">`, and renders our own `<c-button
+type="submit" text="{% trans "Search" %}">` beside it. The field's own `form="filterForm"` attribute
+is kept (matches research R4's framing — redundant rather than wrong, now that the id exists on the
+enclosing form) rather than dropped, so the markup stays legible against upstream's own component.
+
+**Why defensible**: the alternative that keeps the component's button (accepting an English-only
+label, contrary to the plan) or renders both buttons side by side (confusing, untested by the task's
+own acceptance criteria) are both worse than the one extra `<c-form.field>` call this duplicates.
+The duplication is the field's config only — one component call — not the six-file duplication R4's
+option 2 rejected. Confirmed by rendering the page: exactly one `<form id="filterForm">`, one input
+named `q`, one submit button, translated.
+
+**Revisit if**: django-mvp exposes a `button_text` (or similar) var on `actions/search.html` —
+raised in the issue this block's own comment names — at which point the block can go back to
+rendering the component directly.
+
+**ADR:** none.
+
+## D11 — `TestVocabularyList.test_page_renders_no_sort_filter_or_create_control` is left red, not edited
+**Ambiguous**: that test (T006, US-1) asserts `'name="q"' not in content` — true only because no
+search box existed yet. T011 gives the page a search box by design (FR-006, plan.md), so the
+assertion is now definitionally false, and the brief's own prohibitions call this scenario out by
+name: "Never modify or delete a test you did not author in this story... If one genuinely must
+change, mark the task blocked and say why."
+
+**Chosen**: the assertion is left untouched. T011's own acceptance (its new `TestVocabularySearch`
+tests, scoped by `-k Search`) is unaffected and green. The pre-existing test fails in the story-end
+full-suite run, reported there rather than fixed here.
+
+**Why defensible**: the instruction is explicit and appears twice (skill doc and brief). Editing it
+myself — even a one-line, well-justified edit — is exactly the "comply into a known-wrong state"
+shape the org has been burned by before (FS-012). The other two assertions in the same test
+(`'name="o"' not in content`, `"Add new" not in content`) are still true and untouched; only the
+`q` line is stale, and it is stale because the feature it predates was always going to ship in this
+same phase (tasks.md: "T011 rewrites the actions block T006 writes... the same test module").
+Reviewer/Forge disposition is the likely fix: split the assertion out, or delete it, once someone
+other than the story that invalidated it signs off.
+
+**Revisit if**: never, from inside this story — this is Forge's to reconcile, not mine.
+
+**ADR:** none — a triage record, not a design decision.

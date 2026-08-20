@@ -21,6 +21,10 @@ class VocabularyListView(MVPListView):
     list_item_template = "controlled_vocabularies/ui/conceptscheme_list_item.html"
     template_name = "controlled_vocabularies/ui/conceptscheme_list.html"
 
+    # django-mvp's SearchMixin reads ?q=, strips it, and applies case-insensitive
+    # substring matching across these fields with OR semantics (T011, FR-006).
+    search_fields = ["name", "description"]
+
     # A class attribute, not an `.order_by()` call inside get_queryset() — Django applies
     # `self.ordering` innermost, ahead of both django-mvp's search and order mixins; ordering
     # from our own get_queryset() would land after the search mixin's `.distinct()`, the

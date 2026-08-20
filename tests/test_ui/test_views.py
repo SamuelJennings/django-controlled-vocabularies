@@ -1,6 +1,7 @@
-"""Tests for :mod:`controlled_vocabularies.ui.views` (T006-T009)."""
+"""Tests for :mod:`controlled_vocabularies.ui.views` (T006-T009, T011-T013)."""
 
 import pytest
+from bs4 import BeautifulSoup
 from django.db import connection
 from django.template.loader import render_to_string
 from django.test.utils import CaptureQueriesContext
@@ -215,3 +216,92 @@ class TestVocabularyListEmptyState:
         view.request = rf.get("/")
 
         assert "no vocabularies" in str(view.get_empty_state_heading())
+
+
+class TestVocabularySearch:
+    """A search narrows the list by name and by description (FR-006, SC-006, User Story 2
+    scenarios 1-3 and 7).
+    """
+
+    @pytest.mark.django_db
+    def test_a_word_from_the_name_narrows_to_that_vocabulary(self, client):
+        match = ConceptSchemeFactory(name="Geological Time Scale")
+        ConceptSchemeFactory(name="Soil Classification")
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-list"), {"q": "Geological"})
+
+        listed = {vocabulary.pk for vocabulary in response.context["object_list"]}
+        assert listed == {match.pk}
+
+    @pytest.mark.django_db
+    def test_a_word_appearing_only_in_the_description_narrows_too(self, client):
+        match = ConceptSchemeFactory(name="Alpha", description="Covers stratigraphy and rock units")
+        ConceptSchemeFactory(name="Beta", description="Covers something else entirely")
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-list"), {"q": "stratigraphy"})
+
+        listed = {vocabulary.pk for vocabulary in response.context["object_list"]}
+        assert listed == {match.pk}
+
+    @pytest.mark.django_db
+    def test_matching_ignores_case(self, client):
+        match = ConceptSchemeFactory(name="Geological Time Scale")
+        ConceptSchemeFactory(name="Soil Classification")
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-list"), {"q": "geological"})
+
+        listed = {vocabulary.pk for vocabulary in response.context["object_list"]}
+        assert listed == {match.pk}
+
+    @pytest.mark.django_db
+    @pytest.mark.parametrize("term", ["%", "_", "'"])
+    def test_a_term_containing_a_like_wildcard_or_a_quote_is_looked_for_literally(self, client, term):
+        # icontains escapes %, _ and the backslash before building the LIKE pattern, so none
+        # of these terms are wildcards here — none of the seeded names or descriptions
+        # contain the literal character, so a correct implementation matches nothing.
+        ConceptSchemeFactory.create_batch(3)
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-list"), {"q": term})
+
+        assert list(response.context["object_list"]) == []
+
+    @pytest.mark.django_db
+    def test_a_non_latin_term_matches_its_vocabulary(self, client):
+        match = ConceptSchemeFactory(name="地質年代")
+        ConceptSchemeFactory(name="Soil Classification")
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-list"), {"q": "地質"})
+
+        listed = {vocabulary.pk for vocabulary in response.context["object_list"]}
+        assert listed == {match.pk}
+
+    @pytest.mark.django_db
+    def test_the_rendered_page_carries_a_search_input_and_no_sort_or_filter_control(self, client):
+        ConceptSchemeFactory()
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-list"))
+        content = response.content.decode()
+
+        assert 'name="q"' in content
+        assert 'name="o"' not in content
+        assert "filterModal" not in content
+
+    @pytest.mark.django_db
+    def test_the_search_input_belongs_to_a_get_form_that_actually_exists(self, client):
+        # The shipped search action's input and button both carry a hard-coded
+        # form="filterForm" attribute, and upstream only defines an element with that id
+        # inside the *filter* action (research R4) — render search alone and the box is
+        # wired to nothing. A query-string assertion alone would not catch this: it builds
+        # the URL directly and never touches the box's own wiring. Parsing the markup and
+        # confirming a real <form id="filterForm"> nests the input is what proves the box
+        # itself would submit.
+        ConceptSchemeFactory()
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-list"))
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        form = soup.find("form", id="filterForm")
+        assert form is not None
+        assert form.get("method", "").lower() == "get"
+        assert form.find("input", attrs={"name": "q"}) is not None
+        assert form.find(attrs={"type": "submit"}) is not None

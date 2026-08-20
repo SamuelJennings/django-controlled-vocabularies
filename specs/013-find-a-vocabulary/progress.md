@@ -397,3 +397,38 @@ last-push actor must be confirmed to be the bot before the merge gate.
 
 US-2 (T011–T014, search) dispatched into `/home/sam/projects/samueljennings/dcv-013-us2` on the
 Sonnet tier.
+
+## 2026-08-20T07:26:23Z · Implementer US2 · T011
+
+Did: `controlled_vocabularies/ui/views.py` — `search_fields = ["name", "description"]` on
+`VocabularyListView`. `controlled_vocabularies/ui/templates/controlled_vocabularies/ui/conceptscheme_list.html`
+— replaced the empty `{% block page.actions %}` with a `GET` form of our own
+(`id="filterForm"`) holding a `<c-form.field>` search input (same config django-mvp's own
+search action uses: `name="q"`, value readback, aria-label, search-icon prelabel) and our
+own `{% trans "Search" %}` submit button. Comment in the template names both upstream faults
+(research R4: the shipped search action's `form="filterForm"` targets an id only the filter
+action defines; its submit button's label is a hard-coded English literal with no variable
+exposed) and why this block works around rather than patches them — decisions.md D10.
+
+`tests/test_ui/test_views.py` — new `TestVocabularySearch` (9 tests): a word from the name
+narrows; a word only in the description narrows; matching ignores case; `%`, `_` and `'`
+are looked for literally (icontains escapes LIKE metacharacters) and match nothing; a
+non-Latin term (`地質`) matches; the rendered page carries `name="q"` and no `name="o"`/no
+`filterModal`; and — the assertion that actually proves the R4 defect is closed, since a
+query-string-only test would pass even against the broken markup — a `BeautifulSoup` parse
+confirms a real `<form id="filterForm" method="get">` nests both the `q` input and the
+submit button.
+
+Verified: `poetry run pytest tests/test_ui/test_views.py -k Search` — 9 passed (24
+deselected). All 9 observed failing first, for the right reason (no `search_fields`, no
+actions block) — confirmed by running the same command before the production edit.
+
+Watch: running the same file *without* `-k Search` now shows 1 pre-existing failure —
+`TestVocabularyList::test_page_renders_no_sort_filter_or_create_control`, authored in T006
+(US-1), asserts `'name="q"' not in content`. That assertion predates this story's search box
+and is now definitionally false; the other two assertions in the same test (no `o`, no "Add
+new") are untouched and still pass. Per the brief's own prohibition on editing a test I did
+not author, left as-is rather than fixed — decisions.md D11 has the full reasoning. This will
+show as the one failure in the story-end full-suite run.
+
+Next: T012 — prove search survives linking and paging (test-only).
