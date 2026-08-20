@@ -727,3 +727,27 @@ tests/test_demo/ -q` — 11 passed (unaffected, as expected — docs only).
 Next: full verify, then the completion report.
 
 Watch: none new.
+
+## 2026-08-20T01:30Z · Implementer US-3 · full verify and by-hand walk
+
+Did: ran the three documented commands by hand end to end against a fresh throwaway
+`DEMO_DB_PATH`, on a clean server: `migrate`, `seed_demo` ("seed_demo loaded 2 vocabularies"),
+`runserver`. Confirmed by curl against the live server: `/` redirects (302) to `/browse/`; the
+list page's body carries both vocabulary names, both descriptions, both concept counts (`5
+concepts`, `4 concepts`), and both badges (`Imported`, `Held here`); `/browse/?q=DCMI` narrows
+to `DCMI Type Vocabulary` only. `python -m demo.smoke http://127.0.0.1:8001` printed `OK: walked
+the demo vocabulary list and a search`. Server stopped and throwaway files removed.
+
+Ran the story's full verify command once:
+`/home/sam/.openclaw/workspaces/forge/engineering-org/kit/forge verify --repo . --base
+013-find-a-vocabulary`. First run failed conformance: `tests/test_demo/test_demo.py` and
+`tests/test_demo/test_seed.py` reported as mirroring no source module, despite T015's
+`"tests/test_demo/"` directory-prefix declaration in `pyproject.toml`. Root cause: the tool's
+non-mirror-paths parser is regex-based and an apostrophe in my own in-array comment corrupted
+its parsing of every following entry (decisions.md D20). Fixed by listing the three files
+explicitly and moving the comment above the array, matching the file's own existing convention;
+confirmed by calling `forgekit.conformance.declared_non_mirror_paths` directly before and after.
+
+Verified: `forge verify` — conformance passed, docs passed, `poetry:lint` passed, `poetry:
+typecheck` passed, `poetry:test` passed (all 1451 tests — the suite this story added 15 to),
+`poetry:build` passed.

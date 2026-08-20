@@ -406,3 +406,31 @@ not a demo one) — at that point this line stops being load-bearing rather than
 **ADR:** none — one settings module's own value, discovered by the by-hand verification T017
 requires and folded into that task's commit since T015 (where `demo/settings.py` was written)
 is already landed.
+
+## D20 — `non-mirror-paths` entries are exact files, an apostrophe broke the array
+
+**Ambiguous**: `forge verify`'s conformance step flagged `tests/test_demo/test_demo.py` and
+`tests/test_demo/test_seed.py` as mirroring no source module, even though T015 declared
+`"tests/test_demo/"` as a directory-prefix exception in `pyproject.toml`. The parser
+(`forgekit/conformance.py`) extracts the array's text and then matches quoted strings with a
+regex too naive to know TOML comments from string literals — an apostrophe in an in-array
+comment ("module's subject") was read as a string delimiter, corrupting every entry after it.
+`test_smoke.py` was never actually covered by the declaration at all; it passed only because
+it is a standing, cross-repo exception hard-coded in the tool itself (`NON_MIRROR_FILES`),
+unrelated to anything this story wrote.
+
+**Chosen**: list the three `tests/test_demo/` files explicitly, and move the explanatory
+comment above the array (matching the file's own existing style for the `test_ui/` entries),
+written with no apostrophe.
+
+**Why defensible**: matches the tool's own documented convention exactly (explicit files,
+comment outside the array) rather than inventing a directory-prefix shorthand the tool's
+regex-based parser cannot safely round-trip. Confirmed by importing
+`forgekit.conformance.declared_non_mirror_paths` directly and reading its output before and
+after.
+
+**Revisit if**: the parser is ever hardened past regex extraction — this workaround for its
+current form should not be read as guidance beyond it.
+
+**ADR:** none — one repo's own `pyproject.toml` entry, discovered by running the org's own
+verify tool rather than by reading its source in advance.
