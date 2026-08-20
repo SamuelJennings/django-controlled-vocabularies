@@ -451,3 +451,62 @@ deselected (9 from T011 plus these 2). Both new tests passed on first run, confi
 rather than fixing — matches the task's own framing.
 
 Next: T013 — a search matching nothing says so, in its own words.
+
+## 2026-08-20T07:52:03Z · Implementer US2 · T013
+
+Did: `controlled_vocabularies/ui/views.py` — `get_empty_state_heading()` and
+`get_empty_state_message()` both branch on `request.GET.get("q", "").strip()`. A search
+term gives `_('Nothing matches "%(term)s"') % {"term": search_term}` and
+`_("Try a different search term.")`; no term keeps T009's heading (`"This site holds no
+vocabularies"`) and `None` message unchanged. Neither branch uses `mark_safe` or
+`format_html` — both return plain (possibly `%`-interpolated) translatable text, escaped
+by the template layer same as anything else in `{{ }}`.
+`controlled_vocabularies/ui/templates/.../conceptscheme_list.html` — inside
+`{% block page.actions %}`, `{% if search_query %}` renders a `{% trans %}`d link back to
+the unsearched list (`{% url 'controlled_vocabularies_ui:vocabulary-list' %}`) beside the
+search form — the way back FR-009 requires, kept out of the message per the task (a link
+inside a heading/message the empty-state component renders autoescaped with no slot would
+show as literal text, and marking either safe would emit the search term unescaped).
+
+`tests/test_ui/test_views.py` — new `TestVocabularySearchEmptyState` (5 tests): a search
+matching nothing returns 200, echoes the term, and does not show the exact site-empty
+string; that state also carries a link back to the unsearched list (`list_url` present in
+the page's `href`s); an empty site with no search keeps T009's wording and shows no such
+link; the no-match and site-empty headings are different strings; and a term containing
+`<script>alert(1)</script>` is escaped — asserted by parsing the empty-state `<h3>` with
+`BeautifulSoup` and confirming it has no `<script>` *element* nested inside (an HTML
+parser would produce one if the term had gone through `mark_safe`), only the term as
+literal text.
+
+Two real bugs caught before commit, both by observing RED for the right reason first:
+
+1. My first cut of the "term is escaped" test asserted a blanket `"<script>" not in
+   content` — false on *any* page here, since the base chrome's own theme-toggle script
+   is a real `<script>` tag. Rewrote to scope the check to the empty-state heading
+   specifically (`heading.find("script") is None`).
+2. The actions-block link's own Django comment (`{# ... #}`) spanned two lines. Django's
+   `{# #}` tag does not support multi-line content (confirmed with a two-line `Template()`
+   probe outside the test suite) — unlike `{% comment %}`, it silently falls through as
+   literal text instead of raising, so the comment itself leaked into the rendered page
+   and broke an unrelated assertion. Switched to `{% comment %}...{% endcomment %}`,
+   matching the block already at the top of this file from T011.
+3. My first heading wording, "No vocabularies match "…"", shares the substring "no
+   vocabularies" with T009's site-empty heading ("This site holds no vocabularies"), so a
+   test asserting their absence by loose substring could not tell them apart. Changed the
+   wording to "Nothing matches "…"" (no shared substring) and tightened the test to check
+   for T009's *exact* heading string rather than a fragment of it.
+
+Verified: `poetry run pytest tests/test_ui/test_views.py -k Search -q` — 16 passed, 15
+deselected (9 T011 + 2 T012 + 5 T013). `poetry run pytest tests/test_ui/test_templates.py
+-q` — 5 passed (the mechanical every-string-translated scan re-parametrizes over the
+edited template automatically; no bare text introduced). `poetry run ruff check
+controlled_vocabularies/ui/views.py tests/test_ui/test_views.py` — clean.
+
+No decisions.md entry: the design (branch both hooks on the query, one comment naming
+where the link lives) matches plan.md's already-written design closely enough that there
+was no ambiguous call to record beyond the three bugs above, which are progress-note
+material, not decisions.
+
+Next: T014 — document search in README.md and CHANGELOG.md, then the story's exit
+criteria (full `poetry run pytest -q`, the `forge verify` ritual) before the completion
+report.

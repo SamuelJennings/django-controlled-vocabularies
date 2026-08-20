@@ -40,13 +40,22 @@ class VocabularyListView(MVPListView):
         return super().get_queryset().annotate(concept_count=Count("concepts"))
 
     def get_empty_state_heading(self):
-        # This story has no search yet (T011-T014, User Story 2), so there is only one
-        # empty state to report — the site itself holds nothing. Once search exists, the
-        # second state (a search matching nothing, distinct wording — decisions.md D4)
-        # branches here on the ``?q=`` value.
+        # Two distinct empty states, never one (T013, decisions.md D4): a search matching
+        # nothing says so and repeats the term; a genuinely empty site keeps T009's wording.
+        # Both branches return plain translatable text — never mark_safe, never
+        # format_html. The way back to the full list is the link the actions block renders
+        # (conceptscheme_list.html), not markup here — django-mvp's empty-state component
+        # renders this string autoescaped with no slot, so an anchor here would show as
+        # literal text, and marking it safe would emit the search term unescaped.
+        search_term = self.request.GET.get("q", "").strip()
+        if search_term:
+            return _("Nothing matches “%(term)s”") % {"term": search_term}
         return _("This site holds no vocabularies")
 
     def get_empty_state_message(self):
+        search_term = self.request.GET.get("q", "").strip()
+        if search_term:
+            return _("Try a different search term.")
         # No message: the base class's own default points at a create button this page
         # does not show (show_create_action is never set), and this empty state has
         # nothing else useful to add beyond the heading.

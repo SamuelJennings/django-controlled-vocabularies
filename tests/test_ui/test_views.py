@@ -355,3 +355,73 @@ class TestVocabularySearchAcrossRequestsAndPages:
         assert second_page_pks.isdisjoint(first_page_pks)
         assert second_page_pks <= matching_pks
         assert first_page_pks | second_page_pks == matching_pks
+
+
+class TestVocabularySearchEmptyState:
+    """A search matching nothing says so, in its own words (FR-009, FR-011, User Story 2
+    scenario 4, decisions.md D4) — distinct from T009's site-empty wording.
+    """
+
+    @pytest.mark.django_db
+    def test_a_search_matching_nothing_returns_200_with_no_match_wording_and_the_term_echoed(self, client):
+        ConceptSchemeFactory(name="Soil Classification")
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-list"), {"q": "Stratigraphy"})
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        assert "Stratigraphy" in content
+        # The exact site-empty string, not a loose substring — "no vocabularies" itself
+        # is not a safe check here since it is also a substring of some plausible
+        # no-match wordings.
+        assert "This site holds no vocabularies" not in content
+
+    @pytest.mark.django_db
+    def test_a_search_matching_nothing_offers_a_link_back_to_the_unsearched_list(self, client):
+        ConceptSchemeFactory(name="Soil Classification")
+        list_url = reverse("controlled_vocabularies_ui:vocabulary-list")
+
+        response = client.get(list_url, {"q": "Stratigraphy"})
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        hrefs = {a["href"] for a in soup.find_all("a", href=True)}
+        assert list_url in hrefs
+
+    @pytest.mark.django_db
+    def test_an_empty_site_with_no_search_keeps_t009s_wording_and_shows_no_such_link(self, client):
+        list_url = reverse("controlled_vocabularies_ui:vocabulary-list")
+
+        response = client.get(list_url)
+        soup = BeautifulSoup(response.content, "html.parser")
+        content = response.content.decode()
+
+        assert "no vocabularies" in content.lower()
+        hrefs = {a["href"] for a in soup.find_all("a", href=True)}
+        assert list_url not in hrefs
+
+    def test_the_no_match_and_site_empty_headings_are_different_strings(self, rf):
+        no_match_view = VocabularyListView()
+        no_match_view.request = rf.get("/", {"q": "Stratigraphy"})
+
+        site_empty_view = VocabularyListView()
+        site_empty_view.request = rf.get("/")
+
+        assert str(no_match_view.get_empty_state_heading()) != str(site_empty_view.get_empty_state_heading())
+
+    @pytest.mark.django_db
+    def test_a_term_containing_markup_is_escaped_in_the_response(self, client):
+        # Scoped to the empty-state heading itself, not a blanket "no <script> in the
+        # page" check — the page's own theme-toggle script legitimately has one. If the
+        # term were rendered through mark_safe (the repair T013 explicitly rejects), an
+        # HTML parser would read it as a real <script> element nested inside the
+        # heading; a substring check on the raw response would not catch that, since the
+        # unescaped term is also a byte-for-byte substring of the correctly escaped one.
+        ConceptSchemeFactory(name="Soil Classification")
+        list_url = reverse("controlled_vocabularies_ui:vocabulary-list")
+
+        response = client.get(list_url, {"q": "<script>alert(1)</script>"})
+        soup = BeautifulSoup(response.content, "html.parser")
+        heading = soup.find("h3")
+
+        assert heading.find("script") is None
+        assert "<script>alert(1)</script>" in heading.get_text()

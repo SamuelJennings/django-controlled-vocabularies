@@ -29,4 +29,11 @@
     </c-form.field>
     <c-button type="submit" class="join-item" form="filterForm" text="{% trans "Search" %}" />
   </form>
+  {% if search_query %}
+    {% comment %}
+      The way back to the full list when a search is active (T013, decisions.md D4) — a
+      link here, not markup inside the empty-state message (see get_empty_state_heading).
+    {% endcomment %}
+    <a href="{% url 'controlled_vocabularies_ui:vocabulary-list' %}" class="link">{% trans "Show all vocabularies" %}</a>
+  {% endif %}
 {% endblock page.actions %}
