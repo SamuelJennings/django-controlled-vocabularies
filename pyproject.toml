@@ -45,10 +45,12 @@ django-tomselect = "^2026.6.2"
 # imports it (test_ui/test_architecture.py, test_ui/test_packaging.py prove
 # the isolation). django-mvp's own floor is Python >=3.12 while this package's
 # is 3.11, so the marker makes the extra unavailable there rather than an
-# install error. Pinned to the 0.19 line rather than the whole pre-1.0 range:
-# the browsing page's own template works around two faults in 0.19's search
-# action (django-mvp#280), so an upstream fix is as breaking here as an
-# upstream change would be, and a 0.x minor is free to make either.
+# install error. Pinned to the 0.19 line rather than the whole pre-1.0 range,
+# which is ordinary caution about a 0.x dependency whose minors may break. The
+# original reason was narrower and no longer applies: the page once carried a
+# template working around django-mvp's search faults, and an upstream fix would
+# have broken it. That override is gone (ADR 0015) and the affected tests are
+# skipped instead, so a 0.20 carrying the fix is something to adopt — see #147.
 django-mvp = { version = "^0.19.1", optional = true, python = ">=3.12" }
 
 [tool.poetry.extras]
