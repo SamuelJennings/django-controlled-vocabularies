@@ -54,6 +54,10 @@ INSTALLED_APPS = [
     # the demo must match it, and if the two ever disagree the README is the thing that is
     # right (013-find-a-vocabulary task brief).
     "controlled_vocabularies",
+    # The package's own concept search control, which its system checks require of any project
+    # installing it — not only of one rendering the browsing pages. The demo's admin edits a
+    # vocabulary, so a project reading these settings as an example gets the whole wiring.
+    "django_tomselect",
     "django_cotton",
     "easy_icons",
     "flex_menu",
@@ -84,6 +88,10 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # django-tomselect builds the concept search control's context from a thread-local request,
+    # and only this middleware sets it. Without the entry the control renders as an empty select
+    # carrying no search — which is why the package's own checks refuse to stay quiet about it.
+    "django_tomselect.middleware.TomSelectMiddleware",
 ]
 
 TEMPLATES = [

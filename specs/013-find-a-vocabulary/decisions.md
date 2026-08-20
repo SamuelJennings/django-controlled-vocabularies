@@ -463,3 +463,29 @@ the model registered bare it fails on the refused submission.
 should use that rather than declaring its own.
 
 **ADR:** none — a demo project's own wiring, decided by what the story already promised.
+
+## D22 — The demo wires the whole package, not only the part this feature added
+**Ambiguous**: `demo/settings.py` was built from the README's browsing section alone, which
+documents what the `ui` extra needs and nothing else. That section is not wrong — it adds to the
+package's base configuration rather than replacing it — but a demo built from it starts with three
+warnings from the package's own system checks: the core routes are not mounted, `django_tomselect`
+is not installed, and its middleware is absent.
+
+**Chosen**: the demo installs `django_tomselect` and its middleware and mounts
+`controlled_vocabularies.urls`, so it starts silently. The test asserts on `run_checks()` rather
+than on `manage.py check`'s exit code.
+
+**Why defensible**: the demo's whole purpose is to be read as an example of how to wire this
+package. An example that warns on every startup is a worked example of the mistake, and the reader
+most likely to copy it is the one least able to tell which warnings are safe to ignore. The
+management command exits zero on warnings, so an exit-code assertion would have passed this
+configuration forever — which is exactly what happened. `run_checks()` is what makes the silence
+the thing under test.
+
+The README gains a sentence saying the browsing section adds to the base configuration rather than
+replacing it, because a reader following it in isolation hit the same three warnings the demo did.
+
+**Revisit if**: the package's checks grow a warning a demonstration genuinely cannot satisfy — at
+which point the test needs a named exception, not a weakened assertion.
+
+**ADR:** none — a demo configuration decision, local to this repository.

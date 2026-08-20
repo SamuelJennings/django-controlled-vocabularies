@@ -349,6 +349,10 @@ page restricted wraps the include where it mounts these routes.
 pip install django-controlled-vocabularies[ui]
 ```
 
+This section adds to the package's base configuration rather than replacing it: `django_tomselect`
+and its middleware are still required, as ["Choosing a concept by typing"](#choosing-a-concept-by-typing)
+describes, and `manage.py check` says so on startup if they are missing.
+
 Add the ui app and django-mvp's own stack to `INSTALLED_APPS` — quoted from this package's own
 test project, so the list below is one that demonstrably works:
 

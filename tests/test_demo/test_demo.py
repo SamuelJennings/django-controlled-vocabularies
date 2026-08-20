@@ -24,10 +24,15 @@ import django
 django.setup()
 
 from django.conf import settings
-from django.core.management import call_command
+from django.core.checks import run_checks
 from django.urls import resolve, reverse
 
-call_command("check")
+# run_checks(), not call_command("check"): the management command exits zero on warnings, so it
+# passes a configuration that tells its own user something is wrong on every startup. The demo
+# is read as an example of how to wire this package, and an example that warns is a worked
+# example of the mistake. Assert the silence rather than the exit code.
+messages = run_checks()
+assert not messages, "the demo must start silently: " + "; ".join(str(m) for m in messages)
 
 assert settings.DEBUG is True, "the demo must be recognisable as a demo, not a deployment (FR-018)"
 assert settings.DATABASES["default"]["ENGINE"] == "django.db.backends.sqlite3"
