@@ -167,9 +167,9 @@
       "id": "US2",
       "priority": "P2",
       "issue": 144,
-      "status": "todo",
+      "status": "in_progress",
       "replans": 0,
-      "worktree": null,
+      "worktree": "/home/sam/projects/samueljennings/dcv-013-us2",
       "tasks": [
         {
           "id": "T011",
