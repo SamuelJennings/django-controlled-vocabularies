@@ -3,7 +3,7 @@
   "feature": "013-find-a-vocabulary",
   "branch": "013-find-a-vocabulary",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "PR_READY",
+  "state": "MERGED",
   "state_history": [
     {
       "state": "INTAKE",
@@ -94,6 +94,11 @@
       "state": "PR_READY",
       "at": "2026-08-20T12:40:00Z",
       "note": "US-3 accepted and verified; branch pushed with the maintainer's permission for the workflow file, bot push on top so the last push actor is the bot"
+    },
+    {
+      "state": "MERGED",
+      "at": "2026-08-20T12:08:12Z",
+      "note": "PR #145 merged; approved by SamuelJennings"
     }
   ],
   "gates": {
@@ -117,8 +122,8 @@
       ]
     },
     "merge": {
-      "approved_by": null,
-      "at": null
+      "approved_by": "SamuelJennings",
+      "at": "2026-08-20T12:08:01Z"
     }
   },
   "stories": [
@@ -392,6 +397,6 @@
   },
   "pr": {
     "number": 145,
-    "draft": true
+    "draft": false
   }
 }
