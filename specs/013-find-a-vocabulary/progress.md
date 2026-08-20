@@ -539,3 +539,26 @@ US-2 (T011-T014) implementation complete. Running the story's exit criteria next
 run is expected to show exactly one failure —
 `TestVocabularyList::test_page_renders_no_sort_filter_or_create_control` (T006, decisions.md
 D11) — left untouched per the brief's prohibition on editing a test from another story.
+
+## 2026-08-20 — US-2 accepted
+
+Search landed (T011–T014) and was verified here rather than on the implementer's word: 1431 tests,
+lint, type check, structure conformance, documentation and build all green; both craft-skill
+receipts matched the registry; every commit on the branch is bot-authored.
+
+One thing the implementer correctly refused to resolve. `TestVocabularyList::test_page_renders_no_sort_filter_or_create_control`,
+authored in T006, asserted the page carried no `name="q"` — a true pin on the empty actions block
+US-1 left behind, and false by design once T011 fills that block with the search form the spec
+requires. The brief forbids an implementer editing another story's test, so it came back flagged
+(decisions.md D11) rather than quietly fixed. Resolved here: the test was folded away, since the
+US-2 test `test_the_rendered_page_carries_a_search_input_and_nothing_else` already covered sort and
+filter absence, and its one unique claim — no create control — moved across. Deleting it outright
+rather than editing the stale line avoids two near-duplicate tests of the same block drifting apart.
+
+Tamper-check flags the same two files as US-1 — the test project's settings and URL configuration,
+additive and the plan's own instruction, triaged in decisions.md D9. Nothing new.
+
+Branch pushed as the bot (`0b9f20a..75d3cf5`); no workflow file is in this push, so the App's
+missing `workflows` permission did not bite. Completion comment posted on #144, ledger flipped.
+
+Next: the review panel over the whole feature branch.

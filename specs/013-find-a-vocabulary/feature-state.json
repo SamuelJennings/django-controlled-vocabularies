@@ -167,7 +167,7 @@
       "id": "US2",
       "priority": "P2",
       "issue": 144,
-      "status": "in_progress",
+      "status": "done",
       "replans": 0,
       "worktree": "/home/sam/projects/samueljennings/dcv-013-us2",
       "tasks": [
@@ -185,9 +185,6 @@
             "code": [
               "controlled_vocabularies/ui/views.py:26",
               "controlled_vocabularies/ui/templates/controlled_vocabularies/ui/conceptscheme_list.html:9"
-            ],
-            "concerns": [
-              "TestVocabularyList::test_page_renders_no_sort_filter_or_create_control (T006, pre-existing) now fails at 'name=\"q\" not in content' — decisions.md D11"
             ]
           }
         },
