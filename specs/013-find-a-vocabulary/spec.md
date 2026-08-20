@@ -75,6 +75,45 @@ A person looking at a site holding more vocabularies than fit on a screen types 
 
 ---
 
+### User Story 3 - Run the page and look at it (Priority: P1)
+
+**Refined**: 2026-08-20 — added after the maintainer pointed out that nothing in the first two
+stories lets him confirm the page renders. A test asserting a page's markup and a person looking at
+that page are different evidence, and only the second closes the question the whole feature exists
+to answer.
+
+Someone with a fresh clone of the repository — the maintainer at a review, a contributor deciding
+whether the package suits them — installs it, runs three commands, and has a browser open on a
+populated vocabulary list. They did not write a settings module, wire up seven applications, or
+find their own SKOS file first. They can search it, page through it, and add a vocabulary by hand to
+see it appear.
+
+**Why this priority**: P1 alongside the list itself. The page's own value is unverifiable without
+it, and every later slice of the browsing interface — a vocabulary's own page, a record's page —
+inherits the same running site the moment it exists.
+
+**Independent Test**: from a clean checkout, follow the documented commands and confirm the list is
+served and populated at the documented address. Confirm the same walk runs unattended, so the demo
+cannot rot silently.
+
+**Acceptance Scenarios**:
+
+1. **Given** a fresh clone with dependencies installed, **When** the documented commands are run in
+   order, **Then** a server is running and its documented address serves the vocabulary list with
+   vocabularies on it.
+2. **Given** the seeded demo, **When** the list is read, **Then** it holds both a vocabulary
+   imported from a publisher and one authored locally, so the difference between the two entries is
+   visible rather than described.
+3. **Given** a seeded demo in any state, **When** the seed command is run again, **Then** the demo
+   returns to the same state, whatever was added or removed before.
+4. **Given** the demo, **When** its root address is opened, **Then** it leads to the list rather
+   than to a missing page.
+5. **Given** a change to the package or the demo, **When** it is proposed, **Then** an unattended
+   check installs the demo, seeds it, serves it and reads the list back, and fails if any step
+   does not work.
+
+---
+
 ### Edge Cases
 
 - A vocabulary with no description at all — the entry still shows the rest, and the missing description leaves no stray punctuation or empty label behind.
@@ -103,6 +142,11 @@ A person looking at a site holding more vocabularies than fit on a screen types 
 - **FR-011**: A site holding no vocabularies MUST get a page saying so, in wording distinct from a search that matched nothing.
 - **FR-012**: The page MUST be reachable by a name the package owns rather than a fixed path, so a project chooses the address it is mounted at.
 - **FR-013**: No entry may link to the vocabulary it names, because nothing serves a vocabulary's own address yet.
+- **FR-014**: The repository MUST carry a runnable demonstration project that serves this page, configured the way the package's own documentation tells a project to configure it.
+- **FR-015**: The demonstration MUST be reachable in three documented commands from a fresh clone with dependencies installed — build the database, load content, serve it — and its root address MUST lead to the list rather than to a missing page.
+- **FR-016**: The demonstration's content MUST include both an imported vocabulary and a locally authored one, and loading it MUST be repeatable: running the command again returns the demonstration to the same state from any prior state.
+- **FR-017**: The demonstration MUST be checked without a person: an unattended run installs it, loads its content, serves it, and reads the list back, failing if any step does not work.
+- **FR-018**: The demonstration MUST be recognisable as one — a local database, an obviously throwaway secret, and documentation saying plainly that it is not a production configuration.
 
 ### Key Entities
 
@@ -119,6 +163,7 @@ A person looking at a site holding more vocabularies than fit on a screen types 
 - **SC-004**: The address of a narrowed list, opened fresh, produces the same vocabularies in the same order.
 - **SC-005**: The number of database queries the page runs does not grow with the number of vocabularies it shows.
 - **SC-006**: Every string the page shows a reader can be translated, and none is fixed in one language.
+- **SC-007**: A person who has never seen this repository can look at the working page within three commands of a fresh clone, and the same walk runs unattended on every proposed change.
 
 ## Assumptions
 

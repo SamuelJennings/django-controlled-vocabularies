@@ -69,6 +69,11 @@
       "state": "GATE_MERGE",
       "at": "2026-08-20T10:30:00Z",
       "note": "all four correctness findings fixed and each new gate proved against its defect; the three security remediations applied in the same commit (pin narrowed to ^0.19.1, 100-word search bound, README permission paragraph). 1440 tests green locally, all 10 checks green on 28a1c48, pushed as forge-aeo so the bot is the last pusher, PR #145 out of draft and mergeable."
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-20T00:40:00Z",
+      "note": "amendment: US-3 (runnable demonstration project) added to the approved scope and re-gated with the maintainer, who also authorised the demo workflow file; issue #146 created and linked, PR Closes block re-synced"
     }
   ],
   "gates": {
@@ -80,7 +85,8 @@
         "alphabetical order by name, case-insensitive and stable",
         "the concept count counts concepts only and excludes nothing",
         "an empty site and a search that matched nothing say different things",
-        "search selects from the whole set before the results are paged"
+        "search selects from the whole set before the results are paged",
+        "amended 2026-08-20: US-3 added by delta brief, approved in session"
       ]
     },
     "plan": {
@@ -259,6 +265,36 @@
               "CHANGELOG.md:18"
             ]
           }
+        }
+      ]
+    },
+    {
+      "id": "US3",
+      "priority": "P1",
+      "issue": 146,
+      "status": "todo",
+      "replans": 0,
+      "worktree": null,
+      "tasks": [
+        {
+          "id": "T015",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T016",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T017",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T018",
+          "status": "todo",
+          "attempts": 0
         }
       ]
     }

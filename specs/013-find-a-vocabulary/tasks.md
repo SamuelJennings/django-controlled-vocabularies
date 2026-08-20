@@ -358,6 +358,119 @@ without knowing its vocabulary — so a reader is not left inferring it.
 
 ---
 
+## Phase 4 — US-3: Run the page and look at it (P1, #146)
+
+*Added 2026-08-20 by amendment, re-gated with the maintainer. Runs after US-2 has merged: both
+touch the README, and the demo has to serve the finished page rather than half of it.*
+
+### T015 — The demo project runs
+
+**Files**: `manage.py` (new), `demo/__init__.py` (new), `demo/settings.py` (new),
+`demo/urls.py` (new), `tests/test_demo/__init__.py` (new), `tests/test_demo/test_demo.py` (new),
+`pyproject.toml`
+
+The repository has no `manage.py` and no project of its own — the test suite has always been the
+only thing that boots Django. Add both. `demo/settings.py` is the configuration the README already
+documents, written out in full rather than imported from the tests: a reader comparing the two
+should find them the same wiring, and a demo that imports test settings teaches nobody anything.
+`DEBUG = True`, a local SQLite file, and a throwaway secret written in the file — with a `ruff`
+per-file ignore for the hard-coded-secret rule, since the alternative is a demo that will not start
+until someone exports an environment variable.
+
+`demo/urls.py` mounts the browsing routes, the admin (so a vocabulary can be added by hand and seen
+to appear), and a root route **named `home`** redirecting to the list. The name is not decoration:
+django-mvp's footer menu reverses `home` on every page, so without it every render logs a reversal
+failure and the demo's root address — the first thing anyone tries — is a 404.
+
+Declare `tests/test_demo/` as a directory prefix under `[tool.forge.conformance] non-mirror-paths`:
+its subject is a project, not a module.
+
+Test, in `TestDemoProject`: the demo settings module boots in a subprocess and `manage.py check`
+is clean under it; the list route reverses under the demo's own urlconf; the root address redirects
+to it; `DEBUG` is on and the database is a local file, so nobody mistakes it for a deployment
+template.
+
+**Proves**: FR-014, FR-015, FR-018, User Story 3 scenarios 1 and 4.
+**Verify**: `pytest tests/test_demo/ -q`, then by hand: `python manage.py migrate` and
+`python manage.py runserver`.
+
+**Depends on**: T014.
+
+---
+
+### T016 — Seeding is one command, and repeatable
+
+**Files**: `demo/seed/*.ttl` (new), `demo/management/__init__.py` (new),
+`demo/management/commands/__init__.py` (new), `demo/management/commands/seed_demo.py` (new),
+`tests/test_demo/test_seed.py` (new)
+
+Two small SKOS files written for this purpose and shipped under `demo/seed/` — **not** reused from
+`tests/fixtures/`, which is test data whose shape changes when a test needs it to. One carries
+static URIs from an external publisher, so it lands as an imported vocabulary; one carries none, so
+it lands as authored here. Between them the demo shows both kinds of entry, which is the difference
+the list is claiming to make visible.
+
+`seed_demo` clears the vocabularies it manages and loads both files through the package's own
+import path — the demo exercises the same code a real project would, never a fixture loaded behind
+it. Destructive and idempotent by design, and it says so when it runs.
+
+Test, in `TestSeedDemo`: after one run both vocabularies exist with their concepts; after a second
+run the counts are identical; a vocabulary added by hand between runs is gone afterwards; one
+vocabulary reads as imported and the other as authored here.
+
+**Proves**: FR-016, User Story 3 scenarios 2 and 3.
+**Verify**: `pytest tests/test_demo/test_seed.py -q`.
+
+**Depends on**: T015.
+
+---
+
+### T017 — The walk runs unattended
+
+**Files**: `demo/smoke.py` (new), `.github/workflows/demo.yml` (new), `tests/test_demo/test_smoke.py` (new)
+
+A script that does what a person would: migrate a throwaway database, seed it, start the server,
+request the list, and assert on what comes back — that both seeded vocabularies are named, that a
+search narrows to one of them, and that the page carries the concept counts. It asserts on the
+served response, never on the code that produced it, because the failure it exists to catch is the
+one every unit test passes through: a template that renders in a test client and not in a browser.
+
+`.github/workflows/demo.yml` runs it on pull requests and on pushes to the default branch, with no
+paths filter on the pull-request trigger — a path-filtered required check never reports on an
+out-of-scope pull request and blocks the merge, which the repository's other workflows already
+explain. Read-only `contents` permission, no secrets: it installs from the public index and asserts
+locally. Model it on `django-literature`'s `demo.yml`.
+
+**The maintainer pushes this file.** The bot identity has no `workflows` permission, by design, so
+this task's branch cannot be pushed by the usual route — flag it at the story report rather than
+working around it.
+
+Test, in `TestDemoSmoke`: the script's assertions are exercised against a served page in-process, so
+a broken assertion fails here rather than only in CI.
+
+**Proves**: FR-017, User Story 3 scenario 5.
+**Verify**: `pytest tests/test_demo/test_smoke.py -q`, and `python -m demo.smoke` end to end.
+
+**Depends on**: T016.
+
+---
+
+### T018 — The demo is documented
+
+**Files**: `README.md`, `CHANGELOG.md`
+
+A "Try it" section: the three commands in order, the address they lead to, what the seeded content
+holds, that seeding is destructive and idempotent, and — plainly — that this is not a production
+configuration. Keep it beside the browsing section it demonstrates, not in a separate part of the
+file.
+
+**Proves**: Article VI, FR-015, FR-018. **Verify**: follow the section from a clean checkout and get
+the page.
+
+**Depends on**: T017.
+
+---
+
 ## Out of scope, deliberately
 
 - Any link into a vocabulary — #141.

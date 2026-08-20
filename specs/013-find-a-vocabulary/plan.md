@@ -38,9 +38,18 @@ test project.
 **Constraints**: no JavaScript requirement — the page works without it. No access rule of the
 package's own. No link to a vocabulary's own page until #141 serves one.
 
-**Scale/Scope**: two user stories, one new app, one view, two templates, one route, one extra. The
-two stories run **in sequence, not in parallel** — US-2 extends the same view class and rewrites the
-same template block US-1 writes, so parallel worktrees would collide at convergence.
+**Scale/Scope**: three user stories, one new app, one view, two templates, one route, one extra,
+and a demonstration project. The stories run **in sequence, not in parallel** — US-2 extends the
+same view class and rewrites the same template block US-1 writes, and US-3 serves the finished page
+and shares the README with both, so parallel worktrees would collide at convergence.
+
+**Amendment, 2026-08-20 (re-gated):** US-3 adds a runnable demonstration project — `manage.py`, a
+`demo/` project configured exactly as the README documents, a `seed_demo` command loading two
+purpose-written SKOS files through the package's own importer, and an unattended check that serves
+the page and reads it back. It exists because the first two stories are unverifiable by looking:
+tests assert markup, and only a running page answers the question the feature was built to answer.
+The demonstration is development surface, not published surface — it ships in the repository and not
+in the wheel, so it adds no dependency a consumer carries.
 
 ## Constitution Check
 
@@ -152,6 +161,7 @@ stack.
 |---|---|
 | `ui/checks.py` — one function, one check | The failure it replaces is a raw `ModuleNotFoundError: mvp` raised from URL loading, which names neither the extra nor the app that needs it. The reference implementation lacks this and its own review flagged the gap. It is a function and a registration, not a layer. |
 | Second settings module + subprocess boot test | The claim "the core does not require django-mvp" is otherwise untestable in a process that has already imported it. This is the same mechanism the repo already uses to prove the admin is optional. |
+| A `demo/` project written out in full rather than importing the test settings | The demo's job is to be read as well as run: a reader comparing it against the README's instructions should find the same wiring twice, and a settings module that imports the tests' teaches nothing and drags test-only choices — an in-memory database, a fixed URI base — into the thing meant to look like a real project. |
 
 ## Risks
 
@@ -165,3 +175,10 @@ stack.
   the template pointing at it.
 - **Coverage floors** (project 90%, patch 85%) with a new app that is mostly templates. Mitigation:
   the view and check carry real tests; template behaviour is asserted through rendered HTML.
+- **The demo's workflow file cannot be pushed by the bot** — the App holds no `workflows`
+  permission, deliberately, so that an agent cannot rewrite the checks that gate its own work.
+  Mitigation: the maintainer pushes that file himself; the story reports the constraint rather than
+  routing around it. Every other file on the branch pushes normally.
+- **A demo rots quietly.** Its whole value is being runnable, and nothing about a stale one looks
+  wrong in a diff. Mitigation: the unattended walk (T017) is the demo's own test, and it asserts on
+  a served response rather than on the code behind it.

@@ -610,3 +610,20 @@ breaking here as an upstream change, and a 0.x minor is free to make either), a 
 saying the page carries no permission rule of its own, and a 100-word bound on the search term
 (decisions.md D16). The bound is proved both ways: a 600-word term 500s without it and returns 200
 with it, and the truncation it costs is pinned by its own test rather than left implicit.
+
+## 2026-08-20 — Amendment: US-3, a runnable demonstration
+
+The maintainer raised that nothing on this branch lets him confirm the page renders — a test
+asserting markup and a person looking at the page are different evidence. Agreed, and taken into
+this feature rather than a later one: a merge gate whose deliverable is only checkable after a
+*later* pull request lands inverts the point of the gate, and #141 and #142 inherit the demo the
+moment it exists.
+
+Spec amended with User Story 3, FR-014 through FR-018 and SC-007; `tasks.md` gains Phase 4
+(T015–T018); `plan.md` records the amendment, one complexity entry and two new risks. Story issue
+#146 created and linked under the epic, epic body and the pull request's `Closes` block re-synced,
+ledger amended and schema-valid. Re-gated in session — the maintainer approved the amended scope
+and, separately and explicitly, the demo's CI workflow file.
+
+The workflow file remains unpushable by the bot. That constraint is now written into T017 as
+something to report rather than route around.
