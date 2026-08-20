@@ -441,10 +441,15 @@ documents. From a fresh clone, with dependencies installed:
 
 ```bash
 poetry install --extras ui
-python manage.py migrate
-python manage.py seed_demo
-python manage.py runserver
+
+poetry run python manage.py migrate
+poetry run python manage.py seed_demo
+poetry run python manage.py runserver
 ```
+
+The three commands run through `poetry run` so they use the environment the install just built,
+whatever `python` on the shell's path happens to be — on many systems there is no `python` there
+at all.
 
 `migrate` builds the database, `seed_demo` loads two small vocabularies into it, and `runserver`
 serves the site at `http://127.0.0.1:8000/`, which redirects straight to the populated,
@@ -456,6 +461,13 @@ short vocabulary authored here, with no publisher of its own.
 `seed_demo` is destructive and idempotent: it clears every vocabulary before loading, so running
 it again returns the demo to the same seeded state whatever was added or removed before —
 including anything entered through the admin.
+
+To add a vocabulary by hand and watch it appear on the list, give yourself an account first and
+sign in at `http://127.0.0.1:8000/admin/`:
+
+```bash
+poetry run python manage.py createsuperuser
+```
 
 The demo is not a production configuration: `DEBUG` is on, the database is a local SQLite file,
 and the secret key is a throwaway value committed in `demo/settings.py`. Do not deploy it as-is.

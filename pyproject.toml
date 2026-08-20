@@ -176,6 +176,7 @@ non-mirror-paths = [
     "tests/test_ui/test_packaging.py",
     "tests/test_ui/test_templates.py",
     "tests/test_demo/test_demo.py",
+    "tests/test_demo/test_documented_commands.py",
     "tests/test_demo/test_seed.py",
     "tests/test_demo/test_smoke.py",
 ]
