@@ -81,7 +81,13 @@ mypy_path = "controlled_vocabularies/"
 plugins = ["mypy_django_plugin.main"]
 
 [tool.django-stubs]
-django_settings_module = "tests.settings"
+# The core-only settings, not tests.settings. django-stubs' mypy plugin imports this module to
+# build its type information, and the Code Quality job installs the package without the `ui`
+# extra — so pointing it at tests.settings, which installs django-mvp's stack, crashes the plugin
+# with "Error constructing plugin instance of NewSemanalDjangoPlugin" in CI while passing on any
+# machine that happens to have the extra. The types this package exposes are the core's, so the
+# core settings are also the right subject.
+django_settings_module = "tests.settings_core"
 ignore_missing_model_attributes = "True"
 
 [tool.ruff]

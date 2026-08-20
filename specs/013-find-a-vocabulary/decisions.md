@@ -515,7 +515,7 @@ submitted from a browser — a request carrying `?q=` still filters exactly as s
 test of that behaviour still runs. FR-006's control and FR-009's link back are, for now, delivered
 by the query string alone. The README says so.
 
-**Revisit if**: #282 lands. Unskip all three, delete the README's paragraph, and check whether the
+**Revisit if**: #282 lands — tracked on this repository as #147. Unskip all three, delete the README's paragraph, and check whether the
 actions area is reachable without an override before writing anything.
 
 **ADR:** docs/adr/0015-upstream-defects-are-waited-on-not-worked-around.md — this is a standing
