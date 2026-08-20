@@ -34,7 +34,7 @@ asserts that a big vocabulary matters more than a small one. Alphabetical is the
 can predict before the page loads, which is what makes a list scannable rather than merely sorted.
 This is FR-004.
 
-**ADR:** none.
+**ADR:** none — the spec states it as a requirement, and it binds this one list. Nothing downstream inherits a rule from it.
 
 ## D3 — The count is concepts, and nothing is excluded from it
 **Ambiguous**: a vocabulary holds concepts, collections and ordered collections, and a concept has
@@ -52,7 +52,8 @@ now for a state that does not exist would be an untested assumption dressed as a
 R4 builds the lifecycle it decides whether a deprecated concept still counts, which is a decision it
 is equipped to make and this feature is not. This is FR-002.
 
-**ADR:** none.
+**ADR:** none — the decision defers to R4 rather than settling anything. R4 will need one when it
+chooses whether a deprecated concept still counts.
 
 ## D4 — Two distinct empty states, never one
 **Ambiguous**: a page showing no vocabularies has two causes — the site holds none, or the search
@@ -68,7 +69,8 @@ populated site is empty is a false statement the page has the information to avo
 search term back matters for the same reason a form redisplays what was typed: a mistyped word is
 invisible once the box is the only record of it. This is FR-009 and FR-011.
 
-**ADR:** none.
+**ADR:** none — FR-009 and FR-011 carry it as requirements on this page. If the sibling pages adopt
+the same split it becomes a house rule worth recording, and #141 is the place to notice that.
 
 ## D5 — Search runs over the whole set, before paging
 **Ambiguous**: pagination and search interact, and the failure is silent in the direction that
@@ -83,7 +85,7 @@ length that made search worth having, and the result — "no vocabulary matches"
 one — is indistinguishable from a correct answer. This is FR-008 and FR-010, and the reason User
 Story 2 carries an acceptance scenario that searches from the second page.
 
-**ADR:** none.
+**ADR:** none — FR-008 already carries it as a requirement; an ADR would restate the spec rather than explain a choice the spec does not.
 
 ## D6 — Imported is read from the identifier, and R4 will complicate it
 **Ambiguous**: "authored here" versus "imported" is not a field. The only signal the data carries is
@@ -190,7 +192,8 @@ named `q`, one submit button, translated.
 raised in the issue this block's own comment names — at which point the block can go back to
 rendering the component directly.
 
-**ADR:** none.
+**ADR:** none — a workaround for a named upstream defect, scoped to one template and expected to be
+reverted. Recording it as an ADR would outlive the problem it describes.
 
 ## D11 — `TestVocabularyList.test_page_renders_no_sort_filter_or_create_control` is left red, not edited
 **Ambiguous**: that test (T006, US-1) asserts `'name="q"' not in content` — true only because no
@@ -215,3 +218,22 @@ other than the story that invalidated it signs off.
 **Revisit if**: never, from inside this story — this is Forge's to reconcile, not mine.
 
 **ADR:** none — a triage record, not a design decision.
+
+## D12 — D11's stale test is folded away rather than edited
+**Ambiguous**: D11 left `TestVocabularyList.test_page_renders_no_sort_filter_or_create_control`
+failing, correctly — an implementer may not edit a test another story authored. That left the
+disposition open: split the stale assertion out, delete the stale line, or delete the test.
+
+**Chosen**: delete the test. `TestVocabularySearch.test_the_rendered_page_carries_a_search_input_and_nothing_else`
+already asserted no sort control and no filter control over the same rendered page, so the only
+claim the older test still made on its own was that nothing here creates a vocabulary. That
+assertion moved across, and the test it came from is gone.
+
+**Why defensible**: editing the stale line would have left two tests making overlapping claims
+about the same block of markup, which drift apart the first time one is updated and the other is
+not. The older test's own name and its remaining assertions were both a description of a page that
+no longer exists — the empty toolbar US-1 left behind — rather than of anything the finished
+feature does. Deleting a test is normally a signal worth stopping for, which is why the decision is
+recorded here and named in the pull request rather than folded silently into a commit.
+
+**ADR:** none — a convergence triage record, not a design decision.
