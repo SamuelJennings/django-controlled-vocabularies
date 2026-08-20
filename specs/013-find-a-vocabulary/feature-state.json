@@ -225,8 +225,18 @@
         },
         {
           "id": "T014",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [],
+            "commands": [
+              "poetry run ruff check (exit 0, no Python changed)"
+            ],
+            "code": [
+              "README.md:327",
+              "CHANGELOG.md:18"
+            ]
+          }
         }
       ]
     }

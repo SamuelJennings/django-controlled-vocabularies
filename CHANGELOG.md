@@ -15,6 +15,11 @@ All notable changes to this project are documented in this file. The format foll
   none says so, in wording distinct from a search that matches nothing. No entry links to the
   vocabulary it names yet — nothing serves that address on the site until a later feature adds
   it. See the README.
+- The same page's search box narrows the list by a vocabulary's name and description (not by
+  the concepts it holds), travels in the page's address so a narrowed list can be linked to, and
+  widens on a second word rather than narrowing — matching is OR across every word and both
+  fields. A search matching nothing says so, repeats the term, and links back to the unsearched
+  list. See the README.
 
 ### Fixed
 

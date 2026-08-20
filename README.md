@@ -324,6 +324,14 @@ order, each entry showing its description, how many concepts it holds, and wheth
 authored here or imported from a publisher — with the publisher's own identifier shown for an
 imported one. A site holding no vocabularies says so rather than showing an empty list.
 
+A search box narrows that list by a vocabulary's name and description — not by the concepts it
+holds; finding a concept without already knowing which vocabulary holds it is not something this
+page does. The term travels in the page's address (`?q=`), so a narrowed list can be linked to or
+bookmarked and returned to. A second word **widens** the results rather than narrowing them:
+matching is OR across every word and both fields, not AND, which is the opposite of what a search
+box usually implies. There is no other way to filter or sort the list. A search matching nothing
+says so, repeats what was searched for, and offers a link back to the unsearched list.
+
 ```bash
 pip install django-controlled-vocabularies[ui]
 ```

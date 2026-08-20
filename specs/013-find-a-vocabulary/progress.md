@@ -510,3 +510,32 @@ material, not decisions.
 Next: T014 — document search in README.md and CHANGELOG.md, then the story's exit
 criteria (full `poetry run pytest -q`, the `forge verify` ritual) before the completion
 report.
+
+## 2026-08-20T07:56:12Z · Implementer US2 · T014
+
+Did: `README.md` — new paragraph in "Finding a vocabulary", right after the page's own
+intro paragraph and before the install step: what the search covers (name and
+description, not concepts — "finding a concept without already knowing which vocabulary
+holds it is not something this page does"), that the term travels in the address (`?q=`)
+so a narrowed list can be linked to or bookmarked, that a second word **widens** rather
+than narrows (OR across every word and both fields — flagged as the opposite of what a
+reader assumes, per the task), that there is no other filter or sort, and that a search
+matching nothing says so, repeats the term, and links back to the unsearched list.
+`CHANGELOG.md` — a second `### Added` bullet under `[Unreleased]`, alongside T010's,
+summarizing the same ground for a reader who does not open the README.
+
+No new test file — this task's own acceptance is that the documented behaviour matches
+the tests already proving it (T011-T013), same shape as T010.
+
+Verified: read every sentence added against `controlled_vocabularies/ui/views.py` and
+`tests/test_ui/test_views.py::TestVocabularySearch*` as they stand after T013 — each
+claim (fields searched, `?q=` persistence, OR-widening, no-match wording and link) has a
+passing test behind it. `poetry run ruff check` — no Python changed by this task.
+Committed via `git commit` — pre-commit gate (trailing-whitespace, end-of-file-fixer)
+passed clean on the first attempt.
+
+US-2 (T011-T014) implementation complete. Running the story's exit criteria next: full
+`poetry run pytest -q`, the `forge verify` ritual, then the completion report. Full-suite
+run is expected to show exactly one failure —
+`TestVocabularyList::test_page_renders_no_sort_filter_or_create_control` (T006, decisions.md
+D11) — left untouched per the brief's prohibition on editing a test from another story.
