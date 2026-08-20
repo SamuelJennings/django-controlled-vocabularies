@@ -375,3 +375,34 @@ elsewhere.
 at that point `call_command("seed_demo")` becomes available and this indirection can go.
 
 **ADR:** none — one test's own method.
+
+## D19 — `demo/settings.py` sets `LANGUAGE_CODE` explicitly, one line past the README
+
+**Ambiguous**: `seed_demo` failed by hand — `SkosImportFailed`,
+`DEFAULT_LANGUAGE_UNCONFIGURED` — even though the identical import already passed under
+`tests.settings` in every automated test. The difference is `LANGUAGE_CODE`: Django's own
+default is `"en-us"`, and Django's own default `LANGUAGES` list does not contain `"en-us"` as an
+exact member (it holds `"en"` and several regional variants, not that one) — so
+`ConceptScheme.effective_default_language` resolves to a code the importer's own configuration
+check refuses to import against, before a single concept is stored. `tests.settings` never hits
+this because it sets `LANGUAGE_CODE = "en"` explicitly; `demo/settings.py`, written to match only
+README.md's "Finding a vocabulary" section, did not set it at all and inherited Django's
+default.
+
+**Chosen**: `LANGUAGE_CODE = "en"` in `demo/settings.py`, with a comment naming the failure it
+prevents.
+
+**Why defensible**: this is not a disagreement with the README — the "Finding a vocabulary"
+section documents the `ui` stack's own requirements, not the general Django project settings a
+`startproject` scaffold already supplies (`ALLOWED_HOSTS`, `TIME_ZONE`, `USE_I18N`, all of which
+`demo/settings.py` also sets without README backing). `LANGUAGE_CODE` belongs in that same
+category: ordinary project boilerplate, needed here only because Django's own default happens to
+be a code its own default `LANGUAGES` list does not contain. No package behaviour changed;
+`controlled_vocabularies/` is untouched.
+
+**Revisit if**: the package ever tolerates an unconfigured default language (a design change,
+not a demo one) — at that point this line stops being load-bearing rather than becoming wrong.
+
+**ADR:** none — one settings module's own value, discovered by the by-hand verification T017
+requires and folded into that task's commit since T015 (where `demo/settings.py` was written)
+is already landed.

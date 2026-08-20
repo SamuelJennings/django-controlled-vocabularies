@@ -134,3 +134,9 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 USE_TZ = True
 TIME_ZONE = "UTC"
 USE_I18N = True
+
+# Django's own default (LANGUAGE_CODE="en-us") is not itself a member of the default
+# LANGUAGES list, which the importer's own configuration check refuses to import against
+# (controlled_vocabularies.exchange.skos.SkosImporter — DEFAULT_LANGUAGE_UNCONFIGURED) — the
+# seed command fails without this, before it stores a single concept.
+LANGUAGE_CODE = "en"
