@@ -171,4 +171,7 @@ non-mirror-paths = [
     "tests/test_ui/test_boot.py",
     "tests/test_ui/test_packaging.py",
     "tests/test_ui/test_templates.py",
+    # tests/test_demo/'s subject is the demo project as a whole booting, seeding and being
+    # served — not one module under controlled_vocabularies/ (013-find-a-vocabulary T015).
+    "tests/test_demo/",
 ]

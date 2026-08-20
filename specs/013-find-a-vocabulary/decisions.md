@@ -322,3 +322,29 @@ The first makes this redundant rather than wrong; the second changes what trunca
 
 **ADR:** none — one view's input handling against a named upstream defect, expected to outlive the
 defect but not to bind anything else.
+
+## D17 — The demo's boot test proves the root redirect by URL resolution, not by request
+
+**Ambiguous**: T015's test needs to prove the demo's root address is wired to the vocabulary
+list (FR-015, scenario 4). The obvious way is `django.test.Client().get("/", follow=True)` and
+asserting on the redirect chain — but that requires a migrated database (the view queries
+`ConceptScheme`) and `"testserver"` in `ALLOWED_HOSTS`, neither of which the demo's own
+settings should carry only to satisfy this test: a migrated scratch database duplicates what
+T016's seed test already proves, and `"testserver"` in a settings file a reader treats as the
+real configuration is exactly the kind of test-only value plan.md's Complexity Tracking already
+rules out for this module.
+
+**Chosen**: `django.urls.resolve("/")` against the demo's own urlconf, asserting the matched
+view is `RedirectView` with `pattern_name="controlled_vocabularies_ui:vocabulary-list"` and
+`url_name="home"`. No database, no test client, no settings changed to accommodate the test.
+
+**Why defensible**: this proves exactly what FR-015 requires — the root address is configured to
+lead to the list — without asserting anything about the view's runtime behaviour, which is
+already covered by `test_ui/test_views.py` and, end to end over real HTTP, by T017's unattended
+walk (FR-017). A resolution check and a live-server walk are complementary evidence, not a gap
+between them.
+
+**Revisit if**: this test starts standing in for the smoke walk rather than beside it — at that
+point it should assert less, not more.
+
+**ADR:** none — one test's own method, not a package-wide rule.

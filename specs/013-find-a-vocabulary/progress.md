@@ -627,3 +627,25 @@ and, separately and explicitly, the demo's CI workflow file.
 
 The workflow file remains unpushable by the bot. That constraint is now written into T017 as
 something to report rather than route around.
+
+## 2026-08-20T00:00Z · Implementer US-3 · T015
+
+Did: added `manage.py`, `demo/__init__.py`, `demo/settings.py` and `demo/urls.py` — the demo
+project boots against the exact `INSTALLED_APPS`/settings README.md's "Finding a vocabulary"
+section documents, plus the Django/django-mvp boilerplate a runnable project needs beyond it. A
+root route named `home` redirects to the vocabulary list, satisfying django-mvp's footer menu
+reversal and FR-015. Test-first: `tests/test_demo/test_demo.py` (`TestDemoProject`) boots the
+demo settings module in a subprocess, runs `manage.py check`, and asserts `DEBUG`/local-database
+and the root's URL resolution — declared a non-mirror path in `pyproject.toml` (its subject is
+the whole project, not one module).
+
+Verified: `poetry run pytest tests/test_demo/ -q` — 1 passed. `ruff check manage.py demo/
+tests/test_demo/ pyproject.toml` — clean.
+
+Next: T016 — seeding.
+
+Watch: `manage.py check` reports non-fatal warnings (`controlled_vocabularies.W002-W004`) for
+`django_tomselect` and the core app's own URL mount, because the demo's `INSTALLED_APPS`
+deliberately matches only the README's "Finding a vocabulary" section, which does not include
+them — that feature (typed concept search) is not part of this page. Not a blocker; noted in
+`concerns` for the completion report.
