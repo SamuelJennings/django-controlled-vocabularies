@@ -489,3 +489,34 @@ replacing it, because a reader following it in isolation hit the same three warn
 which point the test needs a named exception, not a weakened assertion.
 
 **ADR:** none — a demo configuration decision, local to this repository.
+
+## D23 — No page template of our own; the blocked tests are skipped and named
+**Ambiguous**: django-mvp's shipped search control is inert on a page that renders search without
+a filter control — its input and button carry `form="filterForm"` and only the filter action
+defines that element. An earlier revision of this feature overrode django-mvp's page template to
+supply the missing form, its own translatable submit button, and the link back to the unsearched
+list. That made every requirement pass.
+
+**Chosen**: the override is deleted. This package ships the row partial and nothing else, and the
+page is django-mvp's own. Three tests are skipped, each naming django-mvp/django-mvp#282 and the
+condition that unskips it: the box's own submission, the link back to the full list, and the
+whitespace-only prefill.
+
+**Why defensible**: the maintainer's ruling, and the reasoning generalises past this feature. A
+template override in a consumer is invisible once it works, and it outlives the upstream release
+that made it unnecessary — nothing ever goes red to say "you can delete this now". django-mvp
+exists so that consuming packages do not carry their own copies of its markup; a shell whose
+consumers all carry overrides has stopped being a shell, and every override makes the next upstream
+fix harder to adopt. A skipped test with a reason is the opposite: it is visible in every run, it
+names what it waits for, and it turns back into coverage the moment upstream ships.
+
+The cost is stated rather than hidden. Until #282 lands, the search box on the page cannot be
+submitted from a browser — a request carrying `?q=` still filters exactly as specified, and every
+test of that behaviour still runs. FR-006's control and FR-009's link back are, for now, delivered
+by the query string alone. The README says so.
+
+**Revisit if**: #282 lands. Unskip all three, delete the README's paragraph, and check whether the
+actions area is reachable without an override before writing anything.
+
+**ADR:** docs/adr/0015-upstream-defects-are-waited-on-not-worked-around.md — this is a standing
+rule about how this package treats its interface dependency, not a decision about one page.

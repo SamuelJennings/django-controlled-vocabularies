@@ -19,7 +19,15 @@ class VocabularyListView(MVPListView):
 
     model = ConceptScheme
     list_item_template = "controlled_vocabularies/ui/conceptscheme_list_item.html"
-    template_name = "controlled_vocabularies/ui/conceptscheme_list.html"
+
+    # No page template of our own: the page is django-mvp's `list_view.html`, reached through
+    # the base class's own fallback. This package supplies the row and nothing else, which is
+    # the extension point django-mvp documents. An earlier revision overrode the page to work
+    # around two faults in the shipped search control (django-mvp/django-mvp#282); the override
+    # was removed on the maintainer's instruction. A template override in a consumer outlives
+    # the upstream fix that made it unnecessary, and a shell package whose consumers all carry
+    # overrides has stopped being a shell. The tests those faults block are skipped, naming the
+    # issue they wait on (decisions.md D23).
 
     # django-mvp's SearchMixin reads ?q=, strips it, and applies case-insensitive
     # substring matching across these fields with OR semantics (T011, FR-006).

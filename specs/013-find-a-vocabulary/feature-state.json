@@ -3,7 +3,7 @@
   "feature": "013-find-a-vocabulary",
   "branch": "013-find-a-vocabulary",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "REVIEW",
+  "state": "PR_READY",
   "state_history": [
     {
       "state": "INTAKE",
@@ -89,6 +89,11 @@
       "state": "REVIEW",
       "at": "2026-08-20T12:20:00Z",
       "note": "US-3 diff reviewed for correctness against FR-014..018 plus a security lens on the new workflow: request_changes, 2 findings (1 high, 1 low), both reproduced by the orchestrator and both fixed. The high one: README documents adding a vocabulary through the admin and demo/urls.py mounts it, but nothing registered the model anywhere, so the one interactive instruction in the story led to an admin holding only users and groups. Fixed in demo/admin.py, not in the package, and gated by a test walking the whole documented instruction - proved against both the unregistered and the bare-registration failures (D21). The low one: a CHANGELOG line wrapped past the file's own width. One non-blocking observation on demo/smoke.py's urlopen left as is: its only caller passes a fixed localhost address."
+    },
+    {
+      "state": "PR_READY",
+      "at": "2026-08-20T12:40:00Z",
+      "note": "US-3 accepted and verified; branch pushed with the maintainer's permission for the workflow file, bot push on top so the last push actor is the bot"
     }
   ],
   "gates": {

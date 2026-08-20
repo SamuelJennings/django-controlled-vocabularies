@@ -425,6 +425,18 @@ a list whose every entry led to a missing page would ship a broken front door ra
 working one; a later feature turns the name into a link in the same change that gives it
 somewhere to lead.
 
+**One thing does not work yet.** The search box on the page cannot be submitted: the control comes
+from django-mvp, and in the released version its input is tied to a form that only its filter
+control creates ([django-mvp#282](https://github.com/django-mvp/django-mvp/issues/282)). Searching
+by address works exactly as documented — `?q=soil` narrows the list, and the narrowed address can be
+shared and bookmarked — but typing in the box and pressing the button does nothing until that fix
+ships. The same fault is why a page whose search matched nothing names the term but offers no link
+back to the full list.
+
+We are waiting on the fix rather than shipping a copy of django-mvp's page with the gap patched: an
+override in a package like this one outlives the release that makes it unnecessary, and nothing ever
+reports that it has (`docs/adr/0015-upstream-defects-are-waited-on-not-worked-around.md`).
+
 The page is served by `VocabularyListView`, in `controlled_vocabularies.ui.views`. A project that
 wants a different presentation subclasses it and routes its own path at the same view — the
 queryset, its ordering and its concept count come with the class, so an override that only changes

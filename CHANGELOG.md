@@ -22,6 +22,16 @@ All notable changes to this project are documented in this file. The format foll
   list. Letter case is ignored, with one limit belonging to the database rather than to this
   package: SQLite folds ASCII letters only, so on SQLite a vocabulary named *Ökologie* is found
   by *ÖKOLOGIE* and not by *ökologie*. PostgreSQL matches either way. See the README.
+
+### Known limitations
+
+- The search box on the page cannot be submitted, and a search matching nothing offers no link
+  back to the full list. Both come from the released django-mvp's search control, whose input is
+  tied to a form only its filter control creates
+  ([django-mvp#282](https://github.com/django-mvp/django-mvp/issues/282)). Searching by address is
+  unaffected: `?q=soil` narrows the list and the narrowed address can be shared. We are waiting on
+  the upstream fix rather than shipping a patched copy of django-mvp's page — see
+  `docs/adr/0015-upstream-defects-are-waited-on-not-worked-around.md`.
 - A runnable demo project: `manage.py`, `demo/settings.py` and `demo/urls.py` bring up the
   vocabulary list configured exactly as the README documents. `migrate`, `seed_demo` and
   `runserver` put a populated, searchable list on screen from a fresh clone in three commands.
