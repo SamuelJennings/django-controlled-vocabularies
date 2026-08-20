@@ -53,17 +53,16 @@ class TestDocumentedCommands:
         assert "seed_demo" in subcommands, subcommands
         assert "runserver" in subcommands, subcommands
 
-    @pytest.mark.parametrize("subcommand", ["migrate", "seed_demo", "runserver"])
-    def test_every_documented_command_runs_in_the_installed_environment(self, subcommand):
-        prefixes = [prefix for prefix, name in documented_commands() if name == subcommand]
-
-        assert prefixes, f"the README does not document 'manage.py {subcommand}'"
-        for prefix in prefixes:
-            assert prefix.strip().endswith("poetry run"), (
-                f"the README documents '{prefix} python manage.py {subcommand}': a bare "
-                "interpreter is not the environment 'poetry install' just built, and on a "
-                "machine whose path carries only 'python3' it does not exist at all"
-            )
+    @pytest.mark.parametrize(("prefix", "subcommand"), documented_commands())
+    def test_every_documented_command_runs_in_the_installed_environment(self, prefix, subcommand):
+        """Every invocation the section carries, not only the three that start it: the same
+        drift that shipped a bare ``python manage.py migrate`` can ship a bare
+        ``createsuperuser`` beside it."""
+        assert prefix.strip().endswith("poetry run"), (
+            f"the README documents '{prefix} python manage.py {subcommand}': a bare "
+            "interpreter is not the environment 'poetry install' just built, and on a "
+            "machine whose path carries only 'python3' it does not exist at all"
+        )
 
     @pytest.mark.parametrize("subcommand", ["migrate", "seed_demo", "runserver"])
     def test_the_unattended_walk_runs_the_documented_commands(self, subcommand):

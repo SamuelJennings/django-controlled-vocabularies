@@ -434,3 +434,32 @@ current form should not be read as guidance beyond it.
 
 **ADR:** none — one repo's own `pyproject.toml` entry, discovered by running the org's own
 verify tool rather than by reading its source in advance.
+
+## D21 — the demo project registers the vocabulary model, the package still registers nothing
+
+**Ambiguous**: User Story 3 promises a reader can "add a vocabulary by hand to see it appear",
+and README.md turns that into a documented instruction — run `createsuperuser`, sign in at
+`/admin/` — with `demo/urls.py` mounting the admin for exactly that purpose. Nothing anywhere
+in the repository registers `ConceptScheme` with an admin site: the package registers nothing
+deliberately, because a curator interface is R5 and a package that registered its own models
+would take that decision away from every project installing it. Following the documented steps
+led to an admin index holding only users and groups. Confirmed by reading `admin.site._registry`
+under `demo.settings`, which returned `['auth.Group', 'auth.User']`.
+
+**Chosen**: a `demo/admin.py` registering the model with a `ModelAdmin` whose form carries
+`name`, `description`, `default_language` and `static_uri`. The package is untouched.
+
+**Why defensible**: the registration belongs to the project that documents it, which is what a
+real installing project would do, so the demo demonstrates the actual arrangement rather than a
+privileged one. The four-field form is not decoration — `slug` is unique, required and derived
+from `name` on every save while `slug_is_manual` is unset, so a bare `admin.site.register()`
+serves a form demanding a value the model is about to compute, and the submission is refused.
+The gate in `tests/test_demo/test_admin.py` walks the whole documented instruction (sign in, GET
+the form, POST it, read the list back) rather than asserting registration, and was proved
+against both failure shapes: with `demo/admin.py` removed it fails on the missing form, and with
+the model registered bare it fails on the refused submission.
+
+**Revisit if**: R5 lands a curator interface the package itself ships, at which point the demo
+should use that rather than declaring its own.
+
+**ADR:** none — a demo project's own wiring, decided by what the story already promised.

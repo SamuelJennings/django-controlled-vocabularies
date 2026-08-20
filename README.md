@@ -469,6 +469,10 @@ sign in at `http://127.0.0.1:8000/admin/`:
 poetry run python manage.py createsuperuser
 ```
 
+The admin form there belongs to the demo project, not to the package: `demo/admin.py` registers
+the vocabulary model with its own admin site. The package registers nothing, so installing it
+adds no admin of its own — a project decides for itself which of its models it curates that way.
+
 The demo is not a production configuration: `DEBUG` is on, the database is a local SQLite file,
 and the secret key is a throwaway value committed in `demo/settings.py`. Do not deploy it as-is.
 

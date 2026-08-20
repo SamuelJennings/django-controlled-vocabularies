@@ -24,10 +24,12 @@ All notable changes to this project are documented in this file. The format foll
   by *ÖKOLOGIE* and not by *ökologie*. PostgreSQL matches either way. See the README.
 - A runnable demo project: `manage.py`, `demo/settings.py` and `demo/urls.py` bring up the
   vocabulary list configured exactly as the README documents. `migrate`, `seed_demo` and
-  `runserver` put a populated, searchable list on screen from a fresh clone in three commands. `seed_demo` is destructive and idempotent,
-  loading two vocabularies — one imported, one authored here — through the package's own import
-  path. An unattended check (`.github/workflows/demo.yml`, `demo/smoke.py`) walks the same path
-  on every pull request. See the README's "Try it" section.
+  `runserver` put a populated, searchable list on screen from a fresh clone in three commands.
+  `seed_demo` is destructive and idempotent, loading two vocabularies — one imported, one
+  authored here — through the package's own import path. The demo project registers the
+  vocabulary model with its own admin site, so a vocabulary can be added by hand and watched
+  onto the list. An unattended check (`.github/workflows/demo.yml`, `demo/smoke.py`) walks the
+  same path on every pull request. See the README's "Try it" section.
 
 ### Fixed
 
