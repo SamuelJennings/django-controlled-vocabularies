@@ -27,7 +27,14 @@ rather than absorbed.
 
 ---
 
-## D2 — The hierarchy is shown one level at a time, not as a whole tree
+## D2 — ~~The hierarchy is shown one level at a time, not as a whole tree~~ *(withdrawn)*
+
+> **Withdrawn 2026-08-20, before the specification was signed off.** The maintainer read this back
+> and removed hierarchy navigation from the feature entirely: the page holds one flat, searchable
+> list of every concept, and how concepts relate is shown on a concept's own page, which is #142's.
+> The reasoning is kept because it was acted on — the specification, the stories and the issue graph
+> all carried it for a time — and because it is the argument to answer if a tree is ever proposed
+> for this page again. Superseded by `spec.md` FR-006 and User Story 2.
 
 **Ambiguity**: "work down through it from the top" does not say whether the whole hierarchy is
 rendered at once, expandable in place, or navigated one level at a time.
@@ -46,7 +53,11 @@ the two to specify, to test and to reason about, and it is the one that does not
 
 ---
 
-## D3 — Following a concept is not a link to a concept
+## D3 — ~~Following a concept is not a link to a concept~~ *(withdrawn)*
+
+> **Withdrawn 2026-08-20, with D2.** Nothing on the page is followable at all now, so the
+> distinction this decision drew has nothing left to apply to. `spec.md` FR-011 states the plain
+> rule that replaced it: nothing on the page links to an individual record.
 
 **Ambiguity**: FR-014 forbids linking to an individual concept, and D2 requires following a concept
 to see what is under it. These read as contradictory.
@@ -81,32 +92,32 @@ guaranteed exists.
 
 ---
 
-## D5 — A row shows a label and whether anything is under it, and nothing else
+## D5 — A row shows a label and nothing else
 
-**Ambiguity**: how much of a concept a row in the hierarchy or in search results carries.
+**Ambiguity**: how much of a concept a row in the list or in search results carries.
 
-**Chosen**: the label, and whether the concept has concepts narrower than it. No definition, no
-notes, no identifier.
+**Chosen**: the label. No definition, no notes, no identifier, and — since the hierarchy came out
+with D2 — no indication of what a concept is broader or narrower than.
 
 **Why defensible**: a definition per row turns a list a visitor scans into prose they must read, and
 a definition is what #142's page is for — putting it here would build the part of #142 that is
-cheapest to build and leave the part that matters. Whether anything is under a concept is not
-decoration: without it a visitor cannot tell a leaf from a branch they have not opened, and D2's
-one-level-at-a-time navigation depends on that distinction being visible.
+cheapest to build and leave the part that matters. An earlier revision also showed whether a concept
+had anything under it, which the one-level-at-a-time navigation needed; with a flat list it is a
+claim about a relation the page otherwise says nothing about, and the maintainer's instruction is
+that relations belong on a concept's own page.
 
 ---
 
-## D6 — A search covers the whole vocabulary, never the current position
+## D6 — A search covers the whole vocabulary, never the page being viewed
 
-**Ambiguity**: whether a search run from a position below the top is scoped to that subtree.
+**Ambiguity**: whether a search run from the second page of a long list is scoped to that page.
 
 **Chosen**: the whole vocabulary, always.
 
-**Why defensible**: a visitor searches because stepping down did not find the term. A search scoped
-to where they had already looked would fail in exactly that case, and would fail silently — the
-result is a well-formed empty list, indistinguishable from a term the vocabulary does not hold. The
-same reasoning settled the list page's equivalent question in #140 (a search applies to every
-vocabulary, not to the page being viewed).
+**Why defensible**: a search confined to the page being viewed is silently wrong exactly when the
+list is long enough to need one, and its failure is a well-formed empty result indistinguishable
+from a term the vocabulary does not hold. #140 settled the identical question for the list of
+vocabularies the same way.
 
 ---
 
@@ -133,7 +144,7 @@ a decision taken deliberately one feature ago (#140 D6, "the identifier is never
 always a resolvable address") — was asked twice and answered about the published/unpublished axis
 instead.
 
-**Chosen**: yes. FR-016 makes the list page's identifier a link, alongside the entry link this
+**Chosen**: yes. FR-013 makes the list page's identifier a link, alongside the entry link this
 feature was always going to add there.
 
 **Why defensible**: leaving the two pages disagreeing about whether an identifier is a link would
@@ -148,35 +159,36 @@ imported vocabulary and none for one held here.
 
 ---
 
-## D9 — The demonstration gains a hierarchy and collections
+## D9 — The demonstration gains collections and richer labels
 
 **Ambiguity**: the demonstration project delivered by #140 seeds two vocabularies, neither of which
-has a single broader/narrower relation or a single collection. Nothing said this feature must change
-that.
+holds a single collection, and whose concepts carry only a preferred label each. Nothing said this
+feature must change that.
 
-**Chosen**: FR-019 and FR-020 require the demonstration to hold a vocabulary with a hierarchy at
-least two levels deep and both an ordered and an unordered collection, and require the unattended
-check to open a vocabulary page, step down and search inside it.
+**Chosen**: FR-018 and FR-019 require the demonstration to hold a vocabulary carrying both an
+ordered and an unordered collection and concepts carrying alternative and hidden labels, and require
+the unattended check to open a vocabulary page and search inside it.
 
 **Why defensible**: #140's third user story exists because the maintainer pointed out that nothing
 in the first two let him confirm the page renders, and that a test asserting markup and a person
-looking at a page are different evidence. Every part of this feature — the hierarchy, the path back
-to the top, the leaf-versus-branch distinction, the collections section — is invisible on the
-demonstration as it stands, so shipping it unchanged would reintroduce exactly the gap that story
-closed. The unattended check is extended for the same reason it exists: a demonstration nobody walks
-rots without saying so.
+looking at a page are different evidence. Two parts of this feature are invisible on the
+demonstration as it stands — the collections section, and a search matching a name the reader is
+never shown — so shipping it unchanged would reintroduce exactly the gap that story closed. The
+hidden label is the sharper of the two: it is the one behaviour here that cannot be confirmed by
+reading the page, only by searching for something that is not on it. The unattended check is
+extended for the same reason it exists: a demonstration nobody walks rots without saying so.
 
 ---
 
-## D10 — Paging applies to the hierarchy as well as to search results
+## D10 — The list of concepts is paged
 
-**Ambiguity**: #140 paginates the vocabulary list. Nothing said whether a level of the hierarchy is
-paginated.
+**Ambiguity**: #140 paginates the list of vocabularies. Nothing said whether the list of a
+vocabulary's concepts is paged, or only its search results.
 
-**Chosen**: both are, at a fixed size, preserving the current position or search across pages
-(FR-017).
+**Chosen**: the list is paged at a fixed size, search in force or not, with any search preserved
+across pages (FR-016).
 
-**Why defensible**: a single level can be large — a vocabulary with a flat structure has *every*
-concept at the top, which FR-006 and User Story 2 scenario 6 both admit as a normal case. Paginating
-search results but not the level they were reached from would put the unbounded case on the page
-that is hardest to leave.
+**Why defensible**: the unpaged case is the unbounded one. A vocabulary holds far more concepts than
+a site holds vocabularies — the goal this package pursues names tens of thousands — so a page that
+paginates only search results puts every concept in the vocabulary on the page a reader arrives at
+first.
