@@ -38,17 +38,6 @@ class TestVocabularyList:
 
         assert added.pk in {vocabulary.pk for vocabulary in response.context["object_list"]}
 
-    @pytest.mark.django_db
-    def test_page_renders_no_sort_filter_or_create_control(self, client):
-        ConceptSchemeFactory()
-
-        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-list"))
-        content = response.content.decode()
-
-        assert 'name="q"' not in content
-        assert 'name="o"' not in content
-        assert "Add new" not in content
-
 
 class TestVocabularyListEntry:
     """An entry's description, size and origin (FR-002, FR-003, User Story 1 scenarios 2-5).
@@ -276,7 +265,11 @@ class TestVocabularySearch:
         assert listed == {match.pk}
 
     @pytest.mark.django_db
-    def test_the_rendered_page_carries_a_search_input_and_no_sort_or_filter_control(self, client):
+    def test_the_rendered_page_carries_a_search_input_and_nothing_else(self, client):
+        # The actions block holds search and only search. Sort, filter and create are all
+        # part of the toolbar django-mvp renders by default, and all three are out of scope
+        # (spec.md scope note): sorting is not asked for, filtering was ruled out for want
+        # of an axis, and nothing here creates a vocabulary.
         ConceptSchemeFactory()
 
         response = client.get(reverse("controlled_vocabularies_ui:vocabulary-list"))
@@ -285,6 +278,7 @@ class TestVocabularySearch:
         assert 'name="q"' in content
         assert 'name="o"' not in content
         assert "filterModal" not in content
+        assert "Add new" not in content
 
     @pytest.mark.django_db
     def test_the_search_input_belongs_to_a_get_form_that_actually_exists(self, client):
