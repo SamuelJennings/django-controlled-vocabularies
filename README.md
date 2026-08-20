@@ -317,6 +317,181 @@ the admin adds *Hold down "Control", or "Command" on a Mac, to select more than 
 same sentence the admin puts under any multiple-select field, and it does not describe this
 control: concepts are added by typing and picking, and removed one at a time.
 
+## Finding a vocabulary
+
+The `ui` extra adds one reader-facing page: every vocabulary the site holds, in alphabetical
+order, each entry showing its description, how many concepts it holds, and whether it was
+authored here or imported from a publisher — with the publisher's own identifier shown for an
+imported one. A site holding no vocabularies says so rather than showing an empty list.
+
+A search box narrows that list by a vocabulary's name and description — not by the concepts it
+holds; finding a concept without already knowing which vocabulary holds it is not something this
+page does. The term travels in the page's address (`?q=`), so a narrowed list can be linked to or
+bookmarked and returned to. A second word **widens** the results rather than narrowing them:
+matching is OR across every word and both fields, not AND, which is the opposite of what a search
+box usually implies. There is no other way to filter or sort the list. A search matching nothing
+says so, repeats what was searched for, and offers a link back to the unsearched list.
+
+Case is ignored, with one limit that belongs to the database rather than to this package. SQLite
+folds case for ASCII letters only, so a vocabulary named *Ökologie* is found by *ÖKOLOGIE* and not
+by *ökologie*. PostgreSQL folds the whole of Unicode and matches either way. Django
+[documents this](https://docs.djangoproject.com/en/stable/ref/databases/#substring-matching-and-case-sensitivity)
+and does not work around it, and neither does this package, because nothing above the database can.
+It matters for any site whose vocabularies are named in German, French, Greek or Russian.
+
+The page carries **no permission rule of its own**. Every vocabulary in the database is listed to
+anyone who reaches the URL, exactly as the concept search endpoint above serves anyone who reaches
+it, and for the same reason: a package cannot guess a project's access policy. A vocabulary has no
+draft state, so one still being authored is listed from the moment it exists. A site that needs the
+page restricted wraps the include where it mounts these routes.
+
+```bash
+pip install django-controlled-vocabularies[ui]
+```
+
+This section adds to the package's base configuration rather than replacing it: `django_tomselect`
+and its middleware are still required, as ["Choosing a concept by typing"](#choosing-a-concept-by-typing)
+describes, and `manage.py check` says so on startup if they are missing.
+
+Add the ui app and django-mvp's own stack to `INSTALLED_APPS` — quoted from this package's own
+test project, so the list below is one that demonstrably works:
+
+```python
+INSTALLED_APPS = [
+    ...
+    "controlled_vocabularies",
+    "django_cotton",
+    "easy_icons",
+    "flex_menu",
+    # "mvp" before "crispy_tailwind": django-mvp ships an override of crispy-tailwind's
+    # help-text template, and the first app to declare a template path wins.
+    "mvp",
+    "crispy_forms",
+    "crispy_tailwind",
+    "controlled_vocabularies.ui",
+]
+
+# crispy-forms 2.7's get_template_pack() has no default, and the {% crispy %} tag validates
+# the pack against CRISPY_ALLOWED_TEMPLATE_PACKS at template-compile time — django-mvp's own
+# templates carry the tag, so both settings are required even though this page renders no
+# form of its own.
+CRISPY_TEMPLATE_PACK = "tailwind"
+CRISPY_ALLOWED_TEMPLATE_PACKS = ["tailwind"]
+
+TEMPLATES[0]["OPTIONS"]["context_processors"] += ["mvp.context_processors.mvp_config"]
+
+# django-mvp's base template renders icons through django-easy-icons and its own sidebar and
+# mobile-dock chrome through django-flex-menus; both raise at render time without these.
+EASY_ICONS = {
+    "default": {
+        "renderer": "easy_icons.renderers.ProviderRenderer",
+        "config": {"tag": "i"},
+        "packs": ["mvp.utils.BS5_ICONS"],
+    },
+}
+FLEX_MENUS = {
+    "renderers": {
+        "sidebar": "mvp.renderers.SidebarRenderer",
+        "dock": "mvp.renderers.MobileFooterNavRenderer",
+    },
+}
+```
+
+Mount the routes at an address of your choosing:
+
+```python
+from django.urls import include, path
+
+urlpatterns = [
+    ...
+    path("browse/", include("controlled_vocabularies.ui.urls")),
+]
+```
+
+Reverse the page by name, under its own namespace — `controlled_vocabularies_ui`, distinct from
+the core package's own `controlled_vocabularies` namespace, so both can be mounted in one
+project without either shadowing the other's reverses:
+
+```python
+reverse("controlled_vocabularies_ui:vocabulary-list")
+```
+
+`manage.py check` reports `controlled_vocabularies.ui.E001`, naming the extra to install, if
+`django-mvp` is not importable.
+
+**An entry names a vocabulary — it does not yet link to it.** Every vocabulary already has an
+address on this site (`ConceptScheme.local_url`), but nothing serves that address yet. Shipping
+a list whose every entry led to a missing page would ship a broken front door rather than a
+working one; a later feature turns the name into a link in the same change that gives it
+somewhere to lead.
+
+**One thing does not work yet.** The search box on the page cannot be submitted: the control comes
+from django-mvp, and in the released version its input is tied to a form that only its filter
+control creates ([django-mvp#282](https://github.com/django-mvp/django-mvp/issues/282)). Searching
+by address works exactly as documented — `?q=soil` narrows the list, and the narrowed address can be
+shared and bookmarked — but typing in the box and pressing the button does nothing until that fix
+ships. The same fault is why a page whose search matched nothing names the term but offers no link
+back to the full list.
+
+We are waiting on the fix rather than shipping a copy of django-mvp's page with the gap patched: an
+override in a package like this one outlives the release that makes it unnecessary, and nothing ever
+reports that it has (`docs/adr/0015-upstream-defects-are-waited-on-not-worked-around.md`).
+
+The page is served by `VocabularyListView`, in `controlled_vocabularies.ui.views`. A project that
+wants a different presentation subclasses it and routes its own path at the same view — the
+queryset, its ordering and its concept count come with the class, so an override that only changes
+`list_item_template` keeps every guarantee above:
+
+```python
+from controlled_vocabularies.ui.views import VocabularyListView
+
+
+class BrandedVocabularyListView(VocabularyListView):
+    list_item_template = "myproject/vocabulary_card.html"
+```
+
+### Try it: the demo project
+
+The repository carries a runnable demo of the page above, wired the same way this section
+documents. From a fresh clone, with dependencies installed:
+
+```bash
+poetry install --extras ui
+
+poetry run python manage.py migrate
+poetry run python manage.py seed_demo
+poetry run python manage.py runserver
+```
+
+The three commands run through `poetry run` so they use the environment the install just built,
+whatever `python` on the shell's path happens to be — on many systems there is no `python` there
+at all.
+
+`migrate` builds the database, `seed_demo` loads two small vocabularies into it, and `runserver`
+serves the site at `http://127.0.0.1:8000/`, which redirects straight to the populated,
+searchable vocabulary list at `http://127.0.0.1:8000/browse/`. The seeded content shows both
+kinds of entry the list distinguishes: the DCMI Type Vocabulary, a real vocabulary published by
+the Dublin Core Metadata Initiative, imported from a SKOS file; and Data Collection Methods, a
+short vocabulary authored here, with no publisher of its own.
+
+`seed_demo` is destructive and idempotent: it clears every vocabulary before loading, so running
+it again returns the demo to the same seeded state whatever was added or removed before —
+including anything entered through the admin.
+
+To add a vocabulary by hand and watch it appear on the list, give yourself an account first and
+sign in at `http://127.0.0.1:8000/admin/`:
+
+```bash
+poetry run python manage.py createsuperuser
+```
+
+The admin form there belongs to the demo project, not to the package: `demo/admin.py` registers
+the vocabulary model with its own admin site. The package registers nothing, so installing it
+adds no admin of its own — a project decides for itself which of its models it curates that way.
+
+The demo is not a production configuration: `DEBUG` is on, the database is a local SQLite file,
+and the secret key is a throwaway value committed in `demo/settings.py`. Do not deploy it as-is.
+
 ## Importing a published vocabulary
 
 `import_skos()` reads a SKOS file — Turtle, RDF/XML, or JSON-LD — and creates or updates the

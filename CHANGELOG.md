@@ -6,6 +6,41 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+### Added
+
+- Finding a vocabulary: an opt-in `ui` extra (`pip install django-controlled-vocabularies[ui]`)
+  adds one page listing every vocabulary the site holds, alphabetically and stably, each entry
+  showing its description, its concept count, and whether it was authored here or imported from
+  a publisher — with the publisher's own identifier shown for an imported one. A site holding
+  none says so, in wording distinct from a search that matches nothing. No entry links to the
+  vocabulary it names yet — nothing serves that address on the site until a later feature adds
+  it. See the README.
+- The same page's search box narrows the list by a vocabulary's name and description (not by
+  the concepts it holds), travels in the page's address so a narrowed list can be linked to, and
+  widens on a second word rather than narrowing — matching is OR across every word and both
+  fields. A search matching nothing says so, repeats the term, and links back to the unsearched
+  list. Letter case is ignored, with one limit belonging to the database rather than to this
+  package: SQLite folds ASCII letters only, so on SQLite a vocabulary named *Ökologie* is found
+  by *ÖKOLOGIE* and not by *ökologie*. PostgreSQL matches either way. See the README.
+
+### Known limitations
+
+- The search box on the page cannot be submitted, and a search matching nothing offers no link
+  back to the full list. Both come from the released django-mvp's search control, whose input is
+  tied to a form only its filter control creates
+  ([django-mvp#282](https://github.com/django-mvp/django-mvp/issues/282)). Searching by address is
+  unaffected: `?q=soil` narrows the list and the narrowed address can be shared. We are waiting on
+  the upstream fix rather than shipping a patched copy of django-mvp's page — see
+  `docs/adr/0015-upstream-defects-are-waited-on-not-worked-around.md`.
+- A runnable demo project: `manage.py`, `demo/settings.py` and `demo/urls.py` bring up the
+  vocabulary list configured exactly as the README documents. `migrate`, `seed_demo` and
+  `runserver` put a populated, searchable list on screen from a fresh clone in three commands.
+  `seed_demo` is destructive and idempotent, loading two vocabularies — one imported, one
+  authored here — through the package's own import path. The demo project registers the
+  vocabulary model with its own admin site, so a vocabulary can be added by hand and watched
+  onto the list. An unattended check (`.github/workflows/demo.yml`, `demo/smoke.py`) walks the
+  same path on every pull request. See the README's "Try it" section.
+
 ### Fixed
 
 - `ConceptsField`: a required field on an existing record no longer refuses a valid submission

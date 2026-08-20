@@ -1,0 +1,29 @@
+{% load i18n %}
+<c-card title="{{ object.name }}">
+  <c-slot name="badges">
+    {% if object.static_uri %}
+      <c-badge>{% trans "Imported" %}</c-badge>
+    {% else %}
+      <c-badge>{% trans "Held here" %}</c-badge>
+    {% endif %}
+  </c-slot>
+  {% if object.description %}
+    {% comment %}
+      Truncated in the template rather than clamped in CSS (decisions.md D14). A
+      `line-clamp-*` class would be the tidier answer, but this package ships no stylesheet
+      of its own and django-mvp's prebuilt one is generated from django-mvp's own templates
+      — a utility class that upstream does not already use is absent from the build, so the
+      class would render and do nothing, with no error to say so. A description running to
+      several paragraphs must not push every other vocabulary off the screen (spec.md Edge
+      Cases), and the filter holds that regardless of which stylesheet a project loads.
+    {% endcomment %}
+    <c-text size="sm" muted>{{ object.description|truncatewords:40 }}</c-text>
+  {% endif %}
+  {% if object.static_uri %}
+    {# The identifier is never a link — it is not always a resolvable address (D6). #}
+    <c-text size="xs" muted>{{ object.static_uri }}</c-text>
+  {% endif %}
+  <c-text size="xs" muted>
+    {% blocktrans count counter=object.concept_count %}{{ counter }} concept{% plural %}{{ counter }} concepts{% endblocktrans %}
+  </c-text>
+</c-card>
