@@ -80,7 +80,7 @@ A person looking at a site holding more vocabularies than fit on a screen types 
 - A vocabulary with no description at all — the entry still shows the rest, and the missing description leaves no stray punctuation or empty label behind.
 - A description running to several paragraphs — the entry stays scannable rather than pushing every other vocabulary off the screen.
 - A search string containing characters with a meaning in a query — `%`, `_`, a quote — is treated as text to look for, not as an instruction.
-- A search string in a non-Latin script, and a search that differs from the text only by letter case in such a script.
+- A search string in a non-Latin script, and a search that differs from the text only by letter case in such a script — the second of these depends on the database, and what each one does is pinned by test and stated in the package's own documentation (FR-006).
 - An imported vocabulary whose publisher identifier is not a web address — it is shown as given, not turned into a link that leads nowhere.
 - A vocabulary name long enough to break the layout.
 - No entry links to the vocabulary it names — until #141 serves a vocabulary's own address, a link would lead to a missing page.
@@ -95,7 +95,7 @@ A person looking at a site holding more vocabularies than fit on a screen types 
 - **FR-003**: Each entry MUST show whether the vocabulary is held here or was imported from a publisher, and MUST show the publisher's own identifier for an imported one and no such identifier for one authored here.
 - **FR-004**: The list MUST appear in a stable alphabetical order by name that does not depend on letter case.
 - **FR-005**: The page MUST carry no access rule of its own: every vocabulary the site holds is shown to whoever requests the page, leaving any restriction to the project mounting the package's routes.
-- **FR-006**: A visitor MUST be able to narrow the list by searching text appearing in a vocabulary's name or its description, matching regardless of letter case, and treating the search string as text rather than as query syntax.
+- **FR-006**: A visitor MUST be able to narrow the list by searching text appearing in a vocabulary's name or its description, matching regardless of letter case, and treating the search string as text rather than as query syntax. Letter case is ignored for ASCII letters on every database. For letters outside ASCII it is ignored on PostgreSQL and is not ignored on SQLite, whose `LIKE` folds ASCII only. The limitation sits below the application — no query the ORM can express repairs it — so it MUST be disclosed to a reader of the package rather than left to be discovered.
 - **FR-007**: A search MUST be carried in the page's own address, so that a narrowed list can be linked to, bookmarked and returned to.
 - **FR-008**: A search MUST be applied to every vocabulary the site holds before the results are divided into pages, never to one page of them.
 - **FR-009**: A search matching nothing MUST say so, repeat what was searched for, and offer a way back to the full list.

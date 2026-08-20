@@ -332,6 +332,19 @@ matching is OR across every word and both fields, not AND, which is the opposite
 box usually implies. There is no other way to filter or sort the list. A search matching nothing
 says so, repeats what was searched for, and offers a link back to the unsearched list.
 
+Case is ignored, with one limit that belongs to the database rather than to this package. SQLite
+folds case for ASCII letters only, so a vocabulary named *Ökologie* is found by *ÖKOLOGIE* and not
+by *ökologie*. PostgreSQL folds the whole of Unicode and matches either way. Django
+[documents this](https://docs.djangoproject.com/en/stable/ref/databases/#substring-matching-and-case-sensitivity)
+and does not work around it, and neither does this package, because nothing above the database can.
+It matters for any site whose vocabularies are named in German, French, Greek or Russian.
+
+The page carries **no permission rule of its own**. Every vocabulary in the database is listed to
+anyone who reaches the URL, exactly as the concept search endpoint above serves anyone who reaches
+it, and for the same reason: a package cannot guess a project's access policy. A vocabulary has no
+draft state, so one still being authored is listed from the moment it exists. A site that needs the
+page restricted wraps the include where it mounts these routes.
+
 ```bash
 pip install django-controlled-vocabularies[ui]
 ```

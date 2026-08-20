@@ -21,7 +21,7 @@
                   form="filterForm"
                   class="join-item grow md:w-[220px]"
                   placeholder="{% trans "Search" %}"
-                  value="{{ search_query|default:'' }}"
+                  value="{{ search_term|default:'' }}"
                   aria-label="{% trans "Search" %}">
       <c-slot name="prelabel">
         <c-icon name="search" />
@@ -29,10 +29,12 @@
     </c-form.field>
     <c-button type="submit" class="join-item" form="filterForm" text="{% trans "Search" %}" />
   </form>
-  {% if search_query %}
+  {% if search_term %}
     {% comment %}
       The way back to the full list when a search is active (T013, decisions.md D4) — a
       link here, not markup inside the empty-state message (see get_empty_state_heading).
+      `search_term`, not the mixin's raw `search_query`: a whitespace-only `?q=` filters
+      nothing, so it must not read as a search in force either (decisions.md D13).
     {% endcomment %}
     <a href="{% url 'controlled_vocabularies_ui:vocabulary-list' %}" class="link">{% trans "Show all vocabularies" %}</a>
   {% endif %}

@@ -19,7 +19,9 @@ All notable changes to this project are documented in this file. The format foll
   the concepts it holds), travels in the page's address so a narrowed list can be linked to, and
   widens on a second word rather than narrowing — matching is OR across every word and both
   fields. A search matching nothing says so, repeats the term, and links back to the unsearched
-  list. See the README.
+  list. Letter case is ignored, with one limit belonging to the database rather than to this
+  package: SQLite folds ASCII letters only, so on SQLite a vocabulary named *Ökologie* is found
+  by *ÖKOLOGIE* and not by *ökologie*. PostgreSQL matches either way. See the README.
 
 ### Fixed
 

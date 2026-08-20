@@ -562,3 +562,51 @@ Branch pushed as the bot (`0b9f20a..75d3cf5`); no workflow file is in this push,
 missing `workflows` permission did not bite. Completion comment posted on #144, ledger flipped.
 
 Next: the review panel over the whole feature branch.
+
+## Review
+
+Two lenses over the whole feature diff, one round each.
+
+**Security — approve, risk low.** Nothing critical or high. Both real defects belong to django-mvp
+rather than here, and both are now filed upstream: the search box's input and submit button target
+a form id only the filter action defines (#280), and the search mixin builds one `Q` per word per
+field straight from `?q=` with no cap, which on SQLite raises an unhandled `OperationalError` on a
+long enough term (#281). Reproduced rather than taken on report: 499 words 500s the page, 300
+returns 200. PostgreSQL has no equivalent ceiling. Applied here at convergence: the django-mvp pin
+narrowed to `^0.19.1`, a word bound in our own view, and a README sentence saying the page enforces
+no permission check.
+
+**Correctness and spec — request_changes, risk medium.** Four findings, all reproduced here before
+being acted on, all fixed.
+
+- *Search was not case-insensitive for any letter outside ASCII* (high). On SQLite, `Ökologie` is
+  found by `ÖKOLOGIE` and not by `ökologie`, and the reader gets the no-match empty state, which
+  looks exactly like a correct answer. The existing non-Latin test could not catch it, because
+  Japanese has no case. There is no repair above the database, so the limit is now stated in the
+  README and in FR-006, pinned by a test in both directions, and recorded as ADR 0014 because every
+  later search surface inherits it (decisions.md D15).
+- *No test asserted an entry shows its vocabulary's name or description* (medium). The factory
+  leaves the description blank, so that branch of the row partial was never rendered under test and
+  both could have been deleted with the suite green. One test now covers both, and it fails when
+  either is removed.
+- *A description running to several paragraphs rendered in full* (medium), against the spec's own
+  edge case. Shortened in the template rather than clamped in CSS: this package ships no stylesheet,
+  and a utility class django-mvp's prebuilt one does not already contain is absent from the file, so
+  a clamp would render and silently do nothing (decisions.md D14).
+- *A whitespace-only `?q=` read as a search* (low) — the full list, but with the box prefilled and
+  the way-back link offered. The page now branches on the same stripped term the queryset was
+  filtered on (decisions.md D13).
+
+Each of the three new gates was proved against the defect it exists to catch: the fix reverted, the
+test seen to fail, the fix restored.
+
+Full verify after the fixes: 1438 tests pass, lint, types, dependency check, migration check and
+build all green.
+
+The three remediations named in the security summary were outstanding when the correctness review
+came back, and are applied in the same commit: the django-mvp pin narrowed to `^0.19.1` (the
+browsing page's template works around two faults in 0.19's search action, so an upstream fix is as
+breaking here as an upstream change, and a 0.x minor is free to make either), a README paragraph
+saying the page carries no permission rule of its own, and a 100-word bound on the search term
+(decisions.md D16). The bound is proved both ways: a 600-word term 500s without it and returns 200
+with it, and the truncation it costs is pinned by its own test rather than left implicit.

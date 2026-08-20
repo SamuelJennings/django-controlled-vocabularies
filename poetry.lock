@@ -2560,4 +2560,4 @@ ui = ["django-mvp"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<4.0"
-content-hash = "c6192c9efd8f3d334f1520d1a8c32ea8e96c393476a24b33cde56444b56e933f"
+content-hash = "79dd019f828aac9ef50c61d6f6db78d4624918f2589d281b8937bbd624f6adfa"

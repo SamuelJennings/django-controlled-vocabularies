@@ -49,6 +49,38 @@ class TestVocabularyListEntry:
     and would otherwise be indistinguishable from the row's.
     """
 
+    def test_an_entry_names_and_describes_its_vocabulary(self):
+        # The two things every entry must carry (FR-002, User Story 1 scenario 4) and the
+        # two nothing else asserts: every other case here builds a factory scheme whose
+        # description is blank, so the description branch is never taken and deleting
+        # either the title or the description from the partial would leave them all green.
+        # Line coverage does not stand in for this — templates are not measured.
+        scheme = ConceptSchemeFactory.build(
+            name="Geological Time Scale",
+            description="Periods, epochs and ages of the geological record.",
+        )
+        scheme.concept_count = 0
+
+        html = render_to_string(ROW_TEMPLATE, {"object": scheme})
+
+        assert scheme.name in html
+        assert scheme.description in html
+
+    def test_a_description_running_to_several_paragraphs_is_shortened(self):
+        # An entry stays scannable however long its description is (spec.md Edge Cases).
+        # The assertion is on the rendered text rather than on a class name deliberately:
+        # a CSS clamp cannot be relied on here (decisions.md D14), so what is checked is
+        # that the entry does not carry the whole description, not how it avoids doing so.
+        description = " ".join(f"word{index}" for index in range(400))
+        scheme = ConceptSchemeFactory.build(name="Verbose", description=description)
+        scheme.concept_count = 0
+
+        html = render_to_string(ROW_TEMPLATE, {"object": scheme})
+
+        assert "word0" in html
+        assert "word399" not in html
+        assert len(BeautifulSoup(html, "html.parser").get_text()) < len(description)
+
     @pytest.mark.django_db
     def test_get_queryset_annotates_the_real_concept_count(self, client):
         populated = ConceptSchemeFactory()
@@ -263,6 +295,79 @@ class TestVocabularySearch:
 
         listed = {vocabulary.pk for vocabulary in response.context["object_list"]}
         assert listed == {match.pk}
+
+    @pytest.mark.django_db
+    @pytest.mark.skipif(connection.vendor != "sqlite", reason="the limitation under test is SQLite's")
+    @pytest.mark.parametrize(
+        ("name", "term", "matches"),
+        [
+            ("Ecology", "ECOLOGY", True),
+            ("Ökologie", "ÖKOLOGIE", True),
+            ("Ökologie", "ökologie", False),
+            ("Гидрология", "гидрология", False),
+        ],
+    )
+    def test_case_insensitive_matching_covers_ascii_letters_only_on_sqlite(self, client, name, term, matches):
+        # The case half of the non-Latin edge case, which the test above cannot reach:
+        # Japanese has no case, so it passes whether or not case folding works. On SQLite
+        # `LIKE` folds ASCII letters and nothing else, so a vocabulary named `Ökologie` is
+        # not found by `ökologie` — a documented Django limitation with no ORM-level repair
+        # (`Lower()` compiles to the same ASCII-only `LOWER()`). PostgreSQL folds the whole
+        # of Unicode and matches. Pinned rather than left implicit so the day it changes is
+        # a failing test rather than a silent difference between two supported backends;
+        # disclosed in the README, and FR-006 is written against it.
+        scheme = ConceptSchemeFactory(name=name)
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-list"), {"q": term})
+
+        listed = {vocabulary.pk for vocabulary in response.context["object_list"]}
+        assert (listed == {scheme.pk}) is matches
+
+    @pytest.mark.django_db
+    def test_a_search_far_longer_than_any_real_one_still_answers(self, client):
+        # Unbounded, the upstream mixin ORs one condition per word per field, and past
+        # roughly 400 words the query exceeds SQLite's parser depth limit and the page 500s
+        # for anyone who can reach it (django-mvp#281). 600 words fits an ordinary request
+        # line, so nothing stands in the way of sending it.
+        ConceptSchemeFactory(name="Geology")
+        term = " ".join(f"word{index}" for index in range(600))
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-list"), {"q": term})
+
+        assert response.status_code == 200
+
+    @pytest.mark.django_db
+    def test_a_search_past_the_bound_keeps_its_first_words_and_drops_the_rest(self, client):
+        # The cost of the bound above, pinned rather than left implicit. Matching is OR, so
+        # dropping words drops matches — a term long enough to be truncated is answered on
+        # its first 100 words alone. The bound sits far above any search a person means, so
+        # this is reachable only by a term nobody typed on purpose.
+        # Zero-padded so no word is a substring of another: unpadded, `word5` matches
+        # `word500` and the late vocabulary would be found through a word that survived
+        # truncation, which would pass the assertion below for the wrong reason.
+        early = ConceptSchemeFactory(name="word003 vocabulary")
+        late = ConceptSchemeFactory(name="word500 vocabulary")
+        term = " ".join(f"word{index:03d}" for index in range(600))
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-list"), {"q": term})
+
+        listed = {vocabulary.pk for vocabulary in response.context["object_list"]}
+        assert early.pk in listed
+        assert late.pk not in listed
+
+    @pytest.mark.django_db
+    def test_a_search_of_nothing_but_whitespace_is_not_a_search(self, client):
+        # It filters nothing (the search mixin strips before testing for a term), so the
+        # page must not read as searched either: no prefilled box, no offer of a way back
+        # from a search that never happened.
+        ConceptSchemeFactory.create_batch(2)
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-list"), {"q": "   "})
+        content = response.content.decode()
+
+        assert len(response.context["object_list"]) == 2
+        assert "Show all vocabularies" not in content
+        assert BeautifulSoup(content, "html.parser").find("input", attrs={"name": "q"}).get("value", "") == ""
 
     @pytest.mark.django_db
     def test_the_rendered_page_carries_a_search_input_and_nothing_else(self, client):

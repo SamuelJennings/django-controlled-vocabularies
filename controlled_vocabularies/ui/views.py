@@ -34,6 +34,30 @@ class VocabularyListView(MVPListView):
     # once pagination is in play.
     ordering = [Lower("name"), "pk"]
 
+    # A search longer than this many words keeps its first this-many and drops the rest.
+    max_search_words = 100
+
+    def setup(self, request, *args, **kwargs):
+        # django-mvp's search mixin ORs one condition per word per search field with no
+        # bound, and reads `?q=` from the request itself rather than through a method a
+        # subclass could override (`mvp/views/list.py`). Past roughly 400 words the resulting
+        # expression exceeds SQLite's parser depth limit and the page raises OperationalError
+        # — a 500 on a page anyone can reach, from a query string short enough to fit an
+        # ordinary request line. Bounding the term once, here, before anything has read it,
+        # is what keeps the queryset, the page's own context and the empty states agreeing on
+        # what was searched for. Filed upstream as django-mvp#281; this stays correct whether
+        # or not upstream grows a bound of its own.
+        #
+        # The bound is set far above any search a person means and far below where the
+        # database gives out, because dropping words from an OR search drops matches: a bound
+        # tight enough to trim a real search would answer a different question in silence.
+        super().setup(request, *args, **kwargs)
+        words = request.GET.get("q", "").split()
+        if len(words) > self.max_search_words:
+            bounded = request.GET.copy()
+            bounded["q"] = " ".join(words[: self.max_search_words])
+            request.GET = bounded
+
     def get_queryset(self):
         # Collections are not counted (decisions.md D3) — Count("concepts") reaches the
         # concepts related_name only, never collection_members or any other relation.
@@ -45,6 +69,15 @@ class VocabularyListView(MVPListView):
         # to the empty states as it does to the queryset. The `search_query` the mixin puts
         # in the context is the raw value, unstripped, and is not a substitute here.
         return self.request.GET.get("q", "").strip()
+
+    def get_context_data(self, **kwargs):
+        # The template needs the same stripped term the queryset was filtered on. Branching
+        # the page on the raw `search_query` put `?q=%20%20` into a half-searched state: the
+        # unfiltered list, but with the box prefilled with whitespace and the way-back link
+        # offering to undo a search that never happened.
+        context = super().get_context_data(**kwargs)
+        context["search_term"] = self.get_search_term()
+        return context
 
     def get_empty_state_heading(self):
         # Two distinct empty states, never one (decisions.md D4): a search matching
