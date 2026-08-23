@@ -220,3 +220,35 @@ instances is where it would surface.
 **Why defensible**: both views live in one `controlled_vocabularies/ui/views.py`, and the recorded
 standard puts one test module per source module, splitting per unit with classes rather than extra
 files. A second module for the same source file is the case that standard names as non-conforming.
+
+---
+
+## D13 — `tests/test_checks.py`'s clean-check baseline is left red by T005's new check
+
+**Ambiguity**: none at spec or plan level — this surfaced only when the full verify ran at the end
+of the story, per the brief's own ritual, and no task names it.
+
+**Found**: `tests.settings` imports `CONTROLLED_VOCABULARIES_BASE_URI = "https://example.org/
+vocabularies"` from `tests.settings_core`, unchanged, while also installing
+`controlled_vocabularies.ui` and mounting its routes at `/browse/` (`tests/urls.py`) — a
+vocabulary/vocabulary mismatch of exactly the kind `controlled_vocabularies.ui.W001` (T005) exists
+to report, on the project's own test settings. `tests/test_checks.py::TestCheckSurvivesUnmigratedDatabase::
+test_check_reports_nothing_against_an_unmigrated_connection` asserts `manage.py check` is silent
+under `tests.settings` and now sees this one warning.
+
+**Not chosen**: overriding `CONTROLLED_VOCABULARIES_BASE_URI` in `tests/settings.py` to agree with
+the `/browse/` mount — tried, reverted. Eleven pre-existing tests in `tests/test_models.py` and
+`tests/test_factories.py` assert `.uri`/`.local_url` against the literal string
+`https://example.org/vocabularies/...`, not through `conf.get_base_uri()`, and all eleven broke.
+Moving the ui app's mount in `tests/urls.py` to `/vocabularies/` instead was also not chosen: it
+collides with the core app's own mount at that prefix, and the file's own docstring records that
+the two prefixes are deliberately different so a hard-coded path in either app would be caught.
+
+**Chosen**: leave `tests/settings.py`, `tests/urls.py` and `tests/test_checks.py` untouched. This
+story's own scope (`controlled_vocabularies/ui/`, `tests/test_ui/`, `tests/test_demo/`, `demo/`)
+never touches any of the three, and the two production fixes available both ripple into tests this
+story does not own. Reported in the completion report's `concerns` rather than silently patched.
+
+**Revisit if**: a maintainer decides which of `tests/settings.py`'s base address or `tests/urls.py`'s
+mount should move, and updates the eleven `test_models.py`/`test_factories.py` assertions (or
+`SILENCED_SYSTEM_CHECKS`s the warning for the test settings specifically) in the same change.

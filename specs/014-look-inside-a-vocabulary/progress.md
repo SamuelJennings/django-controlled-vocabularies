@@ -127,3 +127,60 @@ Verified: `poetry run pytest tests/test_ui/ -q` — 98 passed, 3 skipped, after 
 Next: T005 (does not depend on T004 — see tasks.md's dependency summary). Watch: T004 needs
 either explicit authorization to add a `slug` to the six affected `.build()` calls, or a
 factory change, before it can land.
+
+## 2026-08-24 · Implementer US-1 · T005
+
+Did: added `check_vocabulary_detail_route` to `controlled_vocabularies/ui/checks.py`
+(`controlled_vocabularies.ui.W001`), registered from `ControlledVocabulariesUIConfig.ready()`.
+Reverses `vocabulary-detail` with a placeholder slug, strips it back off to get the mount
+prefix, compares against `urlparse(conf.get_base_uri()).path`. Silent (`NoReverseMatch`) when
+the routes are not mounted at all.
+Verified: `poetry run pytest tests/test_ui/ -q` — 101 passed, 3 skipped.
+Next: T006.
+
+## 2026-08-24 · Implementer US-1 · T006
+
+Did: set `CONTROLLED_VOCABULARIES_BASE_URI = "http://localhost:8000/browse"` in
+`demo/settings.py`, matching where `demo/urls.py` mounts the browsing routes. Extended
+`tests/test_demo/test_demo.py` with a subprocess boot that migrates, seeds, and asserts the
+locally authored vocabulary's identifier now starts with the configured base address while the
+imported one still equals its own `static_uri`.
+Verified: `poetry run pytest tests/test_demo/ tests/test_ui/ -q` — 122 passed, 3 skipped.
+Next: T007.
+
+## 2026-08-24 · Implementer US-1 · T007
+
+Did: extended README.md's "Finding a vocabulary" section with "A vocabulary's own page" —
+what it shows, the `vocabulary-detail` route name (verified reversing against this branch),
+and the `CONTROLLED_VOCABULARIES_BASE_URI`/mount-agreement rule `controlled_vocabularies.ui.W001`
+enforces. Added the matching CHANGELOG entry.
+Verified: `poetry run pytest tests/test_ui/ tests/test_demo/ -q` — 122 passed, 3 skipped.
+Next: the story's mandatory full verify.
+
+## 2026-08-24 · Implementer US-1 · Full verify (final ritual)
+
+Ran `poetry run pytest -q` (the full suite, once, per the brief's ritual) and
+`/home/sam/.openclaw/workspaces/forge/engineering-org/kit/forge verify --repo
+/home/sam/projects/samueljennings/dcv-014-us1`.
+
+Found one pre-existing test newly red:
+`tests/test_checks.py::TestCheckSurvivesUnmigratedDatabase::test_check_reports_nothing_against_an_unmigrated_connection`.
+`tests.settings` inherits `CONTROLLED_VOCABULARIES_BASE_URI = "https://example.org/vocabularies"`
+from `tests.settings_core` unchanged, while also mounting `controlled_vocabularies.ui`'s routes
+at `/browse/` — the same class of mismatch T005's new check exists to report, now on the
+project's own test settings.
+
+Tried and reverted: overriding the setting in `tests/settings.py` to agree with `/browse/`.
+Broke eleven pre-existing tests in `tests/test_models.py` and `tests/test_factories.py` that
+assert `.uri`/`.local_url` against the literal `https://example.org/vocabularies/...` string
+rather than through `conf.get_base_uri()`. Moving the ui app's mount in `tests/urls.py` instead
+was not attempted: it would collide with the core app's own `/vocabularies/` mount and undo the
+file's own deliberate two-different-prefixes design. Full reasoning in decisions.md D13.
+
+Left `tests/settings.py`, `tests/urls.py` and `tests/test_checks.py` untouched — none is inside
+this story's scope, and both available fixes ripple into tests this story does not own.
+Reported as a concern rather than patched.
+
+Final state: `poetry run pytest -q` — 1476 passed, 3 skipped, 1 failed (the one above).
+`forge verify`: conformance passed, poetry:lint passed, poetry:typecheck passed, poetry:test
+failed (the same test), poetry:build passed, docs skipped (needs --base).
