@@ -239,38 +239,89 @@
       "priority": "P2",
       "issue": 152,
       "worktree": "/home/sam/projects/samueljennings/dcv-014-us3",
-      "status": "in_progress",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T013",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailConceptSearch -q",
+              "poetry run pytest tests/test_ui/test_views.py -q"
+            ],
+            "tests": [
+              "tests/test_ui/test_views.py::TestVocabularyDetailConceptSearch"
+            ]
+          }
         },
         {
           "id": "T014",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailConceptSearchAddressAndCase -q",
+              "poetry run pytest tests/test_ui/test_views.py -q"
+            ],
+            "tests": [
+              "tests/test_ui/test_views.py::TestVocabularyDetailConceptSearchAddressAndCase"
+            ]
+          }
         },
         {
           "id": "T015",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailConceptSearchEmptyState -q",
+              "poetry run pytest tests/test_ui/test_views.py tests/test_ui/test_templates.py -q"
+            ],
+            "tests": [
+              "tests/test_ui/test_views.py::TestVocabularyDetailConceptSearchEmptyState"
+            ]
+          }
         },
         {
           "id": "T016",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_demo/test_seed.py -q",
+              "poetry run pytest tests/test_demo/ -q"
+            ],
+            "tests": [
+              "tests/test_demo/test_seed.py"
+            ]
+          }
         },
         {
           "id": "T017",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_demo/test_smoke.py -q",
+              "poetry run pytest tests/test_demo/ -q",
+              "python demo/smoke.py http://127.0.0.1:8765"
+            ],
+            "tests": [
+              "tests/test_demo/test_smoke.py"
+            ]
+          }
         },
         {
           "id": "T018",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_demo/ tests/test_ui/ -q"
+            ]
+          }
         }
       ]
     },
