@@ -910,3 +910,65 @@ class TestVocabularyDetailConceptOrder:
         second = [c.pk for c in client.get(url).context["object_list"]]
 
         assert first == second
+
+
+class TestVocabularyDetailConceptPaging:
+    """A long list is paged, and an empty vocabulary says so (FR-014, FR-016, User
+    Story 2 scenarios 7, 8).
+    """
+
+    @pytest.mark.django_db
+    def test_a_long_list_is_paged_and_the_second_page_renders(self, client):
+        scheme = ConceptSchemeFactory()
+        ConceptFactory.create_batch(30, scheme=scheme)
+        url = reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug})
+
+        first_page = client.get(url)
+        per_page = first_page.context["paginator"].per_page
+        assert len(first_page.context["object_list"]) == per_page
+
+        soup = BeautifulSoup(first_page.content, "html.parser")
+        page_two_href = next(a["href"] for a in soup.find_all("a", href=True) if "page=2" in a["href"])
+
+        second_page = client.get(url + page_two_href)
+
+        assert second_page.status_code == 200
+        assert len(second_page.context["object_list"]) == 30 - per_page
+
+    @pytest.mark.django_db
+    def test_a_paging_link_carries_forward_an_active_query_parameter(self, client):
+        # django-mvp's paging component builds each link with Django's own
+        # `{% querystring %}` tag, which keeps every parameter but `page` — nothing is
+        # done here to make that so. Proven with a parameter this story gives no
+        # filtering meaning to (search itself is US-3's, not this story's), so the
+        # assertion is about the paging mechanism carrying a parameter forward, not
+        # about a filter this view does not yet have. Read the link out of the markup
+        # rather than constructing it by hand — that is the only way a broken
+        # querystring tag would show up.
+        scheme = ConceptSchemeFactory()
+        ConceptFactory.create_batch(30, scheme=scheme)
+        url = reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug})
+
+        response = client.get(url, {"unrelated": "kept"})
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        page_two_href = next(
+            a["href"]
+            for a in soup.find_all("a", href=True)
+            if "page=2" in a["href"] and "unrelated=kept" in a["href"]
+        )
+
+        second_page = client.get(url + page_two_href)
+        assert second_page.status_code == 200
+
+    @pytest.mark.django_db
+    def test_a_vocabulary_holding_no_concepts_says_so_and_the_rest_of_the_page_still_renders(self, client):
+        scheme = ConceptSchemeFactory(description="Periods, epochs and ages of the geological record.")
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}))
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        assert "no concepts" in content.lower()
+        assert scheme.name in content
+        assert scheme.description in content

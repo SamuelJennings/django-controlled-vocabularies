@@ -169,3 +169,12 @@ class VocabularyDetailView(MVPListView):
         context = super().get_context_data(**kwargs)
         context["vocabulary"] = self.vocabulary
         return context
+
+    def get_empty_state_heading(self):
+        # T011: names this vocabulary as holding none, distinct from the base
+        # class's own generic wording, which points at a create action this page
+        # never shows.
+        return _("This vocabulary holds no concepts")
+
+    def get_empty_state_message(self):
+        return None
