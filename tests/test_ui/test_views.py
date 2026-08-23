@@ -1066,3 +1066,72 @@ class TestVocabularyDetailConceptSearch:
         assert listed <= matching_pks
         assert listed.isdisjoint(non_matching_pks)
         assert response.context["paginator"].count == 30
+
+
+class TestVocabularyDetailConceptSearchAddressAndCase:
+    """A search is carried in the address, and case is ignored (FR-008, User Story 3
+    scenarios 5, 8; tasks.md T014). ADR 0014 covers the letter-case limit outside ASCII.
+    """
+
+    @pytest.mark.django_db
+    def test_a_narrowed_lists_address_opened_fresh_returns_the_same_concepts(self, client):
+        scheme = ConceptSchemeFactory()
+        match = ConceptFactory(scheme=scheme, label="Stratigraphy Unit")
+        ConceptFactory(scheme=scheme, label="Soil Classification")
+        url = reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug})
+
+        first = {c.pk for c in client.get(url, {"q": "Stratigraphy"}).context["object_list"]}
+        second = {c.pk for c in client.get(url, {"q": "Stratigraphy"}).context["object_list"]}
+
+        assert first == second == {match.pk}
+
+    @pytest.mark.django_db
+    def test_matching_ignores_ascii_case(self, client):
+        match = ConceptFactory(label="Granite")
+        ConceptFactory(scheme=match.scheme, label="Basalt")
+        url = reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": match.scheme.slug})
+
+        response = client.get(url, {"q": "granite"})
+
+        listed = {c.pk for c in response.context["object_list"]}
+        assert listed == {match.pk}
+
+    @pytest.mark.django_db
+    @pytest.mark.parametrize("term", ["%", "_", "'"])
+    def test_a_term_containing_a_like_wildcard_or_a_quote_is_looked_for_literally(self, client, term):
+        # icontains escapes %, _ and the backslash before building the LIKE pattern
+        # (TestVocabularySearch's own precedent, #140) — none of these terms are
+        # wildcards here, and none of the seeded labels contain the literal
+        # character, so a correct implementation matches nothing.
+        scheme = ConceptSchemeFactory()
+        ConceptFactory.create_batch(3, scheme=scheme)
+        url = reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug})
+
+        response = client.get(url, {"q": term})
+
+        assert list(response.context["object_list"]) == []
+
+    @pytest.mark.django_db
+    @pytest.mark.skipif(connection.vendor != "sqlite", reason="the limitation under test is SQLite's")
+    @pytest.mark.parametrize(
+        ("label", "term", "matches"),
+        [
+            ("Ecology", "ECOLOGY", True),
+            ("Ökologie", "ÖKOLOGIE", True),
+            ("Ökologie", "ökologie", False),
+            ("Гидрология", "гидрология", False),
+        ],
+    )
+    def test_case_insensitive_matching_covers_ascii_letters_only_on_sqlite(self, client, label, term, matches):
+        # ADR 0014: SQLite's LIKE folds ASCII letters only, so a concept labelled
+        # Ökologie is found by ÖKOLOGIE and not by ökologie; PostgreSQL folds the
+        # whole of Unicode and matches either way. Pinned rather than left implicit,
+        # per the precedent this ADR sets for every search surface that follows the
+        # one it names — this is that surface.
+        concept = ConceptFactory(label=label)
+        url = reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": concept.scheme.slug})
+
+        response = client.get(url, {"q": term})
+
+        listed = {c.pk for c in response.context["object_list"]}
+        assert (listed == {concept.pk}) is matches

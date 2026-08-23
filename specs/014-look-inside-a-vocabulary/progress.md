@@ -337,3 +337,27 @@ decoded body and failed as a false positive (the echoed search box value, not a 
 the label) — corrected to `get_text()` before it was ever run as a claimed pass.
 Verified: `poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailConceptSearch -q`
 — 6 passed. Then the file: 69 passed, 3 skipped (baseline 63 passed, 3 skipped).
+
+## 2026-08-24 · Implementer US-3 · T014
+
+Did: no production change — the brief lists only `tests/test_ui/test_views.py`, and the
+behaviour pinned here (address-carried search, ASCII case-insensitivity, LIKE-wildcard/quote
+escaping) already comes from django-mvp's own search mixin plus T013's `search_fields`. Nine new
+tests in a new `TestVocabularyDetailConceptSearchAddressAndCase` class, mirroring
+`TestVocabularySearch`'s own precedent for the list of vocabularies: the same `?q=` address
+requested twice returns the same set (scenario 8); a term in one letter case matches a label in
+another; `%`, `_` and `'` are looked for literally, not as LIKE syntax; and the ADR 0014
+letter-case-outside-ASCII parametrize set (`Ecology`/`Ökologie`/`Гидрология`), skipped on any
+non-SQLite backend with the reason named, exactly as the list search already discloses.
+RED/characterization check, not RED-then-GREEN: since nothing here is new production code, the
+usual RED step would prove nothing. Instead, ran the new class once with all nine passing
+(behaviour already correct), then temporarily blanked `VocabularyDetailView.search_fields` to
+confirm the tests are not tautological — 7 of 9 failed for the right reason (unfiltered results
+leaking through). The 2 that still passed unfiltered are the address-carried-search-returns-
+matching case and the true-going ASCII/Ökologie sub-cases of the case parametrize, which cannot
+be broken by "no filtering" in a vocabulary holding only the one concept under test — the same
+structural limit `TestVocabularySearch`'s own equivalent parametrize set already carries, not a
+new weakness introduced here. Restored `search_fields` before re-running to confirm the whole
+file was green again.
+Verified: `poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailConceptSearchAddressAndCase -q`
+— 9 passed. Then the file: 78 passed, 3 skipped.
