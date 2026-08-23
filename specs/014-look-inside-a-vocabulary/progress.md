@@ -208,3 +208,105 @@ asserts silence against the project's own correctly wired configuration.
 
 Final state: `poetry run pytest -q` — 1478 passed, 3 skipped, 0 failed. `forge verify`: conformance,
 lint, typecheck, test and build all passed; docs skipped (needs `--base`).
+
+## 2026-08-24 · Implementer US-2 · T008
+
+Did: `VocabularyDetailView.get_queryset()` filters `Concept.objects` to `scheme=self.vocabulary`
+— nothing else, no relation consulted. Added `concept_list_item.html` (a bare `<c-card
+title="{{ object.label }}">`, nothing else) and pointed `list_item_template` at it. Three new
+tests in `TestVocabularyDetailConceptList`: a broader/narrower chain three levels deep renders
+flat (asserted on DOM nesting — no `.card` contains another `.card` — not on a row count alone),
+a fully decorated concept's row carries only its label (note, alternative label, identifier and
+relation all attached, none of it leaking into the row's own markup), and a concept in another
+scheme does not appear.
+RED observed first: stashed the production changes, ran the new class, watched it fail on
+`TemplateDoesNotExist: controlled_vocabularies/concept_list_item.html` (the auto-derived path,
+since no explicit template existed yet) and on `RuntimeError: Database access not allowed` until
+the missing `@pytest.mark.django_db` was added — both for the right reason, then restored.
+Verified: `poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailConceptList
+tests/test_ui/test_views.py::TestVocabularyDetail
+tests/test_ui/test_views.py::TestVocabularyDetailDescriptionAndProvenance
+tests/test_ui/test_views.py::TestVocabularyDetailIdentifierLink -q` — 14 passed.
+
+## 2026-08-24 · Implementer US-2 · T009
+
+Did: moved queryset construction from `get_queryset()` into `setup()`, assigned to
+`self.queryset` (decisions.md D11) — `Concept.objects.filter(scheme=self.vocabulary)` annotated
+with `resolved_label = Coalesce(Subquery(<preferred ConceptLabel in get_language()>), F("label"))`.
+The subquery matches `language` exactly against `get_language()`, never by base language (D11).
+Template now reads `object.resolved_label`. Three new tests in `TestVocabularyDetailConceptLabel`:
+a German preferred label shows under `translation.override("de")` (using a label deliberately not
+a substring of the English one, so the assertion cannot pass by truncation coincidence), a concept
+with no German label falls back to `Concept.label`, and query count stays flat between 3 and 30
+concepts (`django_assert_num_queries`).
+RED observed first: the German-label test initially used "Granit" against the stored "Granite" —
+passed against the unmodified view because "Granit" is a substring of "Granite", a tautological
+pass. Replaced with "Kristallgestein" (no relation to the stored label) and re-ran against the
+unmodified view: failed with the string absent from the response body, the correct reason. Also
+had to teach T008's `test_a_concepts_row_carries_only_its_label` to set
+`concept.resolved_label = concept.label` by hand, since the row template now reads an attribute
+a plain (unannotated) fixture does not carry.
+Verified: `poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailConceptList
+tests/test_ui/test_views.py::TestVocabularyDetailConceptLabel -q` — 6 passed.
+
+## 2026-08-24 · Implementer US-2 · T010
+
+Did: `ordering = [Lower("resolved_label"), "pk"]` as a class attribute on
+`VocabularyDetailView`. Three new tests in `TestVocabularyDetailConceptOrder`: a concept whose
+German preferred label sorts before another's under German, but whose own (default-language)
+label sorts after it under no override — proving the order follows the *shown* label, not the
+stored one; two identically labelled concepts (the second built via `.build()` +
+`set_slug()` to dodge the derived-slug collision, mirroring `ConceptSchemeFactory`'s own
+tiebreak tests) land in the same order on repeated requests; and two ordinary requests return
+the same sequence.
+RED observed first: ran the class before adding `ordering` — the language test failed (default
+order came back as insertion order, `[zebra, antelope]`, not the alphabetical `[antelope,
+zebra]` the assertion expects); the tiebreak and same-order tests already passed by coincidence
+of SQLite's natural row order, which is expected — they are regression guards against the
+*deterministic* half of FR-007, not proof the alphabetical ordering does not yet exist.
+Verified: `poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailConceptOrder
+tests/test_ui/test_views.py::TestVocabularyDetailConceptList
+tests/test_ui/test_views.py::TestVocabularyDetailConceptLabel -q` — 9 passed.
+
+## 2026-08-24 · Implementer US-2 · T011
+
+Did: `get_empty_state_heading()`/`get_empty_state_message()` overrides on
+`VocabularyDetailView` naming the vocabulary as holding no concepts, with no message (there is
+no create action on this page to point at). No pagination override — `MVPListView`'s own
+`paginate_by = 24` default already fixes the page size, matching `VocabularyListView`'s own
+precedent. Three new tests in `TestVocabularyDetailConceptPaging`: a 30-concept vocabulary pages
+at 24, and the link read out of the first page's own markup (never constructed by hand) reaches
+a working second page; a paging link carries forward an arbitrary GET parameter this story gives
+no meaning to (real search is US-3's — this proves django-mvp's own `{% querystring %}`
+mechanism does the carrying, nothing built here); and an empty vocabulary says so while its
+description and title still render.
+RED observed first: the paging and querystring-carrying tests passed unmodified (django-mvp's
+own defaults and pagination component already do this — no story-specific work needed, matching
+the task's own "without anything being done about it" framing); the empty-state test failed
+against the base class's generic "There's nothing here yet" heading, absent the word "concepts".
+Verified: `poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailConceptPaging -q`
+— 3 passed, then the whole file: 63 passed, 3 skipped.
+
+## 2026-08-24 · Implementer US-2 · T012
+
+Did: extended README's "A vocabulary's own page" section — the concept list is flat and
+alphabetical by the label shown (reader's language, falling back to the vocabulary's own
+default), a row carries only a concept's label, and a bolded line states plainly that how
+concepts relate is not shown here (#142). Replaced the stale "a later feature; there is nothing
+to list yet" parenthetical the section carried since before T004 landed. Matching CHANGELOG
+entry under `[Unreleased] / Added`. No new commands or reverse() calls introduced — nothing
+further to verify against the branch beyond the existing example, unchanged.
+Noticed but out of scope: "**An entry names a vocabulary — it does not yet link to it** ... a
+later feature turns the name into a link" (README, just above "### A vocabulary's own page") is
+itself stale — T004 landed the link, in this same story's own history, and the sentence was
+never updated. Not touched: it belongs to US-1's T004/T007, not this story's files. Reported in
+`concerns`.
+
+## Full verify (final ritual)
+
+`poetry run pytest -q` — 1491 passed, 3 skipped, 0 failed (baseline was 1478 passed, 3 skipped;
+13 new tests added across T008-T011, T012 added none).
+
+`forge verify --repo /home/sam/projects/samueljennings/dcv-014-us2`: conformance passed,
+poetry:lint passed, poetry:typecheck passed, poetry:test passed, poetry:build passed, docs
+skipped (needs `--base`).
