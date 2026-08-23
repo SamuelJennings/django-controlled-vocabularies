@@ -123,6 +123,7 @@ class VocabularyDetailView(MVPListView):
     """
 
     model = Concept
+    template_name = "controlled_vocabularies/ui/conceptscheme_detail.html"
 
     def setup(self, request, *args, **kwargs):
         super().setup(request, *args, **kwargs)
@@ -135,3 +136,8 @@ class VocabularyDetailView(MVPListView):
         # Without this override the title reads as the concept model's plural, because
         # the view's `model` is `Concept` — the page describes the vocabulary, not concepts.
         return self.vocabulary.name
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["vocabulary"] = self.vocabulary
+        return context

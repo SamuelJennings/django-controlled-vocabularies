@@ -1,0 +1,17 @@
+{% extends "list_view.html" %}
+{% load i18n %}
+{% block page.content %}
+  {% if vocabulary.description %}
+    <div class="vocabulary-description">
+      <c-text size="sm" muted>{{ vocabulary.description|truncatewords:40 }}</c-text>
+    </div>
+  {% endif %}
+  <div class="vocabulary-provenance">
+    {% if vocabulary.static_uri %}
+      <c-text size="xs" muted>{{ vocabulary.static_uri }}</c-text>
+    {% else %}
+      <c-text size="xs" muted>{% trans "Held here" %}</c-text>
+    {% endif %}
+  </div>
+  {{ block.super }}
+{% endblock page.content %}

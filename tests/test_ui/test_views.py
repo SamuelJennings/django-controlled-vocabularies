@@ -604,3 +604,50 @@ class TestVocabularyDetail:
         response = client.get(reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}))
 
         assert response.status_code == 200
+
+
+class TestVocabularyDetailDescriptionAndProvenance:
+    """The page describes the vocabulary and says where it came from (FR-002, FR-003,
+    User Story 1 scenarios 1, 2, 3, 5).
+    """
+
+    @pytest.mark.django_db
+    def test_a_vocabulary_with_a_description_shows_it_and_reads_as_held_here(self, client):
+        scheme = ConceptSchemeFactory(description="Periods, epochs and ages of the geological record.")
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}))
+        content = response.content.decode()
+
+        assert scheme.description in content
+        assert "Held here" in content
+
+    @pytest.mark.django_db
+    def test_a_vocabulary_with_no_description_renders_no_heading_or_empty_element(self, client):
+        scheme = ConceptSchemeFactory(description="")
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}))
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        assert soup.find(class_="vocabulary-description") is None
+
+    @pytest.mark.django_db
+    def test_a_vocabulary_published_elsewhere_shows_its_publisher_identifier_and_names_no_publisher(self, client):
+        scheme = ConceptSchemeFactory(external=True)
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}))
+        content = response.content.decode()
+
+        assert scheme.static_uri in content
+        assert "Held here" not in content
+        assert "Publisher" not in content
+
+    @pytest.mark.django_db
+    def test_a_description_running_to_several_paragraphs_is_shortened(self, client):
+        description = " ".join(f"word{index}" for index in range(400))
+        scheme = ConceptSchemeFactory(description=description)
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}))
+        content = response.content.decode()
+
+        assert "word0" in content
+        assert "word399" not in content
