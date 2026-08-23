@@ -858,3 +858,55 @@ class TestVocabularyDetailConceptLabel:
 
         with django_assert_num_queries(baseline):
             client.get(url)
+
+
+class TestVocabularyDetailConceptOrder:
+    """Order follows the label shown, not the one stored, and stays stable (FR-007,
+    User Story 2 scenario 6, SC-004).
+    """
+
+    @pytest.mark.django_db
+    def test_order_follows_the_label_shown_under_the_active_language_not_the_stored_one(self, client):
+        scheme = ConceptSchemeFactory()
+        # `zebra`'s own (default-language) label sorts last; its German preferred
+        # label sorts first. `antelope` has no German label, so it falls back to its
+        # own — the ordering must follow whichever label is actually resolved for the
+        # active language, never the stored default-language one.
+        zebra = ConceptFactory(scheme=scheme, label="Zebra")
+        zebra.add_label(language="de", kind="preferred", text="Aardvark")
+        antelope = ConceptFactory(scheme=scheme, label="Antelope")
+        url = reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug})
+
+        with translation.override("de"):
+            german_order = [c.pk for c in client.get(url).context["object_list"]]
+        default_order = [c.pk for c in client.get(url).context["object_list"]]
+
+        assert german_order == [zebra.pk, antelope.pk]
+        assert default_order == [antelope.pk, zebra.pk]
+
+    @pytest.mark.django_db
+    def test_two_identically_labelled_concepts_produce_a_deterministic_order(self, client):
+        scheme = ConceptSchemeFactory()
+        first = ConceptFactory(scheme=scheme, label="Duplicate")
+        # A second concept with the same label would collide on its derived slug —
+        # .build() plus set_slug() gives it a distinct one without touching the label
+        # under test, exactly as ConceptSchemeFactory's own tiebreak tests do.
+        second = ConceptFactory.build(scheme=scheme, label="Duplicate")
+        second.set_slug("aaa-sorts-first-by-slug")
+        url = reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug})
+
+        first_request = [c.pk for c in client.get(url).context["object_list"]]
+        second_request = [c.pk for c in client.get(url).context["object_list"]]
+
+        assert first_request == second_request == [first.pk, second.pk]
+
+    @pytest.mark.django_db
+    def test_two_requests_return_the_same_order(self, client):
+        scheme = ConceptSchemeFactory()
+        ConceptFactory.create_batch(5, scheme=scheme)
+        url = reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug})
+
+        first = [c.pk for c in client.get(url).context["object_list"]]
+        second = [c.pk for c in client.get(url).context["object_list"]]
+
+        assert first == second

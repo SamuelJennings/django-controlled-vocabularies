@@ -127,6 +127,13 @@ class VocabularyDetailView(MVPListView):
     template_name = "controlled_vocabularies/ui/conceptscheme_detail.html"
     list_item_template = "controlled_vocabularies/ui/concept_list_item.html"
 
+    # T010: by the label actually shown, not the stored default-language one — Django
+    # applies this innermost (D11), ahead of self.queryset's own annotation being
+    # consulted by anything downstream. `pk` is not decoration: without a total order,
+    # two identically labelled concepts could land on either of two pages, or on
+    # neither, once pagination is in play (#140 makes the same point for vocabularies).
+    ordering = [Lower("resolved_label"), "pk"]
+
     def setup(self, request, *args, **kwargs):
         super().setup(request, *args, **kwargs)
         try:
