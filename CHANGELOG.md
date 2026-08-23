@@ -29,6 +29,14 @@ All notable changes to this project are documented in this file. The format foll
   `controlled_vocabularies.ui.W001`, a warning, when the browsing routes are mounted somewhere
   that disagrees with the path `CONTROLLED_VOCABULARIES_BASE_URI` composes against, since a
   vocabulary's identifier then does not lead back to its own page. See the README.
+- The vocabulary's own page now lists every concept it holds — and only that vocabulary's — in
+  one flat, paged list: nothing several levels down a broader/narrower chain is nested under one
+  above it. Alphabetical order follows the label actually shown, falling back from the reader's
+  own language to the vocabulary's own default one, at a flat query cost regardless of how many
+  concepts the vocabulary holds. A row names a concept and nothing more — no definition, no note,
+  no identifier, no relation, and nothing to follow: how concepts relate to one another is not
+  shown here. A vocabulary holding none says so, distinct from the page's other empty state, and
+  the rest of the page still renders. See the README.
 
 ### Known limitations
 

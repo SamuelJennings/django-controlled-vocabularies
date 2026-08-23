@@ -427,12 +427,24 @@ into a link.
 
 Every vocabulary the site holds has its own address — the same one its identifier composes
 (`ConceptScheme.uri`) when the site is configured as this section describes. The page's title is
-the vocabulary's name. Above the list of concepts it holds (a later feature; there is nothing to
-list yet) it shows the vocabulary's description, truncated the same way and for the same reason
-as the list entry above, and how the vocabulary was obtained: an imported vocabulary's page shows
-the publisher's own identifier; one authored here shows its own address instead. Either way the
-identifier is a link — to the publisher's site for an imported vocabulary, or back to the page
-itself for one authored here.
+the vocabulary's name. Above the list of concepts it holds it shows the vocabulary's description,
+truncated the same way and for the same reason as the list entry above, and how the vocabulary was
+obtained: an imported vocabulary's page shows the publisher's own identifier; one authored here
+shows its own address instead. Either way the identifier is a link — to the publisher's site for
+an imported vocabulary, or back to the page itself for one authored here.
+
+Below that, every concept the vocabulary holds — and only that vocabulary's — in one flat,
+alphabetical list: nothing several levels down a broader/narrower chain is nested under one above
+it. Alphabetical order follows the label actually shown, not necessarily the one stored: a concept
+carrying a preferred label in the reader's own language shows that one; a concept with none in that
+language falls back to its label in the vocabulary's own default language. A row names a concept and
+nothing more — no definition, no note, no identifier, and no relation to another concept.
+
+**How concepts relate to one another is not shown here.** Broader, narrower and related links, and
+a concept's own page, are a later feature's (#142); until then a concept on this list is not
+something a reader can follow to anywhere else. A vocabulary holding no concepts says so, in
+wording distinct from the page's other empty state, and the rest of the page — its description and
+provenance — still renders.
 
 Reverse the page by name, passing the vocabulary's slug:
 
