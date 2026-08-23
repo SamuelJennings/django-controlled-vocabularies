@@ -1024,6 +1024,22 @@ class TestVocabularyDetailConceptSearch:
         assert "granate" not in rendered_text
 
     @pytest.mark.django_db
+    def test_a_concept_matching_on_several_labels_at_once_is_listed_once(self, client):
+        # Searching across a reverse relation joins one row per matching label, so a
+        # concept whose preferred, alternative and hidden labels all match would appear
+        # three times without the de-duplication the search applies. Asserted as a list,
+        # not a set: every other assertion in this class compares sets, which cannot see
+        # a repeat.
+        match = ConceptFactory(label="Granite")
+        match.add_label(language="en", kind=ConceptLabel.Kind.ALTERNATIVE, text="Granite rock")
+        match.add_label(language="en", kind=ConceptLabel.Kind.HIDDEN, text="Granite stone")
+        url = reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": match.scheme.slug})
+
+        response = client.get(url, {"q": "Granite"})
+
+        assert [concept.pk for concept in response.context["object_list"]] == [match.pk]
+
+    @pytest.mark.django_db
     def test_a_word_only_in_the_definition_does_not_find_the_concept(self, client):
         concept = ConceptFactory(label="Granite")
         ConceptNoteFactory(concept=concept, value="A coarse-grained igneous rock.")
