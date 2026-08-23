@@ -475,3 +475,12 @@ tasks already verified, except the `?q=Datset` example, checked directly against
 `demo/smoke.py` walk (T017's own verification run) — both confirm `Datset` narrows to `Dataset`
 with the misspelling itself absent from the response. `poetry run pytest tests/test_demo/
 tests/test_ui/ -q` — 166 passed, 3 skipped, no regressions from the doc-only change.
+
+## Full verify (final ritual)
+
+`poetry run pytest -q` — 1521 passed, 3 skipped, 0 failed (baseline at dispatch was 1491
+passed, 3 skipped; 30 new tests added across T013-T017, T018 added none).
+
+`forge verify --repo /home/sam/projects/samueljennings/dcv-014-us3`: conformance passed,
+poetry:lint passed, poetry:typecheck passed, poetry:test passed, poetry:build passed, docs
+skipped (needs `--base`).
