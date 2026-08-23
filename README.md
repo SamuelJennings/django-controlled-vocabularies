@@ -419,11 +419,39 @@ reverse("controlled_vocabularies_ui:vocabulary-list")
 `manage.py check` reports `controlled_vocabularies.ui.E001`, naming the extra to install, if
 `django-mvp` is not importable.
 
-**An entry names a vocabulary — it does not yet link to it.** Every vocabulary already has an
-address on this site (`ConceptScheme.local_url`), but nothing serves that address yet. Shipping
-a list whose every entry led to a missing page would ship a broken front door rather than a
-working one; a later feature turns the name into a link in the same change that gives it
-somewhere to lead.
+**An entry names a vocabulary — it does not yet link to it.** A vocabulary now has a page of its
+own (below), but nothing on the list yet points a reader there; a later feature turns the name
+into a link.
+
+### A vocabulary's own page
+
+Every vocabulary the site holds has its own address — the same one its identifier composes
+(`ConceptScheme.uri`) when the site is configured as this section describes. The page's title is
+the vocabulary's name. Above the list of concepts it holds (a later feature; there is nothing to
+list yet) it shows the vocabulary's description, truncated the same way and for the same reason
+as the list entry above, and how the vocabulary was obtained: an imported vocabulary's page shows
+the publisher's own identifier; one authored here shows its own address instead. Either way the
+identifier is a link — to the publisher's site for an imported vocabulary, or back to the page
+itself for one authored here.
+
+Reverse the page by name, passing the vocabulary's slug:
+
+```python
+reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": vocabulary.slug})
+```
+
+**The browsing routes must be mounted at the same path `CONTROLLED_VOCABULARIES_BASE_URI`
+composes against**, or a vocabulary's identifier does not lead back to its own page. Mounting the
+routes at `browse/` means the setting's path has to be `/browse`, not the package's own default:
+
+```python
+CONTROLLED_VOCABULARIES_BASE_URI = "https://example.org/browse"
+```
+
+`manage.py check` reports `controlled_vocabularies.ui.W001` — a warning, not an error, since a
+project may serve identifiers through a reverse proxy this package cannot see — when the two
+disagree, naming the mismatched paths. It is silent once they agree, and silent too if the
+browsing routes are not mounted at all.
 
 **One thing does not work yet.** The search box on the page cannot be submitted: the control comes
 from django-mvp, and in the released version its input is tied to a form that only its filter

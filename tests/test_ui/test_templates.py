@@ -44,33 +44,38 @@ def bare_reader_visible_text_nodes(source: str) -> list[str]:
     return [node for node in _TEXT_NODE_RE.findall(stripped) if _WORD_RE.search(node)]
 
 
-class TestRowPartialNeverLinksToTheVocabulary:
-    """FR-013, decisions.md D1 — the row partial's own source, so a link cannot creep back in
-    without the view changing at all (a second, independent proof from the rendered-page one
-    below).
+class TestRowPartialLinksToTheVocabulary:
+    """FR-013, T004 — the row partial's own source, the inverse of what #140 asserted here.
+
+    #140 held that no entry may link to a vocabulary, because no address served one; T001
+    gives every vocabulary a page, so the entry now leads to it. What remains true from #140
+    is the second assertion: the in-site link is reversed from the route's name, never
+    composed from the identifier base address, which is a public identifier and may point at
+    another site's publisher entirely.
     """
 
-    def test_the_row_partial_source_contains_no_url_tag(self):
+    def test_the_row_partial_source_reverses_the_vocabularys_own_route(self):
         source = ROW_TEMPLATE_PATH.read_text()
-        assert "{% url" not in source
+        assert "{% url 'controlled_vocabularies_ui:vocabulary-detail'" in source
 
     def test_the_row_partial_source_contains_no_local_url_reference(self):
         source = ROW_TEMPLATE_PATH.read_text()
         assert "local_url" not in source
 
 
-class TestRenderedPageNeverLinksToAVocabulary:
+class TestRenderedPageLinksToEachVocabulary:
     """FR-013 stated the second way: scanning the page as actually rendered."""
 
     @pytest.mark.django_db
-    def test_no_anchor_on_the_page_points_at_a_vocabularys_own_address(self, client):
-        scheme = ConceptSchemeFactory()
+    def test_every_entry_on_the_page_carries_an_anchor_to_its_own_page(self, client):
+        schemes = [ConceptSchemeFactory(), ConceptSchemeFactory()]
 
         response = client.get(reverse("controlled_vocabularies_ui:vocabulary-list"))
         content = response.content.decode()
 
         hrefs = re.findall(r'href="([^"]*)"', content)
-        assert scheme.local_url not in hrefs
+        for scheme in schemes:
+            assert reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}) in hrefs
 
 
 class TestEveryShippedTemplateWrapsReaderVisibleTextInATranslationTag:

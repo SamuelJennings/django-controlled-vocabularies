@@ -1,5 +1,14 @@
 {% load i18n %}
-<c-card title="{{ object.name }}">
+{% comment %}
+  The name is the way into the vocabulary (T004, FR-013). Given as a slot rather than the
+  card's `title` attribute, which renders as escaped text and so cannot carry an anchor.
+  The row renders in an isolated context holding only the object, so the address is built
+  from the route's name and reaches for nothing else.
+{% endcomment %}
+<c-card>
+  <c-slot name="title">
+    <a href="{% url 'controlled_vocabularies_ui:vocabulary-detail' object.slug %}">{{ object.name }}</a>
+  </c-slot>
   <c-slot name="badges">
     {% if object.static_uri %}
       <c-badge>{% trans "Imported" %}</c-badge>
@@ -20,8 +29,13 @@
     <c-text size="sm" muted>{{ object.description|truncatewords:40 }}</c-text>
   {% endif %}
   {% if object.static_uri %}
-    {# The identifier is never a link — it is not always a resolvable address (D6). #}
-    <c-text size="xs" muted>{{ object.static_uri }}</c-text>
+    {# The identifier is an outbound link (T003 reverses #140's D6): nothing is marked
+       safe and nothing is interpolated into any attribute besides href. It points at an
+       address this site does not control, hence rel="noopener". Which vocabularies show
+       an identifier at all here is unchanged from #140 (decisions.md D8) — a locally
+       authored vocabulary shows none on this page. A bare anchor, not the text component
+       used elsewhere in this row, which always renders a paragraph element. #}
+    <a href="{{ object.static_uri }}" rel="noopener">{{ object.static_uri }}</a>
   {% endif %}
   <c-text size="xs" muted>
     {% blocktrans count counter=object.concept_count %}{{ counter }} concept{% plural %}{{ counter }} concepts{% endblocktrans %}

@@ -9,6 +9,7 @@ across repeated calls: ``ConceptScheme.slug`` is unique app-wide and
 """
 
 import factory
+from django.utils.text import slugify
 
 from controlled_vocabularies.models import (
     Collection,
@@ -47,6 +48,13 @@ class ConceptSchemeFactory(factory.django.DjangoModelFactory):
         model = ConceptScheme
 
     name = factory.Sequence(lambda n: f"Vocabulary {n}")
+    # Derived here as well as in ``save()``, and by the same call, so that an unsaved
+    # ``.build()`` fixture carries the slug it would have had once saved. Without it a
+    # built scheme has a blank slug, and any template reversing a URL against it raises
+    # ``NoReverseMatch`` — which is a property of the fixture, not of the page under test.
+    # ``save()`` recomputes the identical value for a created scheme (``slug_is_manual``
+    # stays False), so nothing about a saved fixture changes.
+    slug = factory.LazyAttribute(lambda scheme: slugify(scheme.name, allow_unicode=True))
 
     class Params:
         external = factory.Trait(

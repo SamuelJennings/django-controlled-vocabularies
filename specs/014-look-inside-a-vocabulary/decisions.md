@@ -220,3 +220,67 @@ instances is where it would surface.
 **Why defensible**: both views live in one `controlled_vocabularies/ui/views.py`, and the recorded
 standard puts one test module per source module, splitting per unit with classes rather than extra
 files. A second module for the same source file is the case that standard names as non-conforming.
+
+---
+
+## D13 — `tests/test_checks.py`'s clean-check baseline is left red by T005's new check
+
+**Ambiguity**: none at spec or plan level — this surfaced only when the full verify ran at the end
+of the story, per the brief's own ritual, and no task names it.
+
+**Found**: `tests.settings` imports `CONTROLLED_VOCABULARIES_BASE_URI = "https://example.org/
+vocabularies"` from `tests.settings_core`, unchanged, while also installing
+`controlled_vocabularies.ui` and mounting its routes at `/browse/` (`tests/urls.py`) — a
+vocabulary/vocabulary mismatch of exactly the kind `controlled_vocabularies.ui.W001` (T005) exists
+to report, on the project's own test settings. `tests/test_checks.py::TestCheckSurvivesUnmigratedDatabase::
+test_check_reports_nothing_against_an_unmigrated_connection` asserts `manage.py check` is silent
+under `tests.settings` and now sees this one warning.
+
+**Not chosen**: overriding `CONTROLLED_VOCABULARIES_BASE_URI` in `tests/settings.py` to agree with
+the `/browse/` mount — tried, reverted. Eleven pre-existing tests in `tests/test_models.py` and
+`tests/test_factories.py` assert `.uri`/`.local_url` against the literal string
+`https://example.org/vocabularies/...`, not through `conf.get_base_uri()`, and all eleven broke.
+Moving the ui app's mount in `tests/urls.py` to `/vocabularies/` instead was also not chosen: it
+collides with the core app's own mount at that prefix, and the file's own docstring records that
+the two prefixes are deliberately different so a hard-coded path in either app would be caught.
+
+**Chosen** (settled at convergence, superseding the deferral this entry first recorded): move the
+mounts. `controlled_vocabularies.ui.urls` is mounted at `vocabularies/`, the path the base address
+already names, and the core app's autocomplete route moves to `widget/` so the two prefixes stay
+deliberately different and neither can match by accident. The base address itself does not move, so
+none of the eleven `test_models.py`/`test_factories.py` assertions change: `/vocabularies` is the
+better public path for a vocabulary's identifier, and `/browse` was the arbitrary half of the pair.
+Four literals move with the mounts — one in `tests/test_urls.py`, two in `tests/test_ui/test_urls.py`,
+and the pair of overrides in `tests/test_ui/test_checks.py`, whose agreeing case now needs no
+override at all and asserts the check's silence against a correctly wired project rather than a
+contrivance.
+
+Silencing the warning for the test settings was rejected outright: a check the project's own test
+run suppresses is a check nothing exercises end to end.
+
+**Revisit if**: never — the test project now demonstrates the wiring the check asks for.
+
+---
+
+## D14 — `ConceptSchemeFactory` derives the slug it would have had once saved
+
+**Ambiguity**: none at spec or plan level. T004 was reported blocked against this and is settled
+here, at convergence.
+
+**Found**: `ConceptScheme.slug` is derived in `save()`, so a `.build()` fixture carries a blank one.
+Nine tests in `tests/test_ui/test_views.py::TestVocabularyListEntry` render the row partial from
+built, unsaved schemes — deliberately, so an assertion about one row is never confused by the
+page's chrome. The moment the row reverses the vocabulary's own route, every one of them raises
+`NoReverseMatch`, which says nothing about the row and everything about the fixture.
+
+**Not chosen**: adding `slug=` to the nine call sites, which leaves the next `.build()` caller to
+rediscover the same trap; or guarding the anchor with `{% if object.slug %}`, which would put a
+branch in shipped markup to accommodate a test fixture, and would silently drop the link from a
+real page if the condition ever held.
+
+**Chosen**: the factory derives `slug` with the same `slugify(name, allow_unicode=True)` call
+`save()` makes. A built scheme now carries the slug it would have had once saved, and a created one
+is unchanged — `slug_is_manual` stays False, so `save()` recomputes the identical value.
+
+**Revisit if**: the factory ever needs to build a scheme whose slug deliberately disagrees with its
+name, which today only `set_slug()` produces and only on a saved instance.
