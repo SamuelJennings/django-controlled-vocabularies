@@ -87,37 +87,72 @@
         {
           "id": "T001",
           "status": "done",
-          "attempts": 1
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetail tests/test_ui/test_urls.py -q"
+            ]
+          }
         },
         {
           "id": "T002",
           "status": "done",
-          "attempts": 1
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetail tests/test_ui/test_views.py::TestVocabularyDetailDescriptionAndProvenance -q"
+            ]
+          }
         },
         {
           "id": "T003",
           "status": "done",
-          "attempts": 1
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/ -q"
+            ]
+          }
         },
         {
           "id": "T004",
           "status": "done",
-          "attempts": 1
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest -q"
+            ]
+          }
         },
         {
           "id": "T005",
           "status": "done",
-          "attempts": 1
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/ -q"
+            ]
+          }
         },
         {
           "id": "T006",
           "status": "done",
-          "attempts": 1
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_demo/ tests/test_ui/ -q"
+            ]
+          }
         },
         {
           "id": "T007",
           "status": "done",
-          "attempts": 1
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/ tests/test_demo/ -q"
+            ]
+          }
         }
       ]
     },
@@ -126,33 +161,71 @@
       "priority": "P1",
       "issue": 151,
       "worktree": "/home/sam/projects/samueljennings/dcv-014-us2",
-      "status": "in_progress",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T008",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_ui/test_views.py::TestVocabularyDetailConceptList"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailConceptList tests/test_ui/test_views.py::TestVocabularyDetail tests/test_ui/test_views.py::TestVocabularyDetailDescriptionAndProvenance tests/test_ui/test_views.py::TestVocabularyDetailIdentifierLink -q"
+            ]
+          }
         },
         {
           "id": "T009",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_ui/test_views.py::TestVocabularyDetailConceptLabel"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailConceptList tests/test_ui/test_views.py::TestVocabularyDetailConceptLabel -q"
+            ]
+          }
         },
         {
           "id": "T010",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_ui/test_views.py::TestVocabularyDetailConceptOrder"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailConceptOrder tests/test_ui/test_views.py::TestVocabularyDetailConceptList tests/test_ui/test_views.py::TestVocabularyDetailConceptLabel -q"
+            ]
+          }
         },
         {
           "id": "T011",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_ui/test_views.py::TestVocabularyDetailConceptPaging"
+            ],
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailConceptPaging -q",
+              "poetry run pytest -q"
+            ]
+          }
         },
         {
           "id": "T012",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pre-commit run --files README.md CHANGELOG.md"
+            ]
+          }
         }
       ]
     },
