@@ -412,3 +412,33 @@ RED observed first: with the two `.ttl` edits stashed, both new tests failed the
 files. Restored the `.ttl` changes and reran: green.
 Verified: `poetry run pytest tests/test_demo/test_seed.py -q` — 6 passed. Then
 `tests/test_demo/` as a whole (smoke, admin, demo, documented-commands): 23 passed.
+
+## 2026-08-24 · Implementer US-3 · T017
+
+Did: extended `demo/smoke.py`'s walk to follow the vocabulary list to a vocabulary's own page
+and search inside it, keeping the existing separation between HTTP transport (`get()`) and
+assertion (now four `check_*` functions plus one link-following helper, all importable and
+directly testable). `extract_vocabulary_url(list_body, name)` reads the served list markup with
+a small regex — no BeautifulSoup, since `demo/smoke.py` is stdlib-only by its own docstring and
+`beautifulsoup4` is a `test`-extra dependency the smoke script cannot assume is installed.
+`check_vocabulary_page` asserts the seeded concept `Dataset` is on the DCMI Type Vocabulary's own
+page; `check_concept_search` searches `Datset` (T016's seeded hidden-label misspelling of
+`Dataset`) and asserts the list narrows to it, excluding `Collection` — a search matching only a
+hidden label, per FR-019 and User Story 3 scenario 3. `walk()` now chains all four checks in one
+pass; the completion message names all three things it walked.
+Fourteen new tests in `tests/test_demo/test_smoke.py`: `extract_vocabulary_url` against a hand-
+built anchor and against a body naming nothing; `check_vocabulary_page` and `check_concept_search`
+each against a real seeded, in-process response (pass, wrong-content fail, non-200 fail, wrong-
+narrowing fail) — the same "exercised against a served page in-process" shape #140's own T017
+established, so a broken assertion fails in the suite and not only in CI.
+RED observed first: stashed the `demo/smoke.py` implementation, wrote the tests against the
+unmodified module, ran them — collection failed with `ImportError: cannot import name
+'HIDDEN_LABEL_SEARCH_TERM'`, the right reason (the names do not exist yet). Restored the
+implementation and reran: 14 passed.
+Verified beyond the test suite, per this task's own point (a template that renders in a test
+client and not in a browser): migrated and seeded a real demo database, ran `manage.py runserver`
+on a real socket, and ran `python demo/smoke.py http://127.0.0.1:8765` against it — `OK: walked
+the demo vocabulary list, a vocabulary's page, and a search inside it, at
+http://127.0.0.1:8765`, exit 0.
+Verified: `poetry run pytest tests/test_demo/test_smoke.py -q` — 14 passed. Then
+`tests/test_demo/` as a whole: 31 passed.
