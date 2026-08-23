@@ -6,6 +6,7 @@ from django.db import connection
 from django.template.loader import render_to_string
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
+from django.utils import translation
 
 from controlled_vocabularies.ui.views import VocabularyListView
 from tests.factories import ConceptFactory, ConceptNoteFactory, ConceptSchemeFactory
@@ -776,6 +777,7 @@ class TestVocabularyDetailConceptList:
         # partial alone. None of that belongs on the row (T008): no definition, no
         # note, no identifier, no relation, and nothing to follow.
         concept = ConceptFactory(label="Granite", external=True)
+        concept.resolved_label = concept.label  # what T009's annotation carries in real use
         ConceptNoteFactory(concept=concept, value="A coarse-grained igneous rock.")
         concept.add_label(language="en", kind="alternative", text="granitic rock")
         other = ConceptFactory(scheme=concept.scheme, label="Basalt")
@@ -803,3 +805,56 @@ class TestVocabularyDetailConceptList:
         listed = {c.pk for c in response.context["object_list"]}
         assert listed == {concept.pk}
         assert foreign.pk not in listed
+
+
+class TestVocabularyDetailConceptLabel:
+    """A concept is named in the reading language (FR-010, SC-005, User Story 2
+    scenarios 4, 5).
+    """
+
+    @pytest.mark.django_db
+    def test_a_concept_with_a_preferred_label_in_the_active_language_shows_it(self, client):
+        # Deliberately not a substring of the default-language label ("Granite") —
+        # a naive test built on "Granit" would pass whether the annotation resolved
+        # the German label or merely truncated the English one.
+        scheme = ConceptSchemeFactory()
+        concept = ConceptFactory(scheme=scheme, label="Granite")
+        concept.add_label(language="de", kind="preferred", text="Kristallgestein")
+        url = reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug})
+
+        with translation.override("de"):
+            response = client.get(url)
+
+        content = response.content.decode()
+        assert "Kristallgestein" in content
+        assert concept.label not in content
+
+    @pytest.mark.django_db
+    def test_a_concept_with_no_label_in_the_active_language_falls_back_to_its_default_one(self, client):
+        # Concept.label *is* the preferred label in the vocabulary's own default
+        # language (D11) — the fallback needs no separate ConceptLabel row.
+        scheme = ConceptSchemeFactory()
+        ConceptFactory(scheme=scheme, label="Granite")
+        url = reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug})
+
+        with translation.override("de"):
+            response = client.get(url)
+
+        assert "Granite" in response.content.decode()
+
+    @pytest.mark.django_db
+    def test_query_count_is_flat_regardless_of_how_many_concepts_the_vocabulary_holds(
+        self, client, django_assert_num_queries
+    ):
+        scheme = ConceptSchemeFactory()
+        ConceptFactory.create_batch(3, scheme=scheme)
+        url = reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug})
+
+        with CaptureQueriesContext(connection) as captured:
+            client.get(url)
+        baseline = len(captured.captured_queries)
+
+        ConceptFactory.create_batch(27, scheme=scheme)
+
+        with django_assert_num_queries(baseline):
+            client.get(url)

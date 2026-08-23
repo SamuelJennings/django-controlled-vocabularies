@@ -4,13 +4,14 @@ One view: ``VocabularyListView``. Search narrows that same view rather than addi
 another, so both user stories land here.
 """
 
-from django.db.models import Count
-from django.db.models.functions import Lower
+from django.db.models import Count, F, OuterRef, Subquery
+from django.db.models.functions import Coalesce, Lower
 from django.http import Http404
+from django.utils.translation import get_language
 from django.utils.translation import gettext_lazy as _
 from mvp.views import MVPListView
 
-from controlled_vocabularies.models import Concept, ConceptScheme
+from controlled_vocabularies.models import Concept, ConceptLabel, ConceptScheme
 
 
 class VocabularyListView(MVPListView):
@@ -132,18 +133,30 @@ class VocabularyDetailView(MVPListView):
             self.vocabulary = ConceptScheme.objects.get(slug=kwargs["slug"])
         except ConceptScheme.DoesNotExist as exc:
             raise Http404(_("No vocabulary matches this address.")) from exc
+        # US-2 T009, decisions.md D11: assigned to self.queryset here, never built by
+        # annotating the result of super().get_queryset() — Django applies
+        # self.ordering innermost, ahead of both django-mvp's search and order mixins'
+        # own get_queryset() overrides, so an annotation added on the way out would not
+        # exist yet when the ordering (T010) is applied. The active language is matched
+        # exactly, not by base language (D11) — labels are stored under the site's own
+        # configured languages, which is exactly what get_language() returns one of.
+        preferred_in_active_language = ConceptLabel.objects.filter(
+            concept=OuterRef("pk"),
+            language=get_language(),
+            kind=ConceptLabel.Kind.PREFERRED,
+        ).values("text")[:1]
+        # Every concept this vocabulary holds, and only this vocabulary's. No relation
+        # is consulted, so the list is flat by construction — a concept three levels
+        # down a broader/narrower chain is a plain sibling of one at the top, never
+        # rendered nested beneath it (T008, FR-006, FR-012).
+        self.queryset = Concept.objects.filter(scheme=self.vocabulary).annotate(
+            resolved_label=Coalesce(Subquery(preferred_in_active_language), F("label"))
+        )
 
     def get_page_title(self):
         # Without this override the title reads as the concept model's plural, because
         # the view's `model` is `Concept` — the page describes the vocabulary, not concepts.
         return self.vocabulary.name
-
-    def get_queryset(self):
-        # US-2 T008: every concept this vocabulary holds, and only this vocabulary's.
-        # No relation is consulted, so the list is flat by construction — a concept
-        # three levels down a broader/narrower chain is a plain sibling of one at the
-        # top, never rendered nested beneath it (FR-006, FR-012).
-        return super().get_queryset().filter(scheme=self.vocabulary)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
