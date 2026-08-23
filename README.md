@@ -419,9 +419,9 @@ reverse("controlled_vocabularies_ui:vocabulary-list")
 `manage.py check` reports `controlled_vocabularies.ui.E001`, naming the extra to install, if
 `django-mvp` is not importable.
 
-**An entry names a vocabulary — it does not yet link to it.** A vocabulary now has a page of its
-own (below), but nothing on the list yet points a reader there; a later feature turns the name
-into a link.
+Each entry's name is a link to that vocabulary's own page, described below. The link is reversed
+from the route's name rather than composed from the identifier base address, so it stays an
+in-site address whatever that setting says.
 
 ### A vocabulary's own page
 
