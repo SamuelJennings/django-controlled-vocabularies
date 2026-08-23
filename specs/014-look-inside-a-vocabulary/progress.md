@@ -391,3 +391,24 @@ Verified: `poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailCo
 — 5 passed. Then `tests/test_ui/test_views.py tests/test_ui/test_templates.py` together (the
 latter mechanically checks every reader-visible template string carries a translation tag,
 which the new "Show every concept" link must too): 89 passed, 3 skipped.
+
+## 2026-08-24 · Implementer US-3 · T016
+
+Did: added `skos:altLabel`/`skos:hiddenLabel` to one concept in each seed file — `Dataset`
+(`demo/seed/dcmi_types.ttl`, the imported vocabulary) gains `"Data set"@en` (alternative) and
+`"Datset"@en` (hidden); `Fieldwork` (`demo/seed/research_methods.ttl`, the authored one) gains
+`"Field work"@en` and `"Feildwork"@en`. Both hidden labels are plausible typos of the seeded
+term itself, not arbitrary strings — the reason FR-018/D9 call for one at all: a hidden label is
+the one behaviour on the page that only a search can confirm, never a reading of it. Loaded
+through `import_skos()` (`seed_demo.py`'s existing path), no fixture behind it — the mapping
+from `skos:altLabel`/`skos:hiddenLabel` to `ConceptLabel.Kind.ALTERNATIVE`/`HIDDEN` already
+existed in `controlled_vocabularies/exchange/mapping.py`, so no importer change was needed or
+made. Two new tests in `TestSeedDemo`: both concepts carry exactly the labels seeded, and a
+second `seed_demo` run does not duplicate them — inherent from the command's own delete-then-
+reimport shape (`ConceptScheme.objects.all().delete()` before each load), not new production
+logic.
+RED observed first: with the two `.ttl` edits stashed, both new tests failed the right way —
+`alt_labels("en")` and `hidden_labels("en")` both came back empty against the unmodified seed
+files. Restored the `.ttl` changes and reran: green.
+Verified: `poetry run pytest tests/test_demo/test_seed.py -q` — 6 passed. Then
+`tests/test_demo/` as a whole (smoke, admin, demo, documented-commands): 23 passed.
