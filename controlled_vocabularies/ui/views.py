@@ -176,16 +176,29 @@ class VocabularyDetailView(MVPListView):
         # the view's `model` is `Concept` — the page describes the vocabulary, not concepts.
         return self.vocabulary.name
 
+    def get_search_term(self):
+        # Read and stripped exactly as django-mvp's own search mixin does it before
+        # filtering (`mvp/views/list.py`), so "a search is in force" means the same
+        # thing to the empty states and the "back to the whole vocabulary" link as it
+        # does to the queryset (T015, #140's own `?q=%20%20` trap restated here).
+        return self.request.GET.get("q", "").strip()
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["vocabulary"] = self.vocabulary
+        context["search_term"] = self.get_search_term()
         return context
 
     def get_empty_state_heading(self):
-        # T011: names this vocabulary as holding none, distinct from the base
-        # class's own generic wording, which points at a create action this page
-        # never shows.
+        # T015, decisions.md D7: two distinct empty states, never one — a search
+        # matching nothing says so and repeats the term; a genuinely empty vocabulary
+        # keeps T011's own wording. Never mark_safe, never format_html.
+        search_term = self.get_search_term()
+        if search_term:
+            return _("Nothing matches “%(term)s”") % {"term": search_term}
         return _("This vocabulary holds no concepts")
 
     def get_empty_state_message(self):
+        if self.get_search_term():
+            return _("Try a different search term.")
         return None

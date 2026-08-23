@@ -361,3 +361,33 @@ new weakness introduced here. Restored `search_fields` before re-running to conf
 file was green again.
 Verified: `poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailConceptSearchAddressAndCase -q`
 — 9 passed. Then the file: 78 passed, 3 skipped.
+
+## 2026-08-24 · Implementer US-3 · T015
+
+Did: `get_search_term()` on `VocabularyDetailView`, stripped exactly the way django-mvp's own
+search mixin reads `?q=` before filtering — the same fix #140 made for the vocabulary list,
+restated one page down so the empty state and the queryset never disagree about whether a
+search is in force. `get_empty_state_heading()`/`get_empty_state_message()` now branch on it:
+a search matching nothing repeats the term and offers a different-search hint; an empty
+vocabulary keeps T011's own wording unchanged. `search_term` added to the context.
+`conceptscheme_detail.html` renders a "Show every concept" link back to the vocabulary's own
+(unsearched) address whenever `search_term` is truthy — in the page template itself, not inside
+the empty-state heading or message (which django-mvp's own component autoescapes with no slot,
+so an anchor there would render as literal text). Unlike #140's identical-shaped feature on the
+list of vocabularies, this is not skipped: that page has no template of its own to add the link
+to, and this one does (T007).
+Five new tests in `TestVocabularyDetailConceptSearchEmptyState`: the no-match wording appears
+and echoes the term (with the exact no-concepts string absent); the way-back link appears when
+a search matches nothing; T011's own wording and the absence of the link hold for a genuinely
+empty vocabulary; the two headings differ as plain strings (constructed directly, without a
+request round-trip, mirroring `TestVocabularySearchEmptyState`'s own precedent); and a
+whitespace-only `?q=` neither filters nor shows the link.
+RED observed first: three of five failed before the change — the no-concepts heading rendered
+for a search matching nothing (wrong branch), the way-back link was absent, and the two headings
+compared equal as the same unconditional string. The other two already passed unmodified
+(`MVPListView`'s own default empty state was already distinct enough from "no such link", and
+the paginator already treats a stripped-empty term as no search).
+Verified: `poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailConceptSearchEmptyState -q`
+— 5 passed. Then `tests/test_ui/test_views.py tests/test_ui/test_templates.py` together (the
+latter mechanically checks every reader-visible template string carries a translation tag,
+which the new "Show every concept" link must too): 89 passed, 3 skipped.

@@ -9,7 +9,7 @@ from django.urls import reverse
 from django.utils import translation
 
 from controlled_vocabularies.models import ConceptLabel
-from controlled_vocabularies.ui.views import VocabularyListView
+from controlled_vocabularies.ui.views import VocabularyDetailView, VocabularyListView
 from tests.factories import ConceptFactory, ConceptNoteFactory, ConceptSchemeFactory
 
 ROW_TEMPLATE = "controlled_vocabularies/ui/conceptscheme_list_item.html"
@@ -1135,3 +1135,83 @@ class TestVocabularyDetailConceptSearchAddressAndCase:
 
         listed = {c.pk for c in response.context["object_list"]}
         assert (listed == {concept.pk}) is matches
+
+
+class TestVocabularyDetailConceptSearchEmptyState:
+    """Three empty states, told apart (FR-014, User Story 3 scenario 7; tasks.md T015,
+    decisions.md D7). Read the search term stripped, the way django-mvp's own mixin
+    reads it before filtering, so the empty state and the queryset agree on whether a
+    search is in force — #140's own trap (``?q=%20%20``) restated one page down.
+    """
+
+    @pytest.mark.django_db
+    def test_a_search_matching_nothing_returns_200_with_no_match_wording_and_the_term_echoed(self, client):
+        scheme = ConceptSchemeFactory()
+        ConceptFactory(scheme=scheme, label="Granite")
+        url = reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug})
+
+        response = client.get(url, {"q": "Basalt"})
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        assert "Basalt" in content
+        # The exact no-concepts string, not a loose substring — "no concepts" itself
+        # would also match a plausible no-match wording.
+        assert "This vocabulary holds no concepts" not in content
+
+    @pytest.mark.django_db
+    def test_a_search_matching_nothing_offers_a_link_back_to_the_unsearched_vocabulary(self, client):
+        # Unlike the list of vocabularies (#140, skipped waiting on django-mvp/django-mvp#282),
+        # this page has its own template (T007) and can render the link directly rather
+        # than needing django-mvp's actions area, so this is not skipped.
+        scheme = ConceptSchemeFactory()
+        ConceptFactory(scheme=scheme, label="Granite")
+        detail_url = reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug})
+
+        response = client.get(detail_url, {"q": "Basalt"})
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        hrefs = {a["href"] for a in soup.find_all("a", href=True)}
+        assert detail_url in hrefs
+
+    @pytest.mark.django_db
+    def test_a_vocabulary_holding_no_concepts_keeps_t011s_wording_and_shows_no_such_link(self, client):
+        scheme = ConceptSchemeFactory()
+        detail_url = reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug})
+
+        response = client.get(detail_url)
+        soup = BeautifulSoup(response.content, "html.parser")
+        content = response.content.decode()
+
+        assert "no concepts" in content.lower()
+        hrefs = {a["href"] for a in soup.find_all("a", href=True)}
+        assert detail_url not in hrefs
+
+    def test_the_no_match_and_no_concepts_headings_are_different_strings(self, rf):
+        scheme = ConceptSchemeFactory.build()
+
+        no_match_view = VocabularyDetailView()
+        no_match_view.vocabulary = scheme
+        no_match_view.request = rf.get("/", {"q": "Basalt"})
+
+        empty_view = VocabularyDetailView()
+        empty_view.vocabulary = scheme
+        empty_view.request = rf.get("/")
+
+        assert str(no_match_view.get_empty_state_heading()) != str(empty_view.get_empty_state_heading())
+
+    @pytest.mark.django_db
+    def test_a_whitespace_only_search_is_not_a_search(self, client):
+        # #140's own trap restated one page down: a raw, unstripped `?q=%20%20` must not
+        # half-search — the list stays unfiltered and no "back to the whole vocabulary"
+        # link appears offering to undo a search that never happened.
+        scheme = ConceptSchemeFactory()
+        ConceptFactory.create_batch(2, scheme=scheme)
+        detail_url = reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug})
+
+        response = client.get(detail_url, {"q": "   "})
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        assert len(response.context["object_list"]) == 2
+        hrefs = {a["href"] for a in soup.find_all("a", href=True)}
+        assert detail_url not in hrefs

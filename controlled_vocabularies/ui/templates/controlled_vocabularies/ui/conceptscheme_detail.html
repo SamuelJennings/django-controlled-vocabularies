@@ -14,5 +14,17 @@
        safe and nothing is interpolated into any attribute besides href #}
     <c-text size="xs" muted><a href="{{ vocabulary.uri }}" rel="noopener">{{ vocabulary.uri }}</a></c-text>
   </div>
+  {% if search_term %}
+    {# The way back to the whole vocabulary (T015, FR-014): rendered here, in this
+       package's own template, never as markup inside the empty-state heading or
+       message — django-mvp's empty-state component autoescapes those strings with no
+       slot, so an anchor there would show as literal text and marking it safe would
+       emit the search term unescaped. #}
+    <p>
+      <a href="{% url 'controlled_vocabularies_ui:vocabulary-detail' vocabulary.slug %}">
+        {% trans "Show every concept" %}
+      </a>
+    </p>
+  {% endif %}
   {{ block.super }}
 {% endblock page.content %}
