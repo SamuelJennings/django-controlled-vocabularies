@@ -310,3 +310,30 @@ never updated. Not touched: it belongs to US-1's T004/T007, not this story's fil
 `forge verify --repo /home/sam/projects/samueljennings/dcv-014-us2`: conformance passed,
 poetry:lint passed, poetry:typecheck passed, poetry:test passed, poetry:build passed, docs
 skipped (needs `--base`).
+
+## 2026-08-24 · Implementer US-3 · T013
+
+Did: `search_fields = ["label", "labels__text"]` as a class attribute on
+`VocabularyDetailView` (decisions.md D4, plan.md item 4). `label` is the preferred label in
+the vocabulary's own default language; `labels__text` reaches every `ConceptLabel` row —
+preferred labels in other languages, alternative labels, and hidden labels — in one traversal,
+which django-mvp's search mixin's own `.distinct()` makes safe. Definitions live on
+`ConceptNote`, outside `search_fields`, so they are never matched. Six new tests in a new
+`TestVocabularyDetailConceptSearch` class: a word matching only the preferred label, only an
+alternative label, and only a hidden label (each on its own concept), the last also asserting
+the hidden label is absent from the rendered text — `BeautifulSoup(...).get_text()`, not the raw
+response body, since the search box legitimately echoes the raw `?q=` value into an `<input
+value="…">` attribute and `get_text()` reads only text nodes, excluding it, the same way a
+reader's own view of the page excludes it. A word matching only a definition finds nothing. A
+matching concept in another vocabulary is excluded. A search requested directly at `page=2`
+(not reached by following a link from page one) still reaches every matching concept and none of
+the non-matching ones mixed into what an unfiltered page two would hold — `paginator.count == 30`
+pins the whole-vocabulary scope directly.
+RED observed first: all six ran against the view before `search_fields` existed. Five failed for
+the right reason — unfiltered results leaking through (`{1, 2} == {1}`, a definition match
+present when it should be absent, a foreign-vocabulary concept and non-matching concepts leaking
+into a 35-strong unfiltered set). The hidden-label test's first attempt asserted against the raw
+decoded body and failed as a false positive (the echoed search box value, not a real display of
+the label) — corrected to `get_text()` before it was ever run as a claimed pass.
+Verified: `poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailConceptSearch -q`
+— 6 passed. Then the file: 69 passed, 3 skipped (baseline 63 passed, 3 skipped).

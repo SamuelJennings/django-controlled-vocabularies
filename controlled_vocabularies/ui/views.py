@@ -134,6 +134,17 @@ class VocabularyDetailView(MVPListView):
     # neither, once pagination is in play (#140 makes the same point for vocabularies).
     ordering = [Lower("resolved_label"), "pk"]
 
+    # django-mvp's SearchMixin reads ?q=, strips it, and applies case-insensitive
+    # substring matching across these fields with OR semantics, joined with `.distinct()`
+    # (T013, FR-008, FR-009, decisions.md D4/plan.md item 4). `label` is the preferred
+    # label in the vocabulary's own default language; `labels__text` reaches every
+    # ConceptLabel row in one traversal — preferred labels in other languages,
+    # alternative labels, and hidden labels. Definitions and notes live on ConceptNote
+    # and are deliberately absent, so they are never matched. A hidden label is matched
+    # here and never displayed: display comes from `resolved_label`, which only ever
+    # reads preferred labels.
+    search_fields = ["label", "labels__text"]
+
     def setup(self, request, *args, **kwargs):
         super().setup(request, *args, **kwargs)
         try:
