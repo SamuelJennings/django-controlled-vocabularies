@@ -44,6 +44,11 @@
       "state": "IMPLEMENT",
       "at": "2026-08-23T22:06:43Z",
       "note": "US-1 dispatched to an implementer in its own worktree"
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-24T00:00:00Z",
+      "note": "US-1 converged and accepted (T004 unblocked at convergence, the test project's own route/base-address mismatch fixed); US-2 dispatched to an implementer in its own worktree"
     }
   ],
   "gates": {
@@ -120,8 +125,8 @@
       "id": "US2",
       "priority": "P1",
       "issue": 151,
-      "worktree": null,
-      "status": "todo",
+      "worktree": "/home/sam/projects/samueljennings/dcv-014-us2",
+      "status": "in_progress",
       "replans": 0,
       "tasks": [
         {
