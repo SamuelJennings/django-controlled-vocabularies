@@ -563,3 +563,44 @@ class TestVocabularySearchEmptyState:
 
         assert heading.find("script") is None
         assert "<script>alert(1)</script>" in heading.get_text()
+
+
+class TestVocabularyDetail:
+    """A vocabulary's own address serves a page, and an unknown one does not (FR-001,
+    FR-017, User Story 1 scenarios 1, 7, 8).
+    """
+
+    @pytest.mark.django_db
+    def test_a_known_vocabulary_serves_its_page_anonymously(self, client):
+        scheme = ConceptSchemeFactory()
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}))
+
+        assert response.status_code == 200
+
+    @pytest.mark.django_db
+    def test_a_slug_nothing_has_returns_404(self, client):
+        response = client.get(
+            reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": "no-such-vocabulary"})
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.django_db
+    def test_the_page_title_is_the_vocabularys_name(self, client):
+        scheme = ConceptSchemeFactory(name="Geological Time Scale")
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}))
+
+        assert response.context["page"]["title"] == scheme.name
+
+    @pytest.mark.django_db
+    def test_a_vocabulary_named_in_a_non_latin_script_still_serves_its_own_page(self, client):
+        # <str:slug>, not <slug:slug>: the model slugifies with allow_unicode=True, and
+        # Django's slug converter matches ASCII only. A vocabulary named this way would
+        # 404 on its own page under the obvious converter.
+        scheme = ConceptSchemeFactory(name="地質年代")
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}))
+
+        assert response.status_code == 200

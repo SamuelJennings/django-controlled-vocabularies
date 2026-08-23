@@ -6,10 +6,11 @@ another, so both user stories land here.
 
 from django.db.models import Count
 from django.db.models.functions import Lower
+from django.http import Http404
 from django.utils.translation import gettext_lazy as _
 from mvp.views import MVPListView
 
-from controlled_vocabularies.models import ConceptScheme
+from controlled_vocabularies.models import Concept, ConceptScheme
 
 
 class VocabularyListView(MVPListView):
@@ -107,3 +108,30 @@ class VocabularyListView(MVPListView):
         # does not show (show_create_action is never set), and this empty state has
         # nothing else useful to add beyond the heading.
         return None
+
+
+class VocabularyDetailView(MVPListView):
+    """A single vocabulary's own page: its description, provenance and the concepts it
+    holds (014-look-inside-a-vocabulary, US-1).
+
+    A list view over ``Concept``, not a detail view over ``ConceptScheme`` — plan.md Key
+    design decision #1. django-mvp's ``MVPDetailView`` is deliberately empty below its
+    heading (its own ADR 0001), so building on it would mean re-implementing search,
+    pagination and the empty states ``MVPListView`` already supplies. The vocabulary
+    itself is resolved once, in ``setup()``, and carried on ``self.vocabulary`` for every
+    hook that needs it.
+    """
+
+    model = Concept
+
+    def setup(self, request, *args, **kwargs):
+        super().setup(request, *args, **kwargs)
+        try:
+            self.vocabulary = ConceptScheme.objects.get(slug=kwargs["slug"])
+        except ConceptScheme.DoesNotExist as exc:
+            raise Http404(_("No vocabulary matches this address.")) from exc
+
+    def get_page_title(self):
+        # Without this override the title reads as the concept model's plural, because
+        # the view's `model` is `Concept` — the page describes the vocabulary, not concepts.
+        return self.vocabulary.name
