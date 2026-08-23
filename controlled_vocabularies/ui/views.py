@@ -124,6 +124,7 @@ class VocabularyDetailView(MVPListView):
 
     model = Concept
     template_name = "controlled_vocabularies/ui/conceptscheme_detail.html"
+    list_item_template = "controlled_vocabularies/ui/concept_list_item.html"
 
     def setup(self, request, *args, **kwargs):
         super().setup(request, *args, **kwargs)
@@ -136,6 +137,13 @@ class VocabularyDetailView(MVPListView):
         # Without this override the title reads as the concept model's plural, because
         # the view's `model` is `Concept` — the page describes the vocabulary, not concepts.
         return self.vocabulary.name
+
+    def get_queryset(self):
+        # US-2 T008: every concept this vocabulary holds, and only this vocabulary's.
+        # No relation is consulted, so the list is flat by construction — a concept
+        # three levels down a broader/narrower chain is a plain sibling of one at the
+        # top, never rendered nested beneath it (FR-006, FR-012).
+        return super().get_queryset().filter(scheme=self.vocabulary)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)

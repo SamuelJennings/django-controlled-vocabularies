@@ -8,9 +8,10 @@ from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from controlled_vocabularies.ui.views import VocabularyListView
-from tests.factories import ConceptFactory, ConceptSchemeFactory
+from tests.factories import ConceptFactory, ConceptNoteFactory, ConceptSchemeFactory
 
 ROW_TEMPLATE = "controlled_vocabularies/ui/conceptscheme_list_item.html"
+CONCEPT_ROW_TEMPLATE = "controlled_vocabularies/ui/concept_list_item.html"
 
 
 class TestVocabularyList:
@@ -736,3 +737,69 @@ class TestVocabularyDetailIdentifierLink:
 
         assert anchor is not None
         assert anchor.text == "urn:nbn:example:vocab-1"
+
+
+class TestVocabularyDetailConceptList:
+    """Every concept the vocabulary holds appears, flat, and only this vocabulary's
+    (FR-006, FR-012, User Story 2 scenarios 1, 2, 3, 9).
+    """
+
+    @pytest.mark.django_db
+    def test_a_multi_level_hierarchy_renders_flat_with_every_concept_exactly_once(self, client):
+        scheme = ConceptSchemeFactory()
+        top = ConceptFactory(scheme=scheme, label="Top Concept")
+        middle = ConceptFactory(scheme=scheme, label="Middle Concept")
+        bottom = ConceptFactory(scheme=scheme, label="Bottom Concept")
+        middle.add_broader(top)
+        bottom.add_broader(middle)
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}))
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        listed = list(response.context["object_list"])
+        assert len(listed) == 3
+        assert {concept.pk for concept in listed} == {top.pk, middle.pk, bottom.pk}
+
+        # Flatness asserted on structure, not a row count: a card for the concept three
+        # levels down (`bottom`) must not be nested inside the card for one at the top
+        # (`top`) — a tree-shaped rendering could total three cards too and still pass
+        # a count-only assertion.
+        cards = soup.find_all(class_="card")
+        assert len(cards) == 3
+        for card in cards:
+            assert card.find(class_="card") is None
+
+    @pytest.mark.django_db
+    def test_a_concepts_row_carries_only_its_label(self):
+        # A fully decorated concept — an alternative label, a note, a static
+        # identifier and a relation to another concept — rendered through the row
+        # partial alone. None of that belongs on the row (T008): no definition, no
+        # note, no identifier, no relation, and nothing to follow.
+        concept = ConceptFactory(label="Granite", external=True)
+        ConceptNoteFactory(concept=concept, value="A coarse-grained igneous rock.")
+        concept.add_label(language="en", kind="alternative", text="granitic rock")
+        other = ConceptFactory(scheme=concept.scheme, label="Basalt")
+        concept.add_broader(other)
+
+        html = render_to_string(CONCEPT_ROW_TEMPLATE, {"object": concept})
+        soup = BeautifulSoup(html, "html.parser")
+
+        assert concept.label in html
+        assert "A coarse-grained igneous rock." not in html
+        assert "granitic rock" not in html
+        assert concept.static_uri not in html
+        assert "Basalt" not in html
+        assert soup.find("a") is None
+
+    @pytest.mark.django_db
+    def test_a_concept_belonging_to_another_vocabulary_does_not_appear(self, client):
+        scheme = ConceptSchemeFactory()
+        other_scheme = ConceptSchemeFactory()
+        concept = ConceptFactory(scheme=scheme, label="Granite")
+        foreign = ConceptFactory(scheme=other_scheme, label="Basalt")
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}))
+
+        listed = {c.pk for c in response.context["object_list"]}
+        assert listed == {concept.pk}
+        assert foreign.pk not in listed
