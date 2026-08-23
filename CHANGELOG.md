@@ -22,6 +22,13 @@ All notable changes to this project are documented in this file. The format foll
   list. Letter case is ignored, with one limit belonging to the database rather than to this
   package: SQLite folds ASCII letters only, so on SQLite a vocabulary named *Ökologie* is found
   by *ÖKOLOGIE* and not by *ökologie*. PostgreSQL matches either way. See the README.
+- A vocabulary's own page, at the address its identifier composes: its name as the page title,
+  its description, and how it was obtained — an imported vocabulary's page links to the
+  publisher's own identifier, one authored here links back to the page itself. Reversed by name
+  as `controlled_vocabularies_ui:vocabulary-detail`. `manage.py check` reports
+  `controlled_vocabularies.ui.W001`, a warning, when the browsing routes are mounted somewhere
+  that disagrees with the path `CONTROLLED_VOCABULARIES_BASE_URI` composes against, since a
+  vocabulary's identifier then does not lead back to its own page. See the README.
 
 ### Known limitations
 
