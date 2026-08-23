@@ -446,6 +446,33 @@ something a reader can follow to anywhere else. A vocabulary holding no concepts
 wording distinct from the page's other empty state, and the rest of the page — its description and
 provenance — still renders.
 
+A search box narrows the list of concepts by every name a term goes by: a concept's preferred
+label in any language it carries, its alternative labels, and its hidden labels — never its
+definition or any other note. A hidden label is matched and never shown: searching for one finds
+the concept it names without ever displaying the label itself, which is the whole point of
+keeping it hidden. As with the list of vocabularies above, the term travels in the page's own
+address (`?q=`), so a narrowed list can be linked to, bookmarked and returned to, and it reaches
+every concept in the vocabulary before paging divides the results — not only the page being
+viewed. A search matching nothing says so, repeats what was searched for, and offers a link back
+to the whole vocabulary.
+
+Case is ignored, with the same database-dependent limit disclosed above: SQLite folds ASCII
+letters only, so a concept labelled *Ökologie* is found by *ÖKOLOGIE* and not by *ökologie*;
+PostgreSQL folds the whole of Unicode and matches either way
+(`docs/adr/0014-database-collation-differences-are-disclosed-not-repaired.md`).
+
+**The search box on this page carries the same limitation as the one on the list of
+vocabularies, above.** Its input is tied to a form only django-mvp's filter control creates
+([django-mvp#282](https://github.com/django-mvp/django-mvp/issues/282), tracked here as
+[#147](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/147)), so typing
+in the box and pressing the button does nothing until that fix ships. Searching by address works
+exactly as documented: the demo project's own DCMI Type Vocabulary carries a concept named
+*Dataset* with a hidden label of `Datset`, a plausible misspelling — `?q=Datset` narrows the page
+to *Dataset* without the misspelling itself ever appearing in the response, and the narrowed
+address can be shared and bookmarked the same as any other. Unlike the list of vocabularies, a
+search here that matches nothing *does* offer a link back to the unsearched vocabulary: this page
+has a template of its own to put that link in, where the list of vocabularies has none.
+
 Reverse the page by name, passing the vocabulary's slug:
 
 ```python

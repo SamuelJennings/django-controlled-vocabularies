@@ -37,16 +37,33 @@ All notable changes to this project are documented in this file. The format foll
   no identifier, no relation, and nothing to follow: how concepts relate to one another is not
   shown here. A vocabulary holding none says so, distinct from the page's other empty state, and
   the rest of the page still renders. See the README.
+- The vocabulary's own page can now be narrowed by a search box, matching a concept's preferred
+  label in any language it carries, its alternative labels, and its hidden labels — never its
+  definition or any other note. A hidden label is matched and never displayed, so a search can
+  find a concept a reader was never shown a name for. The term travels in the page's own address
+  (`?q=`), exactly as the list of vocabularies' own search does, and reaches every concept in the
+  vocabulary before paging divides the results — not only the page being viewed. A search
+  matching nothing says so, repeats the term, and — unlike the list of vocabularies — offers a
+  working link back to the whole vocabulary, since this page has a template of its own to render
+  it in. Letter case is ignored, with the same database-dependent limit disclosed above. See the
+  README.
+- The demo project's DCMI Type Vocabulary now seeds a concept (`Dataset`) carrying an alternative
+  label and a hidden label, and the unattended demo walk (`demo/smoke.py`) follows the vocabulary
+  list to that vocabulary's own page and searches inside it — including a search matching only
+  the hidden label — failing the build if either does not work. See the README's "Try it"
+  section.
 
 ### Known limitations
 
-- The search box on the page cannot be submitted, and a search matching nothing offers no link
-  back to the full list. Both come from the released django-mvp's search control, whose input is
-  tied to a form only its filter control creates
+- The search box on the list of vocabularies cannot be submitted, and a search matching nothing
+  there offers no link back to the full list. The search box on a vocabulary's own page shares
+  the same submit limitation but does offer a working link back when a search matches nothing,
+  since that page has a template of its own to render one in. Both come from the released
+  django-mvp's search control, whose input is tied to a form only its filter control creates
   ([django-mvp#282](https://github.com/django-mvp/django-mvp/issues/282), tracked here as #147).
-  Searching by address is
-  unaffected: `?q=soil` narrows the list and the narrowed address can be shared. We are waiting on
-  the upstream fix rather than shipping a patched copy of django-mvp's page — see
+  Searching by address is unaffected on either page: `?q=soil` narrows the list of vocabularies
+  and `?q=granite` narrows the concepts inside one, and either narrowed address can be shared. We
+  are waiting on the upstream fix rather than shipping a patched copy of django-mvp's page — see
   `docs/adr/0015-upstream-defects-are-waited-on-not-worked-around.md`.
 - A runnable demo project: `manage.py`, `demo/settings.py` and `demo/urls.py` bring up the
   vocabulary list configured exactly as the README documents. `migrate`, `seed_demo` and

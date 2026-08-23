@@ -442,3 +442,36 @@ the demo vocabulary list, a vocabulary's page, and a search inside it, at
 http://127.0.0.1:8765`, exit 0.
 Verified: `poetry run pytest tests/test_demo/test_smoke.py -q` — 14 passed. Then
 `tests/test_demo/` as a whole: 31 passed.
+
+## 2026-08-24 · Implementer US-3 · T018
+
+Did: extended README's "A vocabulary's own page" section with the concept search — what it
+matches (a preferred label in any language, alternative labels, hidden labels; never a
+definition or note), that a hidden label is matched and never shown, that the term travels in
+`?q=` and reaches every concept before paging, the three empty states, and the same
+database-dependent ASCII-only case limit ADR 0014 already discloses for the vocabulary list,
+cited by path. Stated plainly that this page's search box carries #282's same submit
+limitation, tracked here as #147, and that searching by address works — using a real, verified
+example: the demo's `Dataset` concept, its seeded hidden label `Datset` (T016), narrowing
+`?q=Datset` to `Dataset` without the misspelling ever appearing in the response (T017's own
+smoke check proves this live, not just in the test client). Also documented the one place this
+page now differs from the list of vocabularies: a search matching nothing here does offer a
+working way back, because this page has a template of its own to render the link in (T015),
+where the list of vocabularies does not. Matching CHANGELOG entries: two `Added` bullets (the
+concept search; the demo's seeded labels plus the extended smoke walk) and a rewritten `Known
+limitations` bullet distinguishing the two pages' search boxes instead of describing them as one.
+Noticed but out of scope, reported here rather than touched: the pre-existing "One thing does
+not work yet"/"served by `VocabularyListView`" block that immediately follows my new paragraphs
+(README, currently under "### A vocabulary's own page") is actually about the *list* of
+vocabularies — it predates this feature (#140/013), and US-1's T007 inserted the "### A
+vocabulary's own page" heading directly above it without noticing the older content was left
+stranded under the new heading. Its own text ("a page whose search matched nothing names the
+term but offers no link back to the full list") is also now stale for *this* page after T015,
+though it remains correct for the list of vocabularies it was actually written about. Not fixed:
+reorganizing that block is a US-1-shaped edit, not this story's.
+Verified: every command and route name in the new paragraphs is unchanged from what earlier
+tasks already verified, except the `?q=Datset` example, checked directly against
+`tests/test_demo/test_smoke.py::TestCheckConceptSearch` (T017, already green) and the live
+`demo/smoke.py` walk (T017's own verification run) — both confirm `Datset` narrows to `Dataset`
+with the misspelling itself absent from the response. `poetry run pytest tests/test_demo/
+tests/test_ui/ -q` — 166 passed, 3 skipped, no regressions from the doc-only change.
