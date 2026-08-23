@@ -93,14 +93,44 @@ class TestVocabularyListEntry:
         assert counts[populated.pk] == 3
         assert counts[empty.pk] == 0
 
-    def test_imported_vocabulary_shows_its_publisher_identifier_and_reads_as_imported(self):
+    def test_imported_vocabulary_shows_its_publisher_identifier_as_a_link_and_reads_as_imported(self):
+        # T003: the identifier is a link now, not plain text (#140's D6 reversed) — the
+        # anchor's href and text are both the publisher's identifier, unrewritten, and it
+        # carries rel="noopener" since it points at an address this site does not control.
         scheme = ConceptSchemeFactory.build(external=True)
         scheme.concept_count = 0
 
         html = render_to_string(ROW_TEMPLATE, {"object": scheme})
+        soup = BeautifulSoup(html, "html.parser")
+        anchor = soup.find("a", href=scheme.static_uri)
 
-        assert scheme.static_uri in html
+        assert anchor is not None
+        assert anchor.text == scheme.static_uri
+        assert anchor.get("rel") == ["noopener"]
         assert "Imported" in html
+
+    def test_a_locally_authored_vocabulary_still_shows_no_identifier(self):
+        # decisions.md D8: T003 makes an existing identifier display a link, but which
+        # vocabularies show one at all on this page is unchanged from #140 — none for a
+        # vocabulary held here. That case gains a link only on the vocabulary's own page.
+        scheme = ConceptSchemeFactory.build()
+        scheme.concept_count = 0
+
+        html = render_to_string(ROW_TEMPLATE, {"object": scheme})
+        soup = BeautifulSoup(html, "html.parser")
+
+        assert soup.find("a", href=scheme.local_url) is None
+
+    def test_a_urn_identifier_is_still_rendered_as_a_link_unrewritten(self):
+        scheme = ConceptSchemeFactory.build(static_uri="urn:nbn:example:vocab-1")
+        scheme.concept_count = 0
+
+        html = render_to_string(ROW_TEMPLATE, {"object": scheme})
+        soup = BeautifulSoup(html, "html.parser")
+        anchor = soup.find("a", href="urn:nbn:example:vocab-1")
+
+        assert anchor is not None
+        assert anchor.text == "urn:nbn:example:vocab-1"
 
     def test_locally_authored_vocabulary_shows_neither_identifier_nor_imported_wording(self):
         scheme = ConceptSchemeFactory.build()
@@ -651,3 +681,44 @@ class TestVocabularyDetailDescriptionAndProvenance:
 
         assert "word0" in content
         assert "word399" not in content
+
+
+class TestVocabularyDetailIdentifierLink:
+    """The identifier is a link on this page too (FR-004, identifier half of FR-013,
+    User Story 1 scenario 4).
+    """
+
+    @pytest.mark.django_db
+    def test_a_vocabulary_published_elsewhere_links_to_its_publisher_address(self, client):
+        scheme = ConceptSchemeFactory(external=True)
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}))
+        soup = BeautifulSoup(response.content, "html.parser")
+        anchor = soup.find("a", href=scheme.static_uri)
+
+        assert anchor is not None
+        assert anchor.text == scheme.static_uri
+        assert anchor.get("rel") == ["noopener"]
+
+    @pytest.mark.django_db
+    def test_a_vocabulary_held_here_links_to_the_address_this_site_composes(self, client):
+        scheme = ConceptSchemeFactory()
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}))
+        soup = BeautifulSoup(response.content, "html.parser")
+        anchor = soup.find("a", href=scheme.uri)
+
+        assert anchor is not None
+        assert anchor.text == scheme.uri
+        assert anchor.get("rel") == ["noopener"]
+
+    @pytest.mark.django_db
+    def test_a_urn_identifier_is_still_rendered_as_a_link_unrewritten(self, client):
+        scheme = ConceptSchemeFactory(static_uri="urn:nbn:example:vocab-1")
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}))
+        soup = BeautifulSoup(response.content, "html.parser")
+        anchor = soup.find("a", href="urn:nbn:example:vocab-1")
+
+        assert anchor is not None
+        assert anchor.text == "urn:nbn:example:vocab-1"
