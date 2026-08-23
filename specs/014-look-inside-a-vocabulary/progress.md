@@ -30,3 +30,24 @@ Open at approval, and carried forward rather than resolved:
 
 Surfaces: epic #141 · stories #150, #151, #152, #153 · pull request #154 · branch
 `014-look-inside-a-vocabulary`.
+
+---
+
+## 2026-08-20 — Plan written (S3)
+
+`plan.md`, `research.md` and `tasks.md` on the branch. 21 tasks across the four stories, run in
+sequence: US-1, US-2 and US-4 all write the same page template, and US-2 and US-3 both write the
+view's queryset behaviour, so parallel worktrees would collide at every convergence.
+
+The two findings that shaped the plan and were not visible from the specification:
+
+- **A vocabulary's address and the browsing app's mount have never been made to agree.** The address
+  is composed from a setting; the mount is the project's choice; nothing compared them, because until
+  now nothing served a page there. The demonstration is itself misconfigured today. The plan adds the
+  route, a system check that reports the disagreement as a warning, and a corrected demonstration.
+- **The search control still does not submit** on a page carrying search and no filter
+  (django-mvp/django-mvp#282, open). The search itself works through the address. ADR 0015 governs:
+  the defect is waited on, the affected tests are skipped naming the issue, and nothing is built
+  around it — the same state #140 already ships.
+
+No model change, no migration, and nothing in the `exchange` package is touched.
