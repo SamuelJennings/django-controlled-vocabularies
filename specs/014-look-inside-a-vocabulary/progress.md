@@ -310,3 +310,177 @@ never updated. Not touched: it belongs to US-1's T004/T007, not this story's fil
 `forge verify --repo /home/sam/projects/samueljennings/dcv-014-us2`: conformance passed,
 poetry:lint passed, poetry:typecheck passed, poetry:test passed, poetry:build passed, docs
 skipped (needs `--base`).
+
+## 2026-08-24 · Implementer US-3 · T013
+
+Did: `search_fields = ["label", "labels__text"]` as a class attribute on
+`VocabularyDetailView` (decisions.md D4, plan.md item 4). `label` is the preferred label in
+the vocabulary's own default language; `labels__text` reaches every `ConceptLabel` row —
+preferred labels in other languages, alternative labels, and hidden labels — in one traversal,
+which django-mvp's search mixin's own `.distinct()` makes safe. Definitions live on
+`ConceptNote`, outside `search_fields`, so they are never matched. Six new tests in a new
+`TestVocabularyDetailConceptSearch` class: a word matching only the preferred label, only an
+alternative label, and only a hidden label (each on its own concept), the last also asserting
+the hidden label is absent from the rendered text — `BeautifulSoup(...).get_text()`, not the raw
+response body, since the search box legitimately echoes the raw `?q=` value into an `<input
+value="…">` attribute and `get_text()` reads only text nodes, excluding it, the same way a
+reader's own view of the page excludes it. A word matching only a definition finds nothing. A
+matching concept in another vocabulary is excluded. A search requested directly at `page=2`
+(not reached by following a link from page one) still reaches every matching concept and none of
+the non-matching ones mixed into what an unfiltered page two would hold — `paginator.count == 30`
+pins the whole-vocabulary scope directly.
+RED observed first: all six ran against the view before `search_fields` existed. Five failed for
+the right reason — unfiltered results leaking through (`{1, 2} == {1}`, a definition match
+present when it should be absent, a foreign-vocabulary concept and non-matching concepts leaking
+into a 35-strong unfiltered set). The hidden-label test's first attempt asserted against the raw
+decoded body and failed as a false positive (the echoed search box value, not a real display of
+the label) — corrected to `get_text()` before it was ever run as a claimed pass.
+Verified: `poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailConceptSearch -q`
+— 6 passed. Then the file: 69 passed, 3 skipped (baseline 63 passed, 3 skipped).
+
+## 2026-08-24 · Implementer US-3 · T014
+
+Did: no production change — the brief lists only `tests/test_ui/test_views.py`, and the
+behaviour pinned here (address-carried search, ASCII case-insensitivity, LIKE-wildcard/quote
+escaping) already comes from django-mvp's own search mixin plus T013's `search_fields`. Nine new
+tests in a new `TestVocabularyDetailConceptSearchAddressAndCase` class, mirroring
+`TestVocabularySearch`'s own precedent for the list of vocabularies: the same `?q=` address
+requested twice returns the same set (scenario 8); a term in one letter case matches a label in
+another; `%`, `_` and `'` are looked for literally, not as LIKE syntax; and the ADR 0014
+letter-case-outside-ASCII parametrize set (`Ecology`/`Ökologie`/`Гидрология`), skipped on any
+non-SQLite backend with the reason named, exactly as the list search already discloses.
+RED/characterization check, not RED-then-GREEN: since nothing here is new production code, the
+usual RED step would prove nothing. Instead, ran the new class once with all nine passing
+(behaviour already correct), then temporarily blanked `VocabularyDetailView.search_fields` to
+confirm the tests are not tautological — 7 of 9 failed for the right reason (unfiltered results
+leaking through). The 2 that still passed unfiltered are the address-carried-search-returns-
+matching case and the true-going ASCII/Ökologie sub-cases of the case parametrize, which cannot
+be broken by "no filtering" in a vocabulary holding only the one concept under test — the same
+structural limit `TestVocabularySearch`'s own equivalent parametrize set already carries, not a
+new weakness introduced here. Restored `search_fields` before re-running to confirm the whole
+file was green again.
+Verified: `poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailConceptSearchAddressAndCase -q`
+— 9 passed. Then the file: 78 passed, 3 skipped.
+
+## 2026-08-24 · Implementer US-3 · T015
+
+Did: `get_search_term()` on `VocabularyDetailView`, stripped exactly the way django-mvp's own
+search mixin reads `?q=` before filtering — the same fix #140 made for the vocabulary list,
+restated one page down so the empty state and the queryset never disagree about whether a
+search is in force. `get_empty_state_heading()`/`get_empty_state_message()` now branch on it:
+a search matching nothing repeats the term and offers a different-search hint; an empty
+vocabulary keeps T011's own wording unchanged. `search_term` added to the context.
+`conceptscheme_detail.html` renders a "Show every concept" link back to the vocabulary's own
+(unsearched) address whenever `search_term` is truthy — in the page template itself, not inside
+the empty-state heading or message (which django-mvp's own component autoescapes with no slot,
+so an anchor there would render as literal text). Unlike #140's identical-shaped feature on the
+list of vocabularies, this is not skipped: that page has no template of its own to add the link
+to, and this one does (T007).
+Five new tests in `TestVocabularyDetailConceptSearchEmptyState`: the no-match wording appears
+and echoes the term (with the exact no-concepts string absent); the way-back link appears when
+a search matches nothing; T011's own wording and the absence of the link hold for a genuinely
+empty vocabulary; the two headings differ as plain strings (constructed directly, without a
+request round-trip, mirroring `TestVocabularySearchEmptyState`'s own precedent); and a
+whitespace-only `?q=` neither filters nor shows the link.
+RED observed first: three of five failed before the change — the no-concepts heading rendered
+for a search matching nothing (wrong branch), the way-back link was absent, and the two headings
+compared equal as the same unconditional string. The other two already passed unmodified
+(`MVPListView`'s own default empty state was already distinct enough from "no such link", and
+the paginator already treats a stripped-empty term as no search).
+Verified: `poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailConceptSearchEmptyState -q`
+— 5 passed. Then `tests/test_ui/test_views.py tests/test_ui/test_templates.py` together (the
+latter mechanically checks every reader-visible template string carries a translation tag,
+which the new "Show every concept" link must too): 89 passed, 3 skipped.
+
+## 2026-08-24 · Implementer US-3 · T016
+
+Did: added `skos:altLabel`/`skos:hiddenLabel` to one concept in each seed file — `Dataset`
+(`demo/seed/dcmi_types.ttl`, the imported vocabulary) gains `"Data set"@en` (alternative) and
+`"Datset"@en` (hidden); `Fieldwork` (`demo/seed/research_methods.ttl`, the authored one) gains
+`"Field work"@en` and `"Feildwork"@en`. Both hidden labels are plausible typos of the seeded
+term itself, not arbitrary strings — the reason FR-018/D9 call for one at all: a hidden label is
+the one behaviour on the page that only a search can confirm, never a reading of it. Loaded
+through `import_skos()` (`seed_demo.py`'s existing path), no fixture behind it — the mapping
+from `skos:altLabel`/`skos:hiddenLabel` to `ConceptLabel.Kind.ALTERNATIVE`/`HIDDEN` already
+existed in `controlled_vocabularies/exchange/mapping.py`, so no importer change was needed or
+made. Two new tests in `TestSeedDemo`: both concepts carry exactly the labels seeded, and a
+second `seed_demo` run does not duplicate them — inherent from the command's own delete-then-
+reimport shape (`ConceptScheme.objects.all().delete()` before each load), not new production
+logic.
+RED observed first: with the two `.ttl` edits stashed, both new tests failed the right way —
+`alt_labels("en")` and `hidden_labels("en")` both came back empty against the unmodified seed
+files. Restored the `.ttl` changes and reran: green.
+Verified: `poetry run pytest tests/test_demo/test_seed.py -q` — 6 passed. Then
+`tests/test_demo/` as a whole (smoke, admin, demo, documented-commands): 23 passed.
+
+## 2026-08-24 · Implementer US-3 · T017
+
+Did: extended `demo/smoke.py`'s walk to follow the vocabulary list to a vocabulary's own page
+and search inside it, keeping the existing separation between HTTP transport (`get()`) and
+assertion (now four `check_*` functions plus one link-following helper, all importable and
+directly testable). `extract_vocabulary_url(list_body, name)` reads the served list markup with
+a small regex — no BeautifulSoup, since `demo/smoke.py` is stdlib-only by its own docstring and
+`beautifulsoup4` is a `test`-extra dependency the smoke script cannot assume is installed.
+`check_vocabulary_page` asserts the seeded concept `Dataset` is on the DCMI Type Vocabulary's own
+page; `check_concept_search` searches `Datset` (T016's seeded hidden-label misspelling of
+`Dataset`) and asserts the list narrows to it, excluding `Collection` — a search matching only a
+hidden label, per FR-019 and User Story 3 scenario 3. `walk()` now chains all four checks in one
+pass; the completion message names all three things it walked.
+Fourteen new tests in `tests/test_demo/test_smoke.py`: `extract_vocabulary_url` against a hand-
+built anchor and against a body naming nothing; `check_vocabulary_page` and `check_concept_search`
+each against a real seeded, in-process response (pass, wrong-content fail, non-200 fail, wrong-
+narrowing fail) — the same "exercised against a served page in-process" shape #140's own T017
+established, so a broken assertion fails in the suite and not only in CI.
+RED observed first: stashed the `demo/smoke.py` implementation, wrote the tests against the
+unmodified module, ran them — collection failed with `ImportError: cannot import name
+'HIDDEN_LABEL_SEARCH_TERM'`, the right reason (the names do not exist yet). Restored the
+implementation and reran: 14 passed.
+Verified beyond the test suite, per this task's own point (a template that renders in a test
+client and not in a browser): migrated and seeded a real demo database, ran `manage.py runserver`
+on a real socket, and ran `python demo/smoke.py http://127.0.0.1:8765` against it — `OK: walked
+the demo vocabulary list, a vocabulary's page, and a search inside it, at
+http://127.0.0.1:8765`, exit 0.
+Verified: `poetry run pytest tests/test_demo/test_smoke.py -q` — 14 passed. Then
+`tests/test_demo/` as a whole: 31 passed.
+
+## 2026-08-24 · Implementer US-3 · T018
+
+Did: extended README's "A vocabulary's own page" section with the concept search — what it
+matches (a preferred label in any language, alternative labels, hidden labels; never a
+definition or note), that a hidden label is matched and never shown, that the term travels in
+`?q=` and reaches every concept before paging, the three empty states, and the same
+database-dependent ASCII-only case limit ADR 0014 already discloses for the vocabulary list,
+cited by path. Stated plainly that this page's search box carries #282's same submit
+limitation, tracked here as #147, and that searching by address works — using a real, verified
+example: the demo's `Dataset` concept, its seeded hidden label `Datset` (T016), narrowing
+`?q=Datset` to `Dataset` without the misspelling ever appearing in the response (T017's own
+smoke check proves this live, not just in the test client). Also documented the one place this
+page now differs from the list of vocabularies: a search matching nothing here does offer a
+working way back, because this page has a template of its own to render the link in (T015),
+where the list of vocabularies does not. Matching CHANGELOG entries: two `Added` bullets (the
+concept search; the demo's seeded labels plus the extended smoke walk) and a rewritten `Known
+limitations` bullet distinguishing the two pages' search boxes instead of describing them as one.
+Noticed but out of scope, reported here rather than touched: the pre-existing "One thing does
+not work yet"/"served by `VocabularyListView`" block that immediately follows my new paragraphs
+(README, currently under "### A vocabulary's own page") is actually about the *list* of
+vocabularies — it predates this feature (#140/013), and US-1's T007 inserted the "### A
+vocabulary's own page" heading directly above it without noticing the older content was left
+stranded under the new heading. Its own text ("a page whose search matched nothing names the
+term but offers no link back to the full list") is also now stale for *this* page after T015,
+though it remains correct for the list of vocabularies it was actually written about. Not fixed:
+reorganizing that block is a US-1-shaped edit, not this story's.
+Verified: every command and route name in the new paragraphs is unchanged from what earlier
+tasks already verified, except the `?q=Datset` example, checked directly against
+`tests/test_demo/test_smoke.py::TestCheckConceptSearch` (T017, already green) and the live
+`demo/smoke.py` walk (T017's own verification run) — both confirm `Datset` narrows to `Dataset`
+with the misspelling itself absent from the response. `poetry run pytest tests/test_demo/
+tests/test_ui/ -q` — 166 passed, 3 skipped, no regressions from the doc-only change.
+
+## Full verify (final ritual)
+
+`poetry run pytest -q` — 1521 passed, 3 skipped, 0 failed (baseline at dispatch was 1491
+passed, 3 skipped; 30 new tests added across T013-T017, T018 added none).
+
+`forge verify --repo /home/sam/projects/samueljennings/dcv-014-us3`: conformance passed,
+poetry:lint passed, poetry:typecheck passed, poetry:test passed, poetry:build passed, docs
+skipped (needs `--base`).

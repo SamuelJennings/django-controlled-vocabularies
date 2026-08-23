@@ -423,6 +423,32 @@ Each entry's name is a link to that vocabulary's own page, described below. The 
 from the route's name rather than composed from the identifier base address, so it stays an
 in-site address whatever that setting says.
 
+**One thing does not work yet.** The search box on this page cannot be submitted: the control comes
+from django-mvp, and in the released version its input is tied to a form that only its filter
+control creates ([django-mvp#282](https://github.com/django-mvp/django-mvp/issues/282), tracked here as
+[#147](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/147)). Searching
+by address works exactly as documented — `?q=soil` narrows the list, and the narrowed address can be
+shared and bookmarked — but typing in the box and pressing the button does nothing until that fix
+ships. The same fault is why this list, when a search matches nothing, names the term but offers no
+link back to the unsearched list.
+
+We are waiting on the fix rather than shipping a copy of django-mvp's page with the gap patched: an
+override in a package like this one outlives the release that makes it unnecessary, and nothing ever
+reports that it has (`docs/adr/0015-upstream-defects-are-waited-on-not-worked-around.md`).
+
+The page is served by `VocabularyListView`, in `controlled_vocabularies.ui.views`. A project that
+wants a different presentation subclasses it and routes its own path at the same view — the
+queryset, its ordering and its concept count come with the class, so an override that only changes
+`list_item_template` keeps every guarantee above:
+
+```python
+from controlled_vocabularies.ui.views import VocabularyListView
+
+
+class BrandedVocabularyListView(VocabularyListView):
+    list_item_template = "myproject/vocabulary_card.html"
+```
+
 ### A vocabulary's own page
 
 Every vocabulary the site holds has its own address — the same one its identifier composes
@@ -446,6 +472,33 @@ something a reader can follow to anywhere else. A vocabulary holding no concepts
 wording distinct from the page's other empty state, and the rest of the page — its description and
 provenance — still renders.
 
+A search box narrows the list of concepts by every name a term goes by: a concept's preferred
+label in any language it carries, its alternative labels, and its hidden labels — never its
+definition or any other note. A hidden label is matched and never shown: searching for one finds
+the concept it names without ever displaying the label itself, which is the whole point of
+keeping it hidden. As with the list of vocabularies above, the term travels in the page's own
+address (`?q=`), so a narrowed list can be linked to, bookmarked and returned to, and it reaches
+every concept in the vocabulary before paging divides the results — not only the page being
+viewed. A search matching nothing says so, repeats what was searched for, and offers a link back
+to the whole vocabulary.
+
+Case is ignored, with the same database-dependent limit disclosed above: SQLite folds ASCII
+letters only, so a concept labelled *Ökologie* is found by *ÖKOLOGIE* and not by *ökologie*;
+PostgreSQL folds the whole of Unicode and matches either way
+(`docs/adr/0014-database-collation-differences-are-disclosed-not-repaired.md`).
+
+**The search box on this page carries the same limitation as the one on the list of
+vocabularies, above.** Its input is tied to a form only django-mvp's filter control creates
+([django-mvp#282](https://github.com/django-mvp/django-mvp/issues/282), tracked here as
+[#147](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/147)), so typing
+in the box and pressing the button does nothing until that fix ships. Searching by address works
+exactly as documented: the demo project's own DCMI Type Vocabulary carries a concept named
+*Dataset* with a hidden label of `Datset`, a plausible misspelling — `?q=Datset` narrows the page
+to *Dataset* without the misspelling itself ever appearing in the response, and the narrowed
+address can be shared and bookmarked the same as any other. Unlike the list of vocabularies, a
+search here that matches nothing *does* offer a link back to the unsearched vocabulary: this page
+has a template of its own to put that link in, where the list of vocabularies has none.
+
 Reverse the page by name, passing the vocabulary's slug:
 
 ```python
@@ -465,31 +518,8 @@ project may serve identifiers through a reverse proxy this package cannot see �
 disagree, naming the mismatched paths. It is silent once they agree, and silent too if the
 browsing routes are not mounted at all.
 
-**One thing does not work yet.** The search box on the page cannot be submitted: the control comes
-from django-mvp, and in the released version its input is tied to a form that only its filter
-control creates ([django-mvp#282](https://github.com/django-mvp/django-mvp/issues/282), tracked here as
-[#147](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/147)). Searching
-by address works exactly as documented — `?q=soil` narrows the list, and the narrowed address can be
-shared and bookmarked — but typing in the box and pressing the button does nothing until that fix
-ships. The same fault is why a page whose search matched nothing names the term but offers no link
-back to the full list.
-
-We are waiting on the fix rather than shipping a copy of django-mvp's page with the gap patched: an
-override in a package like this one outlives the release that makes it unnecessary, and nothing ever
-reports that it has (`docs/adr/0015-upstream-defects-are-waited-on-not-worked-around.md`).
-
-The page is served by `VocabularyListView`, in `controlled_vocabularies.ui.views`. A project that
-wants a different presentation subclasses it and routes its own path at the same view — the
-queryset, its ordering and its concept count come with the class, so an override that only changes
-`list_item_template` keeps every guarantee above:
-
-```python
-from controlled_vocabularies.ui.views import VocabularyListView
-
-
-class BrandedVocabularyListView(VocabularyListView):
-    list_item_template = "myproject/vocabulary_card.html"
-```
+The page is served by `VocabularyDetailView`, in `controlled_vocabularies.ui.views`, and is
+subclassed the same way as the list above.
 
 ### Try it: the demo project
 

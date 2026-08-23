@@ -31,6 +31,10 @@
     skos:inScheme <http://purl.org/dc/dcmitype/> ;
     skos:topConceptOf <http://purl.org/dc/dcmitype/> ;
     skos:prefLabel "Dataset"@en ;
+    skos:altLabel "Data set"@en ;
+    # A common misspelling (T016, US-3): the reader never sees this, only a search for it
+    # finds the concept, which is the one thing about a hidden label a page cannot show.
+    skos:hiddenLabel "Datset"@en ;
     skos:definition "Data encoded in a defined structure."@en .
 
 <http://purl.org/dc/dcmitype/Image>

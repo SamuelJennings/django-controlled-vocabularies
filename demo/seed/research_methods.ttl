@@ -9,6 +9,10 @@
 <http://example.org/research-methods/fieldwork>
     a skos:Concept ;
     skos:prefLabel "Fieldwork"@en ;
+    skos:altLabel "Field work"@en ;
+    # A common misspelling (T016, US-3): the reader never sees this, only a search for it
+    # finds the concept, which is the one thing about a hidden label a page cannot show.
+    skos:hiddenLabel "Feildwork"@en ;
     skos:definition "Data collected through direct observation or measurement at a study site."@en .
 
 <http://example.org/research-methods/laboratory-experiment>

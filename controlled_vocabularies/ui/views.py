@@ -134,6 +134,17 @@ class VocabularyDetailView(MVPListView):
     # neither, once pagination is in play (#140 makes the same point for vocabularies).
     ordering = [Lower("resolved_label"), "pk"]
 
+    # django-mvp's SearchMixin reads ?q=, strips it, and applies case-insensitive
+    # substring matching across these fields with OR semantics, joined with `.distinct()`
+    # (T013, FR-008, FR-009, decisions.md D4/plan.md item 4). `label` is the preferred
+    # label in the vocabulary's own default language; `labels__text` reaches every
+    # ConceptLabel row in one traversal — preferred labels in other languages,
+    # alternative labels, and hidden labels. Definitions and notes live on ConceptNote
+    # and are deliberately absent, so they are never matched. A hidden label is matched
+    # here and never displayed: display comes from `resolved_label`, which only ever
+    # reads preferred labels.
+    search_fields = ["label", "labels__text"]
+
     def setup(self, request, *args, **kwargs):
         super().setup(request, *args, **kwargs)
         try:
@@ -165,16 +176,29 @@ class VocabularyDetailView(MVPListView):
         # the view's `model` is `Concept` — the page describes the vocabulary, not concepts.
         return self.vocabulary.name
 
+    def get_search_term(self):
+        # Read and stripped exactly as django-mvp's own search mixin does it before
+        # filtering (`mvp/views/list.py`), so "a search is in force" means the same
+        # thing to the empty states and the "back to the whole vocabulary" link as it
+        # does to the queryset (T015, #140's own `?q=%20%20` trap restated here).
+        return self.request.GET.get("q", "").strip()
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["vocabulary"] = self.vocabulary
+        context["search_term"] = self.get_search_term()
         return context
 
     def get_empty_state_heading(self):
-        # T011: names this vocabulary as holding none, distinct from the base
-        # class's own generic wording, which points at a create action this page
-        # never shows.
+        # T015, decisions.md D7: two distinct empty states, never one — a search
+        # matching nothing says so and repeats the term; a genuinely empty vocabulary
+        # keeps T011's own wording. Never mark_safe, never format_html.
+        search_term = self.get_search_term()
+        if search_term:
+            return _("Nothing matches “%(term)s”") % {"term": search_term}
         return _("This vocabulary holds no concepts")
 
     def get_empty_state_message(self):
+        if self.get_search_term():
+            return _("Try a different search term.")
         return None
