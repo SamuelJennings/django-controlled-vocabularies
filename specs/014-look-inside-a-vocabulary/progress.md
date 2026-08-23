@@ -184,3 +184,27 @@ Reported as a concern rather than patched.
 Final state: `poetry run pytest -q` — 1476 passed, 3 skipped, 1 failed (the one above).
 `forge verify`: conformance passed, poetry:lint passed, poetry:typecheck passed, poetry:test
 failed (the same test), poetry:build passed, docs skipped (needs --base).
+
+## Convergence — T004 unblocked, and the test project's own wiring corrected
+
+T004 landed. The row's name is now an anchor to the vocabulary's page, given through the card's
+`title` slot rather than its `title` attribute, which renders as escaped text and so cannot carry
+one. `ConceptSchemeFactory` derives the slug `save()` would derive (decisions.md D14), so the nine
+built, unsaved fixtures that render the row partial directly no longer raise `NoReverseMatch` — the
+blocker reported against this task.
+
+#140's two assertions that no entry links to a vocabulary were replaced by their inverse, in
+`tests/test_ui/test_templates.py`: the partial's source must reverse the vocabulary's route, and
+every entry on the rendered page must carry an anchor to its own page. The second assertion of the
+source-level pair is kept as it was — the in-site link is reversed from the route's name, never
+composed from the identifier base address.
+
+The `tests.settings` mismatch left red at the end of the story is fixed by moving the mounts rather
+than the base address (decisions.md D13, rewritten): browsing is mounted at `vocabularies/`, the path
+`CONTROLLED_VOCABULARIES_BASE_URI` already names, and the core app's autocomplete route moves to
+`widget/`. None of the eleven `test_models.py`/`test_factories.py` identifier literals change. The
+check's agreeing case in `tests/test_ui/test_checks.py` now needs no `override_settings` at all: it
+asserts silence against the project's own correctly wired configuration.
+
+Final state: `poetry run pytest -q` — 1478 passed, 3 skipped, 0 failed. `forge verify`: conformance,
+lint, typecheck, test and build all passed; docs skipped (needs `--base`).

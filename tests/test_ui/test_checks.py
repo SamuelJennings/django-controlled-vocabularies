@@ -53,15 +53,18 @@ class TestCheckVocabularyDetailRoute:
     page when the browsing routes are mounted where the configured base address says they are.
     """
 
-    @override_settings(CONTROLLED_VOCABULARIES_BASE_URI="http://localhost:8000/browse")
     def test_reports_nothing_when_the_mount_and_the_base_address_agree(self):
+        # No override: the test project's own configuration is the agreeing case
+        # (tests/urls.py mounts the browsing routes at the path
+        # CONTROLLED_VOCABULARIES_BASE_URI names), so this asserts the check stays silent
+        # against a correctly wired project rather than against a contrivance.
         assert check_vocabulary_detail_route(None) == []
 
-    @override_settings(CONTROLLED_VOCABULARIES_BASE_URI="http://localhost:8000/vocabularies")
+    @override_settings(CONTROLLED_VOCABULARIES_BASE_URI="http://localhost:8000/browse")
     def test_reports_a_warning_naming_its_own_id_when_they_disagree(self):
-        # The test settings mount the browsing routes at /browse/ (tests/urls.py) while this
-        # override points the base address at /vocabularies — the same disagreement the
-        # demonstration itself ships with until T006.
+        # The test settings mount the browsing routes at /vocabularies/ (tests/urls.py)
+        # while this override points the base address at /browse — the same disagreement
+        # the demonstration itself ships with until T006.
         warnings = check_vocabulary_detail_route(None)
 
         assert len(warnings) == 1

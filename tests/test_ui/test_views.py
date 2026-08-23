@@ -66,6 +66,20 @@ class TestVocabularyListEntry:
         assert scheme.name in html
         assert scheme.description in html
 
+    def test_an_entry_leads_to_the_vocabularys_own_page(self):
+        # T004, FR-013: the list finally leads somewhere. #140 shipped these entries
+        # unlinked because no address served a vocabulary yet; T001 gives them one, and
+        # the name is what carries it.
+        scheme = ConceptSchemeFactory.build(name="Geological Time Scale")
+        scheme.concept_count = 0
+        detail_url = reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug})
+
+        html = render_to_string(ROW_TEMPLATE, {"object": scheme})
+        anchor = BeautifulSoup(html, "html.parser").find("a", href=detail_url)
+
+        assert anchor is not None
+        assert anchor.text.strip() == scheme.name
+
     def test_a_description_running_to_several_paragraphs_is_shortened(self):
         # An entry stays scannable however long its description is (spec.md Edge Cases).
         # The assertion is on the rendered text rather than on a class name deliberately:

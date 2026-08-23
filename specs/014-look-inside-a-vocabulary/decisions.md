@@ -244,11 +244,43 @@ Moving the ui app's mount in `tests/urls.py` to `/vocabularies/` instead was als
 collides with the core app's own mount at that prefix, and the file's own docstring records that
 the two prefixes are deliberately different so a hard-coded path in either app would be caught.
 
-**Chosen**: leave `tests/settings.py`, `tests/urls.py` and `tests/test_checks.py` untouched. This
-story's own scope (`controlled_vocabularies/ui/`, `tests/test_ui/`, `tests/test_demo/`, `demo/`)
-never touches any of the three, and the two production fixes available both ripple into tests this
-story does not own. Reported in the completion report's `concerns` rather than silently patched.
+**Chosen** (settled at convergence, superseding the deferral this entry first recorded): move the
+mounts. `controlled_vocabularies.ui.urls` is mounted at `vocabularies/`, the path the base address
+already names, and the core app's autocomplete route moves to `widget/` so the two prefixes stay
+deliberately different and neither can match by accident. The base address itself does not move, so
+none of the eleven `test_models.py`/`test_factories.py` assertions change: `/vocabularies` is the
+better public path for a vocabulary's identifier, and `/browse` was the arbitrary half of the pair.
+Four literals move with the mounts — one in `tests/test_urls.py`, two in `tests/test_ui/test_urls.py`,
+and the pair of overrides in `tests/test_ui/test_checks.py`, whose agreeing case now needs no
+override at all and asserts the check's silence against a correctly wired project rather than a
+contrivance.
 
-**Revisit if**: a maintainer decides which of `tests/settings.py`'s base address or `tests/urls.py`'s
-mount should move, and updates the eleven `test_models.py`/`test_factories.py` assertions (or
-`SILENCED_SYSTEM_CHECKS`s the warning for the test settings specifically) in the same change.
+Silencing the warning for the test settings was rejected outright: a check the project's own test
+run suppresses is a check nothing exercises end to end.
+
+**Revisit if**: never — the test project now demonstrates the wiring the check asks for.
+
+---
+
+## D14 — `ConceptSchemeFactory` derives the slug it would have had once saved
+
+**Ambiguity**: none at spec or plan level. T004 was reported blocked against this and is settled
+here, at convergence.
+
+**Found**: `ConceptScheme.slug` is derived in `save()`, so a `.build()` fixture carries a blank one.
+Nine tests in `tests/test_ui/test_views.py::TestVocabularyListEntry` render the row partial from
+built, unsaved schemes — deliberately, so an assertion about one row is never confused by the
+page's chrome. The moment the row reverses the vocabulary's own route, every one of them raises
+`NoReverseMatch`, which says nothing about the row and everything about the fixture.
+
+**Not chosen**: adding `slug=` to the nine call sites, which leaves the next `.build()` caller to
+rediscover the same trap; or guarding the anchor with `{% if object.slug %}`, which would put a
+branch in shipped markup to accommodate a test fixture, and would silently drop the link from a
+real page if the condition ever held.
+
+**Chosen**: the factory derives `slug` with the same `slugify(name, allow_unicode=True)` call
+`save()` makes. A built scheme now carries the slug it would have had once saved, and a created one
+is unchanged — `slug_is_manual` stays False, so `save()` recomputes the identical value.
+
+**Revisit if**: the factory ever needs to build a scheme whose slug deliberately disagrees with its
+name, which today only `set_slug()` produces and only on a saved instance.

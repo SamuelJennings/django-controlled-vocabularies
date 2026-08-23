@@ -1,5 +1,14 @@
 {% load i18n %}
-<c-card title="{{ object.name }}">
+{% comment %}
+  The name is the way into the vocabulary (T004, FR-013). Given as a slot rather than the
+  card's `title` attribute, which renders as escaped text and so cannot carry an anchor.
+  The row renders in an isolated context holding only the object, so the address is built
+  from the route's name and reaches for nothing else.
+{% endcomment %}
+<c-card>
+  <c-slot name="title">
+    <a href="{% url 'controlled_vocabularies_ui:vocabulary-detail' object.slug %}">{{ object.name }}</a>
+  </c-slot>
   <c-slot name="badges">
     {% if object.static_uri %}
       <c-badge>{% trans "Imported" %}</c-badge>
