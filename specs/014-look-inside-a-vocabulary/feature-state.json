@@ -29,6 +29,11 @@
       "state": "PLAN",
       "at": "2026-08-20T12:00:00Z",
       "note": "plan.md, research.md, tasks.md authored; 21 tasks across 4 sequential stories"
+    },
+    {
+      "state": "PLAN",
+      "at": "2026-08-20T12:40:00Z",
+      "note": "design review returned two findings, both verified against the code and applied: the label annotation renamed off a collision with Concept.display_label(), and the new view's tests folded into tests/test_ui/test_views.py"
     }
   ],
   "gates": {
@@ -213,7 +218,7 @@
     },
     "design_review_cycles": {
       "max": 1,
-      "used": 0
+      "used": 1
     },
     "tokens": {
       "max": 120,

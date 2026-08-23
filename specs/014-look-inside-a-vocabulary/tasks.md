@@ -20,7 +20,7 @@ task that finds itself editing `controlled_vocabularies/models.py` has gone wron
 ### T001 — A vocabulary's address serves a page, and an unknown one does not
 
 **Files**: `controlled_vocabularies/ui/views.py`, `controlled_vocabularies/ui/urls.py`,
-`tests/test_ui/test_detail_view.py`, `tests/test_ui/test_urls.py`
+`tests/test_ui/test_views.py`, `tests/test_ui/test_urls.py`
 
 Add `VocabularyDetailView(MVPListView)` with `model = Concept`, resolving the vocabulary from the
 URL slug in `setup()` and raising `Http404` when nothing has it. Route it as
@@ -44,7 +44,7 @@ request to a known one returns 200.
 ### T002 — The page describes the vocabulary and says where it came from
 
 **Files**: `controlled_vocabularies/ui/templates/controlled_vocabularies/ui/conceptscheme_detail.html`,
-`controlled_vocabularies/ui/views.py`, `tests/test_ui/test_detail_view.py`
+`controlled_vocabularies/ui/views.py`, `tests/test_ui/test_views.py`
 
 Add the page template, extending django-mvp's `list_view.html` and overriding `page.content` to put
 the vocabulary's description and provenance above `{{ block.super }}`. Point the view at it with
@@ -63,7 +63,7 @@ the same reason recorded there: this package ships no stylesheet, and a CSS clam
 utility class absent from django-mvp's prebuilt build.
 
 **Proves**: FR-002, FR-003 · US-1 scenarios 1, 2, 3, 5.
-**Verify**: the detail-view test module passes, including a vocabulary with no description.
+**Verify**: the view test module passes, including a vocabulary with no description.
 **Depends on**: T001.
 
 ---
@@ -72,7 +72,7 @@ utility class absent from django-mvp's prebuilt build.
 
 **Files**: `controlled_vocabularies/ui/templates/controlled_vocabularies/ui/conceptscheme_detail.html`,
 `controlled_vocabularies/ui/templates/controlled_vocabularies/ui/conceptscheme_list_item.html`,
-`tests/test_ui/test_detail_view.py`, `tests/test_ui/test_views.py`
+`tests/test_ui/test_views.py`
 
 Render the vocabulary's identifier as an anchor on both pages: `href` is the identifier, the link
 text is the identifier, and the anchor carries `rel="noopener"`. Nothing is marked safe and nothing
@@ -173,7 +173,7 @@ Every example is run against this branch before it is written down.
 
 **Files**: `controlled_vocabularies/ui/views.py`,
 `controlled_vocabularies/ui/templates/controlled_vocabularies/ui/concept_list_item.html`,
-`tests/test_ui/test_detail_view.py`
+`tests/test_ui/test_views.py`
 
 List the vocabulary's concepts through the view's own queryset, with a row partial showing the
 concept's label and nothing else — no definition, no note, no identifier, no relation — and offering
@@ -187,16 +187,16 @@ nested rendering.
 Assert that a concept of another vocabulary does not appear.
 
 **Proves**: FR-006, FR-012 · US-2 scenarios 1, 2, 3, 9.
-**Verify**: the detail-view test module passes.
+**Verify**: the view test module passes.
 **Depends on**: T001.
 
 ---
 
 ### T009 — A concept is named in the reading language
 
-**Files**: `controlled_vocabularies/ui/views.py`, `tests/test_ui/test_detail_view.py`
+**Files**: `controlled_vocabularies/ui/views.py`, `tests/test_ui/test_views.py`
 
-Annotate the queryset with `display_label`: the preferred label in the active language where the
+Annotate the queryset with `resolved_label`: the preferred label in the active language where the
 concept carries one, otherwise `Concept.label`, which is the preferred label in the vocabulary's own
 default language.
 
@@ -209,7 +209,7 @@ One query for the page regardless of how many concepts it shows — assert the q
 change between a vocabulary of three concepts and one of thirty.
 
 **Proves**: FR-010, SC-005 · US-2 scenarios 4, 5.
-**Verify**: the detail-view test module passes under at least two active languages, including a
+**Verify**: the view test module passes under at least two active languages, including a
 concept carrying no label in the active one.
 **Depends on**: T008.
 
@@ -217,9 +217,9 @@ concept carrying no label in the active one.
 
 ### T010 — The order is alphabetical by the label shown, and stable
 
-**Files**: `controlled_vocabularies/ui/views.py`, `tests/test_ui/test_detail_view.py`
+**Files**: `controlled_vocabularies/ui/views.py`, `tests/test_ui/test_views.py`
 
-`ordering = [Lower("display_label"), "pk"]` as a class attribute, for the reason #140 records: `pk`
+`ordering = [Lower("resolved_label"), "pk"]` as a class attribute, for the reason #140 records: `pk`
 is what stops two identically labelled concepts landing on either of two pages or on neither once
 pagination is in play.
 
@@ -229,7 +229,7 @@ the translated one passes any test built on a vocabulary where the two agree, an
 failure this task exists to prevent.
 
 **Proves**: FR-007 · US-2 scenario 6, SC-004.
-**Verify**: the detail-view test module passes; two requests return the same order.
+**Verify**: the view test module passes; two requests return the same order.
 **Depends on**: T009.
 
 ---
@@ -238,7 +238,7 @@ failure this task exists to prevent.
 
 **Files**: `controlled_vocabularies/ui/views.py`,
 `controlled_vocabularies/ui/templates/controlled_vocabularies/ui/conceptscheme_detail.html`,
-`tests/test_ui/test_detail_view.py`
+`tests/test_ui/test_views.py`
 
 Page the list at a fixed size, and give a vocabulary holding no concepts an empty state saying so,
 with the rest of the page still rendered.
@@ -248,7 +248,7 @@ The paging controls are django-mvp's shipped component, which builds each link w
 about it. Assert that rather than assuming it.
 
 **Proves**: FR-014's first half, FR-016 · US-2 scenarios 7, 8.
-**Verify**: the detail-view test module passes; the second page of a long list renders.
+**Verify**: the view test module passes; the second page of a long list renders.
 **Depends on**: T010.
 
 ---
@@ -270,7 +270,7 @@ another is not shown here.
 
 ### T013 — The search matches every name a term goes by
 
-**Files**: `controlled_vocabularies/ui/views.py`, `tests/test_ui/test_detail_view.py`
+**Files**: `controlled_vocabularies/ui/views.py`, `tests/test_ui/test_views.py`
 
 `search_fields = ["label", "labels__text"]`. The first is the default-language preferred label; the
 second reaches every label row — preferred labels in other languages, alternative labels, and hidden
@@ -287,14 +287,14 @@ Also assert that a concept in another vocabulary matching the same word is not r
 the search reaches every concept in the vocabulary rather than the page being viewed.
 
 **Proves**: FR-008, FR-009 · US-3 scenarios 1, 2, 3, 4, 6, 9.
-**Verify**: the detail-view test module passes.
+**Verify**: the view test module passes.
 **Depends on**: T011.
 
 ---
 
 ### T014 — A search is carried in the address, and case is ignored
 
-**Files**: `tests/test_ui/test_detail_view.py`
+**Files**: `tests/test_ui/test_views.py`
 
 The search term travels in `?q=`, so a narrowed list is linkable and returns the same concepts when
 opened fresh. Letter case is ignored and the search string is treated as text: `%`, `_` and a quote
@@ -305,7 +305,7 @@ discloses (ADR 0014). Follow that precedent: pin the behaviour by test, skip wha
 with the reason named, and say so in the documentation rather than leaving it to be discovered.
 
 **Proves**: FR-008 · US-3 scenarios 5, 8.
-**Verify**: the detail-view test module passes on the configured database.
+**Verify**: the view test module passes on the configured database.
 **Depends on**: T013.
 
 ---
@@ -314,7 +314,7 @@ with the reason named, and say so in the documentation rather than leaving it to
 
 **Files**: `controlled_vocabularies/ui/views.py`,
 `controlled_vocabularies/ui/templates/controlled_vocabularies/ui/conceptscheme_detail.html`,
-`tests/test_ui/test_detail_view.py`
+`tests/test_ui/test_views.py`
 
 A search matching nothing says so, repeats what was searched for, and offers the way back to the
 whole list. A vocabulary holding no concepts keeps its own wording from T011. The two must be
@@ -330,7 +330,7 @@ empty-state component autoescapes that string with no slot, so an anchor there s
 and marking it safe would emit the search term unescaped.
 
 **Proves**: FR-014 · US-3 scenario 7.
-**Verify**: the detail-view test module passes; the two states differ in the response body.
+**Verify**: the view test module passes; the two states differ in the response body.
 **Depends on**: T014.
 
 ---
@@ -398,7 +398,7 @@ package is broken. Saying it is a known upstream defect being waited on costs tw
 
 **Files**: `controlled_vocabularies/ui/views.py`,
 `controlled_vocabularies/ui/templates/controlled_vocabularies/ui/conceptscheme_detail.html`,
-`tests/test_ui/test_detail_view.py`
+`tests/test_ui/test_views.py`
 
 Show the vocabulary's collections, each named, with an ordered one distinguishable from an unordered
 one, presented separately from the list of concepts. A vocabulary holding none shows no section at
@@ -411,7 +411,7 @@ context, so pointing it at a collection row would silently render concept rows i
 Nothing links to a collection.
 
 **Proves**: FR-011, FR-015 · US-4 scenarios 1, 2, 3, 4.
-**Verify**: the detail-view test module passes, including a vocabulary with no collections.
+**Verify**: the view test module passes, including a vocabulary with no collections.
 **Depends on**: T011.
 
 ---

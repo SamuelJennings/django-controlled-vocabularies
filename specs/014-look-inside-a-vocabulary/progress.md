@@ -51,3 +51,17 @@ The two findings that shaped the plan and were not visible from the specificatio
   around it — the same state #140 already ships.
 
 No model change, no migration, and nothing in the `exchange` package is touched.
+
+## Design review
+
+Two findings, both verified against the code before being acted on, both applied to the plan and
+the task graph:
+
+- The queryset annotation naming a concept in the reading language was called `display_label`, which
+  is already a public method on `Concept`. An annotation is set as a plain attribute, so a concept
+  fetched through this view would carry a string where the rest of the package calls a method. The
+  annotation is now `resolved_label` (D11).
+- The new view was to be tested in a module of its own beside the existing one for the same source
+  file. Its tests now join `tests/test_ui/test_views.py` as new classes (D12).
+
+No task's scope changed. No change to the specification.

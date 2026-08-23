@@ -192,3 +192,31 @@ across pages (FR-016).
 a site holds vocabularies — the goal this package pursues names tens of thousands — so a page that
 paginates only search results puts every concept in the vocabulary on the page a reader arrives at
 first.
+
+---
+
+## D11 — The queryset's label annotation is named `resolved_label`
+
+**Ambiguity**: the annotation carrying a concept's name in the reading language was called
+`display_label` in the first draft of the plan.
+
+**Chosen**: `resolved_label`.
+
+**Why defensible**: `Concept.display_label()` is an existing public method on the same model, called
+from the forms, the fields and the package's own concept-search endpoint. Django sets an annotation
+as a plain instance attribute, so a concept fetched through this view's queryset would carry a
+string where every other code path finds a bound method, and calling it would raise. The page
+template would still render, so nothing here would fail — the next feature to hold one of these
+instances is where it would surface.
+
+---
+
+## D12 — The new view's tests join `tests/test_ui/test_views.py`
+
+**Ambiguity**: the first draft of the plan gave the new view its own test module.
+
+**Chosen**: its tests are new classes inside the existing `tests/test_ui/test_views.py`.
+
+**Why defensible**: both views live in one `controlled_vocabularies/ui/views.py`, and the recorded
+standard puts one test module per source module, splitting per unit with classes rather than extra
+files. A second module for the same source file is the case that standard names as non-conforming.

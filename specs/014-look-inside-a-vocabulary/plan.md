@@ -58,7 +58,7 @@ template, so parallel worktrees would collide at every convergence.
 | IX — URI identity | The page must be served at the address a vocabulary's identifier composes, or FR-004's link is a lie. This is the feature's sharpest constraint — see Key design decision 2 | Complies via a new system check |
 | XII — Internationalization | Every string translatable; a concept is named in the reading language | Complies, see Key design decision 3 |
 | XIII — Data-model conventions | No model change, so nothing to conform to | Not applicable |
-| XIV — Test structure | `tests/test_ui/` mirrors the source tree; class grouping per behaviour | Complies |
+| XIV — Test structure | `tests/test_ui/` mirrors the source tree. The new view is added to `controlled_vocabularies/ui/views.py`, so its tests join the existing `tests/test_ui/test_views.py` as new classes rather than a second module for the same source file | Complies |
 
 ## Key design decisions
 
@@ -119,13 +119,13 @@ concept, and SC-005 forbids it.
 
 `setup()` assigns `self.queryset` to `Concept.objects.filter(scheme=…)` annotated with
 `Coalesce(Subquery(<the preferred ConceptLabel in the active language>), F("label"))` as
-`display_label`. **Assigning `self.queryset` in `setup()` rather than annotating inside
+`resolved_label`. **Assigning `self.queryset` in `setup()` rather than annotating inside
 `get_queryset()` is deliberate and load-bearing**, and it is the same trap #140 documented: Django
 applies `self.ordering` innermost, and django-mvp's search mixin applies `.distinct()` outermost.
 An annotation added after `super().get_queryset()` would not exist when the ordering is applied.
 Setting `self.queryset` puts the annotation underneath everything.
 
-Ordering is `[Lower("display_label"), "pk"]` as a class attribute, for the same reason #140 gives:
+Ordering is `[Lower("resolved_label"), "pk"]` as a class attribute, for the same reason #140 gives:
 `pk` is not decoration, it is what stops two identically labelled concepts landing on either of two
 pages or on neither once pagination is in play.
 
@@ -142,7 +142,7 @@ and hidden labels — in one traversal. django-mvp's search mixin applies `.dist
 join makes necessary.
 
 Hidden labels are matched and never displayed, which FR-009 requires and which this arrangement
-gives for free: display comes from `display_label`, which only ever reads preferred labels.
+gives for free: display comes from `resolved_label`, which only ever reads preferred labels.
 
 Definitions and notes live on `ConceptNote` and are not in `search_fields`, so they are not matched.
 
@@ -199,7 +199,7 @@ are skipped citing #282, and nothing is built around it.
 | Story | Adds |
 |---|---|
 | **US-1** (P1) | The route, the view's resolution of the vocabulary, the page template's descriptive half, the system check, the demo's base-address setting, and the two link changes to the existing list row |
-| **US-2** (P1) | The concept queryset: the `display_label` annotation, the ordering, pagination, the row partial, and the empty state for a vocabulary holding no concepts |
+| **US-2** (P1) | The concept queryset: the `resolved_label` annotation, the ordering, pagination, the row partial, and the empty state for a vocabulary holding no concepts |
 | **US-3** (P2) | `search_fields`, the two empty states told apart, the seed file's alternative and hidden labels, and the extension of the unattended walk |
 | **US-4** (P3) | The collections section, the seed file's two collections |
 
@@ -211,7 +211,6 @@ the same page template.
 **New**
 - `controlled_vocabularies/ui/templates/controlled_vocabularies/ui/conceptscheme_detail.html`
 - `controlled_vocabularies/ui/templates/controlled_vocabularies/ui/concept_list_item.html`
-- `tests/test_ui/test_detail_view.py`
 
 **Changed**
 - `controlled_vocabularies/ui/views.py` — one new class
