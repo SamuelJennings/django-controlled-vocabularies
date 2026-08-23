@@ -18,6 +18,7 @@ class ControlledVocabulariesUIConfig(AppConfig):
     def ready(self):
         from django.core.checks import register
 
-        from .checks import check_mvp_installed
+        from .checks import check_mvp_installed, check_vocabulary_detail_route
 
         register(check_mvp_installed)
+        register(check_vocabulary_detail_route)

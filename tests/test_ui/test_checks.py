@@ -3,8 +3,14 @@
 import sys
 
 from django.core import checks as django_checks
+from django.test import override_settings
 
-from controlled_vocabularies.ui.checks import CHECK_ID, check_mvp_installed
+from controlled_vocabularies.ui.checks import (
+    CHECK_ID,
+    CHECK_ID_ROUTE_MISMATCH,
+    check_mvp_installed,
+    check_vocabulary_detail_route,
+)
 
 
 class TestCheckMVPInstalled:
@@ -40,3 +46,33 @@ class TestCheckMVPInstalled:
         assert errors
         for error in errors:
             assert isinstance(error, django_checks.Error)
+
+
+class TestCheckVocabularyDetailRoute:
+    """FR-004's precondition, Article IX (T005): a vocabulary's identifier only leads to its
+    page when the browsing routes are mounted where the configured base address says they are.
+    """
+
+    @override_settings(CONTROLLED_VOCABULARIES_BASE_URI="http://localhost:8000/browse")
+    def test_reports_nothing_when_the_mount_and_the_base_address_agree(self):
+        assert check_vocabulary_detail_route(None) == []
+
+    @override_settings(CONTROLLED_VOCABULARIES_BASE_URI="http://localhost:8000/vocabularies")
+    def test_reports_a_warning_naming_its_own_id_when_they_disagree(self):
+        # The test settings mount the browsing routes at /browse/ (tests/urls.py) while this
+        # override points the base address at /vocabularies — the same disagreement the
+        # demonstration itself ships with until T006.
+        warnings = check_vocabulary_detail_route(None)
+
+        assert len(warnings) == 1
+        warning = warnings[0]
+        assert isinstance(warning, django_checks.Warning)
+        assert warning.id == CHECK_ID_ROUTE_MISMATCH
+
+    @override_settings(ROOT_URLCONF="tests.urls_core")
+    def test_reports_nothing_when_the_routes_are_not_mounted_at_all(self):
+        # tests.urls_core is the empty URLconf tests/test_ui/test_boot.py already uses to
+        # prove the core-only settings module stays free of the ui app's URLs — a project
+        # that has installed the app but not yet wired its URLs gets silence here, not a
+        # traceback.
+        assert check_vocabulary_detail_route(None) == []
