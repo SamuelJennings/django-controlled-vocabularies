@@ -49,6 +49,11 @@
       "state": "IMPLEMENT",
       "at": "2026-08-24T00:00:00Z",
       "note": "US-1 converged and accepted (T004 unblocked at convergence, the test project's own route/base-address mismatch fixed); US-2 dispatched to an implementer in its own worktree"
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-24T01:40:00Z",
+      "note": "US-2 accepted (#151), merged to the feature branch and pushed; US-3 dispatched"
     }
   ],
   "gates": {
@@ -233,8 +238,8 @@
       "id": "US3",
       "priority": "P2",
       "issue": 152,
-      "worktree": null,
-      "status": "todo",
+      "worktree": "/home/sam/projects/samueljennings/dcv-014-us3",
+      "status": "in_progress",
       "replans": 0,
       "tasks": [
         {
