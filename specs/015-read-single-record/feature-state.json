@@ -477,8 +477,21 @@
         },
         {
           "id": "T024",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "forge verify --base main --steps docs",
+              "poetry run python manage.py migrate --noinput",
+              "poetry run python manage.py seed_demo",
+              "poetry run python manage.py runserver --noreload 127.0.0.1:<port>",
+              "poetry run python demo/smoke.py http://127.0.0.1:<port>",
+              "poetry run pytest tests/test_demo -q --no-cov",
+              "poetry run ruff check demo/smoke.py demo/settings.py",
+              "poetry run ruff format --check demo/smoke.py demo/settings.py",
+              "poetry run python manage.py makemigrations --check --dry-run"
+            ]
+          }
         }
       ]
     }

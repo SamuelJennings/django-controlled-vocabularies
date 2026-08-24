@@ -13,17 +13,32 @@
     # A common misspelling (T016, US-3): the reader never sees this, only a search for it
     # finds the concept, which is the one thing about a hidden label a page cannot show.
     skos:hiddenLabel "Feildwork"@en ;
-    skos:definition "Data collected through direct observation or measurement at a study site."@en .
+    skos:definition "Data collected through direct observation or measurement at a study site."@en ;
+    # 015-read-single-record T024: a German-only note, carrying no English value of its
+    # own — read under a German reading language it shows directly, while the English-only
+    # skos:definition above falls back to its English value on the very same page, so the
+    # demo walk exercises both halves of FR-005 (a value in the reading language, and a
+    # value with none falling back to the vocabulary's own default) in one request.
+    skos:scopeNote "Erhoben durch unmittelbare Beobachtung oder Messung am Studienort."@de .
 
 <http://example.org/research-methods/laboratory-experiment>
     a skos:Concept ;
     skos:prefLabel "Laboratory experiment"@en ;
-    skos:definition "Data produced under controlled conditions in a laboratory setting."@en .
+    skos:definition "Data produced under controlled conditions in a laboratory setting."@en ;
+    # 015-read-single-record T024, FR-010: an associative link, stated once — the importer
+    # stores one ConceptRelation row from a single direction and Concept.related() reads it
+    # from either side (relation_both_directions.ttl), so remote-sensing's own page shows
+    # this concept back without a second statement here.
+    skos:related <http://example.org/research-methods/remote-sensing> .
 
 <http://example.org/research-methods/survey>
     a skos:Concept ;
     skos:prefLabel "Survey"@en ;
-    skos:definition "Data gathered by questionnaire or structured interview."@en .
+    skos:definition "Data gathered by questionnaire or structured interview."@en ;
+    # 015-read-single-record T024, FR-010: a survey carried out at the study site is a form
+    # of fieldwork — the hierarchical pair the demo walk follows in both directions, since
+    # skos:narrower is derived from this one stored statement rather than stated separately.
+    skos:broader <http://example.org/research-methods/fieldwork> .
 
 <http://example.org/research-methods/remote-sensing>
     a skos:Concept ;

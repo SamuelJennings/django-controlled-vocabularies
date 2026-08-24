@@ -857,3 +857,69 @@ detected.
 
 Next: T024 — the demo, README and changelog debts the closing phase's last task owns.
 Watch: nothing outstanding from T023.
+
+## 2026-08-24T22:40:00Z · Implementer US6 · T024
+
+Did: extended `demo/seed/research_methods.ttl` with a broader/narrower pair ("survey"
+`skos:broader` "fieldwork"), a related pair ("laboratory-experiment" `skos:related`
+"remote-sensing", one direction stored — the importer reads the relation from either
+concept per `relation_both_directions.ttl`'s own precedent), and a German-only
+`skos:scopeNote` on "fieldwork" that carries no English value, so reading that page in
+German shows the German note directly while its English-only `skos:definition` falls
+back to English on the same request — both halves of the language guarantee proved by
+one page, not two. Added `django.middleware.locale.LocaleMiddleware` to
+`demo/settings.py` (between `SessionMiddleware` and `CommonMiddleware`, Django's own
+required order) so a request's `Accept-Language` header can actually select a reading
+language different from the vocabulary's own default — without it every request reads
+in `LANGUAGE_CODE` regardless of what it asks for, and the seeded German note could
+never be reached live. Extended `demo/smoke.py`'s `walk()` to follow the authored
+vocabulary to "Fieldwork"'s own page (once in the default language, once with
+`Accept-Language: de`) and then to "Typical project workflow"'s own page, with four new
+`check_*` functions and `get()` now accepting `headers`. Wrote the three documentation
+debts the gate named — the concept page's own membership section, `skos_curie`, and
+both row-building functions, each placed where `feature-state.json`'s dispatch notes
+said to put it — and a "Try it" paragraph describing the extended walk, into
+`README.md`; one `CHANGELOG.md` entry for the whole closing phase, since none of
+US-1 through US-5 had added one yet.
+
+Verified: the documentation gate quoted verbatim, before (README reverted via `git
+stash push -- README.md`) and after:
+
+Before: `forge verify --base main --steps docs` — "docs-undocumented docs/ — 3 new
+public name(s) that no page documents: `collection_property_rows`,
+`concept_property_rows`, `skos_curie`. A changelog entry and a docstring are not
+documentation." — failed.
+
+After: `forge verify --base main --steps docs` — passed.
+
+The demo walk as actually run, not read: `DEMO_DB_PATH=/tmp/... poetry run python
+manage.py migrate --noinput`, `poetry run python manage.py seed_demo` — "seed_demo
+loaded 2 vocabularies" — `poetry run python manage.py runserver --noreload
+127.0.0.1:<port>`, polled until `curl -sf .../browse/` answered, then `poetry run
+python demo/smoke.py http://127.0.0.1:<port>` — "OK: walked the demo vocabulary list, a
+vocabulary's page, a search inside it, a concept's own page (in the demo's default
+language and in German), and a collection's own page". Before extending `smoke.py`'s
+own checks to use the record's short form rather than its plain label, the same walk
+failed for the right reason: `FAILED: .../fieldwork/ [200]: 'Survey', 'Fieldwork''s
+narrower concept, is not shown — the seeded relation did not load` — a record-valued
+row's own link text is `{scheme.slug}:{record.slug}` (T003/T016), never the plain
+label, which the check had assumed.
+
+Also checked by hand, against the same run, with `curl`: the unsearched concept page
+in the default language shows `skos:narrower` → `data-collection-methods:survey`,
+`skos:definition` in English, and the collections section naming both seeded
+collections; the same page with `Accept-Language: de` shows `skos:scopeNote` (German
+text) alongside the same English `skos:definition` (the fallback); the ordered
+collection's own page shows its four members in the seeded position order
+(survey, fieldwork, remote-sensing, laboratory-experiment).
+
+`poetry run pytest tests/test_demo -q --no-cov` — 34 passed (unchanged from before this
+task; the walk's own new checks run against a live server, not under pytest, per its
+own module docstring). `poetry run ruff check demo/smoke.py demo/settings.py` and
+`poetry run ruff format --check` — clean (one round: the `# noqa: S310` moved with the
+extracted `Request(...)` call needed restating on both it and the `urlopen(...)` call).
+`poetry run python manage.py makemigrations --check --dry-run` — no changes detected.
+
+Next: none — the closing phase (T023, T024) is complete; Story US6 and the whole
+feature are ready for convergence.
+Watch: nothing outstanding.
