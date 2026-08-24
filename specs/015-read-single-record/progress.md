@@ -83,3 +83,37 @@ manage.py makemigrations --check --dry-run` — no changes detected.
 
 Next: T003 (the row-building the two pages share).
 Watch: nothing outstanding.
+
+## 2026-08-24T17:03:59Z · Implementer US0 · T003
+
+Did: added `concept_property_rows(concept, language)` to `controlled_vocabularies/ui/
+views.py` — the shared row-building both T004 and T011 will render from. Returns rows in
+the fixed order: type (`rdf:type` → `skos:Concept`), preferred label, alternative labels,
+notes in `ConceptNote.Kind`'s own declared order, relations (broader, then narrower, then
+related), then the vocabulary. No collections row — decisions.md D4 places collection
+membership outside this list entirely, as a statement other records make about this
+concept rather than one it makes about itself. Hidden labels are never read (FR-004). A
+property absent in the given `language` contributes no row, with no fallback logic inside
+this function — decisions.md D6 leaves that to the caller. Each relation read chains
+`.select_related("scheme")` per decisions.md D-015-02 (none of the three is prefetchable).
+The vocabulary row has no genuine "short form" of its own (decisions.md D2 — nothing
+records a vocabulary's own prefix), so it is named by its plain `.name` instead; every
+record-valued row's link is reversed through `controlled_vocabularies_ui`, never built
+from `local_url`.
+
+Verified: extended `tests/test_ui/test_views.py` first (6 new test classes, 12 tests) and
+watched them fail with `ImportError: cannot import name 'concept_property_rows'` before
+the function existed. After implementation: `poetry run pytest tests/test_ui/test_views.py
+-q -k ConceptPropertyRows` — 8 passed (later expanded to the 12 total across the added
+classes, all green). `poetry run pytest tests/test_ui/test_views.py -q` — 113 passed, 1
+skipped (the pre-existing #147/django-mvp#291 skip, untouched) — no regressions. `poetry
+run ruff check`, `poetry run ruff format --check` and `poetry run mypy` on both changed
+files — clean. `poetry run python manage.py makemigrations --check --dry-run` — no
+changes detected.
+
+Next: none — T000-T003 (US0, the foundational phase) are all committed.
+Watch: the vocabulary row's `short_form` (its plain `.name`, not a `{prefix}:{slug}` form)
+and its D-015-02-driven per-relation `.select_related("scheme")` are judgment calls made
+under decisions.md D2/D-015-02 respectively rather than settled by an explicit T003
+acceptance criterion — worth a second look at T004/T005 gate time if the rendered
+vocabulary row reads oddly next to a concept's own short form.
