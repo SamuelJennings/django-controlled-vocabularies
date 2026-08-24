@@ -407,4 +407,5 @@ own context values is the ordinary extension point. Both views already compute t
 for their empty states, so this makes one value serve the queryset, the empty states and the box
 rather than letting the box disagree with the other two.
 
-**ADR:** none.
+**ADR:** none — an application of D4's own reasoning (a search state that half-agrees with the
+queryset is worse than no state) to a second context variable, not a new decision.
