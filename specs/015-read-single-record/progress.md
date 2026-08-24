@@ -209,3 +209,36 @@ python manage.py makemigrations --check --dry-run` — no changes detected.
 
 Next: T007 (the type row's literal key, and the identifier link).
 Watch: nothing outstanding.
+
+## 2026-08-24T17:30:08Z · Implementer US1 · T007
+
+Did: added the record's own identifier to `concept_detail.html` as an outbound anchor —
+`<a href="{{ object.uri }}" rel="noopener">{{ object.uri }}</a>` inside `<c-text size="xs"
+muted>` — the same markup pattern `conceptscheme_detail.html` already uses for a
+vocabulary's identifier (FR-008). Deliberately not a `<dl>` row: plan.md Key design
+decision #4 fixes the row order as type, preferred label, alternative labels, notes,
+relations, vocabulary, with no identifier row in it, so it sits after the closing
+`</dl>` rather than going through `concept_property_rows()`/`property_row`. The type
+row itself (FR-012) needed no new code — T003 already built it, keyed by the literal
+`TYPE_CURIE = "rdf:type"` module constant (`exchange/mapping.py`), written out rather
+than derived through `skos_curie()` because `rdf:type` sits outside the SKOS namespace
+that function's guard refuses (T001). `Concept.uri` already prefers `static_uri` over
+`local_url` (`models.py:315-323`), so an imported concept's publisher identifier needed
+no view change either — only the test proving it.
+
+Verified: extended `tests/test_ui/test_views.py` first
+(`TestConceptDetailTypeAndIdentifier`, 3 tests) and watched them run: the type-row test
+passed immediately (T003's existing row, right reason — nothing new to prove there,
+matching T004's own precedent for a test that asserts prior work); the identifier-anchor
+test and the imported-concept test both failed with `assert None is not None` — no
+anchor at either `concept.uri` or `concept.static_uri` — before the template addition.
+`poetry run pytest tests/test_ui/test_views.py -q -k TestConceptDetailTypeAndIdentifier`
+— 3 passed after implementation. `poetry run pytest tests/test_ui/test_views.py -q` —
+126 passed, 1 skipped (the pre-existing django-mvp#291 skip, untouched) — no
+regressions. `poetry run ruff check`, `poetry run ruff format --check` and `poetry run
+mypy` on both changed files — clean. `poetry run python manage.py makemigrations
+--check --dry-run` — no changes detected.
+
+Next: T008 (an unfilled property produces no row) and T009 (flat query count) — both [P],
+either order.
+Watch: nothing outstanding.
