@@ -25,6 +25,9 @@ that belongs inside a feature about browsing. Silently dropping it from the agre
 been the alternative, and a gap the maintainer agreed to is exactly the kind that must be stated
 rather than absorbed.
 
+
+**ADR:** none — a gap in what the data model records, not a standing rule. It is stated in the specification and will be settled by the change that adds a notation field.
+
 ---
 
 ## D2 — ~~The hierarchy is shown one level at a time, not as a whole tree~~ *(withdrawn)*
@@ -51,6 +54,9 @@ linkable: a tree expanded in place has no address, so a colleague cannot be sent
 reached. The maintainer asked for this kept relatively simple; one level at a time is the simpler of
 the two to specify, to test and to reason about, and it is the one that does not need replacing.
 
+
+**ADR:** none — withdrawn before the specification was signed off, so it constrains nothing.
+
 ---
 
 ## D3 — ~~Following a concept is not a link to a concept~~ *(withdrawn)*
@@ -72,6 +78,9 @@ here leads somewhere that exists: this page, scoped. Nothing on the page leads t
 serves, which is the property the rule protects. The distinction is stated in `spec.md` FR-007 and
 in the Edge Cases so that it cannot be read as an oversight.
 
+
+**ADR:** none — withdrawn with D2.
+
 ---
 
 ## D4 — A concept is named in the reading language, falling back to the vocabulary's own
@@ -90,6 +99,9 @@ the vocabulary's default rather than to any available language keeps the fallbac
 default language is the one the vocabulary's identity is anchored in, so it is the one a curator
 guaranteed exists.
 
+
+**ADR:** docs/adr/0016-a-concept-is-named-in-the-reading-language.md
+
 ---
 
 ## D5 — A row shows a label and nothing else
@@ -106,6 +118,9 @@ had anything under it, which the one-level-at-a-time navigation needed; with a f
 claim about a relation the page otherwise says nothing about, and the maintainer's instruction is
 that relations belong on a concept's own page.
 
+
+**ADR:** none — what one row of one list carries. The next page to show a concept is free to decide otherwise.
+
 ---
 
 ## D6 — A search covers the whole vocabulary, never the page being viewed
@@ -118,6 +133,9 @@ that relations belong on a concept's own page.
 list is long enough to need one, and its failure is a well-formed empty result indistinguishable
 from a term the vocabulary does not hold. #140 settled the identical question for the list of
 vocabularies the same way.
+
+
+**ADR:** none — the same rule 013-find-a-vocabulary already settled for the list of vocabularies, applied one level down. It inherits rather than establishes.
 
 ---
 
@@ -133,6 +151,9 @@ term and offers the way back; a vocabulary with no collections shows no collecti
 tells someone whose search missed that the site is empty. The same fault applies one level down.
 Collections differ from both because their absence is unremarkable — most vocabularies have none —
 and an empty section headed "Collections" is noise on every page rather than information on one.
+
+
+**ADR:** none — the wording and presence of empty states on one page, sealed inside this view.
 
 ---
 
@@ -157,6 +178,9 @@ revisits it in one place rather than two. What is *not* changed is which vocabul
 identifier at all on the list page: that stays as #140 settled it, the publisher's identifier for an
 imported vocabulary and none for one held here.
 
+
+**ADR:** none — provisional by the maintainer's own framing ("make it a link and we will see how it goes"), so it is not yet a rule future work must abide by.
+
 ---
 
 ## D9 — The demonstration gains collections and richer labels
@@ -178,6 +202,9 @@ hidden label is the sharper of the two: it is the one behaviour here that cannot
 reading the page, only by searching for something that is not on it. The unattended check is
 extended for the same reason it exists: a demonstration nobody walks rots without saying so.
 
+
+**ADR:** none — what the demonstration project seeds. It constrains no code and no interface.
+
 ---
 
 ## D10 — The list of concepts is paged
@@ -192,6 +219,9 @@ across pages (FR-016).
 a site holds vocabularies — the goal this package pursues names tens of thousands — so a page that
 paginates only search results puts every concept in the vocabulary on the page a reader arrives at
 first.
+
+
+**ADR:** none — a page size on one view, following what the list of vocabularies already does.
 
 ---
 
@@ -209,6 +239,9 @@ string where every other code path finds a bound method, and calling it would ra
 template would still render, so nothing here would fail — the next feature to hold one of these
 instances is where it would surface.
 
+
+**ADR:** none — the name of one annotation, chosen to avoid a collision inside one queryset.
+
 ---
 
 ## D12 — The new view's tests join `tests/test_ui/test_views.py`
@@ -220,6 +253,9 @@ instances is where it would surface.
 **Why defensible**: both views live in one `controlled_vocabularies/ui/views.py`, and the recorded
 standard puts one test module per source module, splitting per unit with classes rather than extra
 files. A second module for the same source file is the case that standard names as non-conforming.
+
+
+**ADR:** none — an application of the recorded testing standard, not a new decision.
 
 ---
 
@@ -260,6 +296,9 @@ run suppresses is a check nothing exercises end to end.
 
 **Revisit if**: never — the test project now demonstrates the wiring the check asks for.
 
+
+**ADR:** none — the wiring of this repository's own test project.
+
 ---
 
 ## D14 — `ConceptSchemeFactory` derives the slug it would have had once saved
@@ -285,6 +324,9 @@ is unchanged — `slug_is_manual` stays False, so `save()` recomputes the identi
 **Revisit if**: the factory ever needs to build a scheme whose slug deliberately disagrees with its
 name, which today only `set_slug()` produces and only on a saved instance.
 
+
+**ADR:** none — the behaviour of one test factory.
+
 ---
 
 ## D15 — The demo's seeded collections both go in the authored vocabulary, not the imported one
@@ -309,3 +351,5 @@ risk: every concept in it already sits under the reserved `example.org` placehol
 identifier. Two collections in one file over one each keeps that reasoning in a single place
 rather than requiring it twice, and the acceptance criterion — "both render on a page anyone can
 open" — asks for one page holding both, not one collection per vocabulary.
+
+**ADR:** none — an application of the rule that a vocabulary's identity comes from where it was published (docs/adr/0006-a-document-identity-comes-from-where-it-was-published.md), applied to seed data.
