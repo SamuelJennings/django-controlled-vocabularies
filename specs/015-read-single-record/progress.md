@@ -333,6 +333,35 @@ apply to a markdown-only change.
 
 Story US-1 (T004-T010) is complete. All tasks committed individually; the tree is clean.
 
-Next: T011 (a collection's own address serves a page) — the first task of Story US-2 —
-or the story's own end-of-run report, whichever the run boundary calls for.
+## 2026-08-24T19:52:00Z · Implementer US2 · T011
+
+Did: gave `CollectionDetailView` its page: `template_name` (falling back to django-mvp's
+`detail_view.html` — empty body — until T012 adds the file) and a `get_context_data()`
+wiring a new `collection_property_rows(collection)` into the page as `context["rows"]`.
+Added `collection_property_rows` to `controlled_vocabularies/ui/views.py`, mirroring
+`concept_property_rows`'s shape (type, name, members, vocabulary) rather than reusing it
+directly — a collection's `name` is a plain `CharField` with no per-language variants, so
+there is no reading-language argument, and its type/membership CURIEs depend on
+`Collection.ordered` rather than being fixed. Its member rows reuse the collection's own
+already-loaded `scheme` for the short-form prefix and identifier composition rather than
+each member's own (D-015-02), assigning it onto the FK cache directly (`member.scheme =
+collection.scheme`) so no query is spent per member — `Collection.members()` itself is
+out of this feature's scope (models.py) and only `select_related`s `"concept"`. T000's
+`setup()`/`get_queryset()` already served 200 for a real collection and 404 for both
+flavours of unknown address, so this task adds no new resolution behaviour.
+
+Verified: extended `tests/test_ui/test_views.py` first (`TestCollectionDetail`, 6 tests)
+and watched them fail — `ImportError: cannot import name 'collection_property_rows'`, the
+right reason, before the function existed. After implementation: `poetry run pytest
+tests/test_ui/test_views.py -q -k TestCollectionDetail` — 6 passed, including the
+shared-slug assertion (FR-002, Edge case 2: a concept and a collection in one vocabulary
+carrying the same slug, both reachable at their own addresses) and the read-only
+assertion (`directory == {}`, no "Edit"/"Delete" text — the same default-flipping
+mitigation T004 uses). `poetry run pytest tests/test_ui/test_views.py -q` — 134 passed, 1
+skipped (the pre-existing django-mvp#291 skip, untouched) — no regressions. `poetry run
+ruff check`, `poetry run ruff format --check` and `poetry run mypy` on both changed files
+— clean. `poetry run python manage.py makemigrations --check --dry-run` — no changes
+detected.
+
+Next: T012 (the `collection_detail.html` template — name, type and members).
 Watch: nothing outstanding.
