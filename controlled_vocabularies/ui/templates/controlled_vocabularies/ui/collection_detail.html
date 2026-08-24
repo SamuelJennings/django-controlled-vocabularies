@@ -1,0 +1,27 @@
+{% extends "detail_view.html" %}
+{% comment %}
+  015-read-single-record T012: renders collection_property_rows()'s rows inside one
+  <dl>, through the T002 component — the same two-branch shape concept_detail.html
+  uses (a Python None substituted into {{ }} renders as the literal text "None",
+  which would make property_row.html's {% if short_form %} true for every plain-value
+  row too, so only the keys a row actually carries are passed).
+{% endcomment %}
+{% block page.content %}
+  <dl>
+    {% for row in rows %}
+      {% if row.short_form %}
+        <c-controlled_vocabularies.property_row term="{{ row.term }}"
+                                                  short_form="{{ row.short_form }}"
+                                                  uri="{{ row.uri }}"
+                                                  href="{{ row.href }}" />
+      {% else %}
+        <c-controlled_vocabularies.property_row term="{{ row.term }}" value="{{ row.value }}" />
+      {% endif %}
+    {% endfor %}
+  </dl>
+  {% comment %}
+    015-read-single-record T007, FR-008: the record's own identifier as an outbound
+    link, the same treatment concept_detail.html gives a concept's.
+  {% endcomment %}
+  <c-text size="xs" muted><a href="{{ object.uri }}" rel="noopener">{{ object.uri }}</a></c-text>
+{% endblock page.content %}

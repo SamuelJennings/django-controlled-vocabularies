@@ -14,11 +14,15 @@ from django.utils import translation
 
 from controlled_vocabularies.exchange.mapping import (
     BROADER_CURIE,
+    COLLECTION_TYPE_CURIE,
     CONCEPT_TYPE_CURIE,
     IN_SCHEME_CURIE,
     LABEL_CURIES,
+    MEMBER_CURIE,
+    MEMBER_LIST_CURIE,
     NARROWER_CURIE,
     NOTE_CURIES,
+    ORDERED_COLLECTION_TYPE_CURIE,
     RELATED_CURIE,
     TYPE_CURIE,
 )
@@ -2118,3 +2122,81 @@ class TestCollectionDetail:
         )
 
         assert response.context["rows"] == collection_property_rows(collection)
+
+
+class TestCollectionDetailNameTypeAndMembers:
+    """The same definition list a concept's page uses: the collection's name, its
+    identifier as a link, a type row distinguishing an ordered collection from an
+    unordered one, and its members under the membership property matching its kind
+    (015-read-single-record T012, FR-008, FR-012, FR-013, SC-005, US-2 scenarios 1, 2).
+    """
+
+    @staticmethod
+    def _dt_dd_pairs(response):
+        soup = BeautifulSoup(response.content, "html.parser")
+        return [
+            (dt.get_text(strip=True), dt.find_next_sibling("dd").get_text(strip=True)) for dt in soup.find_all("dt")
+        ]
+
+    @pytest.mark.django_db
+    def test_an_unordered_collection_shows_its_name_type_and_members(self, client):
+        collection, members = collection_with_members(labels=("Granite", "Basalt", "Gabbro"), ordered=False)
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:collection-detail",
+                kwargs={"slug": collection.scheme.slug, "collection_slug": collection.slug},
+            )
+        )
+        pairs = self._dt_dd_pairs(response)
+
+        assert (LABEL_CURIES[ConceptLabel.Kind.PREFERRED], collection.name) in pairs
+        assert (TYPE_CURIE, COLLECTION_TYPE_CURIE) in pairs
+        member_terms = [term for term, _value in pairs if term == MEMBER_CURIE]
+        assert len(member_terms) == 3
+        assert not any(term == MEMBER_LIST_CURIE for term, _value in pairs)
+
+    @pytest.mark.django_db
+    def test_an_ordered_collections_type_differs_and_its_members_are_in_position_order(self, client):
+        # A deliberately non-alphabetical sequence, so the order assertion below
+        # cannot pass by accident (tasks.md T012's own verify criterion).
+        collection, members = collection_with_members(labels=("Granite", "Basalt", "Gabbro"), ordered=True)
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:collection-detail",
+                kwargs={"slug": collection.scheme.slug, "collection_slug": collection.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        pairs = [
+            (dt.get_text(strip=True), dt.find_next_sibling("dd").get_text(strip=True)) for dt in soup.find_all("dt")
+        ]
+        # A member row's <dd> carries both the short-form link and the canonical
+        # identifier as separate text nodes (property_row.html), so the anchor's own
+        # text — not the whole <dd>'s — is what isolates the short form.
+        member_short_forms = [
+            dt.find_next_sibling("dd").find("a").get_text(strip=True)
+            for dt in soup.find_all("dt")
+            if dt.get_text(strip=True) == MEMBER_LIST_CURIE
+        ]
+
+        assert (TYPE_CURIE, ORDERED_COLLECTION_TYPE_CURIE) in pairs
+        assert not any(term == MEMBER_CURIE for term, _value in pairs)
+        assert member_short_forms == [f"{collection.scheme.slug}:{member.slug}" for member in members]
+
+    @pytest.mark.django_db
+    def test_the_identifier_appears_as_an_anchor_to_the_records_own_uri(self, client):
+        collection = CollectionFactory(name="Rock Types")
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:collection-detail",
+                kwargs={"slug": collection.scheme.slug, "collection_slug": collection.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        identifier_link = soup.find("a", href=collection.uri)
+
+        assert identifier_link is not None
+        assert collection.uri in identifier_link.get_text(strip=True)
