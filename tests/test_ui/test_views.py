@@ -1952,3 +1952,26 @@ class TestConceptDetailTypeAndIdentifier:
         assert concept.static_uri.startswith("http://publisher.example.org/")
         assert identifier_link is not None
         assert concept.static_uri in identifier_link.get_text(strip=True)
+
+
+class TestConceptDetailUnfilledPropertiesProduceNoRow:
+    """A concept carrying nothing beyond its label shows its label, its type, its
+    identifier and its vocabulary, and no row at all for any property it does not
+    carry (015-read-single-record T008, FR-018, US-1 scenario 4).
+    """
+
+    @pytest.mark.django_db
+    def test_a_bare_concepts_page_names_exactly_type_label_identifier_and_vocabulary(self, client):
+        concept = ConceptFactory(label="Granite")
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        terms = [dt.get_text(strip=True) for dt in soup.find_all("dt")]
+
+        assert terms == [TYPE_CURIE, LABEL_CURIES[ConceptLabel.Kind.PREFERRED], IN_SCHEME_CURIE]
+        assert soup.find("a", href=concept.uri) is not None
