@@ -658,3 +658,58 @@ test_a_five_level_chain` — 1 failed, for the right reason (the surplus row).
 `controlled_vocabularies/ui/views.py` restored from a pre-edit copy and confirmed
 clean via `git diff --stat` (test file only). `poetry run pytest -q` — 1611
 passed, 1 skipped. `poetry run pre-commit run --all-files` — all hooks passed.
+
+## 2026-08-24T20:33:00Z · Implementer US4 · T019
+
+Did: `concept_list_item.html`'s row is now an anchor to the concept's own page
+(`{% url 'controlled_vocabularies_ui:concept-detail' object.scheme.slug
+object.slug %}`, inside a `title` slot rather than `<c-card>`'s `title` attribute,
+which auto-escapes and so cannot carry markup — the same pattern
+`conceptscheme_list_item.html` already uses for a vocabulary's own row). The
+`#142`-naming comment came out. `VocabularyDetailView.setup()`'s queryset gained
+`.select_related("scheme")`: the row renders in an isolated context holding only
+`object` (`render_list_item`, `mvp/templatetags/mvp.py`, builds a fresh context
+per row rather than inheriting the page's own `vocabulary` variable), so the href
+can only be built from `object.scheme.slug`, and without the join that read costs
+one query per row — this is D-015-04.
+
+Two pre-existing tests needed a look before writing anything new.
+`test_a_concepts_row_carries_only_its_label` (`TestVocabularyDetailConceptList`)
+asserted `soup.find("a") is None`, true under 014 when no concept page existed;
+US-4's whole point is to make that false. Updated in place per D-015-04 — kept
+every other assertion (no definition, no note, no identifier, no relation-text)
+and replaced only the link assertion, renaming the test to say what it now
+proves. `test_query_count_is_flat_regardless_of_how_many_concepts_the_vocabulary_holds`
+(`TestVocabularyDetailConceptLabel`) was left untouched and re-run as the guard
+against the new `object.scheme` read: still green with `select_related` in place.
+
+Added `TestVocabularyDetailConceptListLinksToConceptPages` to test_views.py (2
+tests: a concept in the full list, and one reached through a search-narrowed
+result — US-4 scenarios 1 and 3 — each asserting the row's href and that
+following it returns 200 with `response.context["object"]` equal to the target
+concept). Added `TestConceptRowPartialLinksToItsOwnPage` to test_templates.py (2
+tests, mirroring `TestRowPartialLinksToTheVocabulary`'s own source-level checks
+for `conceptscheme_list_item.html`): the row partial's source reverses
+`concept-detail` and contains no `local_url` reference.
+
+Verified: RED first — `poetry run pytest tests/test_ui/test_views.py -q -k
+"test_a_concepts_row_carries_only_its_label_and_a_link_to_its_own_page or
+TestVocabularyDetailConceptListLinksToConceptPages" tests/test_ui/test_templates.py
+-k TestConceptRowPartialLinksToItsOwnPage --no-cov` before any production change
+— 4 failed (`assert None is not None`, two `StopIteration`s from no matching
+anchor, and the source-scan assert), 1 passed (the "no local_url" half, true
+before and after). Same command after the template and view change — 5 passed.
+Then narrowest scope: `poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailConceptList
+tests/test_ui/test_views.py::TestVocabularyDetailConceptListLinksToConceptPages
+tests/test_ui/test_views.py::TestVocabularyDetailConceptLabel
+tests/test_ui/test_templates.py -q --no-cov` — 24 passed. `poetry run ruff check`
+and `poetry run ruff format --check` on the four changed files — clean (ruff
+format rewrote the reformatted `select_related` chain in views.py once, then
+verified clean). `poetry run mypy controlled_vocabularies/ui/views.py` — no
+issues. `poetry run python manage.py makemigrations --check --dry-run` — no
+changes detected (no model touched).
+
+Next: T020 (a vocabulary's collections link to their own pages).
+Watch: `test_nothing_links_to_a_collection` (`TestVocabularyDetailCollections`)
+is the same shape of pre-existing "no link" assertion, for T020 to update the
+same way — recorded ahead of time as D-015-04's forward pointer to D-015-05.

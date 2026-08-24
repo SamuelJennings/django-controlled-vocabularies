@@ -460,8 +460,16 @@ class VocabularyDetailView(MVPListView):
         # is consulted, so the list is flat by construction — a concept three levels
         # down a broader/narrower chain is a plain sibling of one at the top, never
         # rendered nested beneath it (T008, FR-006, FR-012).
-        self.queryset = Concept.objects.filter(scheme=self.vocabulary).annotate(
-            resolved_label=Coalesce(Subquery(preferred_in_active_language), F("label"))
+        # select_related("scheme") (015-read-single-record T019): the row partial
+        # reverses its own link from `object.scheme.slug`, since it renders in an
+        # isolated context holding only the object (`render_list_item` builds a fresh
+        # context per row) and cannot reach this view's own `vocabulary` context
+        # variable. Without the join, that read would cost one query per row, moving
+        # the count the flat-query-count guarantee below asserts stays still.
+        self.queryset = (
+            Concept.objects.filter(scheme=self.vocabulary)
+            .select_related("scheme")
+            .annotate(resolved_label=Coalesce(Subquery(preferred_in_active_language), F("label")))
         )
 
     def get_page_title(self):

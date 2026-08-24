@@ -894,11 +894,13 @@ class TestVocabularyDetailConceptList:
             assert card.find(class_="card") is None
 
     @pytest.mark.django_db
-    def test_a_concepts_row_carries_only_its_label(self):
+    def test_a_concepts_row_carries_only_its_label_and_a_link_to_its_own_page(self):
         # A fully decorated concept — an alternative label, a note, a static
         # identifier and a relation to another concept — rendered through the row
         # partial alone. None of that belongs on the row (T008): no definition, no
-        # note, no identifier, no relation, and nothing to follow.
+        # note, no identifier, no relation. 015-read-single-record T019 reverses
+        # T008's "nothing to follow": the row is now an anchor to the concept's
+        # own page, the address issue #142 opened.
         concept = ConceptFactory(label="Granite", external=True)
         concept.resolved_label = concept.label  # what T009's annotation carries in real use
         ConceptNoteFactory(concept=concept, value="A coarse-grained igneous rock.")
@@ -914,7 +916,12 @@ class TestVocabularyDetailConceptList:
         assert "granitic rock" not in html
         assert concept.static_uri not in html
         assert "Basalt" not in html
-        assert soup.find("a") is None
+        anchor = soup.find("a")
+        assert anchor is not None
+        assert anchor["href"] == reverse(
+            "controlled_vocabularies_ui:concept-detail",
+            kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+        )
 
     @pytest.mark.django_db
     def test_a_concept_belonging_to_another_vocabulary_does_not_appear(self, client):
@@ -928,6 +935,54 @@ class TestVocabularyDetailConceptList:
         listed = {c.pk for c in response.context["object_list"]}
         assert listed == {concept.pk}
         assert foreign.pk not in listed
+
+
+class TestVocabularyDetailConceptListLinksToConceptPages:
+    """015-read-single-record T019, FR-015, SC-004, US-4 scenarios 1, 3: a vocabulary's
+    concepts link to their own pages, both in the full list and in a search-narrowed one.
+    """
+
+    @pytest.mark.django_db
+    def test_a_concept_in_the_full_list_links_to_and_reaches_its_own_page(self, client):
+        concept = ConceptFactory(label="Granite")
+
+        response = client.get(
+            reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": concept.scheme.slug})
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        anchor = next(a for a in soup.find_all("a", href=True) if a.get_text(strip=True) == concept.label)
+
+        assert anchor["href"] == reverse(
+            "controlled_vocabularies_ui:concept-detail",
+            kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+        )
+
+        follow = client.get(anchor["href"])
+
+        assert follow.status_code == 200
+        assert follow.context["object"] == concept
+
+    @pytest.mark.django_db
+    def test_a_search_narrowed_result_links_to_and_reaches_its_own_page(self, client):
+        match = ConceptFactory(label="Granite")
+        ConceptFactory(scheme=match.scheme, label="Basalt")
+
+        response = client.get(
+            reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": match.scheme.slug}),
+            {"q": "Granite"},
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        anchor = next(a for a in soup.find_all("a", href=True) if a.get_text(strip=True) == match.label)
+
+        assert anchor["href"] == reverse(
+            "controlled_vocabularies_ui:concept-detail",
+            kwargs={"slug": match.scheme.slug, "concept_slug": match.slug},
+        )
+
+        follow = client.get(anchor["href"])
+
+        assert follow.status_code == 200
+        assert follow.context["object"] == match
 
 
 class TestVocabularyDetailConceptLabel:

@@ -16,6 +16,7 @@ from tests.factories import ConceptSchemeFactory
 
 TEMPLATES_ROOT = Path(__file__).resolve().parents[2] / "controlled_vocabularies" / "ui" / "templates"
 ROW_TEMPLATE_PATH = TEMPLATES_ROOT / "controlled_vocabularies" / "ui" / "conceptscheme_list_item.html"
+CONCEPT_ROW_TEMPLATE_PATH = TEMPLATES_ROOT / "controlled_vocabularies" / "ui" / "concept_list_item.html"
 PROPERTY_ROW_TEMPLATE = "cotton/controlled_vocabularies/property_row.html"
 PROPERTY_ROW_TEMPLATE_PATH = TEMPLATES_ROOT / "cotton" / "controlled_vocabularies" / "property_row.html"
 # mvp is a namespace package (no __init__.py), so it carries no __file__ — its own
@@ -85,6 +86,25 @@ class TestRenderedPageLinksToEachVocabulary:
         hrefs = re.findall(r'href="([^"]*)"', content)
         for scheme in schemes:
             assert reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}) in hrefs
+
+
+class TestConceptRowPartialLinksToItsOwnPage:
+    """015-read-single-record T019, FR-015 — the inverse of what T008 asserted here.
+
+    T008 held that a concept's row carries nothing to follow, because no address served
+    one; this feature gives every concept a page, so the row now leads to it. The row
+    renders in an isolated context holding only the object (`render_list_item` builds a
+    fresh context per row), so the address is reversed from ``object.scheme`` and
+    ``object.slug`` alone, never from a variable the surrounding page happens to carry.
+    """
+
+    def test_the_row_partial_source_reverses_the_concepts_own_route(self):
+        source = CONCEPT_ROW_TEMPLATE_PATH.read_text()
+        assert "{% url 'controlled_vocabularies_ui:concept-detail'" in source
+
+    def test_the_row_partial_source_contains_no_local_url_reference(self):
+        source = CONCEPT_ROW_TEMPLATE_PATH.read_text()
+        assert "local_url" not in source
 
 
 class TestEveryShippedTemplateWrapsReaderVisibleTextInATranslationTag:

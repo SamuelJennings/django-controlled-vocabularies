@@ -169,3 +169,35 @@ part of its own — the only short form available for it would be a bare prefix 
 reference, which is legal syntax and reads as a truncation. FR-011 requires the row and fixes its
 property, not the form of its value, and FR-007's disclosure obligation is met either way: the
 canonical identifier is on the page as text and the link leads somewhere a reader can read.
+
+## D-015-04 — T019 supersedes a pre-existing "carries no link" assertion
+
+**Decided (2026-08-24, US-4):** `test_a_concepts_row_carries_only_its_label` (test_views.py) was
+written under 014-look-inside-a-vocabulary, when a concept had no page to lead to — its "no anchor
+at all" assertion (`soup.find("a") is None`) was a correct claim about that state, not a claim this
+feature happens to break. This feature's whole point, named by spec.md User Story 4 and plan.md §8
+("The links the previous slices deferred"), is to make that assertion false: the row becomes the
+link it was "always meant to be" once the concept's own page exists. `tasks.md` T019 lists
+`tests/test_ui/test_views.py` among the files it touches, which is this feature naming the same file
+as in-scope for the change.
+
+The test was updated in place (renamed to
+`test_a_concepts_row_carries_only_its_label_and_a_link_to_its_own_page`) rather than left red or
+deleted: it keeps every other "carries only its label" assertion — no definition, no note, no
+identifier, no relation-text, none of which US-4 touches — and its final assertion now checks the
+row's one anchor resolves to the concept's own page. This mirrors the precedent already in this
+codebase: `conceptscheme_list_item.html`'s own T004 superseded issue #140's "no entry may link to a
+vocabulary" the same way, and `TestRowPartialLinksToTheVocabulary`'s docstring says so explicitly
+rather than quietly deleting the old test.
+
+**Rejected:** leaving the test in place and calling the task blocked. `craft-tdd`'s prohibition
+against touching a test authored outside this story exists to protect a failing pre-existing test as
+evidence about intent someone else asserted. Here the design documents this story was dispatched
+from are that intent, dated after the test it supersedes, and explicit about superseding it by name
+(User Story 4's own description: "The entries that have been plain text since the vocabulary page
+shipped become the links they were always meant to be"). Blocking would report a story as unable to
+proceed past the one requirement `tasks.md` names it should satisfy.
+
+T020 supersedes a second such assertion, `test_nothing_links_to_a_collection`; that decision is
+recorded separately at D-015-05 in T020's own commit, for the same reason and under the same
+`tasks.md` file-scope naming.
