@@ -3,7 +3,7 @@
   "feature": "015-read-single-record",
   "branch": "015-read-single-record",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "IMPLEMENT",
+  "state": "PR_READY",
   "state_history": [
     {
       "state": "SPECIFY",
@@ -32,13 +32,28 @@
     },
     {
       "state": "IMPLEMENT",
-      "at": "2026-08-24T21:05:00Z",
+      "at": "2026-08-24T18:47:02Z",
       "note": "US-4 accepted and converged; two pre-existing \"no link\" assertions superseded per D-015-04/05, the row assertion tightened to exactly one anchor and probed"
     },
     {
       "state": "IMPLEMENT",
-      "at": "2026-08-24T21:55:00Z",
+      "at": "2026-08-24T19:03:22Z",
       "note": "US-5 accepted and converged; the flat-query ceiling deepened to cover membership growth and probed. Closing phase T023-T024 next, carrying the documentation gate's three undocumented public names"
+    },
+    {
+      "state": "CONVERGE",
+      "at": "2026-08-24T20:36:13Z",
+      "note": "closing phase converged onto the feature branch at 4220006"
+    },
+    {
+      "state": "REVIEW",
+      "at": "2026-08-24T20:36:51Z",
+      "note": "single-round review panel returned approve with one low finding"
+    },
+    {
+      "state": "PR_READY",
+      "at": "2026-08-24T20:36:51Z",
+      "note": "R1 closed in 81843c6; PR #162 out of draft, awaiting the merge gate"
     }
   ],
   "gates": {
@@ -498,15 +513,15 @@
   ],
   "budgets": {
     "converge_cycles": {
-      "used": 0,
+      "used": 1,
       "max": 2
     },
     "review_cycles": {
-      "used": 0,
+      "used": 1,
       "max": 1
     },
     "design_review_cycles": {
-      "used": 0,
+      "used": 1,
       "max": 1
     },
     "tokens": {
