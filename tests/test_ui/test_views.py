@@ -22,7 +22,7 @@ from controlled_vocabularies.exchange.mapping import (
     RELATED_CURIE,
     TYPE_CURIE,
 )
-from controlled_vocabularies.models import ConceptLabel, ConceptNote
+from controlled_vocabularies.models import ConceptLabel, ConceptNote, ConceptRelation
 from controlled_vocabularies.ui.views import (
     VocabularyDetailView,
     VocabularyListView,
@@ -31,6 +31,7 @@ from controlled_vocabularies.ui.views import (
 from tests.factories import (
     ConceptFactory,
     ConceptNoteFactory,
+    ConceptRelationFactory,
     ConceptSchemeFactory,
     collection_with_members,
 )
@@ -1975,3 +1976,47 @@ class TestConceptDetailUnfilledPropertiesProduceNoRow:
 
         assert terms == [TYPE_CURIE, LABEL_CURIES[ConceptLabel.Kind.PREFERRED], IN_SCHEME_CURIE]
         assert soup.find("a", href=concept.uri) is not None
+
+
+class TestConceptDetailQueryCount:
+    """The page's query count does not grow with what it shows (015-read-single-record
+    T009, SC-006, plan.md Key design decision #7, decisions.md D-015-02).
+    """
+
+    @pytest.mark.django_db
+    def test_query_count_is_flat_as_labels_notes_and_relations_grow(self, client, django_assert_num_queries):
+        scheme = ConceptSchemeFactory()
+        concept = ConceptFactory(scheme=scheme, label="Granite")
+        concept.add_label(language="de", kind=ConceptLabel.Kind.ALTERNATIVE, text="Granitstein")
+        ConceptNoteFactory(concept=concept, kind=ConceptNote.Kind.DEFINITION, value="An igneous rock.")
+        ConceptRelationFactory(source=concept, target=ConceptFactory(scheme=scheme), kind=ConceptRelation.Kind.BROADER)
+        ConceptRelationFactory(source=ConceptFactory(scheme=scheme), target=concept, kind=ConceptRelation.Kind.BROADER)
+        ConceptRelationFactory(source=concept, target=ConceptFactory(scheme=scheme), kind=ConceptRelation.Kind.RELATED)
+        url = reverse(
+            "controlled_vocabularies_ui:concept-detail",
+            kwargs={"slug": scheme.slug, "concept_slug": concept.slug},
+        )
+
+        with CaptureQueriesContext(connection) as captured:
+            client.get(url)
+        baseline = len(captured.captured_queries)
+
+        # select_related("scheme").prefetch_related("labels", "concept_notes") on the
+        # queryset (plan.md Key design decision #7) collapses what would otherwise be
+        # a separate query per distinct .all() call site — one for alt_labels, one per
+        # ConceptNote.Kind, one for the vocabulary row's scheme lookup — into three: the
+        # joined object fetch and the two prefetches. A real ceiling a caller can
+        # regress past, not only a bound flat by construction regardless of the
+        # queryset (broader()/narrower()/related() are already-optimised fresh
+        # querysets either way, so this does not assert they cost nothing).
+        assert baseline <= 8
+
+        for i in range(5):
+            concept.add_label(language="fr", kind=ConceptLabel.Kind.ALTERNATIVE, text=f"Label {i}")
+            ConceptNoteFactory(concept=concept, kind=ConceptNote.Kind.SCOPE, value=f"Note {i}")
+            ConceptRelationFactory(
+                source=concept, target=ConceptFactory(scheme=scheme), kind=ConceptRelation.Kind.RELATED
+            )
+
+        with django_assert_num_queries(baseline):
+            client.get(url)

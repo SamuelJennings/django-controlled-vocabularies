@@ -275,7 +275,18 @@ class ConceptDetailView(MVPDetailView):
             raise Http404(_("No vocabulary matches this address.")) from exc
 
     def get_queryset(self):
-        return Concept.objects.filter(scheme=self.vocabulary)
+        # select_related("scheme") joins the vocabulary row's own scheme lookup into
+        # the object fetch; prefetch_related collapses what would otherwise be one
+        # query per distinct .all() call site inside concept_property_rows()
+        # (alt_labels, one per ConceptNote.Kind) into a single query each — the two
+        # helpers that read a cached related set (plan.md Key design decision #7).
+        # broader()/narrower()/related() build fresh querysets and are not
+        # prefetchable (decisions.md D-015-02), so they are unaffected here.
+        return (
+            Concept.objects.filter(scheme=self.vocabulary)
+            .select_related("scheme")
+            .prefetch_related("labels", "concept_notes")
+        )
 
     def get_context_data(self, **kwargs):
         # The reading language, falling back to the vocabulary's own default (FR-005,
