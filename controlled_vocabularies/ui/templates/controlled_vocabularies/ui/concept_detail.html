@@ -1,0 +1,24 @@
+{% extends "detail_view.html" %}
+{% comment %}
+  015-read-single-record T005: renders T003's rows inside one <dl>, through the T002
+  component. Two branches, not one call passing every key unconditionally: a Python
+  None substituted into `{{ }}` renders as the literal text "None" (Django's own
+  behaviour for a resolved-but-None variable, distinct from an undefined one), which
+  would make property_row.html's `{% if short_form %}` true for every plain-value row
+  too. Passing only the keys a row actually carries keeps an absent one genuinely
+  unset rather than the four-character string "None".
+{% endcomment %}
+{% block page.content %}
+  <dl>
+    {% for row in rows %}
+      {% if row.short_form %}
+        <c-controlled_vocabularies.property_row term="{{ row.term }}"
+                                                  short_form="{{ row.short_form }}"
+                                                  uri="{{ row.uri }}"
+                                                  href="{{ row.href }}" />
+      {% else %}
+        <c-controlled_vocabularies.property_row term="{{ row.term }}" value="{{ row.value }}" />
+      {% endif %}
+    {% endfor %}
+  </dl>
+{% endblock page.content %}

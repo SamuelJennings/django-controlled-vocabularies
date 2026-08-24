@@ -1787,3 +1787,52 @@ class TestConceptDetail:
         )
 
         assert response.context["rows"] == concept_property_rows(concept, "en")
+
+
+class TestConceptDetailShowsWhatIsRecorded:
+    """Everything recorded appears, keyed by its property, and a hidden label never
+    does (015-read-single-record T005, FR-003, FR-004, SC-001, SC-002, US-1
+    scenarios 1, 2).
+    """
+
+    @pytest.mark.django_db
+    def test_a_preferred_label_a_definition_and_a_scope_note_each_show_on_their_own_row(self, client):
+        concept = ConceptFactory(label="Granite")
+        ConceptNoteFactory(concept=concept, kind=ConceptNote.Kind.DEFINITION, value="A coarse-grained igneous rock.")
+        ConceptNoteFactory(concept=concept, kind=ConceptNote.Kind.SCOPE, value="Used for building stone.")
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        pairs = [
+            (dt.get_text(strip=True), dt.find_next_sibling("dd").get_text(strip=True)) for dt in soup.find_all("dt")
+        ]
+
+        assert (LABEL_CURIES[ConceptLabel.Kind.PREFERRED], "Granite") in pairs
+        assert (NOTE_CURIES[ConceptNote.Kind.DEFINITION], "A coarse-grained igneous rock.") in pairs
+        assert (NOTE_CURIES[ConceptNote.Kind.SCOPE], "Used for building stone.") in pairs
+
+    @pytest.mark.django_db
+    def test_alternative_labels_appear_and_no_hidden_label_appears_anywhere(self, client):
+        concept = ConceptFactory(label="Granite")
+        concept.add_label(language="en", kind=ConceptLabel.Kind.ALTERNATIVE, text="granitic rock")
+        concept.add_label(language="en", kind=ConceptLabel.Kind.HIDDEN, text="granate")
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        content = response.content.decode()
+        soup = BeautifulSoup(response.content, "html.parser")
+        pairs = [
+            (dt.get_text(strip=True), dt.find_next_sibling("dd").get_text(strip=True)) for dt in soup.find_all("dt")
+        ]
+
+        assert (LABEL_CURIES[ConceptLabel.Kind.ALTERNATIVE], "granitic rock") in pairs
+        assert "granate" not in content
