@@ -400,3 +400,34 @@ clean (the template is not a Python file). `poetry run python manage.py makemigr
 
 Next: T013 (a collection holding nothing says so).
 Watch: nothing outstanding.
+
+## 2026-08-24T20:12:00Z · Implementer US2 · T013
+
+Did: `CollectionDetailView.get_context_data()` gains `context["collection_has_members"]`,
+computed from the already-built `rows` (a membership-CURIE row present, `skos:member` or
+`skos:memberList`) rather than a second `.members()` call. `collection_detail.html`
+renders a translated `"This collection holds no members."` message when that flag is
+false, placed after the `<dl>` and before the identifier anchor. No change to
+`collection_property_rows()` itself: a collection with no members already contributed no
+membership row (its `.extend(member_row(...) for member in collection.members())` simply
+has nothing to iterate), so FR-017's "no empty membership row" half was already true —
+this task only adds the "says so" half.
+
+Verified: extended `tests/test_ui/test_views.py` first
+(`TestCollectionDetailEmptyState`, 3 tests: an empty unordered collection, an empty
+ordered one, and a populated one showing no such message) and watched the first two fail
+— `assert None is not None`, the message absent from the rendered page — before the
+template addition; the third passed immediately (right reason: nothing to prove there,
+matching T004's own precedent for asserting the absence of something never built). After
+implementation: `poetry run pytest tests/test_ui/test_views.py -q -k
+TestCollectionDetailEmptyState` — 3 passed. `poetry run pytest
+tests/test_ui/test_views.py -q -k TestCollectionDetail` — 12 passed (T011's 6, T012's 3,
+this task's 3), confirming the `context["rows"]` equality test from T011 stayed green
+unmodified despite the new context key. `poetry run pytest tests/test_ui/test_views.py
+tests/test_ui/test_templates.py -q` — 154 passed, 1 skipped (the pre-existing
+django-mvp#291 skip, untouched) — no regressions. `poetry run ruff check`, `poetry run
+ruff format --check` and `poetry run mypy` on the changed Python file — clean. `poetry
+run python manage.py makemigrations --check --dry-run` — no changes detected.
+
+Next: T014 (the collection page's query count does not grow with what it shows).
+Watch: nothing outstanding.
