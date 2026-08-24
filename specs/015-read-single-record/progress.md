@@ -242,3 +242,30 @@ mypy` on both changed files — clean. `poetry run python manage.py makemigratio
 Next: T008 (an unfilled property produces no row) and T009 (flat query count) — both [P],
 either order.
 Watch: nothing outstanding.
+
+## 2026-08-24T17:31:26Z · Implementer US1 · T008
+
+Did: no production change — this task is test-only per tasks.md's own file list. Added
+`TestConceptDetailUnfilledPropertiesProduceNoRow` to `tests/test_ui/test_views.py`,
+proving FR-018 through the rendered page rather than through `concept_property_rows()`
+directly (T003's `TestConceptPropertyRowsForABareConcept` already covers the function in
+isolation): a bare concept's `<dl>` carries exactly three `<dt>`s, in order — `rdf:type`,
+`skos:prefLabel`, `skos:inScheme` — and its identifier anchor (T007) is present, with no
+row for any property it does not carry.
+
+Verified: the test passed on first run, since T003 and T007 already built the behaviour
+it asserts — per craft-tdd, a claim of pre-existing coverage must be probed rather than
+just read. Probed by temporarily inserting a spurious extra row
+(`row("skos:definition", value="")`) at the front of `concept_property_rows()`'s return
+list and re-running: the test failed on the term-list mismatch, the right reason, before
+the probe was reverted (`git checkout -- controlled_vocabularies/ui/views.py`, confirmed
+clean via `git status`). `poetry run pytest tests/test_ui/test_views.py -q -k
+TestConceptDetailUnfilledPropertiesProduceNoRow` — 1 passed, both before and after the
+probe/revert cycle. `poetry run pytest tests/test_ui/test_views.py -q` — 127 passed, 1
+skipped (the pre-existing django-mvp#291 skip, untouched) — no regressions. `poetry run
+ruff check`, `poetry run ruff format --check` and `poetry run mypy` on the changed file
+— clean. `poetry run python manage.py makemigrations --check --dry-run` — no changes
+detected.
+
+Next: T009 (the page's query count does not grow with what it shows).
+Watch: nothing outstanding.
