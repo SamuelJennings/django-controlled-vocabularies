@@ -319,24 +319,54 @@
       "id": "US3",
       "priority": "P2",
       "issue": 159,
-      "worktree": null,
-      "status": "todo",
+      "worktree": "../dcv-015-us3",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T016",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py -q -k TestConceptDetailRelatedRecordIdentifiers",
+              "poetry run pytest tests/test_ui/test_views.py -q",
+              "poetry run ruff check tests/test_ui/test_views.py",
+              "poetry run ruff format --check tests/test_ui/test_views.py",
+              "poetry run mypy controlled_vocabularies/ui/views.py",
+              "poetry run python manage.py makemigrations --check --dry-run"
+            ]
+          }
         },
         {
           "id": "T017",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py -q -k TestConceptDetailBroaderNarrowerAndRelated",
+              "poetry run pytest tests/test_ui/test_views.py -q",
+              "poetry run ruff check",
+              "poetry run ruff format --check",
+              "poetry run mypy controlled_vocabularies/ui/views.py",
+              "poetry run python manage.py makemigrations --check --dry-run"
+            ]
+          }
         },
         {
           "id": "T018",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py -q -k TestConceptDetailVocabularyRowAndNoAncestorChain",
+              "poetry run pytest tests/test_ui/test_views.py -q -k test_a_five_level_chain",
+              "poetry run pytest -q",
+              "poetry run pre-commit run --all-files",
+              "poetry run mypy controlled_vocabularies/ui/views.py",
+              "poetry run python manage.py makemigrations --check --dry-run"
+            ]
+          }
         }
       ]
     },
