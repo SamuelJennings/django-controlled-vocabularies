@@ -582,6 +582,36 @@ reverse(
 The page is served by `ConceptDetailView`, in `controlled_vocabularies.ui.views`, and is subclassed
 the same way as the pages above.
 
+### A collection's own page
+
+Every collection has its own address too, at a distinct segment from a concept's — the same one
+`Collection.uri` composes — so a concept and a collection in one vocabulary may share a slug and
+both stay reachable. The page is a definition list built the same way a concept's is: its name
+(`skos:prefLabel`), a type row distinguishing an ordered collection from an unordered one
+(`skos:Collection` or `skos:OrderedCollection`), and its members under the membership property
+matching its kind — `skos:member` for an unordered collection, `skos:memberList` for an ordered
+one, whose members appear in the sequence their positions record. A collection holding no members
+says so in plain language rather than showing an empty membership row.
+
+Every record-valued row links to that record's own page here, exactly as a concept's does. The
+collection's own identifier is shown as a link the same way, and the page is equally **read-only**,
+carrying no editing or deletion control of its own.
+
+An address naming no collection is reported not found, and so is one whose vocabulary segment names
+no vocabulary — the two are not distinguished, exactly as for a concept's page.
+
+Reverse the page by name, passing the vocabulary's slug and the collection's own:
+
+```python
+reverse(
+    "controlled_vocabularies_ui:collection-detail",
+    kwargs={"slug": vocabulary.slug, "collection_slug": collection.slug},
+)
+```
+
+The page is served by `CollectionDetailView`, in `controlled_vocabularies.ui.views`, and is
+subclassed the same way as the pages above.
+
 ### Try it: the demo project
 
 The repository carries a runnable demo of the page above, wired the same way this section
