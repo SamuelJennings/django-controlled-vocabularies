@@ -2350,3 +2350,89 @@ class TestConceptDetailRelatedRecordIdentifiers:
 
         assert follow.status_code == 200
         assert follow.context["object"] == parent
+
+
+class TestConceptDetailBroaderNarrowerAndRelated:
+    """Broader, narrower and related concepts each appear as their own row, keyed by
+    the SKOS property naming the relation, and following one opens that concept's own
+    page. Narrower is derived — only the broader direction is ever stored
+    (015-read-single-record T017, FR-010, SC-003, US-3 scenarios 1, 2).
+    """
+
+    @staticmethod
+    def _links_for(soup, term):
+        return [dt.find_next_sibling("dd").find("a") for dt in soup.find_all("dt") if dt.get_text(strip=True) == term]
+
+    @pytest.mark.django_db
+    def test_a_broader_concept_appears_and_following_it_opens_its_page(self, client):
+        concept = ConceptFactory(label="Granite")
+        parent = ConceptFactory(scheme=concept.scheme, label="Igneous Rock")
+        concept.add_broader(parent)
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        (link,) = self._links_for(soup, BROADER_CURIE)
+
+        assert link.get_text(strip=True) == f"{parent.scheme.slug}:{parent.slug}"
+
+        follow = client.get(link["href"])
+
+        assert follow.status_code == 200
+        assert follow.context["object"] == parent
+
+    @pytest.mark.django_db
+    def test_a_concept_broader_of_two_others_shows_both_as_narrower_though_only_broader_is_stored(self, client):
+        parent = ConceptFactory(label="Igneous Rock")
+        child_one = ConceptFactory(scheme=parent.scheme, label="Granite")
+        child_two = ConceptFactory(scheme=parent.scheme, label="Basalt")
+        # Only the narrower->broader direction is ever asserted (FS-003/research R1);
+        # parent.narrower() reads it back from each child's own BROADER row.
+        child_one.add_broader(parent)
+        child_two.add_broader(parent)
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": parent.scheme.slug, "concept_slug": parent.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        narrower_links = self._links_for(soup, NARROWER_CURIE)
+        narrower_short_forms = {link.get_text(strip=True) for link in narrower_links}
+
+        assert narrower_short_forms == {
+            f"{child_one.scheme.slug}:{child_one.slug}",
+            f"{child_two.scheme.slug}:{child_two.slug}",
+        }
+
+        follow = client.get(narrower_links[0]["href"])
+
+        assert follow.status_code == 200
+        assert follow.context["object"] in (child_one, child_two)
+
+    @pytest.mark.django_db
+    def test_a_related_concept_appears_and_following_it_opens_its_page(self, client):
+        concept = ConceptFactory(label="Granite")
+        other = ConceptFactory(scheme=concept.scheme, label="Basalt")
+        concept.add_related(other)
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        (link,) = self._links_for(soup, RELATED_CURIE)
+
+        assert link.get_text(strip=True) == f"{other.scheme.slug}:{other.slug}"
+
+        follow = client.get(link["href"])
+
+        assert follow.status_code == 200
+        assert follow.context["object"] == other
