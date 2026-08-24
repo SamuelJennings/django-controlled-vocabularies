@@ -642,3 +642,19 @@ mypy, deptry).
 Next: none — Story US-3 (T016-T018) is complete. US-4 (T019-T020) is next in
 plan.md's story sequence, dispatched separately.
 Watch: nothing outstanding.
+
+### Amendment to T018, after review
+
+The three-level chain the task text asked for cannot fail its own assertion. The
+concept under test sits in the middle, so its broader concept is the chain's top
+and its narrower concept is the chain's bottom: a page that walked two steps in
+either direction would find nothing further to show and the exact-list assertion
+would hold anyway. The fixture is now five levels, which gives the second hop a
+real concept to surface in each direction.
+
+Probed by making the view emit each broader concept's own broader concept as a
+further row: `poetry run pytest tests/test_ui/test_views.py -q -k
+test_a_five_level_chain` — 1 failed, for the right reason (the surplus row).
+`controlled_vocabularies/ui/views.py` restored from a pre-edit copy and confirmed
+clean via `git diff --stat` (test file only). `poetry run pytest -q` — 1611
+passed, 1 skipped. `poetry run pre-commit run --all-files` — all hooks passed.
