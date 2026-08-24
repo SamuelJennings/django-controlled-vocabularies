@@ -14,6 +14,27 @@
        safe and nothing is interpolated into any attribute besides href #}
     <c-text size="xs" muted><a href="{{ vocabulary.uri }}" rel="noopener">{{ vocabulary.uri }}</a></c-text>
   </div>
+  {% if collections %}
+    {# T019, decisions.md D5/D7: named, separate from the concept list, an ordered
+       one distinguishable from an unordered one. An ordinary loop, not django-mvp's
+       list component — it declares a row-template attribute it never reads and
+       renders whatever row template is already in the surrounding context, so
+       pointing it at a collection row would silently render concept rows instead
+       (plan.md item 5). A vocabulary holding none renders no section at all — this
+       whole block is absent, not present and empty. Nothing here links to a
+       collection: its address is issue #142. #}
+    <div class="vocabulary-collections">
+      <c-text size="sm" bold>{% trans "Collections" %}</c-text>
+      <ul>
+        {% for collection in collections %}
+          <li>
+            {{ collection.name }}
+            {% if collection.ordered %}<c-badge>{% trans "Ordered" %}</c-badge>{% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
   {% if search_term %}
     {# The way back to the whole vocabulary (T015, FR-014): rendered here, in this
        package's own template, never as markup inside the empty-state heading or

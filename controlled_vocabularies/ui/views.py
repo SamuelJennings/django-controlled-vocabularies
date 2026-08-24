@@ -187,6 +187,10 @@ class VocabularyDetailView(MVPListView):
         context = super().get_context_data(**kwargs)
         context["vocabulary"] = self.vocabulary
         context["search_term"] = self.get_search_term()
+        # T019, decisions.md D5/D7: named and, where ordered, marked as such — never
+        # rendered through django-mvp's list component (plan.md item 5), and nothing
+        # here links to a collection (issue #142 owns its address).
+        context["collections"] = self.vocabulary.collections.order_by(Lower("name"))
         return context
 
     def get_empty_state_heading(self):

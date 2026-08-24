@@ -10,7 +10,12 @@ from django.utils import translation
 
 from controlled_vocabularies.models import ConceptLabel
 from controlled_vocabularies.ui.views import VocabularyDetailView, VocabularyListView
-from tests.factories import ConceptFactory, ConceptNoteFactory, ConceptSchemeFactory
+from tests.factories import (
+    ConceptFactory,
+    ConceptNoteFactory,
+    ConceptSchemeFactory,
+    collection_with_members,
+)
 
 ROW_TEMPLATE = "controlled_vocabularies/ui/conceptscheme_list_item.html"
 CONCEPT_ROW_TEMPLATE = "controlled_vocabularies/ui/concept_list_item.html"
@@ -1231,3 +1236,77 @@ class TestVocabularyDetailConceptSearchEmptyState:
         assert len(response.context["object_list"]) == 2
         hrefs = {a["href"] for a in soup.find_all("a", href=True)}
         assert detail_url not in hrefs
+
+
+class TestVocabularyDetailCollections:
+    """The vocabulary's collections are named, an ordered one is distinguishable from an
+    unordered one, and the section stands apart from the concept list (FR-011, FR-015,
+    User Story 4 scenarios 1-4; tasks.md T019, decisions.md D5/D7).
+    """
+
+    @pytest.mark.django_db
+    def test_each_collection_is_named(self, client):
+        scheme = ConceptSchemeFactory()
+        igneous, _ = collection_with_members(scheme=scheme, labels=("Granite",))
+        sedimentary, _ = collection_with_members(scheme=scheme, labels=("Sandstone",))
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}))
+        content = response.content.decode()
+
+        assert igneous.name in content
+        assert sedimentary.name in content
+
+    @pytest.mark.django_db
+    def test_an_ordered_collection_is_distinguishable_from_an_unordered_one(self, client):
+        scheme = ConceptSchemeFactory()
+        unordered, _ = collection_with_members(scheme=scheme, labels=("Granite",), ordered=False)
+        ordered, _ = collection_with_members(scheme=scheme, labels=("Basalt",), ordered=True)
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}))
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        rows = soup.find_all("li")
+        unordered_row = next(row for row in rows if unordered.name in row.get_text())
+        ordered_row = next(row for row in rows if ordered.name in row.get_text())
+
+        assert unordered_row.find(class_="badge") is None
+        assert ordered_row.find(class_="badge") is not None
+
+    @pytest.mark.django_db
+    def test_a_vocabulary_holding_no_collections_shows_no_collections_section(self, client):
+        scheme = ConceptSchemeFactory()
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}))
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        assert soup.find(class_="vocabulary-collections") is None
+
+    @pytest.mark.django_db
+    def test_collections_are_separate_from_the_concept_list_not_mixed_into_it(self, client):
+        scheme = ConceptSchemeFactory()
+        collection, members = collection_with_members(scheme=scheme, labels=("Granite", "Basalt"))
+        other_concept = ConceptFactory(scheme=scheme, label="Quartz")
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}))
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        collections_section = soup.find(class_="vocabulary-collections")
+        assert collections_section is not None
+        # A collection row is not a concept card - the two must not share markup.
+        assert collections_section.find(class_="card") is None
+        # The concept list is unaffected: every concept appears once, whether or not
+        # it belongs to a collection, and the collection's own name is not among them.
+        listed = {c.pk for c in response.context["object_list"]}
+        assert listed == {members[0].pk, members[1].pk, other_concept.pk}
+
+    @pytest.mark.django_db
+    def test_nothing_links_to_a_collection(self, client):
+        scheme = ConceptSchemeFactory()
+        collection, _ = collection_with_members(scheme=scheme)
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}))
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        hrefs = {a["href"] for a in soup.find_all("a", href=True)}
+        assert collection.local_url not in hrefs
+        assert not any("/collection/" in href for href in hrefs)
