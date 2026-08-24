@@ -117,3 +117,31 @@ and its D-015-02-driven per-relation `.select_related("scheme")` are judgment ca
 under decisions.md D2/D-015-02 respectively rather than settled by an explicit T003
 acceptance criterion — worth a second look at T004/T005 gate time if the rendered
 vocabulary row reads oddly next to a concept's own short form.
+
+## 2026-08-24T19:15:00Z · Implementer US1 · T004
+
+Did: gave `ConceptDetailView` its own template candidate
+(`controlled_vocabularies/ui/concept_detail.html`, falling back to django-mvp's
+`detail_view.html` — empty body — until T005 adds the file) and a
+`get_context_data()` that wires T003's `concept_property_rows(self.object,
+get_language())` into the page as `context["rows"]`. T000's `setup()`/`get_queryset()`
+already served 200 for a real concept and 404 for both flavours of unknown address, and
+already resolved a slug shared by two vocabularies to the right one, so this task adds
+no new resolution behaviour — only the row wiring and the read-only assertion.
+
+Verified: extended `tests/test_ui/test_views.py` first (`TestConceptDetail`, 6 tests)
+and watched them fail — 5 already passed against T000's resolution alone (right reason:
+nothing new to prove there), the 6th (`context["rows"]`) failed with `KeyError: 'rows'`
+before `get_context_data()` existed. After implementation: `poetry run pytest
+tests/test_ui/test_views.py -q -k TestConceptDetail` — 6 passed. The read-only test
+asserts both `response.context["directory"] == {}` (a context-level check, catching the
+upstream `show_<action>_action` defaults) and, on the rendered markup, no `re.compile("Edit")`
+/`re.compile("Delete")` text node — plan.md's stated risk mitigation for a default
+flipping in a 0.x dependency. `poetry run pytest tests/test_ui/test_views.py -q` — 119
+passed, 1 skipped (the pre-existing django-mvp#291 skip, untouched) — no regressions.
+`poetry run ruff check`, `poetry run ruff format --check` and `poetry run mypy` on both
+changed files — clean. `poetry run python manage.py makemigrations --check --dry-run` —
+no changes detected.
+
+Next: T005 (the `concept_detail.html` template renders `rows` inside one `<dl>`).
+Watch: nothing outstanding.
