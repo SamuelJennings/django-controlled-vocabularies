@@ -269,3 +269,39 @@ detected.
 
 Next: T009 (the page's query count does not grow with what it shows).
 Watch: nothing outstanding.
+
+## 2026-08-24T17:36:15Z · Implementer US1 · T009
+
+Did: gave `ConceptDetailView.get_queryset()` `.select_related("scheme")` and
+`.prefetch_related("labels", "concept_notes")` (plan.md Key design decision #7) — the
+two helpers (`alt_labels()`, `notes()` per `ConceptNote.Kind`) that read a cached related
+set via `.all()`, plus the vocabulary row's `concept.scheme` lookup, which
+`select_related` folds into the same query as the object fetch instead of a separate
+round trip. `broader()`/`narrower()`/`related()` build fresh querysets each call
+(decisions.md D-015-02) and stay untouched — a prefetch of those paths would never be
+read, and each already carries its own `.select_related("scheme")` from T003.
+
+Verified: first measured the *actual* per-property-growth invariant with an unmodified
+tree (a probe script under `tests/test_ui/`, discarded after) and found it already held
+— every relation/label/note helper here executes one query per *distinct call site*
+regardless of row count, so a growth-comparison test alone (add labels/notes/relations,
+assert the query count is unchanged) would pass identically with or without the
+optimisation and prove nothing about it. Added a second assertion carrying the actual
+weight: `assert baseline <= 8`, a real ceiling reflecting the optimised shape (vocabulary
+lookup + joined object fetch + two prefetches + three relation queries), which a
+`git checkout`-free run confirmed RED at 14 before the `get_queryset()` change (`assert
+14 <= 8`, the unoptimised baseline: one query for the vocabulary-row scheme lookup, one
+for `alt_labels`, seven for the note-kind loop, three for the relation querysets, plus
+the two initial lookups). Extended `tests/test_ui/test_views.py`
+(`TestConceptDetailQueryCount`, 1 test carrying both the ceiling and the growth
+invariant). After implementation: baseline fell to 7, both assertions pass. `poetry run
+pytest tests/test_ui/test_views.py -q -k TestConceptDetailQueryCount` — 1 passed.
+`poetry run pytest tests/test_ui/test_views.py -q` — 128 passed, 1 skipped (the
+pre-existing django-mvp#291 skip, untouched) — no regressions. `poetry run ruff check`,
+`poetry run ruff format --check` (both files needed `ruff format` to apply the
+multi-line queryset chain and the new test's own layout — reapplied and reverified
+clean) and `poetry run mypy` on both changed files — clean. `poetry run python manage.py
+makemigrations --check --dry-run` — no changes detected.
+
+Next: T010 (the README documents the concept page) — the last task of Story US-1.
+Watch: nothing outstanding.
