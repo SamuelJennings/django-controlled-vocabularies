@@ -2285,3 +2285,68 @@ class TestCollectionDetailQueryCount:
 
         with django_assert_num_queries(baseline):
             client.get(url)
+
+
+class TestConceptDetailRelatedRecordIdentifiers:
+    """A record-valued row's canonical identifier is reader-reachable text beside its
+    link, not only a ``title`` attribute a pointer alone would reveal, and an imported
+    record's identifier is its publisher's while the link still leads to this site's
+    page for it (015-read-single-record T016, FR-006, FR-007, SC-003, US-3 scenarios
+    3, 4).
+    """
+
+    @staticmethod
+    def _dd_for(soup, term):
+        dt = next(dt for dt in soup.find_all("dt") if dt.get_text(strip=True) == term)
+        return dt.find_next_sibling("dd")
+
+    @pytest.mark.django_db
+    def test_a_related_records_identifier_is_text_beside_its_link_not_a_title_attribute(self, client):
+        concept = ConceptFactory(label="Granite")
+        parent = ConceptFactory(scheme=concept.scheme, label="Igneous Rock")
+        concept.add_broader(parent)
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        broader_dd = self._dd_for(soup, BROADER_CURIE)
+        link = broader_dd.find("a")
+
+        assert link.get("title") is None
+        assert parent.uri in broader_dd.get_text()
+        assert link["href"] == reverse(
+            "controlled_vocabularies_ui:concept-detail",
+            kwargs={"slug": parent.scheme.slug, "concept_slug": parent.slug},
+        )
+
+    @pytest.mark.django_db
+    def test_an_imported_related_concept_shows_the_publishers_identifier_and_links_here(self, client):
+        concept = ConceptFactory(label="Granite")
+        parent = ConceptFactory(scheme=concept.scheme, label="Igneous Rock", external=True)
+        concept.add_broader(parent)
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        broader_dd = self._dd_for(soup, BROADER_CURIE)
+        link = broader_dd.find("a")
+
+        assert parent.static_uri.startswith("http://publisher.example.org/")
+        assert parent.static_uri in broader_dd.get_text()
+        assert link["href"] == reverse(
+            "controlled_vocabularies_ui:concept-detail",
+            kwargs={"slug": parent.scheme.slug, "concept_slug": parent.slug},
+        )
+
+        follow = client.get(link["href"])
+
+        assert follow.status_code == 200
+        assert follow.context["object"] == parent
