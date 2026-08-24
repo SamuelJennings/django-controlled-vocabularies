@@ -3,7 +3,7 @@
   "feature": "015-read-single-record",
   "branch": "015-read-single-record",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "DESIGN_REVIEW",
+  "state": "IMPLEMENT",
   "state_history": [
     {
       "state": "SPECIFY",
@@ -24,6 +24,11 @@
       "state": "DESIGN_REVIEW",
       "at": "2026-08-24T16:34:16Z",
       "note": "design review returned request_changes; plan and tasks corrected, T000 added, closing phase split out"
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-24T16:36:31Z",
+      "note": "design-review corrections applied and verified; foundational phase dispatching"
     }
   ],
   "gates": {
@@ -53,29 +58,29 @@
       "id": "US0",
       "priority": "P1",
       "issue": null,
-      "worktree": null,
-      "status": "todo",
+      "worktree": "../dcv-015-us0",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T000",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1
         },
         {
           "id": "T001",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1
         },
         {
           "id": "T002",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1
         },
         {
           "id": "T003",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1
         }
       ]
     },

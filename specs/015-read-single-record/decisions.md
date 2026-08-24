@@ -156,3 +156,16 @@ and note helpers keep the prefetch, because they do read `.all()`.
 `collections()` and `Collection.members()` return lists. For those the prefix comes from the record's
 own already-loaded scheme, which is sound precisely because D-015-01's constraints make every
 relation and every membership intra-vocabulary.
+
+## D-015-03 — The vocabulary row names the vocabulary, it does not abbreviate it
+
+**Decided (2026-08-24, foundational phase):** the `skos:inScheme` row shows the vocabulary's
+display name as its link text, with the vocabulary's own canonical identifier beside it and the
+link leading to the vocabulary's page. It is not written as a short form.
+
+FR-006 does not reach this row. A short form is a prefix naming the vocabulary that holds a record
+and a local part naming the record within it, and a vocabulary is held by nothing and has no local
+part of its own — the only short form available for it would be a bare prefix with an empty
+reference, which is legal syntax and reads as a truncation. FR-011 requires the row and fixes its
+property, not the form of its value, and FR-007's disclosure obligation is met either way: the
+canonical identifier is on the page as text and the link leads somewhere a reader can read.
