@@ -335,8 +335,17 @@
       "tasks": [
         {
           "id": "T019",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailCollections -v",
+              "poetry run pytest tests/test_ui/test_templates.py tests/test_ui/test_views.py -q"
+            ],
+            "tests": [
+              "tests/test_ui/test_views.py::TestVocabularyDetailCollections"
+            ]
+          }
         },
         {
           "id": "T020",
