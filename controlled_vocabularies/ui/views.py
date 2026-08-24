@@ -8,6 +8,8 @@ than adding another. The last two are detail views (plan.md Key design decision 
 share one thing: resolving the record named by an address scoped to its vocabulary.
 """
 
+from itertools import count
+
 from django.db.models import Count, F, OuterRef, Subquery
 from django.db.models.functions import Coalesce, Lower
 from django.http import Http404
@@ -187,6 +189,8 @@ def concept_property_rows(concept: Concept, language: str, default_language: str
     three empty.
     """
 
+    identifier_ids = count()
+
     def row(term: str, *, value=None, short_form=None, uri=None, href=None) -> dict:
         # term_uri (T031): the term is itself a CURIE, and a CURIE abbreviates a URI,
         # so a reader hovering one is asking what it stands for — the same disclosure
@@ -198,6 +202,11 @@ def concept_property_rows(concept: Concept, language: str, default_language: str
             "short_form": short_form,
             "uri": uri,
             "href": href,
+            # identifier_id (T029, corrected): property_row.html's hover disclosure
+            # names a hidden span by id via aria-describedby, so it needs one unique
+            # on the page — only a record-valued row (one carrying a uri) has a
+            # hidden span to name at all.
+            "identifier_id": f"identifier-{next(identifier_ids)}" if uri else None,
         }
 
     def localized_text(getter):
@@ -287,6 +296,8 @@ def collection_property_rows(collection: Collection) -> list[dict]:
     other record-valued row would otherwise carry singly.
     """
 
+    identifier_ids = count()
+
     def row(term: str, *, value=None, short_form=None, uri=None, href=None, entries=None) -> dict:
         # term_uri (T031): see concept_property_rows.row() — same disclosure, same reason.
         return {
@@ -297,6 +308,10 @@ def collection_property_rows(collection: Collection) -> list[dict]:
             "uri": uri,
             "href": href,
             "entries": entries,
+            # identifier_id (T029, corrected): see concept_property_rows.row() — same
+            # disclosure, same reason. The membership row itself carries entries, not
+            # its own uri, so it never claims one.
+            "identifier_id": f"identifier-{next(identifier_ids)}" if uri else None,
         }
 
     def member_entry(member: Concept) -> dict:
@@ -314,6 +329,9 @@ def collection_property_rows(collection: Collection) -> list[dict]:
                 "controlled_vocabularies_ui:concept-detail",
                 kwargs={"slug": collection.scheme.slug, "concept_slug": member.slug},
             ),
+            # identifier_id: shares identifier_ids with row() above, so a member's
+            # hidden span id never collides with the vocabulary row's own.
+            "identifier_id": f"identifier-{next(identifier_ids)}",
         }
 
     type_curie = ORDERED_COLLECTION_TYPE_CURIE if collection.ordered else COLLECTION_TYPE_CURIE

@@ -14,6 +14,21 @@ from django.urls import reverse
 
 from tests.factories import ConceptSchemeFactory
 
+def visible_text(element) -> str:
+    """``element``'s text with any ``.sr-only`` descendant's own text left out.
+
+    015-read-single-record T029 (corrected): a disclosed identifier's text is a real
+    node in the DOM, inside a visually-hidden span a screen reader still reads — so
+    ``get_text()`` alone cannot tell "printed for every reader" from "reachable only
+    behind a tooltip and an accessible description".
+    """
+    return "".join(
+        node
+        for node in element.find_all(string=True)
+        if node.find_parent(attrs={"class": "sr-only"}) is None
+    )
+
+
 TEMPLATES_ROOT = Path(__file__).resolve().parents[2] / "controlled_vocabularies" / "ui" / "templates"
 ROW_TEMPLATE_PATH = TEMPLATES_ROOT / "controlled_vocabularies" / "ui" / "conceptscheme_list_item.html"
 CONCEPT_ROW_TEMPLATE_PATH = TEMPLATES_ROOT / "controlled_vocabularies" / "ui" / "concept_list_item.html"
@@ -213,10 +228,10 @@ class TestPropertyRowRendersARecordValue:
         assert anchor.get_text(strip=True) == "geology:granite"
 
     def test_the_canonical_identifier_is_disclosed_on_hover_not_printed_as_text(self):
-        # 015-read-single-record T029, FR-007's later clarification: the full
-        # identifier is disclosed behind the short form (a tooltip, and a title
-        # attribute so a keyboard user and a screen reader reach it too), not printed
-        # as ordinary text beside it.
+        # 015-read-single-record T029 (corrected): the full identifier is disclosed
+        # behind the short form — a tooltip for a pointer, aria-describedby naming a
+        # hidden span for a keyboard user and a screen reader — not printed as
+        # ordinary text beside it, and never in a title attribute.
         html = render_to_string(
             PROPERTY_ROW_TEMPLATE,
             {
@@ -224,25 +239,33 @@ class TestPropertyRowRendersARecordValue:
                 "short_form": "geology:granite",
                 "uri": "http://publisher.example.org/concept/granite",
                 "href": "/vocabularies/geology/granite/",
+                "identifier_id": "identifier-0",
             },
         )
         soup = BeautifulSoup(html, "html.parser")
         dd = soup.find("dd")
 
-        assert "http://publisher.example.org/concept/granite" not in dd.get_text()
+        assert "http://publisher.example.org/concept/granite" not in visible_text(dd)
         anchor = dd.find("a")
-        assert anchor.get("title") == "http://publisher.example.org/concept/granite"
+        assert anchor.get("title") is None
+        hidden_span = soup.find(id=anchor.get("aria-describedby"))
+        assert hidden_span is not None
+        assert hidden_span.get_text() == "http://publisher.example.org/concept/granite"
 
 
 class TestPropertyRowRecordValueDisclosesIdentifierOnHover:
     """FR-007's later clarification: the full identifier is disclosed behind the short
     form, not printed inline beside it, and reachable by more than a pointer alone
-    (015-read-single-record T029). daisyUI's tooltip (class="tooltip" + data-tip)
-    carries the pointer reveal; a title attribute carrying the same value keeps it
-    reachable by keyboard focus and a screen reader.
+    (015-read-single-record T029, corrected). daisyUI's ``:has(:focus-visible)``
+    reveal rule matches a focused *descendant*, so the ``.tooltip`` element must wrap
+    the link rather than be a class on the anchor itself, or a keyboard user tabbing
+    to the link never sees it. The accessible description is carried by
+    ``aria-describedby`` naming a visually-hidden ``.sr-only`` span, not ``title`` —
+    ``aria-describedby`` wins where both are present, and a screen reader's
+    willingness to announce ``title`` is a per-user setting.
     """
 
-    def test_the_identifier_is_a_tooltip_and_a_title_not_printed_text(self):
+    def test_the_tooltip_wraps_the_link_rather_than_a_class_on_it(self):
         html = render_to_string(
             PROPERTY_ROW_TEMPLATE,
             {
@@ -250,6 +273,7 @@ class TestPropertyRowRecordValueDisclosesIdentifierOnHover:
                 "short_form": "geology:granite",
                 "uri": "http://publisher.example.org/concept/granite",
                 "href": "/vocabularies/geology/granite/",
+                "identifier_id": "identifier-0",
             },
         )
         soup = BeautifulSoup(html, "html.parser")
@@ -257,10 +281,23 @@ class TestPropertyRowRecordValueDisclosesIdentifierOnHover:
         anchor = dd.find("a", href="/vocabularies/geology/granite/")
 
         assert anchor is not None
-        assert "tooltip" in anchor.get("class", [])
-        assert anchor.get("data-tip") == "http://publisher.example.org/concept/granite"
-        assert anchor.get("title") == "http://publisher.example.org/concept/granite"
-        assert "http://publisher.example.org/concept/granite" not in dd.get_text()
+        # The broken arrangement this replaces put class="tooltip" on the anchor
+        # itself — asserting only that data-tip exists somewhere would still pass
+        # against that shape, so the anchor's own class is asserted clean of it.
+        assert "tooltip" not in anchor.get("class", [])
+        assert anchor.get("title") is None
+
+        wrapper = anchor.find_parent("span", class_="tooltip")
+        assert wrapper is not None
+        assert wrapper.get("data-tip") == "http://publisher.example.org/concept/granite"
+
+        hidden_id = anchor.get("aria-describedby")
+        assert hidden_id
+        hidden_span = wrapper.find("span", id=hidden_id)
+        assert hidden_span is not None
+        assert "sr-only" in hidden_span.get("class", [])
+        assert hidden_span.get_text() == "http://publisher.example.org/concept/granite"
+        assert "http://publisher.example.org/concept/granite" not in visible_text(dd)
 
 
 def _tailwind_selector(class_token: str) -> str:

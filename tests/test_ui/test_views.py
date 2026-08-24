@@ -51,6 +51,21 @@ ROW_TEMPLATE = "controlled_vocabularies/ui/conceptscheme_list_item.html"
 CONCEPT_ROW_TEMPLATE = "controlled_vocabularies/ui/concept_list_item.html"
 
 
+def visible_text(element) -> str:
+    """``element``'s text with any ``.sr-only`` descendant's own text left out.
+
+    015-read-single-record T029 (corrected): a disclosed identifier's text is a real
+    node in the DOM, inside a visually-hidden span a screen reader still reads — so
+    ``get_text()`` alone cannot tell "printed for every reader" from "reachable only
+    behind a tooltip and an accessible description".
+    """
+    return "".join(
+        node
+        for node in element.find_all(string=True)
+        if node.find_parent(attrs={"class": "sr-only"}) is None
+    )
+
+
 class TestVocabularyList:
     """Every vocabulary the site holds appears exactly once (FR-001, FR-012, User Story 1 scenario 1)."""
 
@@ -2505,13 +2520,15 @@ class TestCollectionDetailIdentifierPosition:
 
 class TestCollectionDetailMemberIdentifierDisclosedOnHover:
     """T028's member entries get the same hover disclosure property_row.html's
-    short-form rows do, not the identifier printed as inline text
-    (015-read-single-record T029).
+    short-form rows do, not the identifier printed as inline text, and never in a
+    title attribute (015-read-single-record T029, corrected): a ``.tooltip`` span
+    wraps each member's link, and ``aria-describedby`` names a hidden span per
+    member, distinct from every other member's on the same page.
     """
 
     @pytest.mark.django_db
-    def test_each_members_identifier_is_a_tooltip_and_a_title_not_printed_text(self, client):
-        collection, (member,) = collection_with_members(labels=("Granite",))
+    def test_each_members_identifier_is_disclosed_by_a_wrapping_tooltip_not_title(self, client):
+        collection, members = collection_with_members()
 
         response = client.get(
             reverse(
@@ -2522,13 +2539,30 @@ class TestCollectionDetailMemberIdentifierDisclosedOnHover:
         soup = BeautifulSoup(response.content, "html.parser")
         member_dt = next(dt for dt in soup.find_all("dt") if dt.get_text(strip=True) == MEMBER_CURIE)
         dd = member_dt.find_next_sibling("dd")
-        anchor = dd.find("a")
+        anchors = dd.find_all("a")
 
-        assert anchor is not None
-        assert "tooltip" in anchor.get("class", [])
-        assert anchor.get("data-tip") == member.uri
-        assert anchor.get("title") == member.uri
-        assert member.uri not in dd.get_text()
+        assert len(anchors) == len(members)
+        seen_hidden_ids = set()
+        for anchor, member in zip(anchors, members, strict=True):
+            assert "tooltip" not in anchor.get("class", [])
+            assert anchor.get("title") is None
+
+            wrapper = anchor.find_parent("span", class_="tooltip")
+            assert wrapper is not None
+            assert wrapper.get("data-tip") == member.uri
+
+            hidden_id = anchor.get("aria-describedby")
+            assert hidden_id
+            assert hidden_id not in seen_hidden_ids
+            seen_hidden_ids.add(hidden_id)
+
+            hidden_span = wrapper.find("span", id=hidden_id)
+            assert hidden_span is not None
+            assert "sr-only" in hidden_span.get("class", [])
+            assert hidden_span.get_text() == member.uri
+
+        dd_text = visible_text(dd)
+        assert all(member.uri not in dd_text for member in members)
 
 
 class TestCollectionDetailEmptyState:
@@ -2618,11 +2652,12 @@ class TestCollectionDetailQueryCount:
 
 class TestConceptDetailRelatedRecordIdentifiers:
     """A record-valued row's canonical identifier is disclosed on hover behind its
-    short form — carried as a tooltip and as a ``title`` attribute, never printed as
-    ordinary text — so a pointer, a keyboard and a screen reader each reach it, and an
-    imported record's identifier is its publisher's while the link still leads to this
-    site's page for it (015-read-single-record T016, T029, FR-006, FR-007, SC-003,
-    US-3 scenarios 3, 4).
+    short form — a ``.tooltip`` span wrapping the link, and ``aria-describedby``
+    naming a hidden span, never a ``title`` attribute — so a pointer, a keyboard and a
+    screen reader each reach it, and an imported record's identifier is its
+    publisher's while the link still leads to this site's page for it
+    (015-read-single-record T016, T029 corrected, FR-006, FR-007, SC-003, US-3
+    scenarios 3, 4).
     """
 
     @staticmethod
@@ -2631,7 +2666,7 @@ class TestConceptDetailRelatedRecordIdentifiers:
         return dt.find_next_sibling("dd")
 
     @pytest.mark.django_db
-    def test_a_related_records_identifier_is_a_tooltip_and_a_title_not_printed_text(self, client):
+    def test_a_related_records_identifier_is_disclosed_by_a_wrapping_tooltip_not_title(self, client):
         concept = ConceptFactory(label="Granite")
         parent = ConceptFactory(scheme=concept.scheme, label="Igneous Rock")
         concept.add_broader(parent)
@@ -2646,9 +2681,18 @@ class TestConceptDetailRelatedRecordIdentifiers:
         broader_dd = self._dd_for(soup, BROADER_CURIE)
         link = broader_dd.find("a")
 
-        assert link.get("title") == parent.uri
-        assert link.get("data-tip") == parent.uri
-        assert parent.uri not in broader_dd.get_text()
+        assert "tooltip" not in link.get("class", [])
+        assert link.get("title") is None
+
+        wrapper = link.find_parent("span", class_="tooltip")
+        assert wrapper is not None
+        assert wrapper.get("data-tip") == parent.uri
+
+        hidden_span = wrapper.find("span", id=link.get("aria-describedby"))
+        assert hidden_span is not None
+        assert "sr-only" in hidden_span.get("class", [])
+        assert hidden_span.get_text() == parent.uri
+        assert parent.uri not in visible_text(broader_dd)
         assert link["href"] == reverse(
             "controlled_vocabularies_ui:concept-detail",
             kwargs={"slug": parent.scheme.slug, "concept_slug": parent.slug},
@@ -2669,11 +2713,14 @@ class TestConceptDetailRelatedRecordIdentifiers:
         soup = BeautifulSoup(response.content, "html.parser")
         broader_dd = self._dd_for(soup, BROADER_CURIE)
         link = broader_dd.find("a")
+        wrapper = link.find_parent("span", class_="tooltip")
 
         assert parent.static_uri.startswith("http://publisher.example.org/")
-        assert link.get("title") == parent.static_uri
-        assert link.get("data-tip") == parent.static_uri
-        assert parent.static_uri not in broader_dd.get_text()
+        assert link.get("title") is None
+        assert wrapper.get("data-tip") == parent.static_uri
+        hidden_span = wrapper.find("span", id=link.get("aria-describedby"))
+        assert hidden_span.get_text() == parent.static_uri
+        assert parent.static_uri not in visible_text(broader_dd)
         assert link["href"] == reverse(
             "controlled_vocabularies_ui:concept-detail",
             kwargs={"slug": parent.scheme.slug, "concept_slug": parent.slug},
@@ -2683,6 +2730,35 @@ class TestConceptDetailRelatedRecordIdentifiers:
 
         assert follow.status_code == 200
         assert follow.context["object"] == parent
+
+    @pytest.mark.django_db
+    def test_two_related_records_hidden_identifier_spans_have_distinct_ids(self, client):
+        # The correction to T029: an id derived carelessly (e.g. from the short form
+        # alone) could collide across rows. Two distinct related records on the same
+        # page is the case that would expose a collision.
+        concept = ConceptFactory(label="Granite")
+        broader = ConceptFactory(scheme=concept.scheme, label="Igneous Rock")
+        related = ConceptFactory(scheme=concept.scheme, label="Basalt")
+        concept.add_broader(broader)
+        concept.add_related(related)
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        broader_link = self._dd_for(soup, BROADER_CURIE).find("a")
+        related_link = self._dd_for(soup, RELATED_CURIE).find("a")
+
+        broader_id = broader_link.get("aria-describedby")
+        related_id = related_link.get("aria-describedby")
+
+        assert broader_id and related_id
+        assert broader_id != related_id
+        assert soup.find(id=broader_id).get_text() == broader.uri
+        assert soup.find(id=related_id).get_text() == related.uri
 
 
 class TestConceptDetailBroaderNarrowerAndRelated:
@@ -2980,10 +3056,11 @@ class TestConceptAndCollectionValuesReachTheReaderEscaped:
         assert "<script>alert(1)</script>" in soup.find("dl").get_text()
 
     @pytest.mark.django_db
-    def test_a_related_records_publisher_supplied_identifier_is_escaped_in_its_tooltip_and_title(self, client):
-        # 015-read-single-record T029: the identifier now reaches two attributes it
-        # did not before, title and data-tip — a quote inside it would break out of
-        # either the same way it would have broken out of href.
+    def test_a_related_records_publisher_supplied_identifier_is_escaped_in_its_tooltip_and_hidden_span(self, client):
+        # 015-read-single-record T029 (corrected): the identifier now reaches the
+        # wrapping span's data-tip attribute and a hidden span's text — a quote or
+        # markup inside it would break out of either the same way it would have
+        # broken out of href.
         concept = ConceptFactory(label="Granite")
         parent = ConceptFactory(scheme=concept.scheme, label="Igneous Rock", external=True)
         parent.static_uri = 'http://publisher.example.org/x"><script>alert(1)</script>'
@@ -2999,9 +3076,12 @@ class TestConceptAndCollectionValuesReachTheReaderEscaped:
         soup = BeautifulSoup(response.content, "html.parser")
 
         assert soup.find("script", string=self._INJECTED_SCRIPT) is None
-        link = soup.find("a", attrs={"data-tip": parent.static_uri})
-        assert link is not None
-        assert link.get("title") == parent.static_uri
+        wrapper = soup.find("span", attrs={"data-tip": parent.static_uri})
+        assert wrapper is not None
+        link = wrapper.find("a")
+        hidden_span = wrapper.find("span", id=link.get("aria-describedby"))
+        assert hidden_span is not None
+        assert hidden_span.get_text() == parent.static_uri
 
     @pytest.mark.django_db
     def test_a_collections_name_containing_markup_is_escaped_on_the_collection_page(self, client):
