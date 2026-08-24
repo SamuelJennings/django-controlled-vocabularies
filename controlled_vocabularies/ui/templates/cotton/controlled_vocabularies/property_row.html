@@ -1,0 +1,27 @@
+<c-vars term value short_form uri href />
+{% comment %}
+  015-read-single-record T002: one term/value pair, rendered as a <dt>/<dd> — a caller
+  wraps a run of these in a <dl>. Namespaced at cotton/controlled_vocabularies/ (plan.md
+  Key design decision #5): a component at cotton/data_field.html in this package would
+  silently shadow django-mvp's own for every project that installs both.
+
+  Composes django-mvp's own <c-link>/<c-text> for everything inside the row; the two
+  literal classes below are copied verbatim from django-mvp's own cotton/data_field.html
+  (this package ships no stylesheet of its own, and django-mvp's is prebuilt from
+  django-mvp's own templates, so a class this package invented would do nothing, silently
+  — tests/test_ui/test_templates.py proves both are in the shipped stylesheet).
+
+  short_form/uri/href are given together for a record-valued row (plan.md Key design
+  decision #6): the short form is the in-site link's own text, never local_url, and the
+  canonical identifier is carried as ordinary text beside it — a title attribute would be
+  invisible to a keyboard user and unreliable for a screen reader (FR-007).
+{% endcomment %}
+<dt class="text-base-content/60 text-xs uppercase font-semibold">{{ term }}</dt>
+<dd class="mb-3">
+  {% if short_form %}
+    <c-link href="{{ href }}" text="{{ short_form }}" />
+    <c-text size="xs" muted tight>{{ uri }}</c-text>
+  {% else %}
+    {{ value }}
+  {% endif %}
+</dd>

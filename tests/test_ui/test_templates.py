@@ -1,17 +1,26 @@
 """Tests proving the ui templates carry no vocabulary link and no untranslated reader-visible
-text (T009, FR-013, decisions.md D1, and the repo's every-string-translated convention).
+text (T009, FR-013, decisions.md D1, and the repo's every-string-translated convention), and,
+from 015-read-single-record T002, the ``property_row`` component's own rendering and CSS.
 """
 
 import re
 from pathlib import Path
 
+import mvp
 import pytest
+from bs4 import BeautifulSoup
+from django.template.loader import render_to_string
 from django.urls import reverse
 
 from tests.factories import ConceptSchemeFactory
 
 TEMPLATES_ROOT = Path(__file__).resolve().parents[2] / "controlled_vocabularies" / "ui" / "templates"
 ROW_TEMPLATE_PATH = TEMPLATES_ROOT / "controlled_vocabularies" / "ui" / "conceptscheme_list_item.html"
+PROPERTY_ROW_TEMPLATE = "cotton/controlled_vocabularies/property_row.html"
+PROPERTY_ROW_TEMPLATE_PATH = TEMPLATES_ROOT / "cotton" / "controlled_vocabularies" / "property_row.html"
+# mvp is a namespace package (no __init__.py), so it carries no __file__ — its own
+# __path__ is the only way to locate the package directory.
+MVP_CSS_PATH = Path(mvp.__path__[0]) / "static" / "css" / "django-mvp.css"
 
 # Django syntax that is already known-safe and is stripped before the reader-visible-text scan:
 # a developer comment, a blocktrans block (translated, content and all), any remaining tag
@@ -89,3 +98,104 @@ class TestEveryShippedTemplateWrapsReaderVisibleTextInATranslationTag:
     def test_no_bare_reader_visible_text_outside_a_translation_tag(self, path):
         fragments = bare_reader_visible_text_nodes(path.read_text())
         assert fragments == []
+
+
+class TestPropertyRowRendersAPlainValue:
+    """A term and a plain value render as a ``<dt>``/``<dd>`` pair (T002, FR-016)."""
+
+    def test_emits_a_dt_dd_pair_carrying_the_term_and_the_value(self):
+        html = render_to_string(
+            PROPERTY_ROW_TEMPLATE,
+            {"term": "skos:definition", "value": "A coarse-grained igneous rock."},
+        )
+        soup = BeautifulSoup(html, "html.parser")
+
+        dt = soup.find("dt")
+        dd = soup.find("dd")
+        assert dt is not None
+        assert dd is not None
+        assert dt.get_text(strip=True) == "skos:definition"
+        assert "A coarse-grained igneous rock." in dd.get_text()
+        # A plain value never composes a link — that only happens for a record-valued row.
+        assert dd.find("a") is None
+
+
+class TestPropertyRowRendersARecordValue:
+    """A record-valued row also carries the record's short form, its canonical identifier
+    as reader-reachable text, and its in-site link (T002, FR-016, plan.md Key design
+    decision #6). ``href`` is a plain string here, exactly as :func:`render_to_string`
+    receives one in isolation — reversing it through the app's own namespace is the
+    caller's job (T003), not this component's.
+    """
+
+    def test_renders_the_short_form_as_the_in_site_links_own_text(self):
+        html = render_to_string(
+            PROPERTY_ROW_TEMPLATE,
+            {
+                "term": "skos:broader",
+                "short_form": "geology:granite",
+                "uri": "http://publisher.example.org/concept/granite",
+                "href": "/vocabularies/geology/granite/",
+            },
+        )
+        soup = BeautifulSoup(html, "html.parser")
+
+        anchor = soup.find("dd").find("a", href="/vocabularies/geology/granite/")
+        assert anchor is not None
+        assert anchor.get_text(strip=True) == "geology:granite"
+
+    def test_the_canonical_identifier_is_reader_reachable_text_not_a_title_attribute(self):
+        # FR-007: a title attribute is invisible to a keyboard user and unreliable for a
+        # screen reader, so the identifier must appear as ordinary text, not tucked away
+        # in an attribute a pointer is needed to reveal.
+        html = render_to_string(
+            PROPERTY_ROW_TEMPLATE,
+            {
+                "term": "skos:broader",
+                "short_form": "geology:granite",
+                "uri": "http://publisher.example.org/concept/granite",
+                "href": "/vocabularies/geology/granite/",
+            },
+        )
+        soup = BeautifulSoup(html, "html.parser")
+        dd = soup.find("dd")
+
+        assert "http://publisher.example.org/concept/granite" in dd.get_text()
+        for element in dd.find_all(True):
+            assert element.get("title") is None
+
+
+def _tailwind_selector(class_token: str) -> str:
+    """The class selector as the shipped stylesheet actually spells it: Tailwind
+    backslash-escapes a colon or a slash inside a compiled class name (memory: "built CSS
+    escapes the colon" — the same is true of the slash a class like
+    ``text-base-content/60`` carries), so a plain ``.token{`` search returns a false zero
+    for a class that is plainly present.
+    """
+    escaped = class_token.replace("/", r"\/").replace(":", r"\:")
+    return f".{escaped}{{"
+
+
+class TestPropertyRowClasses:
+    """Every class the component names by hand is present in django-mvp's own shipped
+    stylesheet (T002) — this package ships none of its own, and django-mvp's is prebuilt
+    from django-mvp's own templates, so an invented class would be silently inert.
+    """
+
+    def test_every_class_the_component_names_is_present_in_the_shipped_stylesheet(self):
+        source = PROPERTY_ROW_TEMPLATE_PATH.read_text()
+        css = MVP_CSS_PATH.read_text()
+
+        tokens = {token for group in re.findall(r'class="([^"]*)"', source) for token in group.split()}
+
+        assert tokens, "the component names no class at all — nothing for this test to prove"
+        for token in tokens:
+            assert _tailwind_selector(token) in css, f"{token!r} is not in the shipped stylesheet"
+
+    def test_the_presence_check_discriminates_rather_than_passing_regardless(self):
+        # A control class the build has no reason to emit: this package's own component
+        # could never legitimately name it, so its absence proves the check above tells a
+        # real class from an absent one instead of matching anything handed to it — which
+        # is exactly the failure mode an invented class would hit in silence otherwise.
+        css = MVP_CSS_PATH.read_text()
+        assert _tailwind_selector("cv-property-row-invented-class") not in css
