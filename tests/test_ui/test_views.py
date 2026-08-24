@@ -2436,3 +2436,62 @@ class TestConceptDetailBroaderNarrowerAndRelated:
 
         assert follow.status_code == 200
         assert follow.context["object"] == other
+
+
+class TestConceptDetailVocabularyRowAndNoAncestorChain:
+    """A record's page shows the vocabulary that holds it, keyed by its own SKOS
+    property, and no further step of the broader/narrower hierarchy than the one
+    immediate neighbour FR-010 requires in each direction (015-read-single-record
+    T018, FR-011).
+    """
+
+    @pytest.mark.django_db
+    def test_the_vocabulary_row_appears_and_following_it_opens_the_vocabularys_page(self, client):
+        concept = ConceptFactory(label="Granite")
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        scheme_dt = next(dt for dt in soup.find_all("dt") if dt.get_text(strip=True) == IN_SCHEME_CURIE)
+        link = scheme_dt.find_next_sibling("dd").find("a")
+
+        assert link.get_text(strip=True) == concept.scheme.name
+
+        follow = client.get(link["href"])
+
+        assert follow.status_code == 200
+        assert follow.context["vocabulary"] == concept.scheme
+
+    @pytest.mark.django_db
+    def test_a_three_level_chain_names_only_the_middle_concepts_immediate_neighbours(self, client):
+        grandparent = ConceptFactory(label="Rock")
+        parent = ConceptFactory(scheme=grandparent.scheme, label="Igneous Rock")
+        child = ConceptFactory(scheme=grandparent.scheme, label="Granite")
+        parent.add_broader(grandparent)
+        child.add_broader(parent)
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": parent.scheme.slug, "concept_slug": parent.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        relation_pairs = [
+            (dt.get_text(strip=True), dt.find_next_sibling("dd").find("a").get_text(strip=True))
+            for dt in soup.find_all("dt")
+            if dt.get_text(strip=True) in (BROADER_CURIE, NARROWER_CURIE)
+        ]
+
+        # Exactly one immediate neighbour in each direction — not grandparent's own
+        # broader concept (it has none here, but nothing walks further to look) and
+        # not child's own narrower concept (it has none here either): the middle
+        # concept's own broader()/narrower() calls are each one hop, full stop.
+        assert relation_pairs == [
+            (BROADER_CURIE, f"{grandparent.scheme.slug}:{grandparent.slug}"),
+            (NARROWER_CURIE, f"{child.scheme.slug}:{child.slug}"),
+        ]
