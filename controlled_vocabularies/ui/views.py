@@ -381,6 +381,13 @@ class CollectionDetailView(MVPDetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["rows"] = collection_property_rows(self.object)
+        # T013, FR-017: no member row appears for an empty collection (its rows
+        # loop simply has nothing to append), so "says it holds nothing" needs its
+        # own flag rather than a template check for an absent row — computed from
+        # the already-built rows, not a second .members() call.
+        context["collection_has_members"] = any(
+            row["term"] in (MEMBER_CURIE, MEMBER_LIST_CURIE) for row in context["rows"]
+        )
         return context
 
 

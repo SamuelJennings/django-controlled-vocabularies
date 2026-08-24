@@ -2200,3 +2200,57 @@ class TestCollectionDetailNameTypeAndMembers:
 
         assert identifier_link is not None
         assert collection.uri in identifier_link.get_text(strip=True)
+
+
+class TestCollectionDetailEmptyState:
+    """A collection holding nothing says so, and shows no empty membership row
+    (015-read-single-record T013, FR-017, US-2 scenario 3).
+    """
+
+    @pytest.mark.django_db
+    def test_an_unordered_collection_with_no_members_says_it_holds_nothing(self, client):
+        collection = CollectionFactory(name="Rock Types", ordered=False)
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:collection-detail",
+                kwargs={"slug": collection.scheme.slug, "collection_slug": collection.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        terms = [dt.get_text(strip=True) for dt in soup.find_all("dt")]
+
+        assert MEMBER_CURIE not in terms
+        assert MEMBER_LIST_CURIE not in terms
+        assert soup.find(string=re.compile("holds no members")) is not None
+
+    @pytest.mark.django_db
+    def test_an_ordered_collection_with_no_members_says_so_too(self, client):
+        collection = CollectionFactory(name="Rock Types", ordered=True)
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:collection-detail",
+                kwargs={"slug": collection.scheme.slug, "collection_slug": collection.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        terms = [dt.get_text(strip=True) for dt in soup.find_all("dt")]
+
+        assert MEMBER_CURIE not in terms
+        assert MEMBER_LIST_CURIE not in terms
+        assert soup.find(string=re.compile("holds no members")) is not None
+
+    @pytest.mark.django_db
+    def test_a_collection_with_members_shows_no_such_message(self, client):
+        collection, _members = collection_with_members(labels=("Granite",))
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:collection-detail",
+                kwargs={"slug": collection.scheme.slug, "collection_slug": collection.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        assert soup.find(string=re.compile("holds no members")) is None
