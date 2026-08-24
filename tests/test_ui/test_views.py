@@ -1836,3 +1836,60 @@ class TestConceptDetailShowsWhatIsRecorded:
 
         assert (LABEL_CURIES[ConceptLabel.Kind.ALTERNATIVE], "granitic rock") in pairs
         assert "granate" not in content
+
+
+class TestConceptDetailValuesInTheReadingLanguage:
+    """A value is shown in the language being read, falling back to the vocabulary's
+    own default — the rule ``Concept.display_label()`` already implements for the
+    preferred label, applied here to notes and alternative labels too
+    (015-read-single-record T006, FR-005, US-1 scenario 3).
+    """
+
+    @staticmethod
+    def _dl_values(response):
+        soup = BeautifulSoup(response.content, "html.parser")
+        return [dd.get_text(strip=True) for dd in soup.find_all("dd")]
+
+    @pytest.mark.django_db
+    def test_values_present_in_both_languages_show_the_reading_languages_ones(self, client):
+        concept = ConceptFactory(label="Granite")
+        concept.add_label(language="de", kind=ConceptLabel.Kind.PREFERRED, text="Kristallgestein")
+        concept.add_label(language="en", kind=ConceptLabel.Kind.ALTERNATIVE, text="granite stone")
+        concept.add_label(language="de", kind=ConceptLabel.Kind.ALTERNATIVE, text="Granitstein")
+        ConceptNoteFactory(concept=concept, language="en", kind=ConceptNote.Kind.DEFINITION, value="An igneous rock.")
+        ConceptNoteFactory(
+            concept=concept, language="de", kind=ConceptNote.Kind.DEFINITION, value="Ein Eruptivgestein."
+        )
+        url = reverse(
+            "controlled_vocabularies_ui:concept-detail",
+            kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+        )
+
+        with translation.override("de"):
+            response = client.get(url)
+
+        values = self._dl_values(response)
+        assert "Kristallgestein" in values
+        assert "Granitstein" in values
+        assert "Ein Eruptivgestein." in values
+        assert concept.label not in values
+        assert "granite stone" not in values
+        assert "An igneous rock." not in values
+
+    @pytest.mark.django_db
+    def test_a_concept_with_no_value_in_the_reading_language_falls_back_to_the_vocabularys_default(self, client):
+        concept = ConceptFactory(label="Granite")
+        concept.add_label(language="en", kind=ConceptLabel.Kind.ALTERNATIVE, text="granite stone")
+        ConceptNoteFactory(concept=concept, language="en", kind=ConceptNote.Kind.DEFINITION, value="An igneous rock.")
+        url = reverse(
+            "controlled_vocabularies_ui:concept-detail",
+            kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+        )
+
+        with translation.override("de"):
+            response = client.get(url)
+
+        values = self._dl_values(response)
+        assert concept.label in values
+        assert "granite stone" in values
+        assert "An igneous rock." in values

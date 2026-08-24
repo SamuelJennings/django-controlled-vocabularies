@@ -152,9 +152,9 @@ class VocabularyListView(MVPListView):
         return None
 
 
-def concept_property_rows(concept: Concept, language: str) -> list[dict]:
+def concept_property_rows(concept: Concept, language: str, default_language: str | None = None) -> list[dict]:
     """The fixed-order rows a concept's own page renders (015-read-single-record T003,
-    FR-003, FR-004, FR-006, FR-018).
+    T006, FR-003, FR-004, FR-005, FR-006, FR-018).
 
     One row per SKOS statement the concept makes about itself, in the order plan.md Key
     design decision #4 fixes: type, preferred label, alternative labels, notes (in the
@@ -163,11 +163,17 @@ def concept_property_rows(concept: Concept, language: str) -> list[dict]:
     membership is never a row here: it is a statement *other* records make about this
     one, not one this concept makes about itself, and sits outside this list entirely
     (decisions.md D4). A hidden label is never read at all (FR-004). A property with no
-    value in ``language`` contributes no row, so a template built over this needs no
-    emptiness logic of its own.
+    value in ``language``, and none in ``default_language`` either, contributes no row,
+    so a template built over this needs no emptiness logic of its own.
 
-    ``language`` is taken exactly as given — any fallback to the vocabulary's default
-    (decisions.md D6) is the caller's decision, not this function's.
+    ``language`` is the language being read. Whether a value absent in ``language``
+    falls back to ``default_language`` (FR-005) is the caller's decision, not this
+    function's own (decisions.md D6): passing ``default_language=None``, the default,
+    requests no fallback at all — a property absent in ``language`` contributes no row,
+    full stop, which is what lets a caller ask what a concept holds in exactly one
+    language. Passing the vocabulary's own effective default language opts every
+    property into the same per-value fallback :meth:`Concept.display_label` already
+    applies to the preferred label alone.
 
     Each row is a plain dict of ``term``/``value``/``short_form``/``uri``/``href`` — the
     same five names the ``property_row`` cotton component takes (T002). A record-valued
@@ -178,6 +184,18 @@ def concept_property_rows(concept: Concept, language: str) -> list[dict]:
 
     def row(term: str, *, value=None, short_form=None, uri=None, href=None) -> dict:
         return {"term": term, "value": value, "short_form": short_form, "uri": uri, "href": href}
+
+    def localized_text(getter):
+        value = getter(language)
+        if not value and default_language and default_language != language:
+            value = getter(default_language)
+        return value
+
+    def localized_list(getter):
+        values = getter(language)
+        if not values and default_language and default_language != language:
+            values = getter(default_language)
+        return values
 
     def record_row(term: str, record: Concept) -> dict:
         # The short form's prefix comes from the vocabulary holding the record
@@ -196,14 +214,19 @@ def concept_property_rows(concept: Concept, language: str) -> list[dict]:
 
     rows = [row(TYPE_CURIE, value=CONCEPT_TYPE_CURIE)]
 
-    preferred_label = concept.preferred_label(language)
+    preferred_label = localized_text(concept.preferred_label)
     if preferred_label:
         rows.append(row(LABEL_CURIES[ConceptLabel.Kind.PREFERRED], value=preferred_label))
 
-    rows.extend(row(LABEL_CURIES[ConceptLabel.Kind.ALTERNATIVE], value=text) for text in concept.alt_labels(language))
+    rows.extend(
+        row(LABEL_CURIES[ConceptLabel.Kind.ALTERNATIVE], value=text) for text in localized_list(concept.alt_labels)
+    )
 
     for kind in ConceptNote.Kind:
-        rows.extend(row(NOTE_CURIES[kind], value=value) for value in concept.notes(language, kind=kind))
+        rows.extend(
+            row(NOTE_CURIES[kind], value=value)
+            for value in localized_list(lambda lang, kind=kind: concept.notes(lang, kind=kind))
+        )
 
     # D-015-02: none of these three is prefetchable (each builds a fresh queryset), so
     # each read chains its own select_related("scheme") rather than relying on a
@@ -255,11 +278,13 @@ class ConceptDetailView(MVPDetailView):
         return Concept.objects.filter(scheme=self.vocabulary)
 
     def get_context_data(self, **kwargs):
-        # T006 gives this the reading-language fallback to the vocabulary's own
-        # default; for now the active language is read exactly as given, per
-        # concept_property_rows' own contract (decisions.md D6).
+        # The reading language, falling back to the vocabulary's own default (FR-005,
+        # decisions.md D6) — concept_property_rows applies the fallback per property
+        # only because this view opts in by passing default_language explicitly.
         context = super().get_context_data(**kwargs)
-        context["rows"] = concept_property_rows(self.object, get_language())
+        context["rows"] = concept_property_rows(
+            self.object, get_language(), default_language=self.object.scheme.effective_default_language
+        )
         return context
 
 
