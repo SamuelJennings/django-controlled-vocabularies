@@ -201,3 +201,26 @@ proceed past the one requirement `tasks.md` names it should satisfy.
 T020 supersedes a second such assertion, `test_nothing_links_to_a_collection`; that decision is
 recorded separately at D-015-05 in T020's own commit, for the same reason and under the same
 `tasks.md` file-scope naming.
+
+## D-015-05 — T020 supersedes a pre-existing "nothing links to a collection" assertion
+
+**Decided (2026-08-24, US-4):** `test_nothing_links_to_a_collection`
+(`TestVocabularyDetailCollections`, test_views.py) predates this feature — its own class
+docstring cites `tasks.md T019, decisions.md D5/D7`, both from 014-look-inside-a-vocabulary,
+where a collection had no page to lead to. `conceptscheme_detail.html`'s own comment at the
+collections block said the same thing in production code: "Nothing here links to a collection:
+its address is issue #142." Both were correct claims about that state, superseded by this
+feature the same way D-015-04 describes for T019's concept row, and for the same reason: `tasks.md`
+T020 names `tests/test_ui/test_views.py` among the files it touches.
+
+Replaced with `test_each_collection_links_to_and_reaches_its_own_page`, asserting the opposite
+of the old claim — the entry's href reverses to the collection's own page and following it
+returns 200 with the right object — and updated the class docstring to say why a class that once
+proved an absence now proves a link. The production-code comment naming issue #142 as the
+address's owner came out of `conceptscheme_detail.html` in the same commit, replaced by a comment
+naming the actual mechanism (`vocabulary.slug`/`collection.slug`, no render_list_item isolation
+to work around here since this loop renders inline in the page template, unlike T019's row
+partial).
+
+**Rejected:** the same alternative D-015-04 rejected, for the same reason — blocking T020 would
+report the story as unable to satisfy the one requirement `tasks.md` names it should.

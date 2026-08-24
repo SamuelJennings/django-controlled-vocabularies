@@ -713,3 +713,41 @@ Next: T020 (a vocabulary's collections link to their own pages).
 Watch: `test_nothing_links_to_a_collection` (`TestVocabularyDetailCollections`)
 is the same shape of pre-existing "no link" assertion, for T020 to update the
 same way — recorded ahead of time as D-015-04's forward pointer to D-015-05.
+
+## 2026-08-24T20:41:00Z · Implementer US4 · T020
+
+Did: `conceptscheme_detail.html`'s collections loop entry is now an anchor
+(`{% url 'controlled_vocabularies_ui:collection-detail' vocabulary.slug
+collection.slug %}`). Unlike T019's row partial, this loop renders inline in
+the page template (not through `render_list_item`'s isolated context), so
+`vocabulary` is already in context and the href needs no extra query — the
+already-loaded `collections` queryset supplies `collection.slug` directly. The
+`#142`-naming production comment came out, replaced by one naming the actual
+mechanism (this is D-015-05).
+
+`test_nothing_links_to_a_collection` (`TestVocabularyDetailCollections`)
+predates this feature the same way T019's test did, for the same reason
+(D-015-05): replaced with `test_each_collection_links_to_and_reaches_its_own_page`,
+asserting the opposite — the entry's href reverses to the collection's page and
+following it returns 200 with `response.context["object"]` equal to the
+collection. Updated the class docstring to say the section now links, not just
+names. Added `TestConceptSchemeDetailCollectionsLinkToTheirOwnPages` to
+test_templates.py (2 tests, the same `TestRowPartialLinksToTheVocabulary`
+source-level pattern used for T019): the page source reverses
+`collection-detail` and contains no `local_url` reference.
+
+Verified: RED first — `poetry run pytest
+"tests/test_ui/test_views.py::TestVocabularyDetailCollections::test_each_collection_links_to_and_reaches_its_own_page"
+tests/test_ui/test_templates.py::TestConceptSchemeDetailCollectionsLinkToTheirOwnPages
+-q --no-cov` before the template change — 2 failed (`StopIteration` from no
+matching anchor; the source-scan assert), 1 passed (the "no local_url" half).
+Same command after the template change — 3 passed. Then narrowest scope:
+`poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailCollections
+tests/test_ui/test_templates.py -q --no-cov` — 23 passed. `poetry run ruff
+check` and `poetry run ruff format --check` on the two changed test files —
+clean. No production Python file changed, so no mypy/deptry run beyond
+pre-commit's own. `poetry run python manage.py makemigrations --check
+--dry-run` — no changes detected.
+
+Next: none — Story US-4 (T019-T020) is complete.
+Watch: nothing outstanding.

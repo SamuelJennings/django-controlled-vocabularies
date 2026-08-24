@@ -1504,8 +1504,9 @@ class TestVocabularyDetailConceptSearchEmptyState:
 
 class TestVocabularyDetailCollections:
     """The vocabulary's collections are named, an ordered one is distinguishable from an
-    unordered one, and the section stands apart from the concept list (FR-011, FR-015,
-    User Story 4 scenarios 1-4; tasks.md T019, decisions.md D5/D7).
+    unordered one, the section stands apart from the concept list, and each collection
+    links to its own page (FR-011, FR-015, User Story 4 scenarios 1-4; tasks.md T019,
+    decisions.md D5/D7 named the section; 015-read-single-record T020 gave it its link).
     """
 
     @pytest.mark.django_db
@@ -1564,16 +1565,27 @@ class TestVocabularyDetailCollections:
         assert listed == {members[0].pk, members[1].pk, other_concept.pk}
 
     @pytest.mark.django_db
-    def test_nothing_links_to_a_collection(self, client):
+    def test_each_collection_links_to_and_reaches_its_own_page(self, client):
+        # 015-read-single-record T020, US-4 scenario 2: reverses this class's own
+        # pre-014-look-inside-a-vocabulary-T019 claim that nothing here links to a
+        # collection — true only until the collection's own page existed to lead to.
         scheme = ConceptSchemeFactory()
         collection, _ = collection_with_members(scheme=scheme)
 
         response = client.get(reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}))
         soup = BeautifulSoup(response.content, "html.parser")
 
-        hrefs = {a["href"] for a in soup.find_all("a", href=True)}
-        assert collection.local_url not in hrefs
-        assert not any("/collection/" in href for href in hrefs)
+        expected_href = reverse(
+            "controlled_vocabularies_ui:collection-detail",
+            kwargs={"slug": scheme.slug, "collection_slug": collection.slug},
+        )
+        anchor = next(a for a in soup.find_all("a", href=True) if a.get_text(strip=True) == collection.name)
+        assert anchor["href"] == expected_href
+
+        follow = client.get(anchor["href"])
+
+        assert follow.status_code == 200
+        assert follow.context["object"] == collection
 
 
 class TestTemplateCommentsDoNotReachThePage:

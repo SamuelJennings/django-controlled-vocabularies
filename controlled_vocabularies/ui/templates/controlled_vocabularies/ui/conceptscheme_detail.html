@@ -26,14 +26,18 @@
        renders whatever row template is already in the surrounding context, so
        pointing it at a collection row would silently render concept rows instead
        (plan.md item 5). A vocabulary holding none renders no section at all — this
-       whole block is absent, not present and empty. Nothing here links to a
-       collection: its address is issue #142. {% endcomment %}
+       whole block is absent, not present and empty. 015-read-single-record T020:
+       each entry now links to its own page — this page keeps `vocabulary` in
+       context throughout (unlike concept_list_item.html, this loop is not rendered
+       through render_list_item's isolated context), so the href is built from
+       `vocabulary.slug` and `collection.slug` alone, no query beyond the
+       already-loaded collections queryset. {% endcomment %}
     <div class="vocabulary-collections">
       <c-text size="sm" bold>{% trans "Collections" %}</c-text>
       <ul>
         {% for collection in collections %}
           <li>
-            {{ collection.name }}
+            <a href="{% url 'controlled_vocabularies_ui:collection-detail' vocabulary.slug collection.slug %}">{{ collection.name }}</a>
             {% if collection.ordered %}<c-badge>{% trans "Ordered" %}</c-badge>{% endif %}
           </li>
         {% endfor %}

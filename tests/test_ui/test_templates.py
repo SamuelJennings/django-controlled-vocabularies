@@ -17,6 +17,7 @@ from tests.factories import ConceptSchemeFactory
 TEMPLATES_ROOT = Path(__file__).resolve().parents[2] / "controlled_vocabularies" / "ui" / "templates"
 ROW_TEMPLATE_PATH = TEMPLATES_ROOT / "controlled_vocabularies" / "ui" / "conceptscheme_list_item.html"
 CONCEPT_ROW_TEMPLATE_PATH = TEMPLATES_ROOT / "controlled_vocabularies" / "ui" / "concept_list_item.html"
+CONCEPTSCHEME_DETAIL_TEMPLATE_PATH = TEMPLATES_ROOT / "controlled_vocabularies" / "ui" / "conceptscheme_detail.html"
 PROPERTY_ROW_TEMPLATE = "cotton/controlled_vocabularies/property_row.html"
 PROPERTY_ROW_TEMPLATE_PATH = TEMPLATES_ROOT / "cotton" / "controlled_vocabularies" / "property_row.html"
 # mvp is a namespace package (no __init__.py), so it carries no __file__ — its own
@@ -104,6 +105,23 @@ class TestConceptRowPartialLinksToItsOwnPage:
 
     def test_the_row_partial_source_contains_no_local_url_reference(self):
         source = CONCEPT_ROW_TEMPLATE_PATH.read_text()
+        assert "local_url" not in source
+
+
+class TestConceptSchemeDetailCollectionsLinkToTheirOwnPages:
+    """015-read-single-record T020, FR-015 — the inverse of what
+    `TestVocabularyDetailCollections.test_nothing_links_to_a_collection`
+    (test_views.py) asserted here: a collection was named but nothing linked to it,
+    because no address served one. This feature gives every collection a page, so
+    each entry now leads to it.
+    """
+
+    def test_the_page_source_reverses_the_collections_own_route(self):
+        source = CONCEPTSCHEME_DETAIL_TEMPLATE_PATH.read_text()
+        assert "{% url 'controlled_vocabularies_ui:collection-detail'" in source
+
+    def test_the_page_source_contains_no_local_url_reference_for_a_collection(self):
+        source = CONCEPTSCHEME_DETAIL_TEMPLATE_PATH.read_text()
         assert "local_url" not in source
 
 
