@@ -2503,6 +2503,34 @@ class TestCollectionDetailIdentifierPosition:
         assert content.index(collection.uri) < content.index("<dl>")
 
 
+class TestCollectionDetailMemberIdentifierDisclosedOnHover:
+    """T028's member entries get the same hover disclosure property_row.html's
+    short-form rows do, not the identifier printed as inline text
+    (015-read-single-record T029).
+    """
+
+    @pytest.mark.django_db
+    def test_each_members_identifier_is_a_tooltip_and_a_title_not_printed_text(self, client):
+        collection, (member,) = collection_with_members(labels=("Granite",))
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:collection-detail",
+                kwargs={"slug": collection.scheme.slug, "collection_slug": collection.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        member_dt = next(dt for dt in soup.find_all("dt") if dt.get_text(strip=True) == MEMBER_CURIE)
+        dd = member_dt.find_next_sibling("dd")
+        anchor = dd.find("a")
+
+        assert anchor is not None
+        assert "tooltip" in anchor.get("class", [])
+        assert anchor.get("data-tip") == member.uri
+        assert anchor.get("title") == member.uri
+        assert member.uri not in dd.get_text()
+
+
 class TestCollectionDetailEmptyState:
     """A collection holding nothing says so, and shows no empty membership row
     (015-read-single-record T013, FR-017, US-2 scenario 3).

@@ -233,6 +233,35 @@ class TestPropertyRowRendersARecordValue:
             assert element.get("title") is None
 
 
+class TestPropertyRowRecordValueDisclosesIdentifierOnHover:
+    """FR-007's later clarification: the full identifier is disclosed behind the short
+    form, not printed inline beside it, and reachable by more than a pointer alone
+    (015-read-single-record T029). daisyUI's tooltip (class="tooltip" + data-tip)
+    carries the pointer reveal; a title attribute carrying the same value keeps it
+    reachable by keyboard focus and a screen reader.
+    """
+
+    def test_the_identifier_is_a_tooltip_and_a_title_not_printed_text(self):
+        html = render_to_string(
+            PROPERTY_ROW_TEMPLATE,
+            {
+                "term": "skos:broader",
+                "short_form": "geology:granite",
+                "uri": "http://publisher.example.org/concept/granite",
+                "href": "/vocabularies/geology/granite/",
+            },
+        )
+        soup = BeautifulSoup(html, "html.parser")
+        dd = soup.find("dd")
+        anchor = dd.find("a", href="/vocabularies/geology/granite/")
+
+        assert anchor is not None
+        assert "tooltip" in anchor.get("class", [])
+        assert anchor.get("data-tip") == "http://publisher.example.org/concept/granite"
+        assert anchor.get("title") == "http://publisher.example.org/concept/granite"
+        assert "http://publisher.example.org/concept/granite" not in dd.get_text()
+
+
 def _tailwind_selector(class_token: str) -> str:
     """The class selector as the shipped stylesheet actually spells it: Tailwind
     backslash-escapes a colon or a slash inside a compiled class name (memory: "built CSS

@@ -12,14 +12,18 @@
   — tests/test_ui/test_templates.py proves both are in the shipped stylesheet).
 
   short_form/uri/href are given together for a record-valued row (plan.md Key design
-  decision #6): the short form is the in-site link's own text, never local_url, and the
-  canonical identifier is carried as ordinary text beside it — a title attribute would be
-  invisible to a keyboard user and unreliable for a screen reader (FR-007).
+  decision #6): the short form is the in-site link's own text, and the canonical
+  identifier is disclosed on hover behind it, never printed inline (015-read-single-
+  record T029, FR-007). daisyUI's tooltip (class="tooltip" + data-tip, both verified
+  present in the shipped stylesheet) carries the pointer reveal; a title attribute
+  carrying the same value keeps it reachable by keyboard focus and a screen reader —
+  serving both, rather than only the always-visible text this row printed before,
+  which FR-007's own clarification ruled out for hiding nothing behind the short form.
 
   entries (015-read-single-record T028) carries a list of {short_form, uri, href} dicts
   instead — a collection's membership is one row for every member it holds, not one row
   each, so the single <dd> below lists them rather than a caller repeating this whole
-  component once per member.
+  component once per member. Each entry gets the same hover disclosure.
 {% endcomment %}
 <dt class="text-base-content/60 text-xs uppercase font-semibold">{{ term }}</dt>
 <dd class="mb-3">
@@ -27,14 +31,20 @@
     <ul>
       {% for entry in entries %}
         <li>
-          <c-link href="{{ entry.href }}" text="{{ entry.short_form }}" />
-          <c-text size="xs" muted tight>{{ entry.uri }}</c-text>
+          <c-link href="{{ entry.href }}"
+                  text="{{ entry.short_form }}"
+                  class="tooltip"
+                  title="{{ entry.uri }}"
+                  data-tip="{{ entry.uri }}" />
         </li>
       {% endfor %}
     </ul>
   {% elif short_form %}
-    <c-link href="{{ href }}" text="{{ short_form }}" />
-    <c-text size="xs" muted tight>{{ uri }}</c-text>
+    <c-link href="{{ href }}"
+            text="{{ short_form }}"
+            class="tooltip"
+            title="{{ uri }}"
+            data-tip="{{ uri }}" />
   {% else %}
     {{ value }}
   {% endif %}
