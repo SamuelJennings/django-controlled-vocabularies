@@ -145,3 +145,31 @@ no changes detected.
 
 Next: T005 (the `concept_detail.html` template renders `rows` inside one `<dl>`).
 Watch: nothing outstanding.
+
+## 2026-08-24T17:22:56Z · Implementer US1 · T005
+
+Did: added `concept_detail.html`, extending `detail_view.html` and rendering T003's
+`rows` inside one `<dl>` through the T002 `property_row` component. Two branches per
+row rather than one call passing every key unconditionally: a Python `None` substituted
+into `{{ }}` renders as the literal text `"None"`, which would make
+`property_row.html`'s `{% if short_form %}` true for every plain-value row too, so only
+the keys a row actually carries are passed.
+
+Verified: this task's test-writing had already started before an infrastructure fault
+interrupted the prior run — inherited `TestConceptDetailShowsWhatIsRecorded` (2 tests)
+in `tests/test_ui/test_views.py` and the template itself, both uncommitted. Read both
+against tasks.md's T005 requirements before trusting them: the two tests cover a
+preferred label, a definition and a scope note each on their own row (test 1) and
+alternative labels appearing while a hidden label appears nowhere in the response
+(test 2) — matching FR-003/FR-004/SC-001/SC-002/US-1 scenarios 1-2 exactly, asserted by
+parsing `<dt>`/`<dd>` pairs by CURIE via BeautifulSoup, the shape T004's tests already
+use. Confirmed RED by moving the template aside and re-running: both tests failed with
+`AssertionError: assert (...) in []` — the right reason, an empty `<dl>` — before
+restoring it. `poetry run pytest tests/test_ui/test_views.py -q -k TestConceptDetail` —
+8 passed (the inherited 2 plus T004's existing 6). `poetry run ruff check`, `poetry run
+ruff format --check` and `poetry run mypy` on `tests/test_ui/test_views.py` — clean (the
+template is not a Python file). `poetry run python manage.py makemigrations --check
+--dry-run` — no changes detected.
+
+Next: T006 (the reading-language rule, applied to notes and alternative labels).
+Watch: nothing outstanding.
