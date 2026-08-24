@@ -463,8 +463,17 @@
       "tasks": [
         {
           "id": "T023",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py::TestPythonSideStringsThisFeatureIntroducedAreTranslatableAndCuriesAreNot tests/test_ui/test_views.py::TestConceptAndCollectionValuesReachTheReaderEscaped tests/test_ui/test_views.py::TestConceptDetailShowsNoCrossVocabularyLink tests/test_ui/test_templates.py::TestEveryTemplateCarryingAnInSiteLinkContainsNoLocalUrlReference -q --no-cov",
+              "poetry run pytest tests/test_ui -q --no-cov",
+              "poetry run ruff check tests/test_ui/test_views.py tests/test_ui/test_templates.py",
+              "poetry run ruff format tests/test_ui/test_views.py tests/test_ui/test_templates.py",
+              "poetry run python manage.py makemigrations --check --dry-run"
+            ]
+          }
         },
         {
           "id": "T024",

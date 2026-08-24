@@ -803,3 +803,57 @@ that no page documents — `skos_curie`, `concept_property_rows` and
 verifications did not pass, so the debt accumulated silently from T001 on. It
 belongs to the closing phase, and the README's concept-page section also does
 not yet mention the membership section T021 added.
+
+## 2026-08-24T21:15:00Z · Implementer US6 · T023
+
+Added four guard test classes proving the cross-cutting requirements no single story
+asserted: `TestPythonSideStringsThisFeatureIntroducedAreTranslatableAndCuriesAreNot`
+(FR-019 — the two views' own `Http404` message is a lazy translation, every CURIE this
+feature keys a row on is a plain string, not one) and
+`TestConceptAndCollectionValuesReachTheReaderEscaped` (FR-021 — a label, a note, a
+collection's own name and a publisher-supplied identifier each reach the reader
+escaped) in `tests/test_ui/test_views.py`; `TestConceptDetailShowsNoCrossVocabularyLink`
+(FR-020 — a concept actually imported through `import_skos()` from a file offering
+`skos:exactMatch` and `skos:closeMatch` shows neither) alongside them; and, in
+`tests/test_ui/test_templates.py`, `TestEveryTemplateCarryingAnInSiteLinkContainsNoLocalUrlReference`
+(FR-006 — `IN_SITE_LINK_TEMPLATE_PATHS` widens the guard from the one template
+`ROW_TEMPLATE_PATH` named to all three that carry an in-site link, `property_row.html`
+included). No production code changed: every guarantee already held, so there was no
+honest pre-implementation RED — each was verified by mutation instead, per every one
+of the four points below.
+
+Every existing per-template assertion in `TestRowPartialLinksToTheVocabulary` and
+`TestConceptRowPartialLinksToItsOwnPage` is untouched — the widened guard is additive,
+not a rewrite of either.
+
+Verified by mutation, each reverted with an empty `git diff` before committing:
+- FR-021: `value="{{ row.value }}"` in `concept_detail.html`/`collection_detail.html`
+  changed to `value="{{ row.value|safe }}"` — the label, note and collection-name
+  tests failed, a real `<script>` parsed out of the response. `object.uri` likewise
+  with `|safe` — the identifier test failed the same way. (An `|safe` added inside
+  `property_row.html`'s own `{{ value }}` does *not* trip these end-to-end tests —
+  the value already arrives HTML-escaped at that point, having been escaped once
+  already when the caller template composed the `value="..."` attribute it is passed
+  through — so the mutation that matters is at the two page templates, which is what
+  the task's own verify clause names.)
+- FR-006: `property_row.html`'s `<c-link>` given a stray `{{ local_url }}` reference —
+  the widened parametrized test failed on that one template, the other two untouched.
+- FR-019: the `_()` around one view's `Http404` message removed — only that view's
+  parametrized case failed, the sibling view's stayed green. A CURIE wrapped in
+  `gettext_lazy` — the CURIE-list test failed on `isinstance(curie, str)`.
+- FR-020: `concept_property_rows` given an extra `skos:exactMatch` row by hand — the
+  no-cross-vocabulary-link test failed on the external URI appearing in the response.
+
+Verified: `poetry run pytest tests/test_ui/test_views.py::TestPythonSideStringsThisFeatureIntroducedAreTranslatableAndCuriesAreNot
+tests/test_ui/test_views.py::TestConceptAndCollectionValuesReachTheReaderEscaped
+tests/test_ui/test_views.py::TestConceptDetailShowsNoCrossVocabularyLink
+tests/test_ui/test_templates.py::TestEveryTemplateCarryingAnInSiteLinkContainsNoLocalUrlReference
+-q --no-cov` — 11 passed. `poetry run pytest tests/test_ui -q --no-cov` — 235 passed,
+1 skipped (was 224 passed, 1 skipped at dispatch). `poetry run ruff check` and
+`poetry run ruff format` on the two changed files — clean (format rewrote import
+grouping and one multi-line assert in `test_views.py`; re-ran the suite after, still
+235/1). `poetry run python manage.py makemigrations --check --dry-run` — no changes
+detected.
+
+Next: T024 — the demo, README and changelog debts the closing phase's last task owns.
+Watch: nothing outstanding from T023.

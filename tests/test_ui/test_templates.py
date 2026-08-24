@@ -20,6 +20,10 @@ CONCEPT_ROW_TEMPLATE_PATH = TEMPLATES_ROOT / "controlled_vocabularies" / "ui" / 
 CONCEPTSCHEME_DETAIL_TEMPLATE_PATH = TEMPLATES_ROOT / "controlled_vocabularies" / "ui" / "conceptscheme_detail.html"
 PROPERTY_ROW_TEMPLATE = "cotton/controlled_vocabularies/property_row.html"
 PROPERTY_ROW_TEMPLATE_PATH = TEMPLATES_ROOT / "cotton" / "controlled_vocabularies" / "property_row.html"
+# 015-read-single-record T023, FR-006: every template that carries an in-site link, widened
+# from the one file ROW_TEMPLATE_PATH named on its own — the two row partials plus
+# property_row.html, which composes the in-site link T003's record-valued rows carry.
+IN_SITE_LINK_TEMPLATE_PATHS = [ROW_TEMPLATE_PATH, CONCEPT_ROW_TEMPLATE_PATH, PROPERTY_ROW_TEMPLATE_PATH]
 # mvp is a namespace package (no __init__.py), so it carries no __file__ — its own
 # __path__ is the only way to locate the package directory.
 MVP_CSS_PATH = Path(mvp.__path__[0]) / "static" / "css" / "django-mvp.css"
@@ -123,6 +127,32 @@ class TestConceptSchemeDetailCollectionsLinkToTheirOwnPages:
     def test_the_page_source_contains_no_local_url_reference_for_a_collection(self):
         source = CONCEPTSCHEME_DETAIL_TEMPLATE_PATH.read_text()
         assert "local_url" not in source
+
+
+class TestEveryTemplateCarryingAnInSiteLinkContainsNoLocalUrlReference:
+    """015-read-single-record T023, FR-006 — the guard
+    :class:`TestRowPartialLinksToTheVocabulary` and
+    :class:`TestConceptRowPartialLinksToItsOwnPage` each make for their own one
+    template, widened to every template that carries an in-site link: the two row
+    partials plus ``property_row.html``, which composes T003's record-valued rows'
+    own in-site link from a caller-supplied ``href`` rather than reversing a route
+    itself. A broadening, not a supersession — every one of the per-template
+    assertions above still runs unchanged; this adds the coverage none of them gave
+    ``property_row.html``.
+    """
+
+    @pytest.mark.parametrize(
+        "path",
+        IN_SITE_LINK_TEMPLATE_PATHS,
+        ids=lambda p: str(p.relative_to(TEMPLATES_ROOT)),
+    )
+    def test_the_template_source_contains_no_local_url_reference(self, path):
+        # Stripped of {% comment %} blocks first, the same known-safe syntax
+        # bare_reader_visible_text_nodes above already treats as inert: property_row.html's
+        # own comment explains in prose why it avoids local_url, which would otherwise read
+        # as a false positive of the very thing this guard exists to catch.
+        markup = _COMMENT_RE.sub("", path.read_text())
+        assert "local_url" not in markup
 
 
 class TestEveryShippedTemplateWrapsReaderVisibleTextInATranslationTag:

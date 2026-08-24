@@ -7,10 +7,12 @@ import re
 import pytest
 from bs4 import BeautifulSoup
 from django.db import connection
+from django.http import Http404
 from django.template.loader import render_to_string
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import translation
+from django.utils.functional import Promise
 
 from controlled_vocabularies.exchange.mapping import (
     BROADER_CURIE,
@@ -26,8 +28,11 @@ from controlled_vocabularies.exchange.mapping import (
     RELATED_CURIE,
     TYPE_CURIE,
 )
-from controlled_vocabularies.models import ConceptLabel, ConceptNote, ConceptRelation
+from controlled_vocabularies.exchange.skos import import_skos
+from controlled_vocabularies.models import Concept, ConceptLabel, ConceptNote, ConceptRelation
 from controlled_vocabularies.ui.views import (
+    CollectionDetailView,
+    ConceptDetailView,
     VocabularyDetailView,
     VocabularyListView,
     collection_property_rows,
@@ -2634,3 +2639,181 @@ class TestConceptDetailVocabularyRowAndNoAncestorChain:
             (BROADER_CURIE, f"{grandparent.scheme.slug}:{grandparent.slug}"),
             (NARROWER_CURIE, f"{child.scheme.slug}:{child.slug}"),
         ]
+
+
+class TestPythonSideStringsThisFeatureIntroducedAreTranslatableAndCuriesAreNot:
+    """FR-019, SC-007, T023 — every reader-visible string the views introduce is
+    lazily translatable, and every CURIE the pages key a row on is a plain string that
+    stays untranslated, because a CURIE is a SKOS identifier rather than reader-visible
+    prose. Scoped to the Python side: every template's own literal text is already
+    covered by
+    ``tests/test_ui/test_templates.py::TestEveryShippedTemplateWrapsReaderVisibleTextInATranslationTag``,
+    which globs every template under the templates root and so already reaches the two
+    new detail templates without needing to be widened.
+    """
+
+    @pytest.mark.django_db
+    @pytest.mark.parametrize(
+        "view_class,slug_kwarg", [(ConceptDetailView, "concept_slug"), (CollectionDetailView, "collection_slug")]
+    )
+    def test_the_unknown_vocabulary_404_message_is_lazily_translatable(self, rf, view_class, slug_kwarg):
+        view = view_class()
+        request = rf.get("/")
+
+        with pytest.raises(Http404) as exc_info:
+            view.setup(request, slug="no-such-vocabulary", **{slug_kwarg: "whatever"})
+
+        assert isinstance(exc_info.value.args[0], Promise), (
+            "the 404 message this view raises is a plain string, not a lazy translation"
+        )
+
+    def test_every_curie_a_row_may_be_keyed_on_is_a_plain_string_not_a_translation(self):
+        curies = [
+            TYPE_CURIE,
+            CONCEPT_TYPE_CURIE,
+            COLLECTION_TYPE_CURIE,
+            ORDERED_COLLECTION_TYPE_CURIE,
+            BROADER_CURIE,
+            NARROWER_CURIE,
+            RELATED_CURIE,
+            IN_SCHEME_CURIE,
+            MEMBER_CURIE,
+            MEMBER_LIST_CURIE,
+            *LABEL_CURIES.values(),
+            *NOTE_CURIES.values(),
+        ]
+
+        assert curies, "nothing to prove — the CURIE tables this asserts against are empty"
+        for curie in curies:
+            assert isinstance(curie, str)
+            assert not isinstance(curie, Promise), (
+                f"{curie!r} is a lazily translated value, but a CURIE is a SKOS identifier and must stay untranslated"
+            )
+
+
+class TestConceptAndCollectionValuesReachTheReaderEscaped:
+    """FR-021, SC-007, T023 — a label, a note, a collection's own name, and a
+    publisher-supplied identifier each reach the reader as text escaped by the
+    template layer. Nothing on either page is marked safe: the assertion fails the
+    same way :class:`TestVocabularySearchEmptyState`'s own escaping test would if
+    ``|safe`` were introduced anywhere it is not today — a raw substring check would
+    pass for an unescaped payload too, since it is a byte-for-byte substring of the
+    correctly escaped one, so each test parses the response and asks whether an HTML
+    parser reads a real element out of it.
+    """
+
+    #: A script tag whose own content is the injected payload — never the shell's
+    #: legitimate theme-toggle script, which carries different content entirely, so
+    #: scoping the "no real element was created" assertion to this is safe wherever on
+    #: the page the value ends up (inside the <dl> or, for an identifier, beside it).
+    _INJECTED_SCRIPT = re.compile(r"alert\(1\)")
+
+    @pytest.mark.django_db
+    def test_a_preferred_label_containing_markup_is_escaped_on_the_concept_page(self, client):
+        concept = ConceptFactory(label="<script>alert(1)</script>")
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        assert soup.find("script", string=self._INJECTED_SCRIPT) is None
+        assert "<script>alert(1)</script>" in soup.find("dl").get_text()
+
+    @pytest.mark.django_db
+    def test_a_note_containing_markup_is_escaped_on_the_concept_page(self, client):
+        concept = ConceptFactory(label="Granite")
+        ConceptNoteFactory(concept=concept, kind=ConceptNote.Kind.DEFINITION, value="<script>alert(1)</script>")
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        assert soup.find("script", string=self._INJECTED_SCRIPT) is None
+        assert "<script>alert(1)</script>" in soup.find("dl").get_text()
+
+    @pytest.mark.django_db
+    def test_a_publisher_supplied_identifier_reaches_an_attribute_only_as_a_links_destination(self, client):
+        # A quote inside the identifier would break out of the href attribute if the
+        # template ever stopped auto-escaping it — the same class of failure FR-021's
+        # spec question names directly.
+        concept = ConceptFactory(label="Granite", external=True)
+        concept.static_uri = 'http://publisher.example.org/x"><script>alert(1)</script>'
+        concept.save()
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        assert soup.find("script", string=self._INJECTED_SCRIPT) is None
+        identifier_link = soup.find("a", href=concept.static_uri)
+        assert identifier_link is not None
+        assert concept.static_uri in identifier_link.get_text(strip=True)
+
+    @pytest.mark.django_db
+    def test_a_collections_name_containing_markup_is_escaped_on_the_collection_page(self, client):
+        collection = CollectionFactory(name="<script>alert(1)</script>")
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:collection-detail",
+                kwargs={"slug": collection.scheme.slug, "collection_slug": collection.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        assert soup.find("script", string=self._INJECTED_SCRIPT) is None
+        assert "<script>alert(1)</script>" in soup.find("dl").get_text()
+
+
+class TestConceptDetailShowsNoCrossVocabularyLink:
+    """FR-020, T023 — nothing stores a concept's exact or close matches, so no row can
+    carry one. Asserted against a concept actually imported from a file that offered
+    both, through the package's own importer, so the assertion is about the shipped
+    behaviour rather than about an empty database that could never have shown one
+    regardless.
+    """
+
+    _MAPPING_TURTLE = """\
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+<http://example.org/rocks/> a skos:ConceptScheme ;
+    skos:prefLabel "Rocks"@en .
+
+<http://example.org/rocks/granite> a skos:Concept ;
+    skos:inScheme <http://example.org/rocks/> ;
+    skos:prefLabel "Granite"@en ;
+    skos:exactMatch <http://external.example.org/rocks/granite> ;
+    skos:closeMatch <http://external.example.org/rocks/granitic-rock> .
+"""
+
+    @pytest.mark.django_db
+    def test_a_concept_imported_with_exact_and_close_matches_shows_neither(self, client, tmp_path):
+        source = tmp_path / "rocks.ttl"
+        source.write_text(self._MAPPING_TURTLE)
+        import_skos(source)
+        concept = Concept.objects.get(static_uri="http://example.org/rocks/granite")
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        content = response.content.decode()
+
+        assert "external.example.org" not in content
+        terms = [dt.get_text(strip=True) for dt in soup.find_all("dt")]
+        assert terms == [TYPE_CURIE, LABEL_CURIES[ConceptLabel.Kind.PREFERRED], IN_SCHEME_CURIE]
