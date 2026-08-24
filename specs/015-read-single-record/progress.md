@@ -502,3 +502,45 @@ fix end of files, check yaml, poetry-check, ruff lint, ruff format, mypy, deptry
 Next: none — Story US-2 (T011-T015) is complete. US-3 (T016-T018) is next in plan.md's
 story sequence, dispatched separately.
 Watch: nothing outstanding.
+
+## 2026-08-24T20:06:00Z · Implementer US3 · T016
+
+Did: no production change. T003's `concept_property_rows()`/`member_row()` already
+carry a record-valued row's canonical identifier via `record.uri` (which already
+prefers `static_uri` — an imported record's publisher-assigned identifier — over
+`local_url`, `models.py:315-323`), and T002's `property_row.html` already renders it
+as ordinary reader-reachable text (`<c-text size="xs" muted tight>{{ uri }}</c-text>`)
+beside the in-site link, never a `title` attribute — both built before this task was
+dispatched. What was genuinely absent was a test proving it at the rendered page for a
+*related* record's row (T007's existing imported-concept test only covers a concept's
+own identifier on its own page, not a related concept shown on someone else's).
+
+Added `TestConceptDetailRelatedRecordIdentifiers` to `tests/test_ui/test_views.py` (2
+tests): a broader row's identifier is present as text within the `<dd>` and the
+anchor carries no `title` attribute; an imported broader concept's row shows its
+`static_uri` (asserted to start with `http://publisher.example.org/`, the `external`
+factory trait's fixed prefix) while the link still reverses to this site's page for
+it, and following that link returns 200 with `response.context["object"]` equal to
+the imported concept.
+
+Verified: both tests passed on first run — per craft-tdd, a claim of pre-existing
+coverage must be probed rather than just read. Probed by temporarily replacing
+`property_row.html`'s `<c-link>`/`<c-text>` pair with a single `<a href="{{ href }}"
+title="{{ uri }}">{{ short_form }}</a>` (identifier moved into a `title` attribute,
+the exact anti-pattern FR-007 forbids) and re-running: both tests failed for the
+right reason (`assert link.get("title") is None` found the URI where it should have
+found nothing; `assert parent.static_uri in broader_dd.get_text()` found the short
+form alone, the identifier no longer in the text) — before reverting via `git diff`
+inspection and restoring the original two-tag markup, confirmed clean with `git
+status`. `poetry run pytest tests/test_ui/test_views.py -q -k
+TestConceptDetailRelatedRecordIdentifiers` — 2 passed. `poetry run pytest
+tests/test_ui/test_views.py -q` — 143 passed, 1 skipped (the pre-existing
+django-mvp#291 skip, untouched) — no regressions. `poetry run ruff check`, `poetry
+run ruff format --check` on the changed file, and `poetry run mypy
+controlled_vocabularies/ui/views.py` — all clean (no production file changed).
+`poetry run python manage.py makemigrations --check --dry-run` — no changes
+detected.
+
+Next: T017 (broader, narrower and related as their own rows; following one opens
+that concept's page).
+Watch: nothing outstanding.
