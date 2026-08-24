@@ -349,8 +349,17 @@
         },
         {
           "id": "T020",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_demo/test_seed.py -q",
+              "poetry run pytest tests/test_demo/ tests/test_ui/ -q"
+            ],
+            "tests": [
+              "tests/test_demo/test_seed.py::TestSeedDemo"
+            ]
+          }
         },
         {
           "id": "T021",

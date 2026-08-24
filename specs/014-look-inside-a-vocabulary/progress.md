@@ -519,3 +519,42 @@ Verified: `poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailCo
 pre-commit run --files controlled_vocabularies/ui/templates/controlled_vocabularies/ui/
 conceptscheme_detail.html controlled_vocabularies/ui/views.py tests/test_ui/test_views.py` — all
 hooks passed, including the mechanical translation-tag check against the new template markup.
+
+## 2026-08-24 · Implementer US-4 · T020
+
+Did: added one `skos:Collection` ("Primary data collection methods", unordered, `skos:member`)
+and one `skos:OrderedCollection` ("Typical project workflow", `skos:memberList` in a deliberate
+non-alphabetical order) to `demo/seed/research_methods.ttl`, both loaded through
+`controlled_vocabularies.exchange.import_skos` — the same path every other seeded record uses,
+never a fixture behind it. `demo/seed/dcmi_types.ttl` is untouched; recorded why in
+decisions.md D15 (that file's URIs are read as the vocabulary's real, externally fixed
+identity, and a collection minted under `purl.org/dc/dcmitype/` would misrepresent whose grouping
+it is — `research_methods.ttl`'s concepts already sit under the reserved `example.org` placeholder
+domain, where no such risk exists). Re-seeding's idempotency needed no new code: `seed_demo.py`
+already deletes every vocabulary before reloading (T016's own design), so the collections are
+recreated fresh on every run by construction.
+
+Four new tests in `tests/test_demo/test_seed.py::TestSeedDemo`: one collection of each kind loads
+after one run; a second run does not duplicate them; both collection names appear in the response
+when the authored vocabulary's own page (T019's view/template) is requested through the test
+client — proving the acceptance criterion ("both render on a page anyone can open") against the
+real view, not just the model.
+
+RED observed first: wrote the four tests against the unmodified seed file, ran them — the two
+count-based assertions failed on `assert 0 == 2` (no collections existed yet, the right reason);
+the render test passed vacuously (its `for` loop iterated zero collections), which is expected
+for an assertion riding on the same fixture as the others rather than driving its own red.
+Added the Turtle content, reran: 8 of 9 in the file passed; the render test failed on
+`assert "A typical project's workflow" in content` — a test bug, not a production one: Django's
+autoescaping renders the apostrophe as `&#x27;`, so a plain substring check against the raw name
+can never match escaped output. Renamed the collection to "Typical project workflow" (no
+apostrophe) rather than patching the test to unescape, since the name itself was arbitrary and a
+demo string free of punctuation quirks is one fewer thing for a future test in this area to trip
+on. Reran: 9 passed.
+
+Verified: `poetry run pytest tests/test_demo/test_seed.py -q` — 9 passed. `poetry run pytest
+tests/test_demo/ tests/test_ui/ -q` — 175 passed, 3 skipped (the pre-existing #147 skips,
+untouched), no regressions. `poetry run pre-commit run --files demo/seed/research_methods.ttl
+tests/test_demo/test_seed.py` — all hooks passed (ruff reports no files to check for
+`tests/test_seed.py` because pre-commit excludes `tests/` by design, per this story's own
+`conventions`).
