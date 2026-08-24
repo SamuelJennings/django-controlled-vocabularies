@@ -34,6 +34,11 @@
       "state": "IMPLEMENT",
       "at": "2026-08-24T21:05:00Z",
       "note": "US-4 accepted and converged; two pre-existing \"no link\" assertions superseded per D-015-04/05, the row assertion tightened to exactly one anchor and probed"
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-24T21:55:00Z",
+      "note": "US-5 accepted and converged; the flat-query ceiling deepened to cover membership growth and probed. Closing phase T023-T024 next, carrying the documentation gate's three undocumented public names"
     }
   ],
   "gates": {
@@ -416,19 +421,35 @@
       "id": "US5",
       "priority": "P3",
       "issue": 161,
-      "worktree": null,
-      "status": "todo",
+      "worktree": "../dcv-015-us5",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T021",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py::TestConceptDetailCollectionMembership -q --no-cov",
+              "poetry run pytest tests/test_ui/test_views.py::TestConceptDetailQueryCount -q --no-cov",
+              "poetry run pytest -q --no-cov",
+              "poetry run pre-commit run --all-files",
+              "poetry run mypy"
+            ]
+          }
         },
         {
           "id": "T022",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py::TestConceptDetailCollectionMembership -q --no-cov",
+              "poetry run pytest -q --no-cov",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
         }
       ]
     },

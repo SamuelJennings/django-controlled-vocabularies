@@ -751,3 +751,55 @@ pre-commit's own. `poetry run python manage.py makemigrations --check
 
 Next: none — Story US-4 (T019-T020) is complete.
 Watch: nothing outstanding.
+
+---
+
+## 2026-08-24T21:40:00Z · Implementer US5 · T021
+
+Added `TestConceptDetailCollectionMembership` to test_ui/test_views.py and the
+membership block to concept_detail.html: a `concept-collections` div below the
+`<dl>` and outside it, a plain-language heading rather than a CURIE, one linked
+entry per collection. `ConceptDetailView.get_context_data` supplies
+`concept_collections` from `Concept.collections()`.
+
+Verified: RED first — `poetry run pytest
+tests/test_ui/test_views.py::TestConceptDetailCollectionMembership -q --no-cov`
+before the template change — 1 failed (`assert section is not None`), 1 passed.
+Same command after — 2 passed. `poetry run pytest
+tests/test_ui/test_views.py::TestConceptDetailQueryCount
+tests/test_ui/test_views.py::TestConceptDetail
+tests/test_ui/test_views.py::TestConceptDetailUnfilledPropertiesProduceNoRow -q
+--no-cov` — 8 passed.
+
+## 2026-08-24T21:55:00Z · Forge convergence US5 · T021
+
+The flat-query ceiling said nothing about the section T021 adds. Its growth loop
+added labels, notes and relations, so `{{ collection.scheme.title }}` in the new
+block would have cost nothing extra with no collection in the fixture, and the
+test would have passed. Deepened the loop to add a collection per iteration.
+
+Probed rather than assumed: with that per-collection related read in the
+template, `poetry run pytest
+tests/test_ui/test_views.py::TestConceptDetailQueryCount -q --no-cov` fails —
+"Expected to perform 8 queries but 13 were done", one per collection. Template
+restored from backup, `git diff` on it empty, 3 passed.
+
+## 2026-08-24T21:45:00Z · Implementer US5 · T022
+
+Added the absent-not-empty assertion. It passed immediately: T021's
+`{% if concept_collections %}` guard already produces the behaviour, so no
+production code was owed and there was no honest pre-implementation RED.
+
+Verified by mutation instead — the guard temporarily replaced with
+`{% if True %}`, the test then failing because the section rendered present and
+empty, template restored with an empty diff before the commit. `poetry run
+pytest tests/test_ui/test_views.py::TestConceptDetailCollectionMembership -q
+--no-cov` — 2 passed.
+
+Next: the closing phase, T023 then T024.
+Watch: the documentation gate is red on three public names this feature added
+that no page documents — `skos_curie`, `concept_property_rows` and
+`collection_property_rows`. It only runs with a base ref, which the per-story
+verifications did not pass, so the debt accumulated silently from T001 on. It
+belongs to the closing phase, and the README's concept-page section also does
+not yet mention the membership section T021 added.
