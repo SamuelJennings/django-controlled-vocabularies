@@ -238,33 +238,80 @@
       "priority": "P2",
       "issue": 158,
       "worktree": null,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T011",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py -q -k TestCollectionDetail",
+              "poetry run pytest tests/test_ui/test_views.py -q",
+              "poetry run ruff check",
+              "poetry run ruff format --check",
+              "poetry run mypy controlled_vocabularies/ui/views.py",
+              "poetry run python manage.py makemigrations --check --dry-run"
+            ]
+          }
         },
         {
           "id": "T012",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py -q -k TestCollectionDetail",
+              "poetry run pytest tests/test_ui/test_views.py tests/test_ui/test_templates.py -q",
+              "poetry run ruff check",
+              "poetry run ruff format --check",
+              "poetry run mypy controlled_vocabularies/ui/views.py",
+              "poetry run python manage.py makemigrations --check --dry-run"
+            ]
+          }
         },
         {
           "id": "T013",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py -q -k TestCollectionDetailEmptyState",
+              "poetry run pytest tests/test_ui/test_views.py tests/test_ui/test_templates.py -q",
+              "poetry run ruff check",
+              "poetry run ruff format --check",
+              "poetry run mypy controlled_vocabularies/ui/views.py",
+              "poetry run python manage.py makemigrations --check --dry-run"
+            ]
+          }
         },
         {
           "id": "T014",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py -q -k TestCollectionDetailQueryCount",
+              "poetry run pytest tests/test_ui/ -q",
+              "poetry run ruff check",
+              "poetry run ruff format --check",
+              "poetry run mypy controlled_vocabularies/ui/views.py",
+              "poetry run python manage.py makemigrations --check --dry-run"
+            ]
+          }
         },
         {
           "id": "T015",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run python manage.py shell -c \"reverse('controlled_vocabularies_ui:collection-detail', ...)\"",
+              "poetry run pytest tests/test_ui/test_views.py -q -k \"TestCollectionDetail or TestCollectionPropertyRows\"",
+              "poetry run python manage.py makemigrations --check --dry-run"
+            ]
+          }
         }
       ]
     },
