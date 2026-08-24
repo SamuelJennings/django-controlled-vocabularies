@@ -544,3 +544,43 @@ detected.
 Next: T017 (broader, narrower and related as their own rows; following one opens
 that concept's page).
 Watch: nothing outstanding.
+
+## 2026-08-24T20:12:00Z · Implementer US3 · T017
+
+Did: no production change. T003's `concept_property_rows()` already builds a row
+for each of `concept.broader()`, `.narrower()` and `.related()` in that fixed
+order, and `.narrower()` (models.py:863-872) is already read back from the target
+side of the stored `BROADER` relation rather than asserted directly — only the
+narrower->broader direction is ever written (research R1). Nothing here needed
+building; what was absent was proof at the rendered page that each relation's row
+carries the right related concept and that its link actually opens that concept's
+own page.
+
+Added `TestConceptDetailBroaderNarrowerAndRelated` to
+`tests/test_ui/test_views.py` (3 tests): a broader concept's row and its followed
+link; a concept that is the broader of two others shows both as narrower rows
+(`child_one`/`child_two` each call `.add_broader(parent)` — only the stored
+direction — and `parent`'s page is asserted to carry both derived narrower rows),
+following one of the two narrower links to confirm it opens one of the two
+children's own page; a related concept's row and its followed link.
+
+Verified: all three passed on first run — per craft-tdd, probed rather than
+trusted. Probed by deleting the three `rows.extend(...)` lines building the
+broader/narrower/related rows from `concept_property_rows()` and re-running: all
+three tests failed for the right reason (`ValueError: not enough values to
+unpack (expected 1, got 0)` for the single-relation broader/related tests, an
+empty-set mismatch for the two-narrower test) — before restoring the three lines
+verbatim, confirmed clean via `git diff controlled_vocabularies/ui/views.py`
+(no output). `poetry run pytest tests/test_ui/test_views.py -q -k
+TestConceptDetailBroaderNarrowerAndRelated` — 3 passed. `poetry run pytest
+tests/test_ui/test_views.py -q` — 146 passed, 1 skipped (the pre-existing
+django-mvp#291 skip, untouched) — no regressions. `poetry run ruff check` on
+both files — clean. `poetry run ruff format --check` first flagged the new test
+file (one long line); `poetry run ruff format` reapplied and reverified clean.
+`poetry run mypy controlled_vocabularies/ui/views.py` — no issues (no production
+file changed). `poetry run python manage.py makemigrations --check --dry-run` —
+no changes detected.
+
+Next: T018 (the vocabulary row, and the three-level chain proving no ancestor
+step beyond the immediate neighbour).
+Watch: nothing outstanding.
