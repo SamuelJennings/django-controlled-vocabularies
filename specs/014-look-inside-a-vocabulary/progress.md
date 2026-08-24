@@ -558,3 +558,26 @@ untouched), no regressions. `poetry run pre-commit run --files demo/seed/researc
 tests/test_demo/test_seed.py` — all hooks passed (ruff reports no files to check for
 `tests/test_seed.py` because pre-commit excludes `tests/` by design, per this story's own
 `conventions`).
+
+## 2026-08-24 · Implementer US-4 · T021
+
+Did: extended README's "A vocabulary's own page" section with a new paragraph on collections —
+what they are (curator-made groupings the broader/narrower relations do not express), that an
+ordered one is shown distinguishably from an unordered one, that nothing on the page opens one
+(named and nothing more, until #142 gives it an address), and that a vocabulary holding none
+shows no section at all (with the same "why" D7 already gives: most vocabularies have none, and
+an always-empty section is noise on every page but one). Extended the "Try it" paragraph with the
+demo's two seeded collection names (`Primary data collection methods`, `Typical project
+workflow`) so the collections section is never empty on a fresh checkout — both names verified
+directly against T020's own passing test
+(`tests/test_demo/test_seed.py::TestSeedDemo::test_both_seeded_collections_render_on_their_vocabularys_page`),
+not retyped from memory. Matching CHANGELOG `Added` bullet, same content, shorter.
+
+Verified: `poetry run pytest tests/test_demo/test_documented_commands.py -q` — 8 passed, no
+regression from the doc-only change. `poetry run pre-commit run --files README.md CHANGELOG.md`
+— all hooks passed.
+
+## Full verify (final ritual)
+
+`poetry run pytest -q` — 1530 passed, 3 skipped, 0 failed (baseline at dispatch was 1522 passed,
+3 skipped; 8 new tests added across T019-T020, T021 added none).

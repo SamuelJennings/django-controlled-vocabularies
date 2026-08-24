@@ -363,8 +363,14 @@
         },
         {
           "id": "T021",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_demo/test_documented_commands.py -q",
+              "poetry run pre-commit run --files README.md CHANGELOG.md"
+            ]
+          }
         }
       ]
     }
