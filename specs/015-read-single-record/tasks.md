@@ -494,3 +494,77 @@ T001 on and all three surfaced at once at US-5's convergence.
 **Verify**: run the documented commands from a clean database and walk the documented path;
 `forge verify --base main --steps docs` exits green.
 **Depends on**: T023.
+
+## Reader-reported corrections — six defects found reading the shipped pages
+
+Raised by the maintainer after walking a vocabulary's page through to a concept's and a
+collection's. Each is a mismatch between what the specification says and what the pages do, not a
+change of intent, so each is corrected here rather than re-specified.
+
+### T025 — A detail page's breadcrumb trail names its own vocabulary
+
+A vocabulary's page shows "Home > DCMI Type Vocabulary". Both record pages showed the upstream
+default instead — the model's plural, linking nowhere. Both now show home, the vocabulary holding
+the record, and the record itself, unlinked as the page the reader is already on.
+
+**Proves**: FR-002.
+**Verify**: the trail's texts and hrefs, on both pages.
+
+### T026 — The record's own identifier leads the page
+
+It sat at the foot, beneath everything the record says about itself. A reader citing the record
+should not have to scroll past the whole definition list to reach it, so it now sits directly
+beneath the title. Still not a row of the list: the fixed row order names only SKOS statements the
+record makes about itself.
+
+**Proves**: FR-008.
+**Verify**: the identifier's position precedes the definition list's, on both pages.
+
+### T027 — The membership section names its direction, and its entries underline on hover
+
+"Collections" reads as collections belonging to the concept, the inverse of what the section says.
+It is now "Member of". Both this section's entries and the vocabulary page's collection entries
+were bare anchors carrying no class at all; both now compose django-mvp's own link component with
+its hover variant.
+
+**Proves**: FR-014.
+**Verify**: the heading's text, and the hover class on every entry of both sections.
+
+### T028 — A collection's members are one group, not one row each
+
+A four-member collection stated `skos:memberList` four times, once per member. The property is
+stated once now, with every member listed beneath it, the same shape the membership section uses. A
+collection holding no members still contributes no row at all.
+
+**Proves**: FR-012, FR-013, FR-017.
+**Verify**: exactly one membership term on the page, carrying every member.
+
+### T029 — A short form discloses its identifier on hover, not underneath it
+
+The canonical identifier was printed as text beside the short form. The specification asks for it on
+hover. It is now a tooltip and a `title` attribute on the link itself — the tooltip for a pointer,
+the attribute so keyboard focus and a screen reader reach the same value, which is what FR-007
+requires beyond the pointer.
+
+**Proves**: FR-006, FR-007.
+**Verify**: the identifier is absent from the row's visible text and present in both attributes.
+
+### T030 — Reconcile the tests these changes invalidate
+
+Three tests pin the behaviour T029 reverses, and two pin T028's one-row-per-member shape. Each is
+evidence about intent, so each is amended in place to assert the new guarantee rather than deleted.
+A new case proves a publisher-supplied identifier is escaped in the two attributes T029 added.
+
+**Proves**: Article IV.
+**Verify**: no test is removed, and the suite is green.
+
+### T031 — A row's term discloses the URI its CURIE abbreviates
+
+The fifth point again, on the term side: hovering a row's term showed nothing. A CURIE abbreviates
+a URI wherever it appears, so a term now carries the same disclosure a short form does, through
+`curie_uri()`, which expands a prefixed name against the namespaces the package declares and
+refuses one it does not. The term is wrapped in `<abbr>` — a CURIE is an abbreviation, and the
+element makes a screen reader announce the expansion where a pointer-only tooltip cannot reach.
+
+**Proves**: FR-007.
+**Verify**: every term on both pages carries the URI its CURIE expands to, and no page prints it.
