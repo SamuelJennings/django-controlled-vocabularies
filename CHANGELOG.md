@@ -52,6 +52,12 @@ All notable changes to this project are documented in this file. The format foll
   list to that vocabulary's own page and searches inside it — including a search matching only
   the hidden label — failing the build if either does not work. See the README's "Try it"
   section.
+- The vocabulary's own page now names its collections — curator-made groupings of its concepts
+  (`skos:Collection` / `skos:OrderedCollection`) that the broader/narrower relations do not
+  express — above the concept list, each one distinguishable as ordered or not. Nothing on the
+  page links to a collection: that address is a later feature's (#142). A vocabulary holding none
+  shows no collections section at all. The demo project's Data Collection Methods vocabulary now
+  seeds one of each kind, loaded through the same SKOS file as its concepts. See the README.
 
 ### Known limitations
 

@@ -484,3 +484,100 @@ passed, 3 skipped; 30 new tests added across T013-T017, T018 added none).
 `forge verify --repo /home/sam/projects/samueljennings/dcv-014-us3`: conformance passed,
 poetry:lint passed, poetry:typecheck passed, poetry:test passed, poetry:build passed, docs
 skipped (needs `--base`).
+
+## 2026-08-24 · Implementer US-4 · T019
+
+Did: `VocabularyDetailView.get_context_data` now puts `collections` in context —
+`self.vocabulary.collections.order_by(Lower("name"))`, so the page's own list is deterministic
+the same way the vocabulary and concept lists already are. `conceptscheme_detail.html` renders
+them with an ordinary `{% for %}` loop inside a `vocabulary-collections` div, above
+`{{ block.super }}`'s concept list — never django-mvp's list component, per plan.md item 5. An
+ordered collection carries a `<c-badge>{% trans "Ordered" %}</c-badge>`; an unordered one carries
+none. A vocabulary with no collections renders no `vocabulary-collections` div at all — the
+`{% if collections %}` guards the whole block, not just its contents (decisions.md D7). No
+anchor is rendered anywhere in the block; nothing links to a collection (issue #142 owns that
+address).
+
+Five new tests in `tests/test_ui/test_views.py::TestVocabularyDetailCollections`: each
+collection is named; an ordered one carries a badge an unordered one does not; a vocabulary
+holding none shows no section (asserted as the section's absence, not an empty one); the section
+holds no concept-card markup and the concept queryset is unaffected by collection membership; no
+anchor's `href` names a collection's `local_url` or contains a `/collection/` segment.
+
+RED observed first: wrote the five tests against the unmodified view/template, ran them —
+`test_each_collection_is_named` failed on `assert 'Collection 0' in content`, the right reason
+(nothing renders collections yet). Implemented the context key and the template block, reran:
+4 of 5 passed; `test_an_ordered_collection_is_distinguishable_from_an_unordered_one` failed with
+`AttributeError: 'NoneType' object has no attribute 'find_parent'` — a test bug, not a production
+one: `soup.find(string=...)` matches exact text-node equality, and the rendered `<li>` carries
+surrounding template whitespace, so no node equals the bare name. Fixed by scanning `<li>` tags
+and matching on `.get_text()` containment instead; reran: 5 passed.
+
+Verified: `poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailCollections -v` —
+5 passed. `poetry run pytest tests/test_ui/test_templates.py tests/test_ui/test_views.py -q` —
+95 passed, 3 skipped (the pre-existing #147 skips, untouched), no regressions. `poetry run
+pre-commit run --files controlled_vocabularies/ui/templates/controlled_vocabularies/ui/
+conceptscheme_detail.html controlled_vocabularies/ui/views.py tests/test_ui/test_views.py` — all
+hooks passed, including the mechanical translation-tag check against the new template markup.
+
+## 2026-08-24 · Implementer US-4 · T020
+
+Did: added one `skos:Collection` ("Primary data collection methods", unordered, `skos:member`)
+and one `skos:OrderedCollection` ("Typical project workflow", `skos:memberList` in a deliberate
+non-alphabetical order) to `demo/seed/research_methods.ttl`, both loaded through
+`controlled_vocabularies.exchange.import_skos` — the same path every other seeded record uses,
+never a fixture behind it. `demo/seed/dcmi_types.ttl` is untouched; recorded why in
+decisions.md D15 (that file's URIs are read as the vocabulary's real, externally fixed
+identity, and a collection minted under `purl.org/dc/dcmitype/` would misrepresent whose grouping
+it is — `research_methods.ttl`'s concepts already sit under the reserved `example.org` placeholder
+domain, where no such risk exists). Re-seeding's idempotency needed no new code: `seed_demo.py`
+already deletes every vocabulary before reloading (T016's own design), so the collections are
+recreated fresh on every run by construction.
+
+Four new tests in `tests/test_demo/test_seed.py::TestSeedDemo`: one collection of each kind loads
+after one run; a second run does not duplicate them; both collection names appear in the response
+when the authored vocabulary's own page (T019's view/template) is requested through the test
+client — proving the acceptance criterion ("both render on a page anyone can open") against the
+real view, not just the model.
+
+RED observed first: wrote the four tests against the unmodified seed file, ran them — the two
+count-based assertions failed on `assert 0 == 2` (no collections existed yet, the right reason);
+the render test passed vacuously (its `for` loop iterated zero collections), which is expected
+for an assertion riding on the same fixture as the others rather than driving its own red.
+Added the Turtle content, reran: 8 of 9 in the file passed; the render test failed on
+`assert "A typical project's workflow" in content` — a test bug, not a production one: Django's
+autoescaping renders the apostrophe as `&#x27;`, so a plain substring check against the raw name
+can never match escaped output. Renamed the collection to "Typical project workflow" (no
+apostrophe) rather than patching the test to unescape, since the name itself was arbitrary and a
+demo string free of punctuation quirks is one fewer thing for a future test in this area to trip
+on. Reran: 9 passed.
+
+Verified: `poetry run pytest tests/test_demo/test_seed.py -q` — 9 passed. `poetry run pytest
+tests/test_demo/ tests/test_ui/ -q` — 175 passed, 3 skipped (the pre-existing #147 skips,
+untouched), no regressions. `poetry run pre-commit run --files demo/seed/research_methods.ttl
+tests/test_demo/test_seed.py` — all hooks passed (ruff reports no files to check for
+`tests/test_seed.py` because pre-commit excludes `tests/` by design, per this story's own
+`conventions`).
+
+## 2026-08-24 · Implementer US-4 · T021
+
+Did: extended README's "A vocabulary's own page" section with a new paragraph on collections —
+what they are (curator-made groupings the broader/narrower relations do not express), that an
+ordered one is shown distinguishably from an unordered one, that nothing on the page opens one
+(named and nothing more, until #142 gives it an address), and that a vocabulary holding none
+shows no section at all (with the same "why" D7 already gives: most vocabularies have none, and
+an always-empty section is noise on every page but one). Extended the "Try it" paragraph with the
+demo's two seeded collection names (`Primary data collection methods`, `Typical project
+workflow`) so the collections section is never empty on a fresh checkout — both names verified
+directly against T020's own passing test
+(`tests/test_demo/test_seed.py::TestSeedDemo::test_both_seeded_collections_render_on_their_vocabularys_page`),
+not retyped from memory. Matching CHANGELOG `Added` bullet, same content, shorter.
+
+Verified: `poetry run pytest tests/test_demo/test_documented_commands.py -q` — 8 passed, no
+regression from the doc-only change. `poetry run pre-commit run --files README.md CHANGELOG.md`
+— all hooks passed.
+
+## Full verify (final ritual)
+
+`poetry run pytest -q` — 1530 passed, 3 skipped, 0 failed (baseline at dispatch was 1522 passed,
+3 skipped; 8 new tests added across T019-T020, T021 added none).
