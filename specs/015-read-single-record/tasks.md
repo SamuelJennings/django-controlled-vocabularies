@@ -472,6 +472,25 @@ task, not something its verification can take for granted.
   falling back across languages.
 - Changelog entry per the quality bar.
 
+Three documentation debts fall due here too. The documentation check only runs when it is given a
+base ref to diff against, which the per-story verifications did not pass, so it stayed silent from
+T001 on and all three surfaced at once at US-5's convergence.
+
+- **The concept page section does not mention the membership section T021 added.** It documents
+  every row of the definition list and stops. Say that the collections gathering a concept are named
+  below the list rather than in it, why the heading is plain language where every row is keyed by a
+  SKOS property, and that a concept no collection gathers shows no such section.
+- **Three public names this feature added are documented nowhere**: `skos_curie` in
+  `controlled_vocabularies.exchange.mapping`, and `concept_property_rows` and
+  `collection_property_rows` in `controlled_vocabularies.ui.views`. Each is the seam a consumer
+  reaches for when building their own page or their own rendering of a report, so each belongs where
+  that consumer is already reading — the two row builders in the page sections that name the view
+  they serve, `skos_curie` where the README first explains what a short form is. A docstring is not
+  documentation and neither is a changelog entry.
+- **Nothing this feature added may be left undocumented.** Run the check rather than reasoning about
+  which names it will flag.
+
 **Proves**: Article VI, SC-008.
-**Verify**: run the documented commands from a clean database and walk the documented path.
+**Verify**: run the documented commands from a clean database and walk the documented path;
+`forge verify --base main --steps docs` exits green.
 **Depends on**: T023.
