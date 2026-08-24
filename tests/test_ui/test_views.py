@@ -3059,3 +3059,50 @@ class TestConceptDetailShowsNoCrossVocabularyLink:
         assert "external.example.org" not in content
         terms = [dt.get_text(strip=True) for dt in soup.find_all("dt")]
         assert terms == [TYPE_CURIE, LABEL_CURIES[ConceptLabel.Kind.PREFERRED], IN_SCHEME_CURIE]
+
+
+class TestPropertyTermDisclosesItsOwnURI:
+    """A row's term is a CURIE too, and a CURIE is an abbreviation of a URI — hovering
+    one discloses what it abbreviates, the same disclosure a record-valued row's short
+    form carries (015-read-single-record T031, FR-007).
+    """
+
+    @pytest.mark.django_db
+    def test_a_concept_pages_terms_each_disclose_the_uri_they_abbreviate(self, client):
+        concept = ConceptFactory(label="Granite")
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        terms = {dt.get_text(strip=True): dt.find("abbr") for dt in soup.find_all("dt")}
+
+        assert terms, "the page rendered no terms at all"
+        assert terms["rdf:type"].get("title") == "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
+        assert terms["skos:prefLabel"].get("title") == "http://www.w3.org/2004/02/skos/core#prefLabel"
+        for curie, abbr in terms.items():
+            assert abbr is not None, f"{curie} discloses nothing"
+            assert "tooltip" in abbr.get("class", []), f"{curie} carries no hover disclosure"
+            assert abbr.get("data-tip") == abbr.get("title"), f"{curie}'s two disclosures disagree"
+            assert abbr["title"] not in soup.find("dl").get_text(), f"{curie}'s URI is printed, not hovered"
+
+    @pytest.mark.django_db
+    def test_a_collection_pages_terms_do_too(self, client):
+        collection, _members = collection_with_members(labels=("Granite",))
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:collection-detail",
+                kwargs={"slug": collection.scheme.slug, "collection_slug": collection.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        terms = {dt.get_text(strip=True): dt.find("abbr") for dt in soup.find_all("dt")}
+
+        assert terms[MEMBER_CURIE].get("title") == "http://www.w3.org/2004/02/skos/core#member"
+        for curie, abbr in terms.items():
+            assert abbr is not None, f"{curie} discloses nothing"
+            assert "tooltip" in abbr.get("class", []), f"{curie} carries no hover disclosure"

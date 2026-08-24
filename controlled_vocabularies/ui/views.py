@@ -29,6 +29,7 @@ from controlled_vocabularies.exchange.mapping import (
     ORDERED_COLLECTION_TYPE_CURIE,
     RELATED_CURIE,
     TYPE_CURIE,
+    curie_uri,
 )
 from controlled_vocabularies.models import Collection, Concept, ConceptLabel, ConceptNote, ConceptScheme
 
@@ -187,7 +188,17 @@ def concept_property_rows(concept: Concept, language: str, default_language: str
     """
 
     def row(term: str, *, value=None, short_form=None, uri=None, href=None) -> dict:
-        return {"term": term, "value": value, "short_form": short_form, "uri": uri, "href": href}
+        # term_uri (T031): the term is itself a CURIE, and a CURIE abbreviates a URI,
+        # so a reader hovering one is asking what it stands for — the same disclosure
+        # a record-valued row's short form carries (FR-007).
+        return {
+            "term": term,
+            "term_uri": curie_uri(term),
+            "value": value,
+            "short_form": short_form,
+            "uri": uri,
+            "href": href,
+        }
 
     def localized_text(getter):
         value = getter(language)
@@ -277,7 +288,16 @@ def collection_property_rows(collection: Collection) -> list[dict]:
     """
 
     def row(term: str, *, value=None, short_form=None, uri=None, href=None, entries=None) -> dict:
-        return {"term": term, "value": value, "short_form": short_form, "uri": uri, "href": href, "entries": entries}
+        # term_uri (T031): see concept_property_rows.row() — same disclosure, same reason.
+        return {
+            "term": term,
+            "term_uri": curie_uri(term),
+            "value": value,
+            "short_form": short_form,
+            "uri": uri,
+            "href": href,
+            "entries": entries,
+        }
 
     def member_entry(member: Concept) -> dict:
         # D-015-02: Collection.members() (models.py, out of this feature's scope)

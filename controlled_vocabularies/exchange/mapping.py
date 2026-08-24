@@ -62,6 +62,30 @@ def skos_curie(predicate: rdflib.URIRef) -> str:
     return f"skos:{predicate_str[len(namespace) :]}"
 
 
+#: Prefix -> namespace for every CURIE a record's page renders as a term
+#: (015-read-single-record T031). :func:`skos_curie` goes one way, from a URI to its
+#: short form; a page needs the other way too, because a reader hovering ``skos:member``
+#: is asking what it abbreviates.
+CURIE_NAMESPACES: dict[str, str] = {
+    "skos": str(SKOS),
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+}
+
+
+def curie_uri(curie: str) -> str:
+    """The full URI a ``prefix:local`` CURIE abbreviates.
+
+    Refuses a prefix this package does not declare rather than concatenating whatever
+    it was given — the same reason :func:`skos_curie` refuses a predicate outside SKOS,
+    and the reason a term added to a namespace nobody declared fails at render rather
+    than putting a fabricated identifier in front of a reader.
+    """
+    prefix, separator, local = curie.partition(":")
+    if not separator or not local or prefix not in CURIE_NAMESPACES:
+        raise ValueError(f"'{curie}' is not a CURIE in a namespace this package declares.")
+    return f"{CURIE_NAMESPACES[prefix]}{local}"
+
+
 #: SKOS label predicate -> :class:`~controlled_vocabularies.models.ConceptLabel.Kind`
 #: (T018, FR-008). ``skos:prefLabel`` in the vocabulary's effective default
 #: language is not looked up through this table at all — that value is
@@ -138,6 +162,7 @@ __all__ = [
     "BROADER_CURIE",
     "COLLECTION_TYPE_CURIE",
     "CONCEPT_TYPE_CURIE",
+    "CURIE_NAMESPACES",
     "DCTERMS",
     "IN_SCHEME_CURIE",
     "LABEL_CURIES",
@@ -152,5 +177,6 @@ __all__ = [
     "RELATED_CURIE",
     "SKOS",
     "TYPE_CURIE",
+    "curie_uri",
     "skos_curie",
 ]

@@ -21,14 +21,19 @@
   <dl>
     {% for row in rows %}
       {% if row.entries %}
-        <c-controlled_vocabularies.property_row term="{{ row.term }}" :entries="row.entries" />
+        <c-controlled_vocabularies.property_row term="{{ row.term }}"
+                                                  term_uri="{{ row.term_uri }}"
+                                                  :entries="row.entries" />
       {% elif row.short_form %}
         <c-controlled_vocabularies.property_row term="{{ row.term }}"
+                                                  term_uri="{{ row.term_uri }}"
                                                   short_form="{{ row.short_form }}"
                                                   uri="{{ row.uri }}"
                                                   href="{{ row.href }}" />
       {% else %}
-        <c-controlled_vocabularies.property_row term="{{ row.term }}" value="{{ row.value }}" />
+        <c-controlled_vocabularies.property_row term="{{ row.term }}"
+                                                  term_uri="{{ row.term_uri }}"
+                                                  value="{{ row.value }}" />
       {% endif %}
     {% endfor %}
   </dl>
