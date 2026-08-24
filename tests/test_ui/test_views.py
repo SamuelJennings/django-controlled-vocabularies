@@ -2692,8 +2692,8 @@ class TestPythonSideStringsThisFeatureIntroducedAreTranslatableAndCuriesAreNot:
 
 
 class TestConceptAndCollectionValuesReachTheReaderEscaped:
-    """FR-021, SC-007, T023 — a label, a note, a collection's own name, and a
-    publisher-supplied identifier each reach the reader as text escaped by the
+    """FR-021, SC-007, T023 — a label, a note, a collection's own name, a vocabulary's
+    own name, and a publisher-supplied identifier each reach the reader as text escaped by the
     template layer. Nothing on either page is marked safe: the assertion fails the
     same way :class:`TestVocabularySearchEmptyState`'s own escaping test would if
     ``|safe`` were introduced anywhere it is not today — a raw substring check would
@@ -2760,6 +2760,29 @@ class TestConceptAndCollectionValuesReachTheReaderEscaped:
         identifier_link = soup.find("a", href=concept.static_uri)
         assert identifier_link is not None
         assert concept.static_uri in identifier_link.get_text(strip=True)
+
+    @pytest.mark.django_db
+    def test_a_vocabularys_name_containing_markup_is_escaped_on_the_concept_page(self, client):
+        # The vocabulary's display name is the one reader-visible string on either page
+        # that reaches <c-link>'s text attribute rather than a <dd> directly, so it is
+        # the one path the other three cases here do not exercise. Probed the way the
+        # rest of this class was: marking the name safe where the row is built fails
+        # this test. Marking it safe in the row template does not — a component
+        # attribute is escaped again when the component renders it — so the reachable
+        # defect is in the view, and that is what this pins.
+        scheme = ConceptSchemeFactory(name="<script>alert(1)</script>")
+        concept = ConceptFactory(scheme=scheme, label="Granite")
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        assert soup.find("script", string=self._INJECTED_SCRIPT) is None
+        assert "<script>alert(1)</script>" in soup.find("dl").get_text()
 
     @pytest.mark.django_db
     def test_a_collections_name_containing_markup_is_escaped_on_the_collection_page(self, client):
