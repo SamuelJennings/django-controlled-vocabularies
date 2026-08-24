@@ -114,6 +114,12 @@ TEMPLATES = [
 
 ROOT_URLCONF = "demo.urls"
 
+# Must match the path component of wherever demo/urls.py mounts controlled_vocabularies.ui's
+# routes ("/browse/") — otherwise a locally authored vocabulary's identifier does not lead
+# back to its own page (FR-004), which is exactly the misconfiguration
+# controlled_vocabularies.ui.W001 exists to report (014-look-inside-a-vocabulary T006).
+CONTROLLED_VOCABULARIES_BASE_URI = "http://localhost:8000/browse"
+
 # mvp/base.html loads the packaged stylesheet with {% static %} unconditionally, so having
 # django.contrib.staticfiles installed is not enough on its own (README.md).
 STATIC_URL = "static/"

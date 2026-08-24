@@ -14,6 +14,7 @@ not one module — so this file is a non-mirror exception (``[tool.forge.conform
 non-mirror-paths``, T015).
 """
 
+import os
 import subprocess
 import sys
 
@@ -65,3 +66,54 @@ class TestDemoProject:
         )
         assert result.returncode == 0, result.stderr
         assert "DEMO_BOOT_OK" in result.stdout
+
+
+# T006: CONTROLLED_VOCABULARIES_BASE_URI must match where demo/urls.py mounts the browsing
+# routes ("/browse/") — without it the demo is exactly the misconfiguration T005's check
+# exists to report. Migrates and seeds in the same fresh subprocess (a local sqlite file
+# under a temp path, never the repo's own demo/db.sqlite3) so the assertions run against a
+# real demo database rather than one asserted about from the outside.
+BASE_ADDRESS_BOOT_SCRIPT = """
+import os
+os.environ["DJANGO_SETTINGS_MODULE"] = "demo.settings"
+import django
+django.setup()
+
+from django.core.management import call_command
+from django.conf import settings
+
+call_command("migrate", run_syncdb=True, verbosity=0)
+
+from demo.management.commands.seed_demo import Command
+from controlled_vocabularies.models import ConceptScheme
+
+call_command(Command())
+
+authored = ConceptScheme.objects.get(static_uri__isnull=True)
+imported = ConceptScheme.objects.get(static_uri__isnull=False)
+
+assert authored.uri == authored.local_url, authored.uri
+assert authored.uri.startswith(settings.CONTROLLED_VOCABULARIES_BASE_URI), authored.uri
+
+assert imported.uri == imported.static_uri, imported.uri
+assert not imported.uri.startswith(settings.CONTROLLED_VOCABULARIES_BASE_URI), imported.uri
+
+print("DEMO_BASE_ADDRESS_OK")
+"""
+
+
+class TestDemoBaseAddress:
+    """The demonstration is configured so its identifiers resolve (T006, US-1 scenario 4 in
+    the demonstration, SC-007)."""
+
+    def test_the_locally_authored_vocabularys_identifier_moves_and_the_imported_ones_does_not(self, tmp_path):
+        env = dict(os.environ, DEMO_DB_PATH=str(tmp_path / "demo.sqlite3"))
+        result = subprocess.run(  # noqa: S603 — fixed interpreter, literal script, no user input
+            [sys.executable, "-c", BASE_ADDRESS_BOOT_SCRIPT],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "DEMO_BASE_ADDRESS_OK" in result.stdout

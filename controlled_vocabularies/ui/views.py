@@ -1,15 +1,20 @@
-"""Views for the opt-in vocabulary-browsing front end (013-find-a-vocabulary).
+"""Views for the opt-in vocabulary-browsing front end (013-find-a-vocabulary,
+014-look-inside-a-vocabulary).
 
-One view: ``VocabularyListView``. Search narrows that same view rather than adding
-another, so both user stories land here.
+Two views: ``VocabularyListView`` over the vocabularies a site holds, and
+``VocabularyDetailView`` over the concepts inside one of them. Both are list views, and
+in each of them search narrows that same view rather than adding another, so every user
+story from both features lands in one of the two.
 """
 
-from django.db.models import Count
-from django.db.models.functions import Lower
+from django.db.models import Count, F, OuterRef, Subquery
+from django.db.models.functions import Coalesce, Lower
+from django.http import Http404
+from django.utils.translation import get_language
 from django.utils.translation import gettext_lazy as _
 from mvp.views import MVPListView
 
-from controlled_vocabularies.models import ConceptScheme
+from controlled_vocabularies.models import Concept, ConceptLabel, ConceptScheme
 
 
 class VocabularyListView(MVPListView):
@@ -26,8 +31,10 @@ class VocabularyListView(MVPListView):
     # around two faults in the shipped search control (django-mvp/django-mvp#282); the override
     # was removed on the maintainer's instruction. A template override in a consumer outlives
     # the upstream fix that made it unnecessary, and a shell package whose consumers all carry
-    # overrides has stopped being a shell. The tests those faults block are skipped, naming the
-    # issue they wait on (decisions.md D23).
+    # overrides has stopped being a shell. Waiting was the right call: #282 shipped in
+    # django-mvp 0.19.2, which this package now floors on, and the tests it blocked are live
+    # again. One test stays skipped for a gap 0.19.2 did not close — a page whose search
+    # matched nothing still has nowhere to put a link back (django-mvp#291).
 
     # django-mvp's SearchMixin reads ?q=, strips it, and applies case-insensitive
     # substring matching across these fields with OR semantics (T011, FR-006).
@@ -41,6 +48,24 @@ class VocabularyListView(MVPListView):
     # order, two same-named vocabularies could land on either of two pages, or on neither,
     # once pagination is in play.
     ordering = [Lower("name"), "pk"]
+
+    # The orderings a reader may choose, as (key, label, expression) — the key is what
+    # `?o=` carries and the expression is never built from the request, so an unrecognised
+    # `?o=` falls back to `ordering` above rather than reaching the database. Declaring
+    # this is what makes the sort control render at all: django-mvp's action is wrapped in
+    # `{% if order_by_choices %}`, so a view that declares none shows no control, which is
+    # why sorting appeared to be broken rather than absent.
+    #
+    # Each expression is a single column, because django-mvp applies `order_by(choice[2])`
+    # with one argument and Django rejects a sequence there. A chosen sort therefore has no
+    # `pk` tiebreak and two identically named vocabularies can swap places between pages —
+    # the instability the default `ordering` above exists to prevent. Raised upstream as
+    # django-mvp#290; the fix belongs there, not in a local re-implementation of the mixin
+    # (decisions.md D16).
+    order_by = [
+        ("name_asc", _("Name (A-Z)"), Lower("name")),
+        ("name_desc", _("Name (Z-A)"), Lower("name").desc()),
+    ]
 
     # A search longer than this many words keeps its first this-many and drops the rest.
     max_search_words = 100
@@ -85,6 +110,12 @@ class VocabularyListView(MVPListView):
         # offering to undo a search that never happened.
         context = super().get_context_data(**kwargs)
         context["search_term"] = self.get_search_term()
+        # django-mvp fills the search box from `search_query`, which it sets to the raw
+        # `?q=` value. A whitespace-only query filters nothing, so leaving the raw value
+        # in place puts whitespace back in the box and the page reads as searched when it
+        # is not. Overwriting the context variable is the supported way to correct it —
+        # the alternative is overriding django-mvp's search component (decisions.md D17).
+        context["search_query"] = context["search_term"]
         return context
 
     def get_empty_state_heading(self):
@@ -106,4 +137,114 @@ class VocabularyListView(MVPListView):
         # No message: the base class's own default points at a create button this page
         # does not show (show_create_action is never set), and this empty state has
         # nothing else useful to add beyond the heading.
+        return None
+
+
+class VocabularyDetailView(MVPListView):
+    """A single vocabulary's own page: its description, provenance and the concepts it
+    holds (014-look-inside-a-vocabulary, US-1).
+
+    A list view over ``Concept``, not a detail view over ``ConceptScheme`` — plan.md Key
+    design decision #1. django-mvp's ``MVPDetailView`` is deliberately empty below its
+    heading (its own ADR 0001), so building on it would mean re-implementing search,
+    pagination and the empty states ``MVPListView`` already supplies. The vocabulary
+    itself is resolved once, in ``setup()``, and carried on ``self.vocabulary`` for every
+    hook that needs it.
+    """
+
+    model = Concept
+    template_name = "controlled_vocabularies/ui/conceptscheme_detail.html"
+    list_item_template = "controlled_vocabularies/ui/concept_list_item.html"
+
+    # T010: by the label actually shown, not the stored default-language one — Django
+    # applies this innermost (D11), ahead of self.queryset's own annotation being
+    # consulted by anything downstream. `pk` is not decoration: without a total order,
+    # two identically labelled concepts could land on either of two pages, or on
+    # neither, once pagination is in play (#140 makes the same point for vocabularies).
+    ordering = [Lower("resolved_label"), "pk"]
+
+    # The orderings a reader may choose, by the label actually shown rather than the stored
+    # one — the same annotation the default `ordering` above uses, so a chosen sort and the
+    # default agree about what a concept is called. The single-expression limitation and its
+    # missing `pk` tiebreak are the list view's, restated: django-mvp#290, decisions.md D16.
+    order_by = [
+        ("label_asc", _("Label (A-Z)"), Lower("resolved_label")),
+        ("label_desc", _("Label (Z-A)"), Lower("resolved_label").desc()),
+    ]
+
+    # django-mvp's SearchMixin reads ?q=, strips it, and applies case-insensitive
+    # substring matching across these fields with OR semantics, joined with `.distinct()`
+    # (T013, FR-008, FR-009, decisions.md D4/plan.md item 4). `label` is the preferred
+    # label in the vocabulary's own default language; `labels__text` reaches every
+    # ConceptLabel row in one traversal — preferred labels in other languages,
+    # alternative labels, and hidden labels. Definitions and notes live on ConceptNote
+    # and are deliberately absent, so they are never matched. A hidden label is matched
+    # here and never displayed: display comes from `resolved_label`, which only ever
+    # reads preferred labels.
+    search_fields = ["label", "labels__text"]
+
+    def setup(self, request, *args, **kwargs):
+        super().setup(request, *args, **kwargs)
+        try:
+            self.vocabulary = ConceptScheme.objects.get(slug=kwargs["slug"])
+        except ConceptScheme.DoesNotExist as exc:
+            raise Http404(_("No vocabulary matches this address.")) from exc
+        # US-2 T009, decisions.md D11: assigned to self.queryset here, never built by
+        # annotating the result of super().get_queryset() — Django applies
+        # self.ordering innermost, ahead of both django-mvp's search and order mixins'
+        # own get_queryset() overrides, so an annotation added on the way out would not
+        # exist yet when the ordering (T010) is applied. The active language is matched
+        # exactly, not by base language (D11) — labels are stored under the site's own
+        # configured languages, which is exactly what get_language() returns one of.
+        preferred_in_active_language = ConceptLabel.objects.filter(
+            concept=OuterRef("pk"),
+            language=get_language(),
+            kind=ConceptLabel.Kind.PREFERRED,
+        ).values("text")[:1]
+        # Every concept this vocabulary holds, and only this vocabulary's. No relation
+        # is consulted, so the list is flat by construction — a concept three levels
+        # down a broader/narrower chain is a plain sibling of one at the top, never
+        # rendered nested beneath it (T008, FR-006, FR-012).
+        self.queryset = Concept.objects.filter(scheme=self.vocabulary).annotate(
+            resolved_label=Coalesce(Subquery(preferred_in_active_language), F("label"))
+        )
+
+    def get_page_title(self):
+        # Without this override the title reads as the concept model's plural, because
+        # the view's `model` is `Concept` — the page describes the vocabulary, not concepts.
+        return self.vocabulary.name
+
+    def get_search_term(self):
+        # Read and stripped exactly as django-mvp's own search mixin does it before
+        # filtering (`mvp/views/list.py`), so "a search is in force" means the same
+        # thing to the empty states and the "back to the whole vocabulary" link as it
+        # does to the queryset (T015, #140's own `?q=%20%20` trap restated here).
+        return self.request.GET.get("q", "").strip()
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["vocabulary"] = self.vocabulary
+        context["search_term"] = self.get_search_term()
+        # The stripped term, for the same reason the list of vocabularies does it: django-mvp
+        # fills the box from the raw `?q=`, so a whitespace-only query would come back in the
+        # box and the page would read as searched while filtering nothing (decisions.md D17).
+        context["search_query"] = context["search_term"]
+        # T019, decisions.md D5/D7: named and, where ordered, marked as such — never
+        # rendered through django-mvp's list component (plan.md item 5), and nothing
+        # here links to a collection (issue #142 owns its address).
+        context["collections"] = self.vocabulary.collections.order_by(Lower("name"))
+        return context
+
+    def get_empty_state_heading(self):
+        # T015, decisions.md D7: two distinct empty states, never one — a search
+        # matching nothing says so and repeats the term; a genuinely empty vocabulary
+        # keeps T011's own wording. Never mark_safe, never format_html.
+        search_term = self.get_search_term()
+        if search_term:
+            return _("Nothing matches “%(term)s”") % {"term": search_term}
+        return _("This vocabulary holds no concepts")
+
+    def get_empty_state_message(self):
+        if self.get_search_term():
+            return _("Try a different search term.")
         return None

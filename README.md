@@ -329,8 +329,15 @@ holds; finding a concept without already knowing which vocabulary holds it is no
 page does. The term travels in the page's address (`?q=`), so a narrowed list can be linked to or
 bookmarked and returned to. A second word **widens** the results rather than narrowing them:
 matching is OR across every word and both fields, not AND, which is the opposite of what a search
-box usually implies. There is no other way to filter or sort the list. A search matching nothing
-says so, repeats what was searched for, and offers a link back to the unsearched list.
+box usually implies. A search matching nothing says so and repeats what was searched for.
+
+A sort control offers the list by name, A-Z or Z-A. That choice travels in the address as `?o=`,
+next to any search term, so a searched and sorted list is still one link you can share. Only the
+orderings the view declares are honoured. Anything else in `?o=` is ignored rather than passed to
+the database, and the page comes back in its default order.
+
+There is no way to filter the list. Filtering needs an axis, and a vocabulary has none that would
+suit every site.
 
 Case is ignored, with one limit that belongs to the database rather than to this package. SQLite
 folds case for ASCII letters only, so a vocabulary named *Ökologie* is found by *ÖKOLOGIE* and not
@@ -419,24 +426,24 @@ reverse("controlled_vocabularies_ui:vocabulary-list")
 `manage.py check` reports `controlled_vocabularies.ui.E001`, naming the extra to install, if
 `django-mvp` is not importable.
 
-**An entry names a vocabulary — it does not yet link to it.** Every vocabulary already has an
-address on this site (`ConceptScheme.local_url`), but nothing serves that address yet. Shipping
-a list whose every entry led to a missing page would ship a broken front door rather than a
-working one; a later feature turns the name into a link in the same change that gives it
-somewhere to lead.
+Each entry's name is a link to that vocabulary's own page, described below. The link is reversed
+from the route's name rather than composed from the identifier base address, so it stays an
+in-site address whatever that setting says.
 
-**One thing does not work yet.** The search box on the page cannot be submitted: the control comes
-from django-mvp, and in the released version its input is tied to a form that only its filter
-control creates ([django-mvp#282](https://github.com/django-mvp/django-mvp/issues/282), tracked here as
-[#147](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/147)). Searching
-by address works exactly as documented — `?q=soil` narrows the list, and the narrowed address can be
-shared and bookmarked — but typing in the box and pressing the button does nothing until that fix
-ships. The same fault is why a page whose search matched nothing names the term but offers no link
-back to the full list.
+**One thing is still missing.** When a search on this page matches nothing, it names the term but
+offers no link back to the unsearched list. Clearing the box and pressing the button does the same
+job, so the page is not a dead end, but the link belongs there. It has to go in the page's actions
+area, and django-mvp offers no way to add anything there without replacing the whole page template
+([django-mvp#291](https://github.com/django-mvp/django-mvp/issues/291)).
 
-We are waiting on the fix rather than shipping a copy of django-mvp's page with the gap patched: an
-override in a package like this one outlives the release that makes it unnecessary, and nothing ever
-reports that it has (`docs/adr/0015-upstream-defects-are-waited-on-not-worked-around.md`).
+Until django-mvp 0.19.2 the search box on this page could not be submitted at all: its input was
+tied to a form only the filter control created
+([django-mvp#282](https://github.com/django-mvp/django-mvp/issues/282), tracked here as
+[#147](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/147)). This package
+waited for the upstream fix rather than shipping a patched copy of django-mvp's page, and the
+version floor moved once the fix was released. An override in a package like this one outlives the
+release that makes it unnecessary, and nothing ever reports that it has
+(`docs/adr/0015-upstream-defects-are-waited-on-not-worked-around.md`).
 
 The page is served by `VocabularyListView`, in `controlled_vocabularies.ui.views`. A project that
 wants a different presentation subclasses it and routes its own path at the same view — the
@@ -450,6 +457,89 @@ from controlled_vocabularies.ui.views import VocabularyListView
 class BrandedVocabularyListView(VocabularyListView):
     list_item_template = "myproject/vocabulary_card.html"
 ```
+
+### A vocabulary's own page
+
+Every vocabulary the site holds has its own address — the same one its identifier composes
+(`ConceptScheme.uri`) when the site is configured as this section describes. The page's title is
+the vocabulary's name. Above the list of concepts it holds it shows the vocabulary's description,
+truncated the same way and for the same reason as the list entry above, and how the vocabulary was
+obtained: an imported vocabulary's page shows the publisher's own identifier; one authored here
+shows its own address instead. Either way the identifier is a link — to the publisher's site for
+an imported vocabulary, or back to the page itself for one authored here.
+
+Below that, every concept the vocabulary holds — and only that vocabulary's — in one flat,
+alphabetical list: nothing several levels down a broader/narrower chain is nested under one above
+it. Alphabetical order follows the label actually shown, not necessarily the one stored: a concept
+carrying a preferred label in the reader's own language shows that one; a concept with none in that
+language falls back to its label in the vocabulary's own default language. A row names a concept and
+nothing more — no definition, no note, no identifier, and no relation to another concept.
+
+**How concepts relate to one another is not shown here.** Broader, narrower and related links, and
+a concept's own page, are a later feature's (#142); until then a concept on this list is not
+something a reader can follow to anywhere else. A vocabulary holding no concepts says so, in
+wording distinct from the page's other empty state, and the rest of the page — its description and
+provenance — still renders.
+
+Above the list of concepts, the page also names the vocabulary's **collections** — curator-made
+groupings of its concepts (`skos:Collection` / `skos:OrderedCollection`) that the broader/narrower
+relations do not express. Each is named, and one whose members carry a deliberate order is shown
+distinguishably from one that does not. **A collection cannot be opened from here**: neither its
+own page nor its members' names are reached by following anything on this page — that address
+belongs to #142, the same feature that gives a concept its own page, so a collection is named and
+nothing more until it lands. A vocabulary holding no collections shows no such section at all —
+most vocabularies have none, and a section that is only ever present-but-empty would be noise on
+every page but one.
+
+A search box narrows the list of concepts by every name a term goes by: a concept's preferred
+label in any language it carries, its alternative labels, and its hidden labels — never its
+definition or any other note. A hidden label is matched and never shown: searching for one finds
+the concept it names without ever displaying the label itself, which is the whole point of
+keeping it hidden. As with the list of vocabularies above, the term travels in the page's own
+address (`?q=`), so a narrowed list can be linked to, bookmarked and returned to, and it reaches
+every concept in the vocabulary before paging divides the results — not only the page being
+viewed. A search matching nothing says so, repeats what was searched for, and offers a link back
+to the whole vocabulary.
+
+Case is ignored, with the same database-dependent limit disclosed above: SQLite folds ASCII
+letters only, so a concept labelled *Ökologie* is found by *ÖKOLOGIE* and not by *ökologie*;
+PostgreSQL folds the whole of Unicode and matches either way
+(`docs/adr/0014-database-collation-differences-are-disclosed-not-repaired.md`).
+
+Searching by address works the same as searching in the box: the demo project's own DCMI Type
+Vocabulary carries a concept named *Dataset* with a hidden label of `Datset`, a plausible
+misspelling — `?q=Datset` narrows the page to *Dataset* without the misspelling itself ever
+appearing in the response, and the narrowed address can be shared and bookmarked the same as any
+other. Unlike the list of vocabularies, a search here that matches nothing offers a link back to
+the unsearched vocabulary: this page has a template of its own to put that link in, where the list
+of vocabularies has none.
+
+A sort control offers the concepts by label, A-Z or Z-A. The choice travels in the address as
+`?o=`, next to any search term, exactly as it does on the list of vocabularies. It sorts by the
+label a reader actually sees rather than the stored one, so a German reader gets the concepts in
+German alphabetical order and not in the vocabulary's own default language.
+
+Reverse the page by name, passing the vocabulary's slug:
+
+```python
+reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": vocabulary.slug})
+```
+
+**The browsing routes must be mounted at the same path `CONTROLLED_VOCABULARIES_BASE_URI`
+composes against**, or a vocabulary's identifier does not lead back to its own page. Mounting the
+routes at `browse/` means the setting's path has to be `/browse`, not the package's own default:
+
+```python
+CONTROLLED_VOCABULARIES_BASE_URI = "https://example.org/browse"
+```
+
+`manage.py check` reports `controlled_vocabularies.ui.W001` — a warning, not an error, since a
+project may serve identifiers through a reverse proxy this package cannot see — when the two
+disagree, naming the mismatched paths. It is silent once they agree, and silent too if the
+browsing routes are not mounted at all.
+
+The page is served by `VocabularyDetailView`, in `controlled_vocabularies.ui.views`, and is
+subclassed the same way as the list above.
 
 ### Try it: the demo project
 
@@ -473,7 +563,10 @@ serves the site at `http://127.0.0.1:8000/`, which redirects straight to the pop
 searchable vocabulary list at `http://127.0.0.1:8000/browse/`. The seeded content shows both
 kinds of entry the list distinguishes: the DCMI Type Vocabulary, a real vocabulary published by
 the Dublin Core Metadata Initiative, imported from a SKOS file; and Data Collection Methods, a
-short vocabulary authored here, with no publisher of its own.
+short vocabulary authored here, with no publisher of its own. Data Collection Methods' own page
+also carries one of each kind of collection — "Primary data collection methods" (unordered) and
+"Typical project workflow" (ordered) — both loaded through the same SKOS file, so the collections
+section described above is never empty on a fresh checkout.
 
 `seed_demo` is destructive and idempotent: it clears every vocabulary before loading, so running
 it again returns the demo to the same seeded state whatever was added or removed before —

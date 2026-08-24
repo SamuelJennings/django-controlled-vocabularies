@@ -16,8 +16,9 @@ seed content, not a module under ``controlled_vocabularies/`` — so it is part 
 
 import pytest
 from django.core.management import call_command
+from django.urls import reverse
 
-from controlled_vocabularies.models import ConceptScheme
+from controlled_vocabularies.models import Concept, ConceptScheme
 from demo.management.commands.seed_demo import Command
 
 
@@ -61,3 +62,61 @@ class TestSeedDemo:
 
         assert imported.count() == 1
         assert authored.count() == 1
+
+    def test_seeded_concepts_carry_alternative_and_hidden_labels_through_the_real_importer(self):
+        # T016, US-3: a search can find something a reader is never shown, which needs a
+        # hidden label content asserting on a search cannot exercise. Loaded through
+        # import_skos() (seed_demo.py), never a fixture behind it — the same path a real
+        # project's own import runs.
+        run_seed_demo()
+
+        dataset = Concept.objects.get(label="Dataset")
+        assert dataset.alt_labels("en") == ["Data set"]
+        # A plausible misspelling of the seeded term, not an arbitrary string — the one a
+        # reader might actually type without knowing the concept is called "Dataset".
+        assert dataset.hidden_labels("en") == ["Datset"]
+
+        fieldwork = Concept.objects.get(label="Fieldwork")
+        assert fieldwork.alt_labels("en") == ["Field work"]
+        assert fieldwork.hidden_labels("en") == ["Feildwork"]
+
+    def test_a_second_run_does_not_duplicate_the_seeded_labels(self):
+        run_seed_demo()
+        run_seed_demo()
+
+        dataset = Concept.objects.get(label="Dataset")
+        assert dataset.alt_labels("en") == ["Data set"]
+        assert dataset.hidden_labels("en") == ["Datset"]
+
+    def test_seeded_collections_load_through_the_real_importer_with_one_of_each_kind(self):
+        # T020, FR-018: through the Turtle file (research_methods.ttl), never a fixture
+        # behind it — the same import_skos() path the concepts and their labels use.
+        run_seed_demo()
+
+        authored = ConceptScheme.objects.get(static_uri__isnull=True)
+        collections = {collection.name: collection for collection in authored.collections.all()}
+
+        assert len(collections) == 2
+        ordered = [c for c in collections.values() if c.ordered]
+        unordered = [c for c in collections.values() if not c.ordered]
+        assert len(ordered) == 1
+        assert len(unordered) == 1
+
+    def test_a_second_run_does_not_duplicate_the_seeded_collections(self):
+        run_seed_demo()
+        run_seed_demo()
+
+        authored = ConceptScheme.objects.get(static_uri__isnull=True)
+        assert authored.collections.count() == 2
+
+    def test_both_seeded_collections_render_on_their_vocabularys_page(self, client):
+        # T020's own acceptance: "both render on a page anyone can open" - exercised through
+        # the real view and template T019 shipped, not asserted against the model alone.
+        run_seed_demo()
+
+        authored = ConceptScheme.objects.get(static_uri__isnull=True)
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": authored.slug}))
+        content = response.content.decode()
+
+        for collection in authored.collections.all():
+            assert collection.name in content
