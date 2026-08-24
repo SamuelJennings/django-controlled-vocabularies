@@ -690,6 +690,7 @@ class TestVocabularyDetailDescriptionAndProvenance:
         content = response.content.decode()
 
         assert scheme.static_uri in content
+        assert "Imported" in content
         assert "Held here" not in content
         assert "Publisher" not in content
 
@@ -1310,3 +1311,33 @@ class TestVocabularyDetailCollections:
         hrefs = {a["href"] for a in soup.find_all("a", href=True)}
         assert collection.local_url not in hrefs
         assert not any("/collection/" in href for href in hrefs)
+
+
+class TestTemplateCommentsDoNotReachThePage:
+    """Django's `{# #}` is a single-line form: its lexer does not match across a newline,
+    so a comment written over several lines is not a comment at all and its text is
+    served to the reader. Both pages carry notes about why they are written the way they
+    are, and none of that belongs in the response."""
+
+    @pytest.mark.django_db
+    def test_the_list_of_vocabularies_serves_no_comment_text(self, client):
+        ConceptSchemeFactory(external=True, description="A description.")
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-list"))
+        content = response.content.decode()
+
+        assert "{#" not in content
+        assert "#}" not in content
+
+    @pytest.mark.django_db
+    def test_a_vocabulary_page_serves_no_comment_text(self, client):
+        scheme = ConceptSchemeFactory(external=True, description="A description.")
+        collection_with_members(scheme=scheme)
+
+        response = client.get(
+            reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}), {"q": "nothing"}
+        )
+        content = response.content.decode()
+
+        assert "{#" not in content
+        assert "#}" not in content

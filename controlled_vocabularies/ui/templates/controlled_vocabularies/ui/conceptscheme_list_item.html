@@ -29,12 +29,12 @@
     <c-text size="sm" muted>{{ object.description|truncatewords:40 }}</c-text>
   {% endif %}
   {% if object.static_uri %}
-    {# The identifier is an outbound link (T003 reverses #140's D6): nothing is marked
+    {% comment %} The identifier is an outbound link (T003 reverses #140's D6): nothing is marked
        safe and nothing is interpolated into any attribute besides href. It points at an
        address this site does not control, hence rel="noopener". Which vocabularies show
        an identifier at all here is unchanged from #140 (decisions.md D8) — a locally
        authored vocabulary shows none on this page. A bare anchor, not the text component
-       used elsewhere in this row, which always renders a paragraph element. #}
+       used elsewhere in this row, which always renders a paragraph element. {% endcomment %}
     <a href="{{ object.static_uri }}" rel="noopener">{{ object.static_uri }}</a>
   {% endif %}
   <c-text size="xs" muted>

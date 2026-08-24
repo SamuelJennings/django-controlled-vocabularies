@@ -7,22 +7,27 @@
     </div>
   {% endif %}
   <div class="vocabulary-provenance">
-    {% if not vocabulary.static_uri %}
+    {% comment %} Both cases are stated, in the same words the list of vocabularies uses (FR-003).
+       Leaving the imported case to the absence of "Held here" would make a reader infer
+       provenance from the identifier's domain, which is the inference FR-003 removes. {% endcomment %}
+    {% if vocabulary.static_uri %}
+      <c-text size="xs" muted>{% trans "Imported" %}</c-text>
+    {% else %}
       <c-text size="xs" muted>{% trans "Held here" %}</c-text>
     {% endif %}
-    {# The identifier is an outbound link (T003 reverses #140's D6): nothing is marked
-       safe and nothing is interpolated into any attribute besides href #}
+    {% comment %} The identifier is an outbound link (T003 reverses #140's D6): nothing is marked
+       safe and nothing is interpolated into any attribute besides href {% endcomment %}
     <c-text size="xs" muted><a href="{{ vocabulary.uri }}" rel="noopener">{{ vocabulary.uri }}</a></c-text>
   </div>
   {% if collections %}
-    {# T019, decisions.md D5/D7: named, separate from the concept list, an ordered
+    {% comment %} T019, decisions.md D5/D7: named, separate from the concept list, an ordered
        one distinguishable from an unordered one. An ordinary loop, not django-mvp's
        list component — it declares a row-template attribute it never reads and
        renders whatever row template is already in the surrounding context, so
        pointing it at a collection row would silently render concept rows instead
        (plan.md item 5). A vocabulary holding none renders no section at all — this
        whole block is absent, not present and empty. Nothing here links to a
-       collection: its address is issue #142. #}
+       collection: its address is issue #142. {% endcomment %}
     <div class="vocabulary-collections">
       <c-text size="sm" bold>{% trans "Collections" %}</c-text>
       <ul>
@@ -36,11 +41,11 @@
     </div>
   {% endif %}
   {% if search_term %}
-    {# The way back to the whole vocabulary (T015, FR-014): rendered here, in this
+    {% comment %} The way back to the whole vocabulary (T015, FR-014): rendered here, in this
        package's own template, never as markup inside the empty-state heading or
        message — django-mvp's empty-state component autoescapes those strings with no
        slot, so an anchor there would show as literal text and marking it safe would
-       emit the search term unescaped. #}
+       emit the search term unescaped. {% endcomment %}
     <p>
       <a href="{% url 'controlled_vocabularies_ui:vocabulary-detail' vocabulary.slug %}">
         {% trans "Show every concept" %}
