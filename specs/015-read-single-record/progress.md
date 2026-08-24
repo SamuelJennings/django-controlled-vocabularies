@@ -54,3 +54,32 @@ manage.py makemigrations --check --dry-run` — no changes detected.
 
 Next: T002 (the `property_row` cotton component).
 Watch: nothing outstanding.
+
+## 2026-08-24T16:57:04Z · Implementer US0 · T002
+
+Did: added the `property_row` cotton component at `controlled_vocabularies/ui/templates/
+cotton/controlled_vocabularies/property_row.html`. Renders a `<dt>`/`<dd>` pair; a plain
+`value` renders in `<dd>` as-is, and a record-valued row (`short_form`/`uri`/`href` given)
+renders the short form as `<c-link>`'s own text (never `local_url`), with the canonical
+identifier (`uri`) as ordinary reader-reachable text beside it via `<c-text muted>` —
+never a `title` attribute (FR-007). The `<dt>`/`<dd>` wrapper carries the only two literal
+classes the component names, copied verbatim from django-mvp's own `data_field.html`;
+everything else composes `<c-link>`/`<c-text>` directly, so nothing this package invents
+can go silently unstyled.
+
+Verified: extended `tests/test_ui/test_templates.py` first (4 new tests plus a CSS-class
+test pair) and watched them fail — `TemplateDoesNotExist`/`FileNotFoundError` — before the
+component existed. After implementation: `poetry run pytest tests/test_ui/test_templates.py
+-q` — 12 passed (11 before this task's tests, +1 from the new template joining the
+existing repo-wide no-bare-text parametrize sweep). The CSS-class test reads django-mvp's
+actual shipped stylesheet (`mvp.__path__[0]/static/css/django-mvp.css` — `mvp` is a
+namespace package, so `mvp.__file__` is `None`) and asserts every class the component
+names by hand is present, escaping the colon and slash the compiled selector carries
+(`.text-base-content\/60{`) the way the build actually spells them; a negative-control
+assertion proves the check discriminates a real class from an absent one rather than
+passing regardless of what it is given. `poetry run ruff check`, `poetry run ruff format
+--check` and `poetry run mypy` on the two changed/added files — clean. `poetry run python
+manage.py makemigrations --check --dry-run` — no changes detected.
+
+Next: T003 (the row-building the two pages share).
+Watch: nothing outstanding.
