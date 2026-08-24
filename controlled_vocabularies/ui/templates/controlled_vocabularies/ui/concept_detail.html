@@ -1,4 +1,5 @@
 {% extends "detail_view.html" %}
+{% load i18n %}
 {% comment %}
   015-read-single-record T005: renders T003's rows inside one <dl>, through the T002
   component. Two branches, not one call passing every key unconditionally: a Python
@@ -21,6 +22,28 @@
       {% endif %}
     {% endfor %}
   </dl>
+  {% if concept_collections %}
+    {% comment %}
+      015-read-single-record T021, FR-014: the collections that gather this concept,
+      below the definition list and outside it, under a plain-language heading rather
+      than a CURIE — SKOS has a property pointing from a collection to its concepts
+      and no inverse of it, so this is a statement other records make about this one,
+      not a row this concept's own list can carry (decisions.md, "Which collections a
+      concept belongs to..."). A concept no collection gathers renders no section at
+      all (T022) — this whole block is absent, not present and empty, the same
+      treatment conceptscheme_detail.html's own collections section gives US-4.
+    {% endcomment %}
+    <div class="concept-collections">
+      <c-text size="sm" bold>{% trans "Collections" %}</c-text>
+      <ul>
+        {% for collection in concept_collections %}
+          <li>
+            <a href="{% url 'controlled_vocabularies_ui:collection-detail' object.scheme.slug collection.slug %}">{{ collection.name }}</a>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
   {% comment %}
     015-read-single-record T007, FR-008: the record's own identifier as an outbound
     link, the same treatment conceptscheme_detail.html already gives a vocabulary's.

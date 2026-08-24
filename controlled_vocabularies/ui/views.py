@@ -320,7 +320,7 @@ class ConceptDetailView(MVPDetailView):
     lookup is retargeted to the *concept's* segment and scoped to that vocabulary — an
     unscoped lookup would 200 at an address whose vocabulary segment names nothing and
     raise ``MultipleObjectsReturned`` the moment two vocabularies share a concept slug
-    (plan.md Key design decision #1). No page-specific context or content: that is US-1's.
+    (plan.md Key design decision #1).
     """
 
     model = Concept
@@ -356,6 +356,13 @@ class ConceptDetailView(MVPDetailView):
         context["rows"] = concept_property_rows(
             self.object, get_language(), default_language=self.object.scheme.effective_default_language
         )
+        # T021, FR-014: the collections that gather this concept, never a row in
+        # `rows` above — membership is a statement other records make about this
+        # one, not a SKOS property this concept carries itself (decisions.md,
+        # "Which collections a concept belongs to..."). `collections()` builds a
+        # fresh queryset (plan.md Key design decision #7, decisions.md D-015-02),
+        # so this is a genuine extra query, not one the existing prefetch collapses.
+        context["concept_collections"] = self.object.collections()
         return context
 
 

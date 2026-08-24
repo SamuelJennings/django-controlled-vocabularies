@@ -2098,6 +2098,49 @@ class TestConceptDetailQueryCount:
             client.get(url)
 
 
+class TestConceptDetailCollectionMembership:
+    """The collections that gather a concept are named below the definition list and
+    outside it, under a plain-language heading, and each leads to that collection's own
+    page (015-read-single-record T021, FR-014, US-5 scenario 1).
+    """
+
+    @pytest.mark.django_db
+    def test_a_concept_gathered_by_two_collections_names_both_outside_the_list_each_linking_to_its_page(
+        self, client
+    ):
+        scheme = ConceptSchemeFactory()
+        concept = ConceptFactory(scheme=scheme, label="Granite")
+        igneous = CollectionFactory(scheme=scheme, name="Igneous rocks")
+        hardness = CollectionFactory(scheme=scheme, name="Hardness scale")
+        igneous.add(concept)
+        hardness.add(concept)
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        section = soup.find(class_="concept-collections")
+        assert section is not None
+        # Outside the definition list, not one of its rows.
+        assert section.find_parent("dl") is None
+
+        for collection in (igneous, hardness):
+            expected_href = reverse(
+                "controlled_vocabularies_ui:collection-detail",
+                kwargs={"slug": scheme.slug, "collection_slug": collection.slug},
+            )
+            anchor = next(a for a in section.find_all("a", href=True) if a.get_text(strip=True) == collection.name)
+            assert anchor["href"] == expected_href
+
+            follow = client.get(anchor["href"])
+            assert follow.status_code == 200
+            assert follow.context["object"] == collection
+
+
 class TestCollectionDetail:
     """A collection's own address serves a read-only page, and an unknown one does
     not (015-read-single-record T011, FR-002, FR-009, Edge case 2).
