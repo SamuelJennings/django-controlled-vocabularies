@@ -269,6 +269,97 @@ class TestVocabularyListOrdering:
             client.get(url)
 
 
+class TestVocabularyListChosenOrdering:
+    """A reader can choose the order, and choosing one actually changes the page.
+
+    Separate from ``TestVocabularyListOrdering``, which covers the order the page arrives in.
+    These cover ``?o=``, which does nothing at all unless the view declares ``order_by`` —
+    the control is wrapped in ``{% if order_by_choices %}`` upstream, so a view that declares
+    none renders no control and a hand-built ``?o=`` is ignored in silence. Both halves are
+    asserted: that the control is on the page, and that the parameter behind it reorders the
+    result. Asserting only the second would pass on a page no reader can operate.
+    """
+
+    @pytest.mark.django_db
+    def test_the_page_offers_both_directions_by_name(self, client):
+        ConceptSchemeFactory()
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-list"))
+        content = response.content.decode()
+
+        assert [key for key, _label, _expression in response.context["order_by_choices"]] == [
+            "name_asc",
+            "name_desc",
+        ]
+        assert "Name (A-Z)" in content
+        assert "Name (Z-A)" in content
+
+    @pytest.mark.django_db
+    def test_choosing_z_to_a_reverses_the_page(self, client):
+        # The slug is deliberately set against the name, for the reason the default-ordering
+        # class documents: without it a slug-ordered page and a name-ordered one agree, and
+        # the test would pass on that coincidence.
+        zebra = ConceptSchemeFactory(name="Zebra")
+        zebra.set_slug("aaa-sorts-first-by-slug")
+        ConceptSchemeFactory(name="antelope")
+        url = reverse("controlled_vocabularies_ui:vocabulary-list")
+
+        ascending = [v.name for v in client.get(url, {"o": "name_asc"}).context["object_list"]]
+        descending = [v.name for v in client.get(url, {"o": "name_desc"}).context["object_list"]]
+
+        assert ascending == ["antelope", "Zebra"]
+        assert descending == ["Zebra", "antelope"]
+
+    @pytest.mark.django_db
+    def test_the_chosen_order_is_marked_as_the_current_one(self, client):
+        ConceptSchemeFactory()
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-list"), {"o": "name_desc"})
+
+        assert response.context["current_ordering"] == "name_desc"
+
+    @pytest.mark.django_db
+    def test_an_ordering_nobody_offered_is_ignored_rather_than_obeyed(self, client):
+        # The whitelist is the whole security story: `?o=` is matched against declared keys
+        # and only the declared expression reaches the database, so a field name or an SQL
+        # fragment in the query string is neither honoured nor an error.
+        zebra = ConceptSchemeFactory(name="Zebra")
+        zebra.set_slug("aaa-sorts-first-by-slug")
+        ConceptSchemeFactory(name="antelope")
+        url = reverse("controlled_vocabularies_ui:vocabulary-list")
+
+        response = client.get(url, {"o": "-slug"})
+
+        assert response.status_code == 200
+        assert [v.name for v in response.context["object_list"]] == ["antelope", "Zebra"]
+        assert response.context["current_ordering"] == ""
+
+    @pytest.mark.django_db
+    def test_a_search_and_a_chosen_order_apply_together(self, client):
+        ConceptSchemeFactory(name="Soil Zebra")
+        ConceptSchemeFactory(name="Soil Antelope")
+        ConceptSchemeFactory(name="Rock Badger")
+        url = reverse("controlled_vocabularies_ui:vocabulary-list")
+
+        response = client.get(url, {"q": "Soil", "o": "name_desc"})
+
+        assert [v.name for v in response.context["object_list"]] == ["Soil Zebra", "Soil Antelope"]
+
+    @pytest.mark.django_db
+    def test_the_sort_control_submits_to_the_same_form_as_the_search_box(self, client):
+        # The reason this whole feature was inert before django-mvp 0.19.2: the sort control's
+        # hidden input carries form="filterForm" exactly as the search box does, and until
+        # 0.19.2 no element with that id existed on a page showing neither a filter nor a
+        # create button. Choosing an order submitted nothing.
+        ConceptSchemeFactory()
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-list"))
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        assert soup.find("form", id="filterForm") is not None
+        assert soup.find("input", attrs={"name": "o"}).get("form") == "filterForm"
+
+
 class TestVocabularyListEmptyState:
     """A site holding no vocabularies says so (FR-011, SC-006, User Story 1 scenario 7).
 
@@ -420,16 +511,6 @@ class TestVocabularySearch:
         assert len(response.context["object_list"]) == 2
         assert "Show all vocabularies" not in content
 
-    @pytest.mark.skip(
-        reason=(
-            "Waiting on django-mvp/django-mvp#282 (tracked here as #147). The search box prefills itself from the raw "
-            "?q= value rather than the stripped one, so a whitespace-only query comes back in the "
-            "box as whitespace while filtering nothing — the page reads as searched when it is "
-            "not. The prefill belongs to django-mvp's own search component, and correcting it "
-            "here would mean overriding the page template. Filtering is unaffected and is "
-            "asserted above."
-        )
-    )
     @pytest.mark.django_db
     def test_a_whitespace_only_search_does_not_come_back_in_the_box(self, client):
         ConceptSchemeFactory.create_batch(2)
@@ -443,37 +524,34 @@ class TestVocabularySearch:
     def test_the_rendered_page_carries_a_search_input_and_nothing_else(self, client):
         # The actions block holds search and only search. Sort, filter and create are all
         # part of the toolbar django-mvp renders by default, and all three are out of scope
-        # (spec.md scope note): sorting is not asked for, filtering was ruled out for want
-        # of an axis, and nothing here creates a vocabulary.
+        # The actions block holds search and sort. Filtering was ruled out for want of an
+        # axis and nothing here creates a vocabulary, so both of those stay absent; sort is
+        # here because a reader asked for it after the first release, and it renders only
+        # because the view declares order_by.
         ConceptSchemeFactory()
 
         response = client.get(reverse("controlled_vocabularies_ui:vocabulary-list"))
         content = response.content.decode()
 
         assert 'name="q"' in content
-        assert 'name="o"' not in content
+        assert 'name="o"' in content
         assert "filterModal" not in content
         assert "Add new" not in content
 
-    @pytest.mark.skip(
-        reason=(
-            "Waiting on django-mvp/django-mvp#282 (tracked here as #147): the shipped search control's input and button "
-            "carry form=\"filterForm\", and the only element with that id lives inside the filter "
-            "action, so a page rendering search alone has a box wired to nothing. Fixing it here "
-            "would mean overriding django-mvp's page template, which is the thing django-mvp exists "
-            "to make unnecessary and which would outlive the upstream fix. Unskip when a released "
-            "django-mvp puts the form element in the actions wrapper."
-        )
-    )
     @pytest.mark.django_db
     def test_the_search_input_belongs_to_a_get_form_that_actually_exists(self, client):
         # The shipped search action's input and button both carry a hard-coded
-        # form="filterForm" attribute, and upstream only defines an element with that id
-        # inside the *filter* action (research R4) — render search alone and the box is
-        # wired to nothing. A query-string assertion alone would not catch this: it builds
-        # the URL directly and never touches the box's own wiring. Parsing the markup and
-        # confirming a real <form id="filterForm"> nests the input is what proves the box
-        # itself would submit.
+        # form="filterForm". Until django-mvp 0.19.2 the only element with that id lived
+        # inside the *filter* action, so a page rendering search alone had a box wired to
+        # nothing — typing a term and pressing the button did nothing at all. A
+        # query-string assertion would not have caught it: it builds the URL directly and
+        # never touches the box's own wiring.
+        #
+        # The association is by attribute, not by nesting: HTML lets a control sit outside
+        # the form it submits to as long as it names the form's id, and upstream renders
+        # the form as an empty hidden element beside the controls. So what has to be true
+        # is that the id resolves, that it resolves to a GET form, and that the search and
+        # sort controls both point at it.
         ConceptSchemeFactory()
 
         response = client.get(reverse("controlled_vocabularies_ui:vocabulary-list"))
@@ -482,8 +560,17 @@ class TestVocabularySearch:
         form = soup.find("form", id="filterForm")
         assert form is not None
         assert form.get("method", "").lower() == "get"
-        assert form.find("input", attrs={"name": "q"}) is not None
-        assert form.find(attrs={"type": "submit"}) is not None
+
+        search_input = soup.find("input", attrs={"name": "q"})
+        assert search_input is not None
+        assert search_input.get("form") == "filterForm"
+
+        submit = soup.find(attrs={"type": "submit", "form": "filterForm"})
+        assert submit is not None
+
+        sort_input = soup.find("input", attrs={"name": "o"})
+        assert sort_input is not None
+        assert sort_input.get("form") == "filterForm"
 
 
 class TestVocabularySearchAcrossRequestsAndPages:
@@ -557,13 +644,17 @@ class TestVocabularySearchEmptyState:
 
     @pytest.mark.skip(
         reason=(
-            "Waiting on django-mvp/django-mvp#282 (tracked here as #147). The way back to the unsearched list has to be a "
-            "link in the page's actions area: django-mvp renders the empty-state heading and message "
-            "as autoescaped strings with no slot, so an anchor inside the message would render as "
-            "literal text, and mark_safe over a string that also carries the search term would emit "
-            "that term unescaped. Placing the link needs the page template, and this package no longer "
-            "overrides it. The no-match message still names the term (test above); only the link is "
-            "absent. Unskip when the actions area is reachable without an override."
+            "django-mvp 0.19.2 fixed the search box itself (django-mvp#282) but not this. A "
+            "reader whose search matched nothing can clear the box and press the button to get "
+            "back, so the page is usable; what is missing is a plain link that says so. It has "
+            "to go in the page's actions area, because django-mvp renders the empty-state "
+            "heading and message as autoescaped strings with no slot — an anchor inside the "
+            "message would show as literal text, and mark_safe over a string that also carries "
+            "the search term would emit that term unescaped. The actions area has no slot "
+            "either, so placing it needs a page-template override, and this package no longer "
+            "carries one. Raised upstream as django-mvp#291. The no-match message still names "
+            "the term (test above); the vocabulary's own page has the link (it has its own "
+            "template) and is not skipped."
         )
     )
     @pytest.mark.django_db
@@ -917,6 +1008,100 @@ class TestVocabularyDetailConceptOrder:
         second = [c.pk for c in client.get(url).context["object_list"]]
 
         assert first == second
+
+
+class TestVocabularyDetailChosenConceptOrder:
+    """A reader can choose the order the concepts come in, and the choice takes effect.
+
+    The vocabulary's own page renders django-mvp's actions block through ``list_view.html``
+    exactly as the list of vocabularies does, so both the control and the ``?o=`` behind it
+    have to be asserted here too — a page can declare orderings the reader cannot reach, and
+    a control can render over a parameter nothing honours.
+    """
+
+    @pytest.mark.django_db
+    def test_the_page_offers_both_directions_by_label(self, client):
+        scheme = ConceptSchemeFactory()
+        ConceptFactory(scheme=scheme)
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}))
+        content = response.content.decode()
+
+        assert [key for key, _label, _expression in response.context["order_by_choices"]] == [
+            "label_asc",
+            "label_desc",
+        ]
+        assert "Label (A-Z)" in content
+        assert "Label (Z-A)" in content
+
+    @pytest.mark.django_db
+    def test_choosing_z_to_a_reverses_the_concepts(self, client):
+        scheme = ConceptSchemeFactory()
+        zebra = ConceptFactory(scheme=scheme, label="Zebra")
+        antelope = ConceptFactory(scheme=scheme, label="Antelope")
+        url = reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug})
+
+        ascending = [c.pk for c in client.get(url, {"o": "label_asc"}).context["object_list"]]
+        descending = [c.pk for c in client.get(url, {"o": "label_desc"}).context["object_list"]]
+
+        assert ascending == [antelope.pk, zebra.pk]
+        assert descending == [zebra.pk, antelope.pk]
+
+    @pytest.mark.django_db
+    def test_the_chosen_order_follows_the_label_shown_not_the_one_stored(self, client):
+        # The same distinction the default order draws: a concept's German preferred label
+        # is what a German reader sees, so it is what a German reader's chosen sort must
+        # follow. Sorting on the stored `label` column would put these the other way round.
+        scheme = ConceptSchemeFactory()
+        zebra = ConceptFactory(scheme=scheme, label="Zebra")
+        zebra.add_label(language="de", kind="preferred", text="Aardvark")
+        antelope = ConceptFactory(scheme=scheme, label="Antelope")
+        url = reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug})
+
+        with translation.override("de"):
+            german = [c.pk for c in client.get(url, {"o": "label_desc"}).context["object_list"]]
+
+        assert german == [antelope.pk, zebra.pk]
+
+    @pytest.mark.django_db
+    def test_an_ordering_nobody_offered_is_ignored_rather_than_obeyed(self, client):
+        scheme = ConceptSchemeFactory()
+        zebra = ConceptFactory(scheme=scheme, label="Zebra")
+        antelope = ConceptFactory(scheme=scheme, label="Antelope")
+        url = reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug})
+
+        response = client.get(url, {"o": "-label"})
+
+        assert response.status_code == 200
+        assert [c.pk for c in response.context["object_list"]] == [antelope.pk, zebra.pk]
+        assert response.context["current_ordering"] == ""
+
+    @pytest.mark.django_db
+    def test_a_search_and_a_chosen_order_apply_together(self, client):
+        scheme = ConceptSchemeFactory()
+        ConceptFactory(scheme=scheme, label="Basalt Zebra")
+        ConceptFactory(scheme=scheme, label="Basalt Antelope")
+        ConceptFactory(scheme=scheme, label="Granite Badger")
+        url = reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug})
+
+        response = client.get(url, {"q": "Basalt", "o": "label_desc"})
+
+        labels = [c.label for c in response.context["object_list"]]
+        assert labels == ["Basalt Zebra", "Basalt Antelope"]
+
+    @pytest.mark.django_db
+    def test_the_search_box_and_the_sort_control_both_submit_to_a_form_that_exists(self, client):
+        scheme = ConceptSchemeFactory()
+        ConceptFactory(scheme=scheme)
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}))
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        form = soup.find("form", id="filterForm")
+        assert form is not None
+        assert form.get("method", "").lower() == "get"
+        assert soup.find("input", attrs={"name": "q"}).get("form") == "filterForm"
+        assert soup.find("input", attrs={"name": "o"}).get("form") == "filterForm"
 
 
 class TestVocabularyDetailConceptPaging:

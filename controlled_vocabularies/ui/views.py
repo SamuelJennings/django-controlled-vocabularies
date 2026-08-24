@@ -31,8 +31,10 @@ class VocabularyListView(MVPListView):
     # around two faults in the shipped search control (django-mvp/django-mvp#282); the override
     # was removed on the maintainer's instruction. A template override in a consumer outlives
     # the upstream fix that made it unnecessary, and a shell package whose consumers all carry
-    # overrides has stopped being a shell. The tests those faults block are skipped, naming the
-    # issue they wait on (decisions.md D23).
+    # overrides has stopped being a shell. Waiting was the right call: #282 shipped in
+    # django-mvp 0.19.2, which this package now floors on, and the tests it blocked are live
+    # again. One test stays skipped for a gap 0.19.2 did not close — a page whose search
+    # matched nothing still has nowhere to put a link back (django-mvp#291).
 
     # django-mvp's SearchMixin reads ?q=, strips it, and applies case-insensitive
     # substring matching across these fields with OR semantics (T011, FR-006).
@@ -46,6 +48,24 @@ class VocabularyListView(MVPListView):
     # order, two same-named vocabularies could land on either of two pages, or on neither,
     # once pagination is in play.
     ordering = [Lower("name"), "pk"]
+
+    # The orderings a reader may choose, as (key, label, expression) — the key is what
+    # `?o=` carries and the expression is never built from the request, so an unrecognised
+    # `?o=` falls back to `ordering` above rather than reaching the database. Declaring
+    # this is what makes the sort control render at all: django-mvp's action is wrapped in
+    # `{% if order_by_choices %}`, so a view that declares none shows no control, which is
+    # why sorting appeared to be broken rather than absent.
+    #
+    # Each expression is a single column, because django-mvp applies `order_by(choice[2])`
+    # with one argument and Django rejects a sequence there. A chosen sort therefore has no
+    # `pk` tiebreak and two identically named vocabularies can swap places between pages —
+    # the instability the default `ordering` above exists to prevent. Raised upstream as
+    # django-mvp#290; the fix belongs there, not in a local re-implementation of the mixin
+    # (decisions.md D16).
+    order_by = [
+        ("name_asc", _("Name (A-Z)"), Lower("name")),
+        ("name_desc", _("Name (Z-A)"), Lower("name").desc()),
+    ]
 
     # A search longer than this many words keeps its first this-many and drops the rest.
     max_search_words = 100
@@ -90,6 +110,12 @@ class VocabularyListView(MVPListView):
         # offering to undo a search that never happened.
         context = super().get_context_data(**kwargs)
         context["search_term"] = self.get_search_term()
+        # django-mvp fills the search box from `search_query`, which it sets to the raw
+        # `?q=` value. A whitespace-only query filters nothing, so leaving the raw value
+        # in place puts whitespace back in the box and the page reads as searched when it
+        # is not. Overwriting the context variable is the supported way to correct it —
+        # the alternative is overriding django-mvp's search component (decisions.md D17).
+        context["search_query"] = context["search_term"]
         return context
 
     def get_empty_state_heading(self):
@@ -136,6 +162,15 @@ class VocabularyDetailView(MVPListView):
     # two identically labelled concepts could land on either of two pages, or on
     # neither, once pagination is in play (#140 makes the same point for vocabularies).
     ordering = [Lower("resolved_label"), "pk"]
+
+    # The orderings a reader may choose, by the label actually shown rather than the stored
+    # one — the same annotation the default `ordering` above uses, so a chosen sort and the
+    # default agree about what a concept is called. The single-expression limitation and its
+    # missing `pk` tiebreak are the list view's, restated: django-mvp#290, decisions.md D16.
+    order_by = [
+        ("label_asc", _("Label (A-Z)"), Lower("resolved_label")),
+        ("label_desc", _("Label (Z-A)"), Lower("resolved_label").desc()),
+    ]
 
     # django-mvp's SearchMixin reads ?q=, strips it, and applies case-insensitive
     # substring matching across these fields with OR semantics, joined with `.distinct()`
@@ -190,6 +225,10 @@ class VocabularyDetailView(MVPListView):
         context = super().get_context_data(**kwargs)
         context["vocabulary"] = self.vocabulary
         context["search_term"] = self.get_search_term()
+        # The stripped term, for the same reason the list of vocabularies does it: django-mvp
+        # fills the box from the raw `?q=`, so a whitespace-only query would come back in the
+        # box and the page would read as searched while filtering nothing (decisions.md D17).
+        context["search_query"] = context["search_term"]
         # T019, decisions.md D5/D7: named and, where ordered, marked as such — never
         # rendered through django-mvp's list component (plan.md item 5), and nothing
         # here links to a collection (issue #142 owns its address).

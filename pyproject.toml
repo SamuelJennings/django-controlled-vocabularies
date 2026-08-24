@@ -46,10 +46,12 @@ django-tomselect = "^2026.6.2"
 # the isolation). django-mvp's own floor is Python >=3.12 while this package's
 # is 3.11, so the marker makes the extra unavailable there rather than an
 # install error. Pinned to the 0.19 line rather than the whole pre-1.0 range:
-# the browsing page's own template works around two faults in 0.19's search
-# action (django-mvp#280), so an upstream fix is as breaking here as an
-# upstream change would be, and a 0.x minor is free to make either.
-django-mvp = { version = "^0.19.1", optional = true, python = ">=3.12" }
+# a 0.x minor is free to change the browsing page's markup, and this package
+# reads that markup in its own tests. The floor is 0.19.2 and not lower: below
+# it the shipped search and sort controls render associated with a form only
+# the filter action defines (django-mvp#282), so both are inert on a page that
+# shows neither a filter nor a create button — which is every page here.
+django-mvp = { version = "^0.19.2", optional = true, python = ">=3.12" }
 
 [tool.poetry.extras]
 ui = ["django-mvp"]

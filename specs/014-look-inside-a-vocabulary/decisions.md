@@ -353,3 +353,58 @@ rather than requiring it twice, and the acceptance criterion — "both render on
 open" — asks for one page holding both, not one collection per vocabulary.
 
 **ADR:** none — an application of the rule that a vocabulary's identity comes from where it was published (docs/adr/0006-a-document-identity-comes-from-where-it-was-published.md), applied to seed data.
+
+## D16 — Choosing a sort loses the stable tiebreak, and that gap goes upstream
+
+**Context**: the vocabulary list and the vocabulary's own page both had a fixed order and no way
+for a reader to change it. Sorting was reported as broken; it was in fact never built. Both views
+carry a stable default (`[Lower("name"), "pk"]` and `[Lower("resolved_label"), "pk"]`), and the
+`pk` on the end is what D2 and D11 both argue for: without a total order, two rows that tie can
+land on either of two pages, or on neither, once pagination is in play.
+
+django-mvp's `OrderMixin` applies a chosen ordering as `queryset.order_by(choice[2])` — one
+argument. Django rejects a sequence there (`FieldError: Invalid order_by arguments`, checked on
+5.2 with both a tuple of strings and a list of expressions). So a declared ordering can be one
+column and no more, and a chosen sort cannot carry the tiebreak the default has.
+
+**Rejected**: re-applying the tiebreak in this package's own `get_queryset()`. It would land
+after the search mixin's `.distinct()`, which is the operand order D2 exists to avoid — and on
+PostgreSQL a `SELECT DISTINCT` whose `ORDER BY` names an expression outside the select list is
+an error, not a slow query. Also rejected: overriding the mixin's private `_apply_ordering`, and
+encoding a composite sort key in one annotated column. The first forks upstream's internals in a
+consumer, the second is clever where the problem is upstream's to solve.
+
+**Chosen**: declare two orderings per view, each a single expression, and raise the limitation
+upstream as django-mvp#290 with the two-line fix (unpack a sequence when one is given). The
+package ships the sort control readers asked for; the tiebreak returns when upstream takes the
+change, at which point each entry grows a `"pk"` and nothing else here changes.
+
+**Why defensible**: the exposure is two rows tying on the sort column *and* the tie straddling a
+page boundary *and* the reader paging through it — narrow, and it costs a reordering, not a wrong
+answer. Carrying a local re-implementation of an upstream mixin to close it would be permanent,
+would outlive the upstream fix, and is the kind of thing this package removed a template override
+to avoid.
+
+**ADR:** none — an application of the standing rule that an upstream gap is raised upstream and
+worked around locally only when the cost of waiting is higher than the cost of the workaround.
+
+## D17 — The search box is filled from the stripped term, not the raw one
+
+**Context**: django-mvp's search component fills the box from `search_query`, which its mixin
+sets to the raw `?q=` value. Its queryset, and this package's own empty states, both use the
+stripped value. A whitespace-only query therefore filtered nothing while coming back in the box
+as whitespace — the page read as searched when it was not, which is the same half-searched state
+D4 was written to prevent, arriving by a different route.
+
+**Rejected**: overriding django-mvp's search component to strip at render time. That is a
+template override in a consumer, for one line.
+
+**Chosen**: overwrite `search_query` in `get_context_data()` with the same stripped term the
+queryset was filtered on, in both views.
+
+**Why defensible**: `search_query` is documented context, not internals, and a view setting its
+own context values is the ordinary extension point. Both views already compute the stripped term
+for their empty states, so this makes one value serve the queryset, the empty states and the box
+rather than letting the box disagree with the other two.
+
+**ADR:** none.
