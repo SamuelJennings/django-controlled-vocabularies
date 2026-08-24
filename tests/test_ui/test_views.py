@@ -916,9 +916,12 @@ class TestVocabularyDetailConceptList:
         assert "granitic rock" not in html
         assert concept.static_uri not in html
         assert "Basalt" not in html
-        anchor = soup.find("a")
-        assert anchor is not None
-        assert anchor["href"] == reverse(
+        # Exactly one, which is what remains of T008's "nothing to follow": the row
+        # leads to the concept's own page and nowhere else — not to its broader
+        # concept, not to its identifier.
+        anchors = soup.find_all("a")
+        assert len(anchors) == 1
+        assert anchors[0]["href"] == reverse(
             "controlled_vocabularies_ui:concept-detail",
             kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
         )
