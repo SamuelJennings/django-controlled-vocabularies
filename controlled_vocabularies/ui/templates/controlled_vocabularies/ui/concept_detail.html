@@ -42,13 +42,19 @@
       concept belongs to..."). A concept no collection gathers renders no section at
       all (T022) — this whole block is absent, not present and empty, the same
       treatment conceptscheme_detail.html's own collections section gives US-4.
+      T027: headed "Member of" rather than "Collections" — the latter reads as
+      collections belonging to the concept, the inverse of what this section says.
+      Each entry composes django-mvp's own <c-link> with hover=True, so it underlines
+      on hover (daisyUI's link-hover class), rather than a bare <a>.
     {% endcomment %}
     <div class="concept-collections">
-      <c-text size="sm" bold>{% trans "Collections" %}</c-text>
+      <c-text size="sm" bold>{% trans "Member of" %}</c-text>
       <ul>
         {% for collection in concept_collections %}
           <li>
-            <a href="{% url 'controlled_vocabularies_ui:collection-detail' object.scheme.slug collection.slug %}">{{ collection.name }}</a>
+            <c-link href="{% url 'controlled_vocabularies_ui:collection-detail' object.scheme.slug collection.slug %}"
+                    text="{{ collection.name }}"
+                    hover=True />
           </li>
         {% endfor %}
       </ul>

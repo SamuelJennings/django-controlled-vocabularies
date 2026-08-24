@@ -1595,6 +1595,20 @@ class TestVocabularyDetailCollections:
         assert follow.status_code == 200
         assert follow.context["object"] == collection
 
+    @pytest.mark.django_db
+    def test_each_collection_entry_underlines_on_hover(self, client):
+        # 015-read-single-record T027: the same bare-anchor defect
+        # TestConceptDetailCollectionMembershipHeadingAndHoverLink's own membership
+        # section had, fixed with the same component.
+        scheme = ConceptSchemeFactory()
+        collection, _ = collection_with_members(scheme=scheme, labels=("Granite",))
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}))
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        anchor = next(a for a in soup.find_all("a", href=True) if a.get_text(strip=True) == collection.name)
+        assert "link-hover" in anchor.get("class", [])
+
 
 class TestTemplateCommentsDoNotReachThePage:
     """Django's `{# #}` is a single-line form: its lexer does not match across a newline,
@@ -2214,6 +2228,51 @@ class TestConceptDetailCollectionMembership:
         soup = BeautifulSoup(response.content, "html.parser")
 
         assert soup.find(class_="concept-collections") is None
+
+
+class TestConceptDetailCollectionMembershipHeadingAndHoverLink:
+    """'Collections' reads as collections belonging to the concept rather than the
+    inverse, so the section is headed 'Member of' instead, and each entry underlines
+    on hover through django-mvp's own link component (015-read-single-record T027).
+    """
+
+    @pytest.mark.django_db
+    def test_the_heading_reads_member_of_not_collections(self, client):
+        scheme = ConceptSchemeFactory()
+        concept = ConceptFactory(scheme=scheme, label="Granite")
+        collection = CollectionFactory(scheme=scheme, name="Igneous rocks")
+        collection.add(concept)
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        section = soup.find(class_="concept-collections")
+
+        assert section.find(string=re.compile("Member of")) is not None
+        assert section.find(string=re.compile("^Collections$")) is None
+
+    @pytest.mark.django_db
+    def test_each_entry_underlines_on_hover(self, client):
+        scheme = ConceptSchemeFactory()
+        concept = ConceptFactory(scheme=scheme, label="Granite")
+        collection = CollectionFactory(scheme=scheme, name="Igneous rocks")
+        collection.add(concept)
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        section = soup.find(class_="concept-collections")
+        anchor = section.find("a", string=re.compile("Igneous rocks"))
+
+        assert "link-hover" in anchor.get("class", [])
 
 
 class TestCollectionDetail:

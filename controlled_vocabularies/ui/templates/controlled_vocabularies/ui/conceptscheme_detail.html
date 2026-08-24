@@ -31,13 +31,17 @@
        context throughout (unlike concept_list_item.html, this loop is not rendered
        through render_list_item's isolated context), so the href is built from
        `vocabulary.slug` and `collection.slug` alone, no query beyond the
-       already-loaded collections queryset. {% endcomment %}
+       already-loaded collections queryset. T027: composes django-mvp's own <c-link>
+       with hover=True, the same bare-anchor defect concept_detail.html's own
+       membership section had, fixed with the same component. {% endcomment %}
     <div class="vocabulary-collections">
       <c-text size="sm" bold>{% trans "Collections" %}</c-text>
       <ul>
         {% for collection in collections %}
           <li>
-            <a href="{% url 'controlled_vocabularies_ui:collection-detail' vocabulary.slug collection.slug %}">{{ collection.name }}</a>
+            <c-link href="{% url 'controlled_vocabularies_ui:collection-detail' vocabulary.slug collection.slug %}"
+                    text="{{ collection.name }}"
+                    hover=True />
             {% if collection.ordered %}<c-badge>{% trans "Ordered" %}</c-badge>{% endif %}
           </li>
         {% endfor %}
