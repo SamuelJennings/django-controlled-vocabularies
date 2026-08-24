@@ -224,3 +224,34 @@ partial).
 
 **Rejected:** the same alternative D-015-04 rejected, for the same reason — blocking T020 would
 report the story as unable to satisfy the one requirement `tasks.md` names it should.
+
+## D-015-06 — T024 adds `LocaleMiddleware` to the demo so the seeded German note is reachable at all
+
+**Decided (2026-08-24, US-6):** T024 asks the seed to carry "a value falling back across
+languages" and the walk to exercise it. The demo had no way to read a page in anything but
+`LANGUAGE_CODE` ("en"): `USE_I18N = True` was set, but no middleware ever consulted a request's
+own language preference, so `get_language()` returned "en" for every request regardless of what
+it asked for. A German-only note on "fieldwork" would have been real, correctly stored data that
+no live request could ever reach — provably present in the database, unprovably present on any
+page a person or `demo/smoke.py` could actually request.
+
+Added `django.middleware.locale.LocaleMiddleware` to `demo/settings.py`, between
+`SessionMiddleware` and `CommonMiddleware` (Django's own required position). No `LANGUAGES`
+setting was added alongside it: Django's own default list already carries "de", and the demo
+declares none of its own for the same reason `docs/adr/...` gives for not freezing a maintainer's
+choice into a downstream project's migration (`_configured_language_codes()`, `models.py`) — the
+demo is meant to read as an ordinary consuming project, not one carrying settings this package
+would never ask a real project to add. `demo/smoke.py`'s own `get()` gained an optional `headers`
+argument so the walk could request `Accept-Language: de` — the same header a real browser sends,
+not a URL parameter or query string this package's own routes carry no concept of.
+
+**Rejected:** seeding the German note without any way to read it live, and treating T006's own
+`translation.override("de")` pytest coverage as sufficient proof of FR-005. That leaves the
+seed content permanently unreachable by the one thing this task exists to run for real — "a real
+run, not a reading" — and by `demo/smoke.py` itself, which is what runs unattended on every
+proposed change (SC-008). Also rejected: giving the vocabulary itself a non-English
+`default_language`, which would have needed no middleware change at all. `research_methods.ttl`'s
+own preferred labels are all `@en`; a concept's identity anchor must carry a preferred label in
+its target vocabulary's *effective default* language (`import_concepts`'s own requirement), so
+every concept in the file would have been set aside rather than imported, and the demo would have
+seeded nothing.
