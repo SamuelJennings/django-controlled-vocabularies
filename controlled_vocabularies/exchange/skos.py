@@ -42,6 +42,7 @@ from controlled_vocabularies.exchange.mapping import (
     MAPPING_PREDICATES,
     NOTE_PREDICATES,
     SKOS,
+    skos_curie,
 )
 from controlled_vocabularies.exchange.report import FatalReason, ImportReport, NormalizedReason, SetAsideReason
 from controlled_vocabularies.exchange.safety import scan_json_ld, scan_rdf_xml
@@ -448,11 +449,6 @@ class SkosGraph:
         candidates |= set(self.graph.subjects(SKOS.topConceptOf, None))
         candidates |= set(self.graph.objects(None, SKOS.hasTopConcept))
         return {node for node in candidates if next(self.graph.objects(node, rdflib.RDF.type), None) is None}
-
-    @staticmethod
-    def skos_curie(predicate: rdflib.URIRef) -> str:
-        """The ``skos:xxx`` CURIE for a predicate in the SKOS namespace (report display only, FIX 15, D48)."""
-        return f"skos:{str(predicate)[len(str(SKOS)) :]}"
 
 
 def _localized_literal(
@@ -973,7 +969,7 @@ class ConceptImporter:
                     # even a Literal (e.g. skos:altLabel pointing at a URI), used to be dropped
                     # with no report entry.
                     self.report.add_set_aside(
-                        SetAsideReason.NO_LANGUAGE_TAG, subject=uri, predicate=self.skos_graph.skos_curie(predicate)
+                        SetAsideReason.NO_LANGUAGE_TAG, subject=uri, predicate=skos_curie(predicate)
                     )
                     continue
                 if not SkosGraph.is_usable_literal(literal):
@@ -1070,7 +1066,7 @@ class ConceptImporter:
                 if not isinstance(literal, rdflib.Literal) or not literal.language:
                     # FIX 15 (D48): same defect as import_labels's identical branch.
                     self.report.add_set_aside(
-                        SetAsideReason.NO_LANGUAGE_TAG, subject=uri, predicate=self.skos_graph.skos_curie(predicate)
+                        SetAsideReason.NO_LANGUAGE_TAG, subject=uri, predicate=skos_curie(predicate)
                     )
                     continue
                 published_tag = literal.language
