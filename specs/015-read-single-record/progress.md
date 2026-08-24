@@ -584,3 +584,61 @@ no changes detected.
 Next: T018 (the vocabulary row, and the three-level chain proving no ancestor
 step beyond the immediate neighbour).
 Watch: nothing outstanding.
+
+## 2026-08-24T20:18:00Z · Implementer US3 · T018
+
+Did: no production change. T003's `concept_property_rows()` already appends
+exactly one `IN_SCHEME_CURIE` row per call, and `Concept.broader()`/`.narrower()`
+(models.py:852-872, out of this feature's scope) are each a single flat
+`Concept.objects.filter(...)` — no recursion anywhere in the codebase walks
+beyond the one hop FR-010/FR-011 ask for. Nothing needed building.
+
+Added `TestConceptDetailVocabularyRowAndNoAncestorChain` to
+`tests/test_ui/test_views.py` (2 tests): the vocabulary row appears keyed by
+`IN_SCHEME_CURIE`, is linked by the vocabulary's display name (decisions.md
+D-015-03 — not a short form), and following it opens the vocabulary's own page
+(`response.context["vocabulary"]`); a three-level chain
+(grandparent -> parent -> child, built with two `add_broader()` calls) shows the
+middle concept's page naming exactly its immediate broader (grandparent) and
+narrower (child) neighbours, asserted as an exact ordered list rather than a
+membership check, so any extra or missing relation row fails it.
+
+Verified: both passed on first run — probed per craft-tdd rather than trusted.
+Two separate probes, one per test: (1) temporarily removed the `IN_SCHEME_CURIE`
+`rows.append(...)` block from `concept_property_rows()` — the vocabulary-row
+test failed with `StopIteration` (no such `<dt>` on the page), the right reason;
+(2) temporarily duplicated the `BROADER_CURIE` `rows.extend(...)` line so the
+grandparent's row appeared twice — the three-level-chain test's exact-list
+assertion failed on the extra entry (`Left contains one more item:
+('skos:narrower', ...)`, a list-length mismatch caused by the duplicate broader
+row shifting the narrower row's index), confirming the assertion is exact
+rather than a loose membership check and would catch surplus relation content
+regardless of its source. Both reverted individually and confirmed clean via
+`git diff controlled_vocabularies/ui/views.py` (no output) before the next
+probe. `poetry run pytest tests/test_ui/test_views.py -q -k
+TestConceptDetailVocabularyRowAndNoAncestorChain` — 2 passed. `poetry run
+pytest tests/test_ui/test_views.py -q` — 148 passed, 1 skipped (the
+pre-existing django-mvp#291 skip, untouched) — no regressions. `poetry run
+ruff check` and `poetry run ruff format --check` on both files — clean.
+`poetry run mypy controlled_vocabularies/ui/views.py` — no issues (no
+production file changed). `poetry run python manage.py makemigrations --check
+--dry-run` — no changes detected.
+
+Story US-3 (T016-T018) is complete. All tasks committed individually; the tree
+is clean. No production code changed across the story — every behaviour US-3
+proves was already built by the foundational phase (T003) and Stories US-1/US-2;
+this story's own work was entirely the tests that pin it, each probed by
+temporarily breaking the mechanism it claims to cover.
+
+### Full suite and pre-commit, run once at the story's end
+
+`poetry run pytest -q` — 1611 passed, 1 skipped (the pre-existing django-mvp#291
+skip, untouched) — no regressions across the whole tree.
+
+`poetry run pre-commit run --all-files` — all hooks passed (trim trailing
+whitespace, fix end of files, check yaml, poetry-check, ruff lint, ruff format,
+mypy, deptry).
+
+Next: none — Story US-3 (T016-T018) is complete. US-4 (T019-T020) is next in
+plan.md's story sequence, dispatched separately.
+Watch: nothing outstanding.
