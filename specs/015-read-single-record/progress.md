@@ -365,3 +365,38 @@ detected.
 
 Next: T012 (the `collection_detail.html` template — name, type and members).
 Watch: nothing outstanding.
+
+## 2026-08-24T20:05:00Z · Implementer US2 · T012
+
+Did: added `collection_detail.html`, extending `detail_view.html` and rendering
+`collection_property_rows()`'s rows inside one `<dl>` through the T002 `property_row`
+component — byte-identical two-branch shape to `concept_detail.html`'s own, plus the
+same outside-the-`<dl>` identifier anchor T007 gave the concept page. No further
+`views.py` change: T011 already built `collection_property_rows()` with the type row
+keyed by `Collection.ordered` (`skos:Collection` vs `skos:OrderedCollection`) and the
+member rows keyed the same way (`skos:member` vs `skos:memberList`), an ordered
+collection's rows following `Collection.members()`'s own position order.
+
+Verified: extended `tests/test_ui/test_views.py` first
+(`TestCollectionDetailNameTypeAndMembers`, 3 tests) and watched them fail — the
+identifier test with `assert None is not None` (no anchor against the empty
+`detail_view.html` fallback body) and the two `<dl>`-content tests against an empty
+`pairs` list — the right reason, before the template existed. An unordered collection's
+members are asserted by counting `skos:member` rows (three, none `skos:memberList`); an
+ordered one's by extracting each `skos:memberList` row's short-form anchor text (not the
+whole `<dd>`'s, which also carries the canonical identifier as a second text node) and
+comparing it against `collection_with_members`'s own insertion order — built from a
+deliberately non-alphabetical label sequence (`Granite, Basalt, Gabbro`) so the
+assertion cannot pass by coincidental sort order. `poetry run pytest
+tests/test_ui/test_views.py -q -k TestCollectionDetail` — 9 passed (T011's existing 6
+plus this task's 3). `poetry run pytest tests/test_ui/test_views.py
+tests/test_ui/test_templates.py -q` — 151 passed, 1 skipped (the pre-existing
+django-mvp#291 skip, untouched) — the repo-wide no-bare-text template sweep in
+`test_templates.py` already parametrizes over every file under the templates root, so
+the new template joined it with no test change of its own. `poetry run ruff check`,
+`poetry run ruff format --check` and `poetry run mypy` on the changed Python file —
+clean (the template is not a Python file). `poetry run python manage.py makemigrations
+--check --dry-run` — no changes detected.
+
+Next: T013 (a collection holding nothing says so).
+Watch: nothing outstanding.
