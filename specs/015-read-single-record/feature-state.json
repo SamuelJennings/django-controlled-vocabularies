@@ -3,7 +3,7 @@
   "feature": "015-read-single-record",
   "branch": "015-read-single-record",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "PLAN",
+  "state": "DESIGN_REVIEW",
   "state_history": [
     {
       "state": "SPECIFY",
@@ -19,6 +19,11 @@
       "state": "PLAN",
       "at": "2026-08-24T16:15:49Z",
       "note": "plan, tasks and analyze complete"
+    },
+    {
+      "state": "DESIGN_REVIEW",
+      "at": "2026-08-24T16:34:16Z",
+      "note": "design review returned request_changes; plan and tasks corrected, T000 added, closing phase split out"
     }
   ],
   "gates": {
@@ -53,6 +58,11 @@
       "replans": 0,
       "tasks": [
         {
+          "id": "T000",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
           "id": "T001",
           "status": "todo",
           "attempts": 0
@@ -64,16 +74,6 @@
         },
         {
           "id": "T003",
-          "status": "todo",
-          "attempts": 0
-        },
-        {
-          "id": "T024",
-          "status": "todo",
-          "attempts": 0
-        },
-        {
-          "id": "T023",
           "status": "todo",
           "attempts": 0
         }
@@ -219,6 +219,26 @@
         },
         {
           "id": "T022",
+          "status": "todo",
+          "attempts": 0
+        }
+      ]
+    },
+    {
+      "id": "US6",
+      "priority": "P3",
+      "issue": null,
+      "worktree": null,
+      "status": "todo",
+      "replans": 0,
+      "tasks": [
+        {
+          "id": "T023",
+          "status": "todo",
+          "attempts": 0
+        },
+        {
+          "id": "T024",
           "status": "todo",
           "attempts": 0
         }

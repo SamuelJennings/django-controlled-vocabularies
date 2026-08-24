@@ -127,3 +127,32 @@ reintroduced by showing one step in each direction.
 - **A concept has no status.** The draft, published and deprecated lifecycle is in the project's
   language but no field holds it, and it belongs to the publication and curation features.
 - **A vocabulary has no short prefix.** See D2.
+
+## D-015-01 — Two edge cases in the approved spec describe states the models refuse
+
+**Decided (2026-08-24, design review):** the two cross-vocabulary edge cases in `spec.md` are struck
+through and forward-tagged in place rather than deleted, and **no test is owed for either**.
+
+`ConceptRelation._reject_cross_scheme` refuses a relation whose endpoints sit in different
+vocabularies, enforced through `clean()` and re-applied in `save()`, and
+`CollectionMember._reject_cross_scheme` does the same for membership — deliberately backstopped in
+`save()` so a factory cannot bypass it. The fixtures the two edge cases need therefore cannot be
+built. The spec's own Key Entities section already agrees: a relation links two concepts of one
+vocabulary.
+
+This is a fault in the approved specification rather than in the plan, which writes no task for
+either. It changes nothing the feature delivers, so it is corrected in place rather than re-gated.
+The short-form prefix still comes from the record's vocabulary, which is what those edge cases were
+reaching for — it is simply always this record's own vocabulary.
+
+## D-015-02 — The relation helpers are not prefetchable, so each read carries its own select_related
+
+**Decided (2026-08-24, design review):** the plan's single `prefetch_related` covering the relation
+paths is dropped. `broader()`, `narrower()`, `related()` and `collections()` build fresh querysets
+rather than iterating a cached related set, so a prefetch of those paths is never read. Each
+record-valued read chains `.select_related("scheme")` on the queryset the helper returns; the label
+and note helpers keep the prefetch, because they do read `.all()`.
+
+`collections()` and `Collection.members()` return lists. For those the prefix comes from the record's
+own already-loaded scheme, which is sound precisely because D-015-01's constraints make every
+relation and every membership intra-vocabulary.

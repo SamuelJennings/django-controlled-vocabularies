@@ -11,15 +11,53 @@ story, at the story's report.
 **Nothing in this feature changes a model, adds a migration, or touches
 `controlled_vocabularies/ui/checks.py`.** A task that finds itself editing
 `controlled_vocabularies/models.py` has gone wrong. The one core change is in `exchange/`, is a move
-plus two derived constants, and is T001.
+plus two derived constants and one written-out one, and is T001.
 
 **A record's address is never built by hand.** In-site links use `{% url %}` against the
-`controlled_vocabularies_ui` namespace. `local_url` is an identifier, not a route, and the existing
-template test forbids it in a row partial.
+`controlled_vocabularies_ui` namespace. `local_url` is an identifier, not a route. The existing
+template test forbids it, but only in the one file it names; T023 widens that guard to every
+template carrying an in-site link.
 
 ---
 
 ## Foundational — no story is dispatched until every task here is green
+
+### T000 — The two addresses resolve, and each finds its record
+
+**Files**: `controlled_vocabularies/ui/urls.py`, `controlled_vocabularies/ui/views.py`,
+`tests/test_ui/test_urls.py`
+
+The two `path()` declarations exactly as plan.md §2 gives them, the collection route first:
+
+```python
+path("<str:slug>/collection/<str:collection_slug>/", CollectionDetailView.as_view(), name="collection-detail"),
+path("<str:slug>/<str:concept_slug>/", ConceptDetailView.as_view(), name="concept-detail"),
+```
+
+`<str:…>` and not `<slug:…>`, for the reason the vocabulary route already documents: the models
+slugify with `allow_unicode=True` and Django's converter is ASCII-only.
+
+The two view classes come with the routes, carrying **only the record resolution both pages share**.
+`SingleObjectMixin`'s default `slug_url_kwarg` is `"slug"`, which on these routes is the
+*vocabulary's* segment, so left alone each view filters records by the vocabulary's slug and 404s on
+every real address. Retargeting `slug_url_kwarg` alone is not enough either: `Concept.slug` is unique
+only per scheme and `Collection.slug` likewise, so an unscoped lookup serves 200 at an address whose
+vocabulary segment names nothing and raises `MultipleObjectsReturned` when two vocabularies share a
+record slug. Each view therefore resolves the vocabulary from the first segment in `setup()`, raising
+`Http404` when it names nothing — the shape `VocabularyDetailView.setup()` already uses — retargets
+`slug_url_kwarg` to `concept_slug` / `collection_slug`, and scopes `get_queryset()` to the resolved
+vocabulary. Nothing else: no template, no context, no rows.
+
+**This is foundational because T003 depends on it.** T003 returns each record-valued row's in-site
+address, which it must reverse through this namespace; without these names it raises
+`NoReverseMatch`. The pages themselves, their 404 assertions and the read-only assertion stay with
+T004 and T011.
+
+**Proves**: the addressing and resolution FR-001 and FR-002 depend on.
+**Verify**: each name reverses to the address `local_url` composes for the same record, including one
+slugged in a non-Latin script; a record slug held by two vocabularies resolves to the one named in
+the address.
+**Depends on**: nothing.
 
 ### T001 — A stored kind knows the SKOS property it fills
 
@@ -30,17 +68,34 @@ Move `skos_curie` from `SkosGraph` in `skos.py` into `mapping.py` as a module-le
 update its two callers in `skos.py`. It depends only on the SKOS namespace, which lives in
 `mapping.py` already, and `skos.py` imports `mapping.py`, so the dependency runs the right way.
 
+**Give `skos_curie` a namespace guard.** It slices the SKOS namespace off by length with no check, so
+`skos_curie(rdflib.RDF.type)` returns the mangled `"skos:tax-ns#type"` instead of failing. It must
+refuse a predicate outside the SKOS namespace. Its docstring scoped it to report display, which is
+why this has not mattered; keying a page's rows on it makes it matter.
+
 Add `LABEL_CURIES` and `NOTE_CURIES`, each **derived by inverting the existing forward table and
 applying `skos_curie`** — never hand-written. A predicate added to `LABEL_PREDICATES` or
-`NOTE_PREDICATES` must therefore appear in the inverse with no second edit, and the test asserts
-exactly that property rather than a fixed list of strings.
+`NOTE_PREDICATES` must therefore appear in the inverse with no second edit.
+
+**Add the terms no forward table holds**, written out as a module-level constant because they invert
+nothing that exists: the relation terms (`skos:broader`, `skos:narrower`, `skos:related`), the
+vocabulary term (`skos:inScheme`), the membership terms (`skos:member`, `skos:memberList`), and the
+type term `rdf:type` with its values `skos:Concept`, `skos:Collection` and `skos:OrderedCollection`.
+Without these, FR-010 to FR-013 have nothing to key a row on.
+
+**Two assertions, and neither borrows the implementation.** Assert the derived tables against
+hand-written expected CURIEs, the shape D48 already established for these exact predicates in
+`tests/test_exchange/test_skos.py` — restating the expectation rather than recomputing it, which
+would compare the implementation to itself and pass for any behaviour. Separately assert that every
+key of `LABEL_PREDICATES` and `NOTE_PREDICATES` appears in its inverse, which is the no-second-edit
+property, and is not tautological because it compares two different structures.
 
 `tests/test_exchange/test_mapping.py` is new and mirrors a source module, so it needs no
 conformance declaration.
 
 **Proves**: FR-003 (the keying the rows depend on).
-**Verify**: the exchange suite passes unchanged apart from the two updated call sites; inverting a
-forward table and applying the function reproduces the constant.
+**Verify**: the exchange suite passes unchanged apart from the two updated call sites; the derived
+tables match the hand-written expectations; `skos_curie` raises on a non-SKOS predicate.
 **Depends on**: nothing.
 
 ### T002 — One component renders a term and its value
@@ -84,7 +139,7 @@ Hidden labels are never a row (FR-004). Assert that with a concept that has one.
 **Proves**: FR-003, FR-004, FR-006, FR-018.
 **Verify**: unit tests over the returned rows for a richly populated concept, a bare one, and one
 carrying a hidden label.
-**Depends on**: T001.
+**Depends on**: T000, T001.
 
 ---
 
@@ -92,23 +147,23 @@ carrying a hidden label.
 
 ### T004 — A concept's address serves a read-only page
 
-**Files**: `controlled_vocabularies/ui/views.py`, `controlled_vocabularies/ui/urls.py`,
-`tests/test_ui/test_views.py`, `tests/test_ui/test_urls.py`
+**Files**: `controlled_vocabularies/ui/views.py`, `tests/test_ui/test_views.py`
 
-`ConceptDetailView`, routed as `path("<str:slug>/<str:concept_slug>/", …, name="concept-detail")`.
-`<str:…>` and not `<slug:…>`, for the reason the vocabulary route already documents: the models
-slugify with `allow_unicode=True` and Django's converter is ASCII-only. Assert it — a concept named
-in a non-Latin script must serve.
+`ConceptDetailView` gains its page: the template it renders and the context it builds. Its route and
+its record resolution came with T000; this task asserts the behaviour they produce.
 
 404 for a concept slug naming nothing, **and equally for a vocabulary segment naming nothing**
-(FR-001). A concept whose slug exists in a different vocabulary is not found here.
+(FR-001). A concept whose slug exists in a different vocabulary is not found here — assert it with
+two vocabularies each holding that slug, so the assertion covers the multiple-match case too.
 
-The page is read-only: `directory = []`, and **the test asserts on the rendered page that no editing
-control appears**, rather than trusting the attribute name to be the only thing that produces one.
+The page is read-only. **The test asserts on the rendered page that no editing control appears**: the
+upstream directory already resolves empty because every `show_<action>_action` defaults to `False`,
+so the assertion exists to catch that default flipping, not to verify an override.
 
 **Proves**: FR-001, FR-009 · SC-001 · US-1 scenario 5.
 **Verify**: anonymous request to a real concept returns 200; both flavours of unknown address
-return 404; no edit or delete affordance in the markup.
+return 404; a concept slug shared by two vocabularies resolves to the right one; no edit or delete
+affordance in the markup.
 **Depends on**: T003.
 
 ### T005 — Everything recorded appears, keyed by its property
@@ -149,8 +204,9 @@ A row saying what kind of thing the record is, keyed by the RDF type property, a
 identifier shown as a link — the treatment the vocabulary page already gives a vocabulary's.
 
 **Proves**: FR-008, FR-012.
-**Verify**: both rows present; the identifier is an anchor whose destination is the record's `uri`;
-an imported concept shows its publisher's identifier.
+**Verify**: both rows present; **the type row's key is the literal `rdf:type`**, not a CURIE the SKOS
+formatter mangled out of it; the identifier is an anchor whose destination is the record's `uri`; an
+imported concept shows its publisher's identifier.
 **Depends on**: T005.
 
 ### T008 — An unfilled property produces no row [P]
@@ -169,10 +225,15 @@ as absent.
 
 **Files**: `controlled_vocabularies/ui/views.py`, `tests/test_ui/test_views.py`
 
-`select_related("scheme")` and one `prefetch_related` covering labels, notes, both relation
-directions and collection memberships — including the scheme of a related concept, whose slug
-prefixes that concept's short form. The model helpers all iterate `.all()`, so the prefetch collapses
-them.
+`select_related("scheme")` and one `prefetch_related` over `labels` and `concept_notes` — the two
+helpers that read a cached related set.
+
+**The relation helpers are not prefetchable.** `broader()`, `narrower()`, `related()` and
+`collections()` build fresh querysets, so a prefetch of the relation paths is inert. Chain
+`.select_related("scheme")` on the queryset each helper returns, because the related concept's scheme
+slug prefixes its short form and reading it per row is one query per related record. `collections()`
+returns a list, and every membership is intra-vocabulary by construction, so its prefix comes from
+the concept's own already-loaded scheme.
 
 **Proves**: SC-006.
 **Verify**: establish the count with `CaptureQueriesContext`, then assert it with
@@ -198,12 +259,10 @@ tests.
 
 ### T011 — A collection's address serves a page
 
-**Files**: `controlled_vocabularies/ui/views.py`, `controlled_vocabularies/ui/urls.py`,
-`tests/test_ui/test_views.py`, `tests/test_ui/test_urls.py`
+**Files**: `controlled_vocabularies/ui/views.py`, `tests/test_ui/test_views.py`
 
-`CollectionDetailView`, routed as
-`path("<str:slug>/collection/<str:collection_slug>/", …, name="collection-detail")`, declared before
-the concept route. Same read-only treatment and the same two flavours of 404 as T004.
+`CollectionDetailView` gains its page, declared before the concept route by T000. Same read-only
+treatment and the same two flavours of 404 as T004, over the resolution T000 already built.
 
 Assert that a concept and a collection sharing one slug inside one vocabulary are both reachable —
 the disjointness the address segment exists for.
@@ -243,7 +302,9 @@ Distinct wording, and no empty membership row.
 
 **Files**: `controlled_vocabularies/ui/views.py`, `tests/test_ui/test_views.py`
 
-As T009, for members and their schemes.
+As T009, for members. `Collection.members()` builds `self.memberships.select_related("concept")` —
+note `"concept"`, not `"concept__scheme"` — so it needs widening, or the prefix read costs one query
+per member.
 
 **Proves**: SC-006.
 **Verify**: the count does not move as members are added.
@@ -363,18 +424,26 @@ Absent, not empty.
 
 ---
 
-## Cross-cutting — the guarantees no single story owns
+## Closing — the guarantees no single story owns, then the demo
 
-### T024 — Translation, escaping, and the links that cannot exist
+Both tasks here run after US-5, in the order given.
+
+### T023 — Translation, escaping, and the links that cannot exist
 
 **Files**: `tests/test_ui/test_views.py`, `tests/test_ui/test_templates.py`
 
-Three requirements that hold across both pages and belong to no one story, asserted once here rather
+Four requirements that hold across both pages and belong to no one story, asserted once here rather
 than assumed everywhere.
 
 - **Every user-visible string these pages show is translatable** (FR-019). A CURIE is not a
-  user-visible string — it is a SKOS identifier and stays untranslated. Assert that the strings the
-  pages introduce carry no hard-coded English, in the way the existing template tests do.
+  user-visible string — it is a SKOS identifier and stays untranslated. The existing template scan
+  already globs every template under the templates root, so it covers the new templates the moment
+  they exist and needs no widening. **Scope this bullet to the Python-side strings the views
+  introduce**, which that scan does not reach.
+- **The in-site-link guard covers the templates this feature adds** (FR-006). Today
+  `ROW_TEMPLATE_PATH` names one file, so no template added here is in its scope. Turn it into the
+  list of templates that carry an in-site link — the two existing row partials plus
+  `property_row.html` — and parametrise the existing assertions over it.
 - **Values reach the reader escaped** (FR-021). A concept whose label, note or publisher-supplied
   identifier contains markup renders it as text. Nothing is marked safe, and a publisher-supplied
   identifier reaches an attribute only as a link's destination.
@@ -383,23 +452,26 @@ than assumed everywhere.
   the assertion is about the shipped behaviour rather than about an empty database.
 
 **Proves**: FR-019, FR-020, FR-021 · SC-007.
-**Verify**: the three assertions above pass; the escaping test fails if `|safe` is introduced
-anywhere in either template.
-**Depends on**: T012, T017.
+**Verify**: the assertions above pass; the escaping test fails if `|safe` is introduced anywhere in
+either template; the widened link guard fails if `local_url` is reintroduced in any listed template.
+**Depends on**: T012, T017, T022.
 
----
+### T024 — The demo reaches the new pages, and the changelog records them
 
-## Closing
+**Files**: `README.md`, `CHANGELOG.md`, `demo/seed/research_methods.ttl`, `demo/` as needed
 
-### T023 — The demo reaches the new pages, and the changelog records them
+The demo walkthrough seeds two vocabularies and one collection of each kind. **It seeds no relation
+and one language** — checked, not assumed: neither seed file carries `skos:broader` or
+`skos:related`, and every literal in both is tagged `@en`. So extending the seed is a step of this
+task, not something its verification can take for granted.
 
-**Files**: `README.md`, `CHANGELOG.md`, `demo/` as needed
-
-The demo walkthrough already seeds two vocabularies, one of each kind of collection, and concepts
-with relations. Extend the documented walk so it ends on a concept's page and a collection's page,
-and confirm the seeded data actually exercises what the pages show — a relation, a collection
-membership, and a note in more than one language. Changelog entry per the quality bar.
+- Extend `demo/seed/research_methods.ttl` with a broader/narrower pair, a related pair, and a note in
+  a second language.
+- Extend the documented walk so it ends on a concept's page and a collection's page.
+- Confirm the walk exercises what the pages show: a relation, a collection membership, and a value
+  falling back across languages.
+- Changelog entry per the quality bar.
 
 **Proves**: Article VI, SC-008.
 **Verify**: run the documented commands from a clean database and walk the documented path.
-**Depends on**: T022.
+**Depends on**: T023.

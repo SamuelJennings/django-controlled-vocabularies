@@ -210,10 +210,15 @@ list of properties and each leads to its collection's page.
   because their addresses differ by the segment that keeps the two spaces disjoint.
 - A record whose identifier was assigned by an external publisher: the page shows that identifier as
   its own, while remaining served at this site's composed address for it.
-- A concept related to a concept in another vocabulary held on this site: the short form carries the
-  other vocabulary's prefix, and the link leads to its page here.
-- A collection gathering a concept from another vocabulary: the member is shown with its own
-  vocabulary's prefix, so a reader can see it comes from elsewhere.
+- ~~A concept related to a concept in another vocabulary held on this site: the short form carries
+  the other vocabulary's prefix, and the link leads to its page here.~~ **Unreachable — no test is
+  owed** (recorded 2026-08-24, D-015-01). `ConceptRelation` refuses a relation whose endpoints differ
+  in vocabulary, in `clean()` and again in `save()`, so the state this describes cannot be built. The
+  Key Entities section says the same: a relation links two concepts of one vocabulary.
+- ~~A collection gathering a concept from another vocabulary: the member is shown with its own
+  vocabulary's prefix, so a reader can see it comes from elsewhere.~~ **Unreachable — no test is
+  owed** (recorded 2026-08-24, D-015-01). `CollectionMember` refuses a cross-vocabulary membership on
+  the same two paths, and the factories tie a member to its parent's vocabulary.
 - An address whose vocabulary segment names no vocabulary: reported as not found, not distinguished
   from an address whose record segment names no record.
 - A vocabulary whose slug would collide with a reserved segment of a record address: prevented by the

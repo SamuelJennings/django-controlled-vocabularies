@@ -13,7 +13,7 @@ work reuses what the two previous slices built — the app, its namespace, the r
 the identifier-link treatment — and adds one genuinely new thing, a reusable component for a
 term-and-value pair, because nothing upstream renders a definition list.
 
-Nothing in the core package changes except one small addition to the predicate registry: the
+Nothing in the core package changes except one small addition to the predicate tables: the
 existing tables map a SKOS predicate to a stored kind, and these pages need the inverse.
 
 ## Technical Context
@@ -42,9 +42,10 @@ existing tables map a SKOS predicate to a stored kind, and these pages need the 
 | IV — Integration-First | The routes mirror the addresses the models already compose, so the feature integrates with identity rather than inventing a parallel address space. |
 | V — Security & data-safety | Every value reaches the page through the template layer's escaping, nothing is marked safe, and a publisher-supplied identifier reaches an attribute only as a link destination (FR-021). |
 | VI — Documentation | The README gains a section for the record pages and the demo walkthrough is extended to reach them, in this PR. |
-| VII — Dependency discipline | No new dependency. `rdflib` is already a core runtime dependency, so reading the predicate registry from the browsing app adds nothing to the install. |
+| VII — Dependency discipline | No new dependency. `rdflib` is already a core runtime dependency, so reading the predicate tables from the browsing app adds nothing to the install. |
 | IX — URI identity | The addresses served are exactly the ones `local_url` composes. This feature reads that composition and never redefines it. |
 | X — Stack & architecture | The browsing app stays behind the `ui` extra; no core module imports it. The architecture test already enforces this. |
+| XI — RDF fidelity | Not engaged. These pages read stored values and serialise no RDF; the CURIEs they key rows on name the properties the values were recorded under. |
 | XII — Internationalization | Every user-visible string is wrapped, in Python and in templates. A CURIE is not a user-visible string — it is a SKOS identifier and stays untranslated. |
 | XIII — Data-model conventions | No model fields added, so no indexing decision is owed. The reads these pages perform run against indexes that already exist. |
 | XIV — Test structure | New tests land in `tests/test_ui/test_views.py` and `tests/test_ui/test_templates.py` as new `Test<Subject>` classes, mirroring the source. No new factory is needed. |
@@ -61,10 +62,26 @@ search, pagination and empty states. A record's page lists nothing that is pagin
 nothing, so it is a `DetailView`. The upstream `MVPDetailView` supplies the page chrome and leaves
 `{% block page.content %}` empty, which is exactly what a page writing its own body wants.
 
-Its `directory = ["update", "delete"]` renders Edit and Delete buttons from
-`directory.update_url` / `delete_url`. These pages are read-only and this package ships no editing
-surface, so the subclass sets `directory = []`. **The first task verifies this by asserting no
-editing control renders**, rather than trusting the attribute name.
+Its `directory = ["update", "delete"]` names two actions, but every `show_<action>_action` on the
+base class defaults to `False` and `resolve_crud_url` drops an action whose flag is falsy before it
+reverses anything, so `get_directory()` already returns nothing until a view opts in. **No
+`directory` override is needed and none is added.** What is worth keeping is the check itself: the
+first task asserts on the rendered page that no editing control appears, because that is what would
+catch a default flipping in a 0.x dependency.
+
+**How each view finds its record.** `SingleObjectMixin.get_object` reads
+`self.kwargs[self.slug_url_kwarg]`, whose default is `"slug"` — which here is the *vocabulary's*
+segment, not the record's. Left alone, every concept page would filter concepts by the vocabulary's
+slug and 404. Retargeting `slug_url_kwarg` alone is not enough either: `Concept.slug` is unique only
+per scheme (`unique_concept_slug_per_scheme`) and `Collection.slug` likewise, so an unscoped lookup
+serves 200 at an address whose vocabulary segment names nothing — which FR-001 forbids — and raises
+`MultipleObjectsReturned` the moment two vocabularies share a record slug, which the models permit.
+
+Both views therefore do what `VocabularyDetailView.setup()` (`ui/views.py:186-191`) already does:
+resolve the vocabulary from the first path segment, raising `Http404` when it names nothing, then set
+`slug_url_kwarg` to `concept_slug` / `collection_slug` and override `get_queryset()` to filter on the
+resolved vocabulary. An unknown vocabulary segment and an unknown record segment then both 404
+indistinguishably, and a slug shared across vocabularies resolves to exactly one record.
 
 ### 2. The routes mirror the addresses the models already compose
 
@@ -96,13 +113,26 @@ existing tables rather than hand-written**, so the two cannot drift:
 - `skos_curie()` moves from `SkosGraph` in `exchange/skos.py` into `exchange/mapping.py`, where the
   namespace it depends on already lives. It is a namespace concern, not a graph concern, and
   `skos.py` imports `mapping.py` already, so the dependency runs the right way. Its two existing
-  callers in `skos.py` are updated.
+  callers in `skos.py` are updated. The move also keeps the browsing app from importing a
+  2000-line importer for a two-line formatter; `SkosGraph` is not exported from
+  `exchange/__init__.py`, so no public surface changes.
+- **`skos_curie` gains a namespace guard.** It slices the SKOS namespace off by length with no check,
+  so `skos_curie(rdflib.RDF.type)` returns the mangled `"skos:tax-ns#type"` rather than failing. Its
+  docstring scoped it to report display, which is why that has not mattered; keying a page's rows on
+  it makes it matter. It must refuse a predicate outside the SKOS namespace.
 - `mapping.py` gains `LABEL_CURIES` and `NOTE_CURIES`, each built by inverting the existing dict and
   applying `skos_curie`. Adding a predicate to the forward table therefore adds it to both pages
   with no second edit.
+- **The terms no forward table holds are written out.** The relation terms (`skos:broader`,
+  `skos:narrower`, `skos:related`), the vocabulary term (`skos:inScheme`), the membership terms
+  (`skos:member`, `skos:memberList`) and the type term and its values (`rdf:type` →
+  `skos:Concept` / `skos:Collection` / `skos:OrderedCollection`) invert nothing that exists, so they
+  are a small module-level constant in `mapping.py` rather than a derivation. The type term is not in
+  the SKOS namespace at all, which is the guard above earning its place.
 
-This is a move plus two derived constants — no new concept, and the module docstring's rule about
-growing one predicate at a time is honoured, because the entries are the ones already there.
+This is a move plus two derived constants and one written-out one — no new concept, and the module
+docstring's rule about growing one predicate at a time is honoured, because the derived entries are
+the ones already there.
 
 ### 4. A row is built in Python, rendered by one component
 
@@ -137,7 +167,8 @@ than remembered.
 A record's short form is `{scheme.slug}:{record.slug}`, built in the view. Its canonical identifier
 is `record.uri`, which is the publisher's where one assigned it and this site's composed address
 otherwise. Its link is `{% url %}` against this app's namespace — **never `local_url`**, which is an
-identifier and not a route, and which the existing template test already forbids in row partials.
+identifier and not a route. The existing template test forbids it, but is hardcoded to one file,
+so the closing phase widens it to every template that carries an in-site link.
 
 The identifier must be reachable without a pointer (FR-007). A `title` attribute alone does not
 satisfy that: it is invisible to a keyboard user and unreliable for a screen reader. The row
@@ -148,21 +179,30 @@ reader-facing outcome rather than the mechanism.
 
 ### 7. Query counts are asserted, not hoped for
 
-A record's page reads labels, notes, both relation directions and collection memberships. The
-model helpers all iterate `.all()` precisely so one `prefetch_related` collapses them:
+A record's page reads labels, notes, both relation directions and collection memberships. **Only the
+label and note helpers read a cached related set.** `preferred_label()`, `alt_labels()`,
+`definition()` and `notes()` iterate `self.labels.all()` / `self.concept_notes.all()`, so one
+`prefetch_related` collapses them:
 
 ```python
-Concept.objects.select_related("scheme").prefetch_related(
-    "labels", "concept_notes",
-    "relations_as_source__target__scheme",
-    "relations_as_target__source__scheme",
-    "collection_memberships__collection",
-)
+Concept.objects.select_related("scheme").prefetch_related("labels", "concept_notes")
 ```
 
-The scheme of a related concept is prefetched because its slug is what prefixes that concept's short
-form. Each page gets a `django_assert_num_queries` test whose count does not move when the number
-of labels, notes, relations or members grows — the SC-006 guarantee.
+`broader()`, `narrower()`, `related()` and `collections()` build fresh querysets
+(`Concept.objects.filter(…)`, `Collection.objects.filter(…)`), as does `Collection.members()`. A
+fresh queryset bypasses the prefetch cache entirely, so **prefetching the relation paths would be
+inert** and is not done. Each record-valued read instead chains `.select_related("scheme")` on the
+queryset the helper returns, because the related record's scheme slug is what prefixes its short form
+(FR-006) and reading `concept.scheme` per row is one query per related record — precisely what SC-006
+forbids.
+
+`collections()` and `members()` return lists rather than querysets. For those the view takes the
+prefix from the record's own already-`select_related`ed scheme, which is valid without a second
+mechanism: `ConceptRelation._reject_cross_scheme` and `CollectionMember._reject_cross_scheme` make
+every relation and every membership intra-vocabulary by construction.
+
+Each page gets a `django_assert_num_queries` test whose count does not move when the number of
+labels, notes, relations or members grows — the SC-006 guarantee.
 
 ### 8. The links the previous slices deferred
 
@@ -185,9 +225,14 @@ two views share. No story is dispatched until this is green.
 | 3 | US-3 links between records (P2) | US-1, US-2 |
 | 4 | US-4 links from the vocabulary page (P2) | US-1, US-2 |
 | 5 | US-5 collection membership section (P3) | US-1, US-2 |
+| 6 | Closing — the guarantees no single story owns, then the demo and changelog | US-5 |
 
 US-3, US-4 and US-5 are independent of one another and could run in parallel. Phase 1 of the
 delivery model allows one worktree at a time, so they run in the order above.
+
+The closing phase is a phase rather than a story because its two tasks assert properties that hold
+across both pages and belong to no one story. Without it they would sit in no worktree and never be
+dispatched.
 
 ## Files this feature touches
 
@@ -205,7 +250,10 @@ delivery model allows one worktree at a time, so they run in the order above.
 - `controlled_vocabularies/exchange/skos.py` — its two `skos_curie` callers.
 - `controlled_vocabularies/ui/templates/controlled_vocabularies/ui/concept_list_item.html` — links.
 - `controlled_vocabularies/ui/templates/controlled_vocabularies/ui/conceptscheme_detail.html` — links.
-- `tests/test_ui/test_views.py`, `tests/test_ui/test_templates.py`, `tests/test_exchange/test_skos.py`
+- `tests/test_ui/test_views.py`, `tests/test_ui/test_templates.py`, `tests/test_ui/test_urls.py`,
+  `tests/test_exchange/test_skos.py`, and `tests/test_exchange/test_mapping.py` (new)
+- `demo/seed/research_methods.ttl` — a relation and a second-language note, so the walkthrough
+  exercises what the pages show. The seed carries neither today.
 - `README.md` — a section for the record pages, and the demo walkthrough extended to reach them.
 - `CHANGELOG.md`
 
@@ -213,10 +261,11 @@ delivery model allows one worktree at a time, so they run in the order above.
 
 ## Risks
 
-1. **`MVPDetailView`'s chrome may render an editing affordance this package cannot serve.** Setting
-   `directory = []` is the expected fix, but the attribute is upstream and could be read elsewhere in
-   the base template. Mitigation: the first foundational task asserts on the rendered page that no
-   editing control appears, so the risk surfaces immediately rather than at review.
+1. **`MVPDetailView`'s chrome may render an editing affordance this package cannot serve.** It does
+   not today — every `show_<action>_action` defaults to `False`, so the directory resolves empty —
+   but that is an upstream default in a 0.x dependency and could flip. Mitigation: the first
+   foundational task asserts on the rendered page that no editing control appears, so a flip surfaces
+   as a red test rather than as an unserveable button.
 2. **A component whose classes the built stylesheet does not carry renders unstyled and nothing goes
    red.** This has caught this project before. Mitigation: the component composes django-mvp's own
    components, and a test checks its classes against the shipped stylesheet.
