@@ -242,6 +242,7 @@ class ConceptDetailView(MVPDetailView):
 
     model = Concept
     slug_url_kwarg = "concept_slug"
+    template_name = "controlled_vocabularies/ui/concept_detail.html"
 
     def setup(self, request, *args, **kwargs):
         super().setup(request, *args, **kwargs)
@@ -252,6 +253,14 @@ class ConceptDetailView(MVPDetailView):
 
     def get_queryset(self):
         return Concept.objects.filter(scheme=self.vocabulary)
+
+    def get_context_data(self, **kwargs):
+        # T006 gives this the reading-language fallback to the vocabulary's own
+        # default; for now the active language is read exactly as given, per
+        # concept_property_rows' own contract (decisions.md D6).
+        context = super().get_context_data(**kwargs)
+        context["rows"] = concept_property_rows(self.object, get_language())
+        return context
 
 
 class CollectionDetailView(MVPDetailView):

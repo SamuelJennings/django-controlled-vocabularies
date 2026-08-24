@@ -1,6 +1,8 @@
 """Tests for :mod:`controlled_vocabularies.ui.views` (T006-T009, T011-T013;
-015-read-single-record T003).
+015-read-single-record T003, T004).
 """
+
+import re
 
 import pytest
 from bs4 import BeautifulSoup
@@ -21,7 +23,11 @@ from controlled_vocabularies.exchange.mapping import (
     TYPE_CURIE,
 )
 from controlled_vocabularies.models import ConceptLabel, ConceptNote
-from controlled_vocabularies.ui.views import VocabularyDetailView, VocabularyListView, concept_property_rows
+from controlled_vocabularies.ui.views import (
+    VocabularyDetailView,
+    VocabularyListView,
+    concept_property_rows,
+)
 from tests.factories import (
     ConceptFactory,
     ConceptNoteFactory,
@@ -1689,3 +1695,95 @@ class TestConceptPropertyRowsLanguageScoping:
 
         preferred_row = next(row for row in rows if row["term"] == LABEL_CURIES[ConceptLabel.Kind.PREFERRED])
         assert preferred_row["value"] == "Kristallgestein"
+
+
+class TestConceptDetail:
+    """A concept's own address serves a read-only page, and an unknown one does not
+    (015-read-single-record T004, FR-001, FR-009, SC-001, US-1 scenario 5).
+    """
+
+    @pytest.mark.django_db
+    def test_a_known_concept_serves_its_page_anonymously(self, client):
+        concept = ConceptFactory()
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+
+        assert response.status_code == 200
+
+    @pytest.mark.django_db
+    def test_a_concept_slug_naming_nothing_in_a_real_vocabulary_returns_404(self, client):
+        scheme = ConceptSchemeFactory()
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": scheme.slug, "concept_slug": "no-such-concept"},
+            )
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.django_db
+    def test_a_vocabulary_segment_naming_nothing_also_returns_404(self, client):
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": "no-such-vocabulary", "concept_slug": "whatever"},
+            )
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.django_db
+    def test_a_concept_slug_shared_by_two_vocabularies_resolves_to_the_one_named_in_the_address(self, client):
+        one = ConceptSchemeFactory()
+        two = ConceptSchemeFactory()
+        ConceptFactory(scheme=one, label="Granite")
+        concept_in_two = ConceptFactory(scheme=two, label="Granite")
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": two.slug, "concept_slug": concept_in_two.slug},
+            )
+        )
+
+        assert response.status_code == 200
+        assert response.context["object"] == concept_in_two
+
+    @pytest.mark.django_db
+    def test_the_page_shows_no_editing_control(self, client):
+        concept = ConceptFactory()
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        # Every show_<action>_action defaults to False on the upstream directory
+        # mixin, so get_directory() already resolves empty (plan.md Key design
+        # decision #1) — this catches that default flipping in a 0.x dependency.
+        assert response.context["directory"] == {}
+        assert soup.find(string=re.compile("Edit")) is None
+        assert soup.find(string=re.compile("Delete")) is None
+
+    @pytest.mark.django_db
+    def test_the_context_carries_the_concepts_property_rows(self, client):
+        concept = ConceptFactory(label="Granite")
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+
+        assert response.context["rows"] == concept_property_rows(concept, "en")
