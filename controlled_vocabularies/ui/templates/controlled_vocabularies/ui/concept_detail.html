@@ -10,6 +10,16 @@
   unset rather than the four-character string "None".
 {% endcomment %}
 {% block page.content %}
+  {% comment %}
+    015-read-single-record T026, FR-008: the record's own identifier as an outbound
+    link, the same treatment conceptscheme_detail.html already gives a vocabulary's.
+    Leads the page — the first thing in page.content — rather than trailing beneath
+    the definition list (T007's original placement): a reader citing this record
+    should not have to scroll past everything it says about itself first. Still not
+    a dl row — plan.md Key design decision #4's fixed row order names no identifier
+    row, only the SKOS statements the record makes about itself.
+  {% endcomment %}
+  <c-text size="xs" muted><a href="{{ object.uri }}" rel="noopener">{{ object.uri }}</a></c-text>
   <dl>
     {% for row in rows %}
       {% if row.short_form %}
@@ -44,11 +54,4 @@
       </ul>
     </div>
   {% endif %}
-  {% comment %}
-    015-read-single-record T007, FR-008: the record's own identifier as an outbound
-    link, the same treatment conceptscheme_detail.html already gives a vocabulary's.
-    Not a dl row — plan.md Key design decision #4's fixed row order names no
-    identifier row, only the SKOS statements the record makes about itself.
-  {% endcomment %}
-  <c-text size="xs" muted><a href="{{ object.uri }}" rel="noopener">{{ object.uri }}</a></c-text>
 {% endblock page.content %}

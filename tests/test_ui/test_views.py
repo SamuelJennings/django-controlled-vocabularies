@@ -2062,6 +2062,30 @@ class TestConceptDetailTypeAndIdentifier:
         assert concept.static_uri in identifier_link.get_text(strip=True)
 
 
+class TestConceptDetailIdentifierPosition:
+    """The record's own identifier leads the page — the first thing in page.content,
+    above the definition list — not trailing beneath it (015-read-single-record T026).
+    """
+
+    @pytest.mark.django_db
+    def test_the_identifier_appears_before_the_definition_list_not_after_it(self, client):
+        concept = ConceptFactory(label="Granite")
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        content = response.content.decode()
+        soup = BeautifulSoup(response.content, "html.parser")
+        identifier_link = soup.find("a", href=concept.uri)
+
+        assert identifier_link is not None
+        assert identifier_link.find_parent("dl") is None
+        assert content.index(concept.uri) < content.index("<dl>")
+
+
 class TestConceptDetailUnfilledPropertiesProduceNoRow:
     """A concept carrying nothing beyond its label shows its label, its type, its
     identifier and its vocabulary, and no row at all for any property it does not
@@ -2393,6 +2417,29 @@ class TestCollectionDetailNameTypeAndMembers:
 
         assert identifier_link is not None
         assert collection.uri in identifier_link.get_text(strip=True)
+
+
+class TestCollectionDetailIdentifierPosition:
+    """The same treatment concept_detail.html gives its own identifier
+    (015-read-single-record T026)."""
+
+    @pytest.mark.django_db
+    def test_the_identifier_appears_before_the_definition_list_not_after_it(self, client):
+        collection = CollectionFactory(name="Rock Types")
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:collection-detail",
+                kwargs={"slug": collection.scheme.slug, "collection_slug": collection.slug},
+            )
+        )
+        content = response.content.decode()
+        soup = BeautifulSoup(response.content, "html.parser")
+        identifier_link = soup.find("a", href=collection.uri)
+
+        assert identifier_link is not None
+        assert identifier_link.find_parent("dl") is None
+        assert content.index(collection.uri) < content.index("<dl>")
 
 
 class TestCollectionDetailEmptyState:

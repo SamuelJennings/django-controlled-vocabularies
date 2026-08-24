@@ -8,6 +8,13 @@
   row too, so only the keys a row actually carries are passed).
 {% endcomment %}
 {% block page.content %}
+  {% comment %}
+    015-read-single-record T026, FR-008: the record's own identifier as an outbound
+    link, the same treatment concept_detail.html gives a concept's. Leads the page —
+    the first thing in page.content — rather than trailing beneath the definition
+    list (T007's original placement).
+  {% endcomment %}
+  <c-text size="xs" muted><a href="{{ object.uri }}" rel="noopener">{{ object.uri }}</a></c-text>
   <dl>
     {% for row in rows %}
       {% if row.short_form %}
@@ -29,9 +36,4 @@
   {% if not collection_has_members %}
     <c-text muted>{% trans "This collection holds no members." %}</c-text>
   {% endif %}
-  {% comment %}
-    015-read-single-record T007, FR-008: the record's own identifier as an outbound
-    link, the same treatment concept_detail.html gives a concept's.
-  {% endcomment %}
-  <c-text size="xs" muted><a href="{{ object.uri }}" rel="noopener">{{ object.uri }}</a></c-text>
 {% endblock page.content %}
