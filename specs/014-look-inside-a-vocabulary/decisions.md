@@ -284,3 +284,28 @@ is unchanged — `slug_is_manual` stays False, so `save()` recomputes the identi
 
 **Revisit if**: the factory ever needs to build a scheme whose slug deliberately disagrees with its
 name, which today only `set_slug()` produces and only on a saved instance.
+
+---
+
+## D15 — The demo's seeded collections both go in the authored vocabulary, not the imported one
+
+**Ambiguity**: T020 names `demo/seed/dcmi_types.ttl` and `demo/seed/research_methods.ttl` as
+candidate files, the same pair T016 (US-3's altLabel/hiddenLabel task) actually touched both of.
+Nothing in the task says a collection must be split one per file, or that both must land in the
+same file.
+
+**Chosen**: both the `skos:Collection` and the `skos:OrderedCollection` go in
+`research_methods.ttl`, the locally authored vocabulary. `dcmi_types.ttl` is unchanged.
+
+**Why defensible**: `dcmi_types.ttl` declares its own `skos:ConceptScheme` at a real,
+externally-registered address (`http://purl.org/dc/dcmitype/`) and is loaded with no target
+scheme override, so every URI in that file is read as this vocabulary's actual, externally
+fixed identity (`CONTEXT.md`'s **Static URI**) — the whole reason it reads as "Imported" rather
+than "Held here". A collection minted under that same namespace would carry a `purl.org` static
+URI nobody at the Dublin Core Metadata Initiative actually assigned — a curator's own grouping
+presented as if it were part of the published vocabulary. `research_methods.ttl` carries no such
+risk: every concept in it already sits under the reserved `example.org` placeholder domain
+(RFC 2606), used precisely because nothing under it can be mistaken for a real publisher's
+identifier. Two collections in one file over one each keeps that reasoning in a single place
+rather than requiring it twice, and the acceptance criterion — "both render on a page anyone can
+open" — asks for one page holding both, not one collection per vocabulary.

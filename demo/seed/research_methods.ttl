@@ -29,3 +29,30 @@
     a skos:Concept ;
     skos:prefLabel "Remote sensing"@en ;
     skos:definition "Data captured from a distance, typically by satellite or aircraft instrument."@en .
+
+# One of each kind (T020, FR-018, decisions.md D9): a plain set, and a deliberately
+# sequenced grouping, both loaded through the package's own importer
+# (controlled_vocabularies.exchange.import_skos) rather than a fixture behind it. Placed
+# in this file rather than dcmi_types.ttl: this vocabulary's own concept URIs already
+# live under the reserved example.org placeholder domain (RFC 2606), so a curator's own
+# grouping minted here claims nothing about what the DCMI Type Vocabulary's real
+# publisher has actually published.
+
+<http://example.org/research-methods/collection/primary-methods>
+    a skos:Collection ;
+    skos:prefLabel "Primary data collection methods"@en ;
+    skos:member
+        <http://example.org/research-methods/fieldwork>,
+        <http://example.org/research-methods/laboratory-experiment>,
+        <http://example.org/research-methods/survey>,
+        <http://example.org/research-methods/remote-sensing> .
+
+<http://example.org/research-methods/collection/typical-workflow>
+    a skos:OrderedCollection ;
+    skos:prefLabel "Typical project workflow"@en ;
+    skos:memberList (
+        <http://example.org/research-methods/survey>
+        <http://example.org/research-methods/fieldwork>
+        <http://example.org/research-methods/remote-sensing>
+        <http://example.org/research-methods/laboratory-experiment>
+    ) .
