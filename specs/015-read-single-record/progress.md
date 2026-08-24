@@ -305,3 +305,34 @@ makemigrations --check --dry-run` — no changes detected.
 
 Next: T010 (the README documents the concept page) — the last task of Story US-1.
 Watch: nothing outstanding.
+
+## 2026-08-24T17:38:20Z · Implementer US1 · T010
+
+Did: added a `### A concept's own page` section to `README.md`, between `### A
+vocabulary's own page` and `### Try it: the demo project`, in the same shape those
+sections already use: what the page shows (the definition list keyed by SKOS property,
+hidden labels never appearing, a property with no value contributing no row), the
+language rule (reading language, falling back to the vocabulary's own default), the
+identifier treatment (a link, publisher's for an imported concept), the read-only and
+no-permission-rule guarantees, the two indistinguishable 404 cases and the shared-slug
+resolution, a `reverse()` example passing both `slug` and `concept_slug`, and the
+serving view's name. Scoped strictly to what T005-T009 actually deliver: no mention of
+the collection membership section (T021, not yet built) or of the vocabulary list
+page linking to a concept entry (T019, not yet built) — those belong to their own
+stories. No test file: T010, like T015 for the collection page, documents only.
+
+Verified: reversed the documented name directly — `poetry run python manage.py shell
+-c "from django.urls import reverse; print(reverse('controlled_vocabularies_ui:
+concept-detail', kwargs={'slug': 'demo-vocab', 'concept_slug': 'demo-concept'}))"` —
+`/browse/demo-vocab/demo-concept/`, confirming the route name and both kwargs exist
+exactly as documented. `poetry run pytest tests/test_ui/test_views.py -q -k
+"TestConceptDetail or TestConceptPropertyRows"` — 23 passed, confirming the documented
+behaviour matches every US-1 test written across T003-T009. `poetry run python
+manage.py makemigrations --check --dry-run` — no changes detected. `ruff`/`mypy` do not
+apply to a markdown-only change.
+
+Story US-1 (T004-T010) is complete. All tasks committed individually; the tree is clean.
+
+Next: T011 (a collection's own address serves a page) — the first task of Story US-2 —
+or the story's own end-of-run report, whichever the run boundary calls for.
+Watch: nothing outstanding.
