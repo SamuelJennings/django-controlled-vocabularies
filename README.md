@@ -541,6 +541,47 @@ browsing routes are not mounted at all.
 The page is served by `VocabularyDetailView`, in `controlled_vocabularies.ui.views`, and is
 subclassed the same way as the list above.
 
+### A concept's own page
+
+Every concept has its own address — the same one `Concept.uri` composes when the site is
+configured as this section describes. The page is a definition list of everything the database
+records about the concept, other than its hidden labels, each row labelled by the SKOS property it
+was recorded under: its type (`rdf:type`), its preferred label (`skos:prefLabel`), its alternative
+labels (`skos:altLabel`), each note it carries under the property of its own kind (`skos:definition`,
+`skos:scopeNote`, and the rest of the six documentary notes SKOS defines), its broader concept, its
+narrower concepts and its related concepts (`skos:broader` / `skos:narrower` / `skos:related`), and
+the vocabulary it belongs to (`skos:inScheme`). Every record-valued row links to that record's own
+page here. A property the concept carries no value for contributes no row at all — never an empty
+one — so a concept carrying nothing beyond its label shows only its label, its type, its identifier
+and its vocabulary.
+
+Every value is shown in the language the site is being read in, exactly as the vocabulary page
+above shows a concept's label: where the concept has none in that language, it falls back to the
+vocabulary's own default language, one language at a time, never every language a value was
+recorded in.
+
+The concept's own identifier is shown as a link, the same treatment its vocabulary's own page gives
+a vocabulary's: an imported concept shows its publisher's identifier, one authored here shows this
+site's own composed address for it. Either way the page itself is **read-only** — it carries no
+editing or deletion control of its own, and no permission rule beyond what the project mounting
+these routes chooses to add.
+
+An address naming no concept is reported not found, and so is one whose vocabulary segment names no
+vocabulary — the two are not distinguished. A concept slug held by more than one vocabulary resolves
+to the one the address actually names.
+
+Reverse the page by name, passing the vocabulary's slug and the concept's own:
+
+```python
+reverse(
+    "controlled_vocabularies_ui:concept-detail",
+    kwargs={"slug": vocabulary.slug, "concept_slug": concept.slug},
+)
+```
+
+The page is served by `ConceptDetailView`, in `controlled_vocabularies.ui.views`, and is subclassed
+the same way as the pages above.
+
 ### Try it: the demo project
 
 The repository carries a runnable demo of the page above, wired the same way this section
