@@ -2093,6 +2093,12 @@ class TestConceptDetailQueryCount:
             ConceptRelationFactory(
                 source=concept, target=ConceptFactory(scheme=scheme), kind=ConceptRelation.Kind.RELATED
             )
+            # T021, FR-014: membership grows with everything else. `collections()`
+            # evaluates one query whatever its length, and the section reads only
+            # fields on the row it returns, so a per-collection read added later
+            # (a member's vocabulary, say) regresses this ceiling rather than
+            # passing unnoticed.
+            CollectionFactory(scheme=scheme, name=f"Collection {i}").add(concept)
 
         with django_assert_num_queries(baseline):
             client.get(url)
@@ -2105,9 +2111,7 @@ class TestConceptDetailCollectionMembership:
     """
 
     @pytest.mark.django_db
-    def test_a_concept_gathered_by_two_collections_names_both_outside_the_list_each_linking_to_its_page(
-        self, client
-    ):
+    def test_a_concept_gathered_by_two_collections_names_both_outside_the_list_each_linking_to_its_page(self, client):
         scheme = ConceptSchemeFactory()
         concept = ConceptFactory(scheme=scheme, label="Granite")
         igneous = CollectionFactory(scheme=scheme, name="Igneous rocks")
