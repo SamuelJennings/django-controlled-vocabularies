@@ -1871,6 +1871,32 @@ class TestConceptDetail:
         assert response.context["rows"] == concept_property_rows(concept, "en")
 
 
+class TestConceptDetailBreadcrumbs:
+    """A concept's page carries a breadcrumb trail naming Home, the vocabulary holding
+    it, and the concept itself, the last item unlinked (015-read-single-record T025).
+    """
+
+    @pytest.mark.django_db
+    def test_the_trail_names_home_the_vocabulary_and_the_concept(self, client):
+        concept = ConceptFactory(label="Granite")
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+
+        assert response.context["page"]["breadcrumbs"] == [
+            {"text": "Home", "href": "/"},
+            {
+                "text": concept.scheme.name,
+                "href": reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": concept.scheme.slug}),
+            },
+            {"text": "Granite"},
+        ]
+
+
 class TestConceptDetailShowsWhatIsRecorded:
     """Everything recorded appears, keyed by its property, and a hidden label never
     does (015-read-single-record T005, FR-003, FR-004, SC-001, SC-002, US-1
@@ -2260,6 +2286,35 @@ class TestCollectionDetail:
         )
 
         assert response.context["rows"] == collection_property_rows(collection)
+
+
+class TestCollectionDetailBreadcrumbs:
+    """A collection's page carries a breadcrumb trail naming Home, the vocabulary
+    holding it, and the collection itself, the last item unlinked
+    (015-read-single-record T025).
+    """
+
+    @pytest.mark.django_db
+    def test_the_trail_names_home_the_vocabulary_and_the_collection(self, client):
+        collection = CollectionFactory(name="Rock Types")
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:collection-detail",
+                kwargs={"slug": collection.scheme.slug, "collection_slug": collection.slug},
+            )
+        )
+
+        assert response.context["page"]["breadcrumbs"] == [
+            {"text": "Home", "href": "/"},
+            {
+                "text": collection.scheme.name,
+                "href": reverse(
+                    "controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": collection.scheme.slug}
+                ),
+            },
+            {"text": "Rock Types"},
+        ]
 
 
 class TestCollectionDetailNameTypeAndMembers:

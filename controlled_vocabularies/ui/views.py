@@ -348,6 +348,20 @@ class ConceptDetailView(MVPDetailView):
             .prefetch_related("labels", "concept_notes")
         )
 
+    def get_breadcrumbs(self):
+        # T025: PageObjectMixin's own default names the model's plural and links
+        # nowhere ("Concepts", href ""), which reads as a trail to every concept
+        # rather than the one vocabulary this page's concept belongs to. self.vocabulary
+        # is already resolved in setup(), so this costs no extra query.
+        return [
+            {"text": _("Home"), "href": "/"},
+            {
+                "text": self.vocabulary.name,
+                "href": reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": self.vocabulary.slug}),
+            },
+            {"text": self.get_page_title()},
+        ]
+
     def get_context_data(self, **kwargs):
         # The reading language, falling back to the vocabulary's own default (FR-005,
         # decisions.md D6) — concept_property_rows applies the fallback per property
@@ -388,6 +402,18 @@ class CollectionDetailView(MVPDetailView):
         # collection.scheme collection_property_rows() reads for the vocabulary
         # row and for every member row's short-form prefix (D-015-02).
         return Collection.objects.filter(scheme=self.vocabulary).select_related("scheme")
+
+    def get_breadcrumbs(self):
+        # T025: same treatment as ConceptDetailView.get_breadcrumbs() — the upstream
+        # default names the model's plural ("Collections") and links nowhere.
+        return [
+            {"text": _("Home"), "href": "/"},
+            {
+                "text": self.vocabulary.name,
+                "href": reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": self.vocabulary.slug}),
+            },
+            {"text": self.get_page_title()},
+        ]
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
