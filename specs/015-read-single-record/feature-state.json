@@ -65,22 +65,60 @@
         {
           "id": "T000",
           "status": "done",
-          "attempts": 1
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_urls.py -q",
+              "poetry run ruff check",
+              "poetry run ruff format --check",
+              "poetry run mypy controlled_vocabularies/ui/views.py controlled_vocabularies/ui/urls.py",
+              "poetry run python manage.py makemigrations --check --dry-run"
+            ]
+          }
         },
         {
           "id": "T001",
           "status": "done",
-          "attempts": 1
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_exchange/test_mapping.py -q",
+              "poetry run pytest tests/test_exchange/ -q",
+              "poetry run ruff check",
+              "poetry run ruff format --check",
+              "poetry run mypy",
+              "poetry run python manage.py makemigrations --check --dry-run"
+            ]
+          }
         },
         {
           "id": "T002",
           "status": "done",
-          "attempts": 1
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_templates.py -q",
+              "poetry run ruff check",
+              "poetry run ruff format --check",
+              "poetry run mypy",
+              "poetry run python manage.py makemigrations --check --dry-run"
+            ]
+          }
         },
         {
           "id": "T003",
           "status": "done",
-          "attempts": 1
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py -q -k ConceptPropertyRows",
+              "poetry run pytest tests/test_ui/test_views.py -q",
+              "poetry run ruff check",
+              "poetry run ruff format --check",
+              "poetry run mypy",
+              "poetry run python manage.py makemigrations --check --dry-run"
+            ]
+          }
         }
       ]
     },
@@ -88,44 +126,110 @@
       "id": "US1",
       "priority": "P1",
       "issue": 157,
-      "worktree": null,
-      "status": "todo",
+      "worktree": "../dcv-015-us1",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T004",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py -q -k TestConceptDetail",
+              "poetry run pytest tests/test_ui/test_views.py -q",
+              "poetry run ruff check",
+              "poetry run ruff format --check",
+              "poetry run mypy",
+              "poetry run python manage.py makemigrations --check --dry-run"
+            ]
+          }
         },
         {
           "id": "T005",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 2,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py -q -k TestConceptDetail",
+              "poetry run ruff check",
+              "poetry run ruff format --check",
+              "poetry run mypy",
+              "poetry run python manage.py makemigrations --check --dry-run"
+            ]
+          }
         },
         {
           "id": "T006",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py -q -k \"TestConceptDetail or TestConceptPropertyRows\"",
+              "poetry run pytest tests/test_ui/test_views.py -q",
+              "poetry run ruff check",
+              "poetry run ruff format --check",
+              "poetry run mypy",
+              "poetry run python manage.py makemigrations --check --dry-run"
+            ]
+          }
         },
         {
           "id": "T007",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py -q -k TestConceptDetailTypeAndIdentifier",
+              "poetry run pytest tests/test_ui/test_views.py -q",
+              "poetry run ruff check",
+              "poetry run ruff format --check",
+              "poetry run mypy",
+              "poetry run python manage.py makemigrations --check --dry-run"
+            ]
+          }
         },
         {
           "id": "T008",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py -q -k TestConceptDetailUnfilledPropertiesProduceNoRow",
+              "poetry run pytest tests/test_ui/test_views.py -q",
+              "poetry run ruff check",
+              "poetry run ruff format --check",
+              "poetry run mypy",
+              "poetry run python manage.py makemigrations --check --dry-run"
+            ]
+          }
         },
         {
           "id": "T009",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py -q -k TestConceptDetailQueryCount",
+              "poetry run pytest tests/test_ui/test_views.py -q",
+              "poetry run ruff check",
+              "poetry run ruff format --check",
+              "poetry run mypy",
+              "poetry run python manage.py makemigrations --check --dry-run"
+            ]
+          }
         },
         {
           "id": "T010",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run python manage.py shell -c \"from django.urls import reverse; print(reverse('controlled_vocabularies_ui: concept-detail', kwargs={'slug': 'demo-vocab', 'concept_slug': 'demo-concept'}))\"",
+              "poetry run pytest tests/test_ui/test_views.py -q -k \"TestConceptDetail or TestConceptPropertyRows\"",
+              "poetry run python manage.py makemigrations --check --dry-run"
+            ]
+          }
         }
       ]
     },
