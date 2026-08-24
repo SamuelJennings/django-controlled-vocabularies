@@ -11,11 +11,22 @@ share one thing: resolving the record named by an address scoped to its vocabula
 from django.db.models import Count, F, OuterRef, Subquery
 from django.db.models.functions import Coalesce, Lower
 from django.http import Http404
+from django.urls import reverse
 from django.utils.translation import get_language
 from django.utils.translation import gettext_lazy as _
 from mvp.views import MVPDetailView, MVPListView
 
-from controlled_vocabularies.models import Collection, Concept, ConceptLabel, ConceptScheme
+from controlled_vocabularies.exchange.mapping import (
+    BROADER_CURIE,
+    CONCEPT_TYPE_CURIE,
+    IN_SCHEME_CURIE,
+    LABEL_CURIES,
+    NARROWER_CURIE,
+    NOTE_CURIES,
+    RELATED_CURIE,
+    TYPE_CURIE,
+)
+from controlled_vocabularies.models import Collection, Concept, ConceptLabel, ConceptNote, ConceptScheme
 
 
 class VocabularyListView(MVPListView):
@@ -139,6 +150,82 @@ class VocabularyListView(MVPListView):
         # does not show (show_create_action is never set), and this empty state has
         # nothing else useful to add beyond the heading.
         return None
+
+
+def concept_property_rows(concept: Concept, language: str) -> list[dict]:
+    """The fixed-order rows a concept's own page renders (015-read-single-record T003,
+    FR-003, FR-004, FR-006, FR-018).
+
+    One row per SKOS statement the concept makes about itself, in the order plan.md Key
+    design decision #4 fixes: type, preferred label, alternative labels, notes (in the
+    order :class:`~controlled_vocabularies.models.ConceptNote.Kind` declares them),
+    relations — broader, narrower, related — then the vocabulary holding it. Collection
+    membership is never a row here: it is a statement *other* records make about this
+    one, not one this concept makes about itself, and sits outside this list entirely
+    (decisions.md D4). A hidden label is never read at all (FR-004). A property with no
+    value in ``language`` contributes no row, so a template built over this needs no
+    emptiness logic of its own.
+
+    ``language`` is taken exactly as given — any fallback to the vocabulary's default
+    (decisions.md D6) is the caller's decision, not this function's.
+
+    Each row is a plain dict of ``term``/``value``/``short_form``/``uri``/``href`` — the
+    same five names the ``property_row`` cotton component takes (T002). A record-valued
+    row (a related concept, or the vocabulary) carries ``short_form``/``uri``/``href``
+    and leaves ``value`` empty; every other row carries ``value`` and leaves the other
+    three empty.
+    """
+
+    def row(term: str, *, value=None, short_form=None, uri=None, href=None) -> dict:
+        return {"term": term, "value": value, "short_form": short_form, "uri": uri, "href": href}
+
+    def record_row(term: str, record: Concept) -> dict:
+        # The short form's prefix comes from the vocabulary holding the record
+        # (decisions.md D2), and the link is reversed through this app's own
+        # namespace — never `local_url`, which is an identifier, not a route
+        # (plan.md Key design decision #6).
+        return row(
+            term,
+            short_form=f"{record.scheme.slug}:{record.slug}",
+            uri=record.uri,
+            href=reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": record.scheme.slug, "concept_slug": record.slug},
+            ),
+        )
+
+    rows = [row(TYPE_CURIE, value=CONCEPT_TYPE_CURIE)]
+
+    preferred_label = concept.preferred_label(language)
+    if preferred_label:
+        rows.append(row(LABEL_CURIES[ConceptLabel.Kind.PREFERRED], value=preferred_label))
+
+    rows.extend(row(LABEL_CURIES[ConceptLabel.Kind.ALTERNATIVE], value=text) for text in concept.alt_labels(language))
+
+    for kind in ConceptNote.Kind:
+        rows.extend(row(NOTE_CURIES[kind], value=value) for value in concept.notes(language, kind=kind))
+
+    # D-015-02: none of these three is prefetchable (each builds a fresh queryset), so
+    # each read chains its own select_related("scheme") rather than relying on a
+    # prefetch that would never be consulted.
+    rows.extend(record_row(BROADER_CURIE, related) for related in concept.broader().select_related("scheme"))
+    rows.extend(record_row(NARROWER_CURIE, related) for related in concept.narrower().select_related("scheme"))
+    rows.extend(record_row(RELATED_CURIE, related) for related in concept.related().select_related("scheme"))
+
+    scheme = concept.scheme
+    rows.append(
+        row(
+            IN_SCHEME_CURIE,
+            # A vocabulary records no short prefix of its own (decisions.md D2) — its
+            # row names it by its plain display name rather than the "{prefix}:{slug}"
+            # short form only a record it holds carries.
+            short_form=scheme.name,
+            uri=scheme.uri,
+            href=reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}),
+        )
+    )
+
+    return rows
 
 
 class ConceptDetailView(MVPDetailView):

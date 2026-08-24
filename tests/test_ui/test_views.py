@@ -1,4 +1,6 @@
-"""Tests for :mod:`controlled_vocabularies.ui.views` (T006-T009, T011-T013)."""
+"""Tests for :mod:`controlled_vocabularies.ui.views` (T006-T009, T011-T013;
+015-read-single-record T003).
+"""
 
 import pytest
 from bs4 import BeautifulSoup
@@ -8,8 +10,18 @@ from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import translation
 
-from controlled_vocabularies.models import ConceptLabel
-from controlled_vocabularies.ui.views import VocabularyDetailView, VocabularyListView
+from controlled_vocabularies.exchange.mapping import (
+    BROADER_CURIE,
+    CONCEPT_TYPE_CURIE,
+    IN_SCHEME_CURIE,
+    LABEL_CURIES,
+    NARROWER_CURIE,
+    NOTE_CURIES,
+    RELATED_CURIE,
+    TYPE_CURIE,
+)
+from controlled_vocabularies.models import ConceptLabel, ConceptNote
+from controlled_vocabularies.ui.views import VocabularyDetailView, VocabularyListView, concept_property_rows
 from tests.factories import (
     ConceptFactory,
     ConceptNoteFactory,
@@ -1145,9 +1157,7 @@ class TestVocabularyDetailConceptPaging:
         soup = BeautifulSoup(response.content, "html.parser")
 
         page_two_href = next(
-            a["href"]
-            for a in soup.find_all("a", href=True)
-            if "page=2" in a["href"] and "unrelated=kept" in a["href"]
+            a["href"] for a in soup.find_all("a", href=True) if "page=2" in a["href"] and "unrelated=kept" in a["href"]
         )
 
         second_page = client.get(url + page_two_href)
@@ -1526,3 +1536,156 @@ class TestTemplateCommentsDoNotReachThePage:
 
         assert "{#" not in content
         assert "#}" not in content
+
+
+class TestConceptPropertyRowsForABareConcept:
+    """A freshly created concept — only what is structurally guaranteed contributes a
+    row: its type, its own (default-language) preferred label, and the vocabulary
+    holding it (015-read-single-record T003). No collections row: membership is a
+    statement other records make about this one, not one this concept makes about
+    itself, and sits outside this list entirely (decisions.md D4).
+    """
+
+    @pytest.mark.django_db
+    def test_a_bare_concept_yields_exactly_type_preferred_label_and_vocabulary(self):
+        concept = ConceptFactory(label="Granite")
+
+        rows = concept_property_rows(concept, "en")
+
+        assert [row["term"] for row in rows] == [
+            TYPE_CURIE,
+            LABEL_CURIES[ConceptLabel.Kind.PREFERRED],
+            IN_SCHEME_CURIE,
+        ]
+
+    @pytest.mark.django_db
+    def test_the_type_row_carries_the_concept_type_curie_as_a_plain_value(self):
+        concept = ConceptFactory()
+
+        rows = concept_property_rows(concept, "en")
+
+        type_row = rows[0]
+        assert type_row["term"] == TYPE_CURIE
+        assert type_row["value"] == CONCEPT_TYPE_CURIE
+        assert type_row["short_form"] is None
+
+
+class TestConceptPropertyRowsOrderForARichlyPopulatedConcept:
+    """The fixed order the plan gives: type, preferred label, alternative labels, notes
+    in the order ``ConceptNote.Kind`` declares them, relations — broader, narrower,
+    related — then the vocabulary (015-read-single-record T003, plan.md Key design
+    decision #4).
+    """
+
+    @pytest.mark.django_db
+    def test_every_section_appears_in_the_fixed_order(self):
+        concept = ConceptFactory(label="Granite")
+        concept.add_label(language="en", kind=ConceptLabel.Kind.ALTERNATIVE, text="granitic rock")
+        for kind in ConceptNote.Kind:
+            ConceptNoteFactory(concept=concept, kind=kind, value=f"A {kind} note.")
+        parent = ConceptFactory(scheme=concept.scheme, label="Igneous Rock")
+        concept.add_broader(parent)
+        child = ConceptFactory(scheme=concept.scheme, label="Pink Granite")
+        child.add_broader(concept)
+        other = ConceptFactory(scheme=concept.scheme, label="Basalt")
+        concept.add_related(other)
+
+        rows = concept_property_rows(concept, "en")
+
+        assert [row["term"] for row in rows] == [
+            TYPE_CURIE,
+            LABEL_CURIES[ConceptLabel.Kind.PREFERRED],
+            LABEL_CURIES[ConceptLabel.Kind.ALTERNATIVE],
+            NOTE_CURIES[ConceptNote.Kind.DEFINITION],
+            NOTE_CURIES[ConceptNote.Kind.SCOPE],
+            NOTE_CURIES[ConceptNote.Kind.EXAMPLE],
+            NOTE_CURIES[ConceptNote.Kind.EDITORIAL],
+            NOTE_CURIES[ConceptNote.Kind.HISTORY],
+            NOTE_CURIES[ConceptNote.Kind.CHANGE],
+            NOTE_CURIES[ConceptNote.Kind.NOTE],
+            BROADER_CURIE,
+            NARROWER_CURIE,
+            RELATED_CURIE,
+            IN_SCHEME_CURIE,
+        ]
+
+
+class TestConceptPropertyRowsHiddenLabel:
+    """A hidden label never appears as a row (T003, FR-004) — SKOS's own match-only,
+    never-displayed kind (decisions.md D3).
+    """
+
+    @pytest.mark.django_db
+    def test_a_hidden_label_contributes_no_row_and_no_hidden_curie_appears(self):
+        concept = ConceptFactory(label="Granite")
+        concept.add_label(language="en", kind=ConceptLabel.Kind.HIDDEN, text="granate")
+
+        rows = concept_property_rows(concept, "en")
+
+        assert "granate" not in [row["value"] for row in rows]
+        assert not any(row["term"] == "skos:hiddenLabel" for row in rows)
+
+
+class TestConceptPropertyRowsRecordValuedRows:
+    """A record-valued row carries its short form, its canonical identifier, and its
+    in-site address reversed through this app's own namespace — never ``local_url``
+    (T003, plan.md Key design decision #6).
+    """
+
+    @pytest.mark.django_db
+    def test_a_broader_row_carries_the_related_concepts_short_form_uri_and_link(self):
+        concept = ConceptFactory(label="Granite")
+        parent = ConceptFactory(scheme=concept.scheme, label="Igneous Rock")
+        concept.add_broader(parent)
+
+        rows = concept_property_rows(concept, "en")
+
+        broader_row = next(row for row in rows if row["term"] == BROADER_CURIE)
+        assert broader_row["value"] is None
+        assert broader_row["short_form"] == f"{parent.scheme.slug}:{parent.slug}"
+        assert broader_row["uri"] == parent.uri
+        assert broader_row["href"] == reverse(
+            "controlled_vocabularies_ui:concept-detail",
+            kwargs={"slug": parent.scheme.slug, "concept_slug": parent.slug},
+        )
+
+    @pytest.mark.django_db
+    def test_the_vocabulary_row_links_to_the_vocabularys_own_page(self):
+        concept = ConceptFactory(label="Granite")
+
+        rows = concept_property_rows(concept, "en")
+
+        vocabulary_row = next(row for row in rows if row["term"] == IN_SCHEME_CURIE)
+        assert vocabulary_row["value"] is None
+        # A vocabulary records no short prefix of its own (decisions.md D2) — its row
+        # names it by its plain display name rather than a "{prefix}:{slug}" short form
+        # that only a record a vocabulary holds carries.
+        assert vocabulary_row["short_form"] == concept.scheme.name
+        assert vocabulary_row["uri"] == concept.scheme.uri
+        assert vocabulary_row["href"] == reverse(
+            "controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": concept.scheme.slug}
+        )
+
+
+class TestConceptPropertyRowsLanguageScoping:
+    """The one reading language given, and no fallback inside this function — that is
+    the caller's decision, not this one's (decisions.md D6).
+    """
+
+    @pytest.mark.django_db
+    def test_a_preferred_label_absent_in_the_given_language_contributes_no_row(self):
+        concept = ConceptFactory(label="Granite")  # only the English default label
+
+        rows = concept_property_rows(concept, "de")
+
+        assert LABEL_CURIES[ConceptLabel.Kind.PREFERRED] not in [row["term"] for row in rows]
+
+    @pytest.mark.django_db
+    def test_a_preferred_label_present_in_the_given_language_does_appear(self):
+        concept = ConceptFactory(label="Granite")
+        concept.add_label(language="de", kind=ConceptLabel.Kind.PREFERRED, text="Kristallgestein")
+
+        rows = concept_property_rows(concept, "de")
+
+        preferred_row = next(row for row in rows if row["term"] == LABEL_CURIES[ConceptLabel.Kind.PREFERRED])
+        assert preferred_row["value"] == "Kristallgestein"
