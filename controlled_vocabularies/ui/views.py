@@ -257,7 +257,7 @@ def concept_property_rows(concept: Concept, language: str, default_language: str
 
 def collection_property_rows(collection: Collection) -> list[dict]:
     """The fixed-order rows a collection's own page renders (015-read-single-record
-    T011, T012, FR-008, FR-012, FR-013, FR-017).
+    T011, T012, T028, FR-008, FR-012, FR-013, FR-017).
 
     Mirrors :func:`concept_property_rows`'s shape (plan.md Key design decision #4):
     type, name, members, then the vocabulary holding it. Unlike a concept's, a
@@ -269,12 +269,17 @@ def collection_property_rows(collection: Collection) -> list[dict]:
     is ``skos:Collection`` with members under ``skos:member``. A collection holding no
     members contributes no membership row at all (FR-017) — the same "absent, not
     empty" rule T003's ``concept_property_rows`` already follows (FR-018).
+
+    Membership is one row carrying every member, not one row per member (T028) — a
+    four-member collection states ``skos:member`` once, with all four beside it. That
+    row's ``entries`` key holds the list of ``{short_form, uri, href}`` dicts every
+    other record-valued row would otherwise carry singly.
     """
 
-    def row(term: str, *, value=None, short_form=None, uri=None, href=None) -> dict:
-        return {"term": term, "value": value, "short_form": short_form, "uri": uri, "href": href}
+    def row(term: str, *, value=None, short_form=None, uri=None, href=None, entries=None) -> dict:
+        return {"term": term, "value": value, "short_form": short_form, "uri": uri, "href": href, "entries": entries}
 
-    def member_row(term: str, member: Concept) -> dict:
+    def member_entry(member: Concept) -> dict:
         # D-015-02: Collection.members() (models.py, out of this feature's scope)
         # only select_relates "concept", not "concept__scheme", and every membership
         # is intra-vocabulary by construction (CollectionMember._reject_cross_scheme).
@@ -282,21 +287,22 @@ def collection_property_rows(collection: Collection) -> list[dict]:
         # member before its uri is read, populating Django's FK cache without a
         # query — the same trick D-015-02 describes for collections()/members().
         member.scheme = collection.scheme
-        return row(
-            term,
-            short_form=f"{collection.scheme.slug}:{member.slug}",
-            uri=member.uri,
-            href=reverse(
+        return {
+            "short_form": f"{collection.scheme.slug}:{member.slug}",
+            "uri": member.uri,
+            "href": reverse(
                 "controlled_vocabularies_ui:concept-detail",
                 kwargs={"slug": collection.scheme.slug, "concept_slug": member.slug},
             ),
-        )
+        }
 
     type_curie = ORDERED_COLLECTION_TYPE_CURIE if collection.ordered else COLLECTION_TYPE_CURIE
     member_curie = MEMBER_LIST_CURIE if collection.ordered else MEMBER_CURIE
 
     rows = [row(TYPE_CURIE, value=type_curie), row(LABEL_CURIES[ConceptLabel.Kind.PREFERRED], value=collection.name)]
-    rows.extend(member_row(member_curie, member) for member in collection.members())
+    entries = [member_entry(member) for member in collection.members()]
+    if entries:
+        rows.append(row(member_curie, entries=entries))
 
     scheme = collection.scheme
     rows.append(

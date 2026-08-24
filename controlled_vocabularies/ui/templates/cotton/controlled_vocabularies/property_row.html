@@ -1,4 +1,4 @@
-<c-vars term value short_form uri href />
+<c-vars term value short_form uri href entries />
 {% comment %}
   015-read-single-record T002: one term/value pair, rendered as a <dt>/<dd> — a caller
   wraps a run of these in a <dl>. Namespaced at cotton/controlled_vocabularies/ (plan.md
@@ -15,10 +15,24 @@
   decision #6): the short form is the in-site link's own text, never local_url, and the
   canonical identifier is carried as ordinary text beside it — a title attribute would be
   invisible to a keyboard user and unreliable for a screen reader (FR-007).
+
+  entries (015-read-single-record T028) carries a list of {short_form, uri, href} dicts
+  instead — a collection's membership is one row for every member it holds, not one row
+  each, so the single <dd> below lists them rather than a caller repeating this whole
+  component once per member.
 {% endcomment %}
 <dt class="text-base-content/60 text-xs uppercase font-semibold">{{ term }}</dt>
 <dd class="mb-3">
-  {% if short_form %}
+  {% if entries %}
+    <ul>
+      {% for entry in entries %}
+        <li>
+          <c-link href="{{ entry.href }}" text="{{ entry.short_form }}" />
+          <c-text size="xs" muted tight>{{ entry.uri }}</c-text>
+        </li>
+      {% endfor %}
+    </ul>
+  {% elif short_form %}
     <c-link href="{{ href }}" text="{{ short_form }}" />
     <c-text size="xs" muted tight>{{ uri }}</c-text>
   {% else %}

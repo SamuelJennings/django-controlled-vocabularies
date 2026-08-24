@@ -2415,7 +2415,9 @@ class TestCollectionDetailNameTypeAndMembers:
         ]
 
     @pytest.mark.django_db
-    def test_an_unordered_collection_shows_its_name_type_and_members(self, client):
+    def test_an_unordered_collection_shows_its_name_type_and_one_row_carrying_every_member(self, client):
+        # 015-read-single-record T028: one row carrying every member, not one row
+        # each — a four-member collection no longer repeats "skos:member" four times.
         collection, members = collection_with_members(labels=("Granite", "Basalt", "Gabbro"), ordered=False)
 
         response = client.get(
@@ -2424,16 +2426,19 @@ class TestCollectionDetailNameTypeAndMembers:
                 kwargs={"slug": collection.scheme.slug, "collection_slug": collection.slug},
             )
         )
+        soup = BeautifulSoup(response.content, "html.parser")
         pairs = self._dt_dd_pairs(response)
 
         assert (LABEL_CURIES[ConceptLabel.Kind.PREFERRED], collection.name) in pairs
         assert (TYPE_CURIE, COLLECTION_TYPE_CURIE) in pairs
-        member_terms = [term for term, _value in pairs if term == MEMBER_CURIE]
-        assert len(member_terms) == 3
+        member_dts = [dt for dt in soup.find_all("dt") if dt.get_text(strip=True) == MEMBER_CURIE]
+        assert len(member_dts) == 1
         assert not any(term == MEMBER_LIST_CURIE for term, _value in pairs)
+        member_short_forms = {a.get_text(strip=True) for a in member_dts[0].find_next_sibling("dd").find_all("a")}
+        assert member_short_forms == {f"{collection.scheme.slug}:{member.slug}" for member in members}
 
     @pytest.mark.django_db
-    def test_an_ordered_collections_type_differs_and_its_members_are_in_position_order(self, client):
+    def test_an_ordered_collections_type_differs_and_its_one_member_row_is_in_position_order(self, client):
         # A deliberately non-alphabetical sequence, so the order assertion below
         # cannot pass by accident (tasks.md T012's own verify criterion).
         collection, members = collection_with_members(labels=("Granite", "Basalt", "Gabbro"), ordered=True)
@@ -2448,14 +2453,11 @@ class TestCollectionDetailNameTypeAndMembers:
         pairs = [
             (dt.get_text(strip=True), dt.find_next_sibling("dd").get_text(strip=True)) for dt in soup.find_all("dt")
         ]
-        # A member row's <dd> carries both the short-form link and the canonical
-        # identifier as separate text nodes (property_row.html), so the anchor's own
-        # text — not the whole <dd>'s — is what isolates the short form.
-        member_short_forms = [
-            dt.find_next_sibling("dd").find("a").get_text(strip=True)
-            for dt in soup.find_all("dt")
-            if dt.get_text(strip=True) == MEMBER_LIST_CURIE
-        ]
+        member_dts = [dt for dt in soup.find_all("dt") if dt.get_text(strip=True) == MEMBER_LIST_CURIE]
+        assert len(member_dts) == 1
+        # T028: one row carrying every member — the anchors inside its one <dd>, not
+        # one <dt>/<dd> pair per member, isolate each member's own short form.
+        member_short_forms = [a.get_text(strip=True) for a in member_dts[0].find_next_sibling("dd").find_all("a")]
 
         assert (TYPE_CURIE, ORDERED_COLLECTION_TYPE_CURIE) in pairs
         assert not any(term == MEMBER_CURIE for term, _value in pairs)
