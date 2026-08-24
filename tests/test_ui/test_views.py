@@ -2467,12 +2467,19 @@ class TestConceptDetailVocabularyRowAndNoAncestorChain:
         assert follow.context["vocabulary"] == concept.scheme
 
     @pytest.mark.django_db
-    def test_a_three_level_chain_names_only_the_middle_concepts_immediate_neighbours(self, client):
-        grandparent = ConceptFactory(label="Rock")
-        parent = ConceptFactory(scheme=grandparent.scheme, label="Igneous Rock")
-        child = ConceptFactory(scheme=grandparent.scheme, label="Granite")
+    def test_a_five_level_chain_names_only_the_middle_concepts_immediate_neighbours(self, client):
+        # Five levels, not three: the concept under test needs a neighbour *beyond*
+        # each of its own neighbours, or a page that walked the hierarchy two steps
+        # would find nothing further to show and the test would pass anyway.
+        great_grandparent = ConceptFactory(label="Material")
+        grandparent = ConceptFactory(scheme=great_grandparent.scheme, label="Rock")
+        parent = ConceptFactory(scheme=great_grandparent.scheme, label="Igneous Rock")
+        child = ConceptFactory(scheme=great_grandparent.scheme, label="Granite")
+        grandchild = ConceptFactory(scheme=great_grandparent.scheme, label="Pink Granite")
+        grandparent.add_broader(great_grandparent)
         parent.add_broader(grandparent)
         child.add_broader(parent)
+        grandchild.add_broader(child)
 
         response = client.get(
             reverse(
@@ -2487,10 +2494,9 @@ class TestConceptDetailVocabularyRowAndNoAncestorChain:
             if dt.get_text(strip=True) in (BROADER_CURIE, NARROWER_CURIE)
         ]
 
-        # Exactly one immediate neighbour in each direction — not grandparent's own
-        # broader concept (it has none here, but nothing walks further to look) and
-        # not child's own narrower concept (it has none here either): the middle
-        # concept's own broader()/narrower() calls are each one hop, full stop.
+        # Exactly one immediate neighbour in each direction: the great-grandparent
+        # above and the grandchild below both exist and are both absent, so a page
+        # that climbed or descended a second step would fail here.
         assert relation_pairs == [
             (BROADER_CURIE, f"{grandparent.scheme.slug}:{grandparent.slug}"),
             (NARROWER_CURIE, f"{child.scheme.slug}:{child.slug}"),
