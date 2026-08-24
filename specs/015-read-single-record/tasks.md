@@ -542,18 +542,30 @@ collection holding no members still contributes no row at all.
 ### T029 — A short form discloses its identifier on hover, not underneath it
 
 The canonical identifier was printed as text beside the short form. The specification asks for it on
-hover. It is now a tooltip and a `title` attribute on the link itself — the tooltip for a pointer,
-the attribute so keyboard focus and a screen reader reach the same value, which is what FR-007
-requires beyond the pointer.
+hover. A `.tooltip` span now *wraps* each link, carrying the identifier as its `data-tip`, and the
+link names a visually-hidden `.sr-only` span holding the same value through `aria-describedby`.
+
+Two corrections to the first attempt, both load-bearing. The class belongs on a wrapper rather than
+on the anchor: daisyUI's reveal rule is `:has(:focus-visible)`, which matches a focused *descendant*,
+so an anchor carrying the class never matched its own focus and the keyboard reveal silently never
+fired. And the accessible description is `aria-describedby`, not `title`: where both are present the
+former wins, and whether a screen reader announces `title` at all is a per-user setting. `aria-label`
+is not used — it would replace the link's accessible name, the short form, rather than add to it.
+
+The caller generates one `identifier_id` per record-valued row, so the hidden spans stay distinct on
+a page showing several.
 
 **Proves**: FR-006, FR-007.
-**Verify**: the identifier is absent from the row's visible text and present in both attributes.
+**Verify**: the identifier is absent from the row's visible text, present in the wrapper's `data-tip`
+and in the hidden span the link describes itself by, and absent from any `title` attribute; two
+related records on one page have distinct hidden-span ids.
 
 ### T030 — Reconcile the tests these changes invalidate
 
 Three tests pin the behaviour T029 reverses, and two pin T028's one-row-per-member shape. Each is
 evidence about intent, so each is amended in place to assert the new guarantee rather than deleted.
-A new case proves a publisher-supplied identifier is escaped in the two attributes T029 added.
+A new case proves a publisher-supplied identifier is escaped both in the wrapper's `data-tip` and in
+the hidden span's text.
 
 **Proves**: Article IV.
 **Verify**: no test is removed, and the suite is green.
