@@ -329,8 +329,15 @@ holds; finding a concept without already knowing which vocabulary holds it is no
 page does. The term travels in the page's address (`?q=`), so a narrowed list can be linked to or
 bookmarked and returned to. A second word **widens** the results rather than narrowing them:
 matching is OR across every word and both fields, not AND, which is the opposite of what a search
-box usually implies. There is no other way to filter or sort the list. A search matching nothing
-says so, repeats what was searched for, and offers a link back to the unsearched list.
+box usually implies. A search matching nothing says so and repeats what was searched for.
+
+A sort control offers the list by name, A-Z or Z-A. That choice travels in the address as `?o=`,
+next to any search term, so a searched and sorted list is still one link you can share. Only the
+orderings the view declares are honoured. Anything else in `?o=` is ignored rather than passed to
+the database, and the page comes back in its default order.
+
+There is no way to filter the list. Filtering needs an axis, and a vocabulary has none that would
+suit every site.
 
 Case is ignored, with one limit that belongs to the database rather than to this package. SQLite
 folds case for ASCII letters only, so a vocabulary named *Ökologie* is found by *ÖKOLOGIE* and not
@@ -423,18 +430,20 @@ Each entry's name is a link to that vocabulary's own page, described below. The 
 from the route's name rather than composed from the identifier base address, so it stays an
 in-site address whatever that setting says.
 
-**One thing does not work yet.** The search box on this page cannot be submitted: the control comes
-from django-mvp, and in the released version its input is tied to a form that only its filter
-control creates ([django-mvp#282](https://github.com/django-mvp/django-mvp/issues/282), tracked here as
-[#147](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/147)). Searching
-by address works exactly as documented — `?q=soil` narrows the list, and the narrowed address can be
-shared and bookmarked — but typing in the box and pressing the button does nothing until that fix
-ships. The same fault is why this list, when a search matches nothing, names the term but offers no
-link back to the unsearched list.
+**One thing is still missing.** When a search on this page matches nothing, it names the term but
+offers no link back to the unsearched list. Clearing the box and pressing the button does the same
+job, so the page is not a dead end, but the link belongs there. It has to go in the page's actions
+area, and django-mvp offers no way to add anything there without replacing the whole page template
+([django-mvp#291](https://github.com/django-mvp/django-mvp/issues/291)).
 
-We are waiting on the fix rather than shipping a copy of django-mvp's page with the gap patched: an
-override in a package like this one outlives the release that makes it unnecessary, and nothing ever
-reports that it has (`docs/adr/0015-upstream-defects-are-waited-on-not-worked-around.md`).
+Until django-mvp 0.19.2 the search box on this page could not be submitted at all: its input was
+tied to a form only the filter control created
+([django-mvp#282](https://github.com/django-mvp/django-mvp/issues/282), tracked here as
+[#147](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/147)). This package
+waited for the upstream fix rather than shipping a patched copy of django-mvp's page, and the
+version floor moved once the fix was released. An override in a package like this one outlives the
+release that makes it unnecessary, and nothing ever reports that it has
+(`docs/adr/0015-upstream-defects-are-waited-on-not-worked-around.md`).
 
 The page is served by `VocabularyListView`, in `controlled_vocabularies.ui.views`. A project that
 wants a different presentation subclasses it and routes its own path at the same view — the
@@ -497,17 +506,18 @@ letters only, so a concept labelled *Ökologie* is found by *ÖKOLOGIE* and not 
 PostgreSQL folds the whole of Unicode and matches either way
 (`docs/adr/0014-database-collation-differences-are-disclosed-not-repaired.md`).
 
-**The search box on this page carries the same limitation as the one on the list of
-vocabularies, above.** Its input is tied to a form only django-mvp's filter control creates
-([django-mvp#282](https://github.com/django-mvp/django-mvp/issues/282), tracked here as
-[#147](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/147)), so typing
-in the box and pressing the button does nothing until that fix ships. Searching by address works
-exactly as documented: the demo project's own DCMI Type Vocabulary carries a concept named
-*Dataset* with a hidden label of `Datset`, a plausible misspelling — `?q=Datset` narrows the page
-to *Dataset* without the misspelling itself ever appearing in the response, and the narrowed
-address can be shared and bookmarked the same as any other. Unlike the list of vocabularies, a
-search here that matches nothing *does* offer a link back to the unsearched vocabulary: this page
-has a template of its own to put that link in, where the list of vocabularies has none.
+Searching by address works the same as searching in the box: the demo project's own DCMI Type
+Vocabulary carries a concept named *Dataset* with a hidden label of `Datset`, a plausible
+misspelling — `?q=Datset` narrows the page to *Dataset* without the misspelling itself ever
+appearing in the response, and the narrowed address can be shared and bookmarked the same as any
+other. Unlike the list of vocabularies, a search here that matches nothing offers a link back to
+the unsearched vocabulary: this page has a template of its own to put that link in, where the list
+of vocabularies has none.
+
+A sort control offers the concepts by label, A-Z or Z-A. The choice travels in the address as
+`?o=`, next to any search term, exactly as it does on the list of vocabularies. It sorts by the
+label a reader actually sees rather than the stored one, so a German reader gets the concepts in
+German alphabetical order and not in the vocabulary's own default language.
 
 Reverse the page by name, passing the vocabulary's slug:
 
