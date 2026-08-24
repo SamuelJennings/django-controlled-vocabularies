@@ -2254,3 +2254,34 @@ class TestCollectionDetailEmptyState:
         soup = BeautifulSoup(response.content, "html.parser")
 
         assert soup.find(string=re.compile("holds no members")) is None
+
+
+class TestCollectionDetailQueryCount:
+    """The collection page's query count does not grow with its member count
+    (015-read-single-record T014, SC-006, as T009 for the concept page).
+    """
+
+    @pytest.mark.django_db
+    def test_query_count_is_flat_as_members_grow(self, client, django_assert_num_queries):
+        scheme = ConceptSchemeFactory()
+        collection, members = collection_with_members(scheme=scheme, labels=("Granite", "Basalt"))
+        url = reverse(
+            "controlled_vocabularies_ui:collection-detail",
+            kwargs={"slug": scheme.slug, "collection_slug": collection.slug},
+        )
+
+        with CaptureQueriesContext(connection) as captured:
+            client.get(url)
+        baseline = len(captured.captured_queries)
+
+        # A real ceiling reflecting the optimised shape (vocabulary lookup +
+        # select_related("scheme") object fetch + one memberships query), not only
+        # a growth comparison that would pass identically whether or not
+        # select_related("scheme") or D-015-02's member.scheme reuse is applied.
+        assert baseline <= 3
+
+        for i in range(5):
+            collection.add(ConceptFactory(scheme=scheme, label=f"Member {i}"))
+
+        with django_assert_num_queries(baseline):
+            client.get(url)

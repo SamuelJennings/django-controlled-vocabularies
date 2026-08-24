@@ -376,7 +376,11 @@ class CollectionDetailView(MVPDetailView):
             raise Http404(_("No vocabulary matches this address.")) from exc
 
     def get_queryset(self):
-        return Collection.objects.filter(scheme=self.vocabulary)
+        # select_related("scheme") joins the vocabulary row's own scheme lookup
+        # into the object fetch (015-read-single-record T014, SC-006) — the same
+        # collection.scheme collection_property_rows() reads for the vocabulary
+        # row and for every member row's short-form prefix (D-015-02).
+        return Collection.objects.filter(scheme=self.vocabulary).select_related("scheme")
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
