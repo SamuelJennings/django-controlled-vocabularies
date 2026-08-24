@@ -2101,7 +2101,7 @@ class TestConceptDetailQueryCount:
 class TestConceptDetailCollectionMembership:
     """The collections that gather a concept are named below the definition list and
     outside it, under a plain-language heading, and each leads to that collection's own
-    page (015-read-single-record T021, FR-014, US-5 scenario 1).
+    page (015-read-single-record T021, T022, FR-014, US-5 scenarios 1-2).
     """
 
     @pytest.mark.django_db
@@ -2139,6 +2139,22 @@ class TestConceptDetailCollectionMembership:
             follow = client.get(anchor["href"])
             assert follow.status_code == 200
             assert follow.context["object"] == collection
+
+    @pytest.mark.django_db
+    def test_a_concept_no_collection_gathers_shows_no_such_section(self, client):
+        # 015-read-single-record T022, FR-014, US-5 scenario 2: absent, not present
+        # and empty — the same treatment T003/FR-018 already give an unfilled property.
+        concept = ConceptFactory(label="Granite")
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        assert soup.find(class_="concept-collections") is None
 
 
 class TestCollectionDetail:
