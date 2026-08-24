@@ -24,3 +24,33 @@ controlled_vocabularies/ui/urls.py` — no issues. `poetry run python manage.py 
 
 Next: T001 (the CURIE tables in `exchange/mapping.py`).
 Watch: nothing outstanding.
+
+## 2026-08-24T16:51:04Z · Implementer US0 · T001
+
+Did: moved `skos_curie` from `SkosGraph` in `exchange/skos.py` to a module-level function
+in `exchange/mapping.py`, and updated its two callers in `skos.py` (both `self.skos_graph.
+skos_curie(predicate)` sites, in `import_labels` and `import_notes`) to call it directly.
+Gave it a namespace guard: it now raises `ValueError` for a predicate outside the SKOS
+namespace instead of returning a mangled string. Added `LABEL_CURIES` and `NOTE_CURIES` to
+`mapping.py`, each derived by inverting `LABEL_PREDICATES`/`NOTE_PREDICATES` and applying
+`skos_curie` — never hand-written. Added the terms no forward table holds as written-out
+module constants: `BROADER_CURIE`, `NARROWER_CURIE`, `RELATED_CURIE`, `IN_SCHEME_CURIE`,
+`MEMBER_CURIE`, `MEMBER_LIST_CURIE`, `TYPE_CURIE`, `CONCEPT_TYPE_CURIE`,
+`COLLECTION_TYPE_CURIE`, `ORDERED_COLLECTION_TYPE_CURIE`.
+
+Verified: wrote `tests/test_exchange/test_mapping.py` (new) first. Confirmed RED by
+`git stash`-ing the production changes and re-running the file — it failed with
+`ImportError: cannot import name 'LABEL_CURIES'`, the right reason, before restoring the
+stash. After implementation: `poetry run pytest tests/test_exchange/test_mapping.py -q` —
+6 passed. Two assertions per derived table, neither borrowing the implementation: one
+compares `LABEL_CURIES`/`NOTE_CURIES` against a hand-written expectation restating
+decisions.md D48's own predicate/CURIE pairs (not recomputed via `skos_curie`), the other
+compares `set(LABEL_PREDICATES.values())`/`set(NOTE_PREDICATES.values())` against the
+derived table's keys — the no-second-edit property. `poetry run pytest
+tests/test_exchange/ -q` — 628 passed, confirming the exchange suite is unchanged apart
+from the two updated call sites. `poetry run ruff check`, `poetry run ruff format --check`
+and `poetry run mypy` on the three changed/added files — clean. `poetry run python
+manage.py makemigrations --check --dry-run` — no changes detected.
+
+Next: T002 (the `property_row` cotton component).
+Watch: nothing outstanding.
