@@ -1,7 +1,10 @@
-"""Views for the opt-in vocabulary-browsing front end (013-find-a-vocabulary).
+"""Views for the opt-in vocabulary-browsing front end (013-find-a-vocabulary,
+014-look-inside-a-vocabulary).
 
-One view: ``VocabularyListView``. Search narrows that same view rather than adding
-another, so both user stories land here.
+Two views: ``VocabularyListView`` over the vocabularies a site holds, and
+``VocabularyDetailView`` over the concepts inside one of them. Both are list views, and
+in each of them search narrows that same view rather than adding another, so every user
+story from both features lands in one of the two.
 """
 
 from django.db.models import Count, F, OuterRef, Subquery
