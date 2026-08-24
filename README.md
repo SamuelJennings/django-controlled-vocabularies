@@ -472,6 +472,16 @@ something a reader can follow to anywhere else. A vocabulary holding no concepts
 wording distinct from the page's other empty state, and the rest of the page — its description and
 provenance — still renders.
 
+Above the list of concepts, the page also names the vocabulary's **collections** — curator-made
+groupings of its concepts (`skos:Collection` / `skos:OrderedCollection`) that the broader/narrower
+relations do not express. Each is named, and one whose members carry a deliberate order is shown
+distinguishably from one that does not. **A collection cannot be opened from here**: neither its
+own page nor its members' names are reached by following anything on this page — that address
+belongs to #142, the same feature that gives a concept its own page, so a collection is named and
+nothing more until it lands. A vocabulary holding no collections shows no such section at all —
+most vocabularies have none, and a section that is only ever present-but-empty would be noise on
+every page but one.
+
 A search box narrows the list of concepts by every name a term goes by: a concept's preferred
 label in any language it carries, its alternative labels, and its hidden labels — never its
 definition or any other note. A hidden label is matched and never shown: searching for one finds
@@ -543,7 +553,10 @@ serves the site at `http://127.0.0.1:8000/`, which redirects straight to the pop
 searchable vocabulary list at `http://127.0.0.1:8000/browse/`. The seeded content shows both
 kinds of entry the list distinguishes: the DCMI Type Vocabulary, a real vocabulary published by
 the Dublin Core Metadata Initiative, imported from a SKOS file; and Data Collection Methods, a
-short vocabulary authored here, with no publisher of its own.
+short vocabulary authored here, with no publisher of its own. Data Collection Methods' own page
+also carries one of each kind of collection — "Primary data collection methods" (unordered) and
+"Typical project workflow" (ordered) — both loaded through the same SKOS file, so the collections
+section described above is never empty on a fresh checkout.
 
 `seed_demo` is destructive and idempotent: it clears every vocabulary before loading, so running
 it again returns the demo to the same seeded state whatever was added or removed before —
