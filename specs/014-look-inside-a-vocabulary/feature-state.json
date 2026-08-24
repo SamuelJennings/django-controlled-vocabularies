@@ -3,7 +3,7 @@
   "feature": "014-look-inside-a-vocabulary",
   "branch": "014-look-inside-a-vocabulary",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "CONVERGE",
+  "state": "MERGED",
   "state_history": [
     {
       "state": "INTAKE",
@@ -59,6 +59,11 @@
       "state": "CONVERGE",
       "at": "2026-08-24T07:42:25Z",
       "note": "all four stories accepted and merged to the feature branch; no migrations introduced, one cleanup fix to a stale module docstring, decision verdicts recorded and one graduated to a decision record"
+    },
+    {
+      "state": "MERGED",
+      "at": "2026-08-24T09:48:20Z",
+      "note": "PR #154 merged; approved by SamuelJennings"
     }
   ],
   "gates": {
@@ -81,8 +86,8 @@
       "at": null
     },
     "merge": {
-      "approved_by": null,
-      "at": null
+      "approved_by": "SamuelJennings",
+      "at": "2026-08-24T09:45:48Z"
     }
   },
   "stories": [
@@ -400,6 +405,6 @@
   },
   "pr": {
     "number": 154,
-    "draft": true
+    "draft": false
   }
 }
