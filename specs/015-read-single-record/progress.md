@@ -466,3 +466,39 @@ makemigrations --check --dry-run` — no changes detected.
 
 Next: T015 (the README documents the collection page) — the last task of Story US-2.
 Watch: nothing outstanding.
+
+## 2026-08-24T20:26:00Z · Implementer US2 · T015
+
+Did: added a `### A collection's own page` section to `README.md`, between `### A
+concept's own page` and `### Try it: the demo project`, in the same shape those sections
+already use: what the page shows (name, type, members, keyed by their SKOS/membership
+properties, the empty-collection wording), the shared-slug disjointness with a concept's
+address, the identifier and read-only treatment, the two indistinguishable 404 cases, a
+`reverse()` example passing both `slug` and `collection_slug`, and the serving view's
+name. Scoped strictly to what T011-T014 actually deliver — no mention of US-3's
+broader/narrower/related rows or US-4's vocabulary-page links, which are not yet built.
+No test file: like T010, this documents only.
+
+Verified: reversed the documented name directly — `poetry run python manage.py shell -c
+"from django.urls import reverse; print(reverse('controlled_vocabularies_ui:
+collection-detail', kwargs={'slug': 'demo-vocab', 'collection_slug':
+'demo-collection'}))"` — `/browse/demo-vocab/collection/demo-collection/`, confirming
+the route name and both kwargs exist exactly as documented. `poetry run pytest
+tests/test_ui/test_views.py -q -k "TestCollectionDetail or TestCollectionPropertyRows"`
+— 13 passed, confirming the documented behaviour matches every US-2 test written across
+T011-T014. `poetry run python manage.py makemigrations --check --dry-run` — no changes
+detected. `ruff`/`mypy` do not apply to a markdown-only change.
+
+Story US-2 (T011-T015) is complete. All tasks committed individually; the tree is clean.
+
+### Full suite and pre-commit, run once at the story's end
+
+`poetry run pytest -q` — 1604 passed, 1 skipped (the pre-existing django-mvp#291 skip,
+untouched) — no regressions across the whole tree, not only `tests/test_ui/`.
+
+`poetry run pre-commit run --all-files` — all hooks passed (trim trailing whitespace,
+fix end of files, check yaml, poetry-check, ruff lint, ruff format, mypy, deptry).
+
+Next: none — Story US-2 (T011-T015) is complete. US-3 (T016-T018) is next in plan.md's
+story sequence, dispatched separately.
+Watch: nothing outstanding.
