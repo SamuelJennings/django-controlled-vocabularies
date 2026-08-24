@@ -29,6 +29,11 @@
       "state": "IMPLEMENT",
       "at": "2026-08-24T16:36:31Z",
       "note": "design-review corrections applied and verified; foundational phase dispatching"
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-24T21:05:00Z",
+      "note": "US-4 accepted and converged; two pre-existing \"no link\" assertions superseded per D-015-04/05, the row assertion tightened to exactly one anchor and probed"
     }
   ],
   "gates": {
@@ -374,19 +379,36 @@
       "id": "US4",
       "priority": "P2",
       "issue": 160,
-      "worktree": null,
-      "status": "todo",
+      "worktree": "../dcv-015-us4",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T019",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailConceptList tests/test_ui/test_views.py::TestVocabularyDetailConceptListLinksToConceptPages tests/test_ui/test_templates.py::TestConceptRowPartialLinksToItsOwnPage -q --no-cov",
+              "poetry run pytest -q --no-cov",
+              "poetry run pre-commit run --all-files",
+              "poetry run mypy controlled_vocabularies/ui/views.py",
+              "poetry run python manage.py makemigrations --check --dry-run"
+            ]
+          }
         },
         {
           "id": "T020",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "commands": [
+              "poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailCollections tests/test_ui/test_templates.py::TestConceptSchemeDetailCollectionsLinkToTheirOwnPages -q --no-cov",
+              "poetry run pytest -q --no-cov",
+              "poetry run pre-commit run --all-files",
+              "poetry run python manage.py makemigrations --check --dry-run"
+            ]
+          }
         }
       ]
     },
