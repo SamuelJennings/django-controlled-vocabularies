@@ -212,10 +212,11 @@ class TestPropertyRowRendersARecordValue:
         assert anchor is not None
         assert anchor.get_text(strip=True) == "geology:granite"
 
-    def test_the_canonical_identifier_is_reader_reachable_text_not_a_title_attribute(self):
-        # FR-007: a title attribute is invisible to a keyboard user and unreliable for a
-        # screen reader, so the identifier must appear as ordinary text, not tucked away
-        # in an attribute a pointer is needed to reveal.
+    def test_the_canonical_identifier_is_disclosed_on_hover_not_printed_as_text(self):
+        # 015-read-single-record T029, FR-007's later clarification: the full
+        # identifier is disclosed behind the short form (a tooltip, and a title
+        # attribute so a keyboard user and a screen reader reach it too), not printed
+        # as ordinary text beside it.
         html = render_to_string(
             PROPERTY_ROW_TEMPLATE,
             {
@@ -228,9 +229,9 @@ class TestPropertyRowRendersARecordValue:
         soup = BeautifulSoup(html, "html.parser")
         dd = soup.find("dd")
 
-        assert "http://publisher.example.org/concept/granite" in dd.get_text()
-        for element in dd.find_all(True):
-            assert element.get("title") is None
+        assert "http://publisher.example.org/concept/granite" not in dd.get_text()
+        anchor = dd.find("a")
+        assert anchor.get("title") == "http://publisher.example.org/concept/granite"
 
 
 class TestPropertyRowRecordValueDisclosesIdentifierOnHover:

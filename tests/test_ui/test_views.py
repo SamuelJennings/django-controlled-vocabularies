@@ -2617,11 +2617,12 @@ class TestCollectionDetailQueryCount:
 
 
 class TestConceptDetailRelatedRecordIdentifiers:
-    """A record-valued row's canonical identifier is reader-reachable text beside its
-    link, not only a ``title`` attribute a pointer alone would reveal, and an imported
-    record's identifier is its publisher's while the link still leads to this site's
-    page for it (015-read-single-record T016, FR-006, FR-007, SC-003, US-3 scenarios
-    3, 4).
+    """A record-valued row's canonical identifier is disclosed on hover behind its
+    short form — carried as a tooltip and as a ``title`` attribute, never printed as
+    ordinary text — so a pointer, a keyboard and a screen reader each reach it, and an
+    imported record's identifier is its publisher's while the link still leads to this
+    site's page for it (015-read-single-record T016, T029, FR-006, FR-007, SC-003,
+    US-3 scenarios 3, 4).
     """
 
     @staticmethod
@@ -2630,7 +2631,7 @@ class TestConceptDetailRelatedRecordIdentifiers:
         return dt.find_next_sibling("dd")
 
     @pytest.mark.django_db
-    def test_a_related_records_identifier_is_text_beside_its_link_not_a_title_attribute(self, client):
+    def test_a_related_records_identifier_is_a_tooltip_and_a_title_not_printed_text(self, client):
         concept = ConceptFactory(label="Granite")
         parent = ConceptFactory(scheme=concept.scheme, label="Igneous Rock")
         concept.add_broader(parent)
@@ -2645,8 +2646,9 @@ class TestConceptDetailRelatedRecordIdentifiers:
         broader_dd = self._dd_for(soup, BROADER_CURIE)
         link = broader_dd.find("a")
 
-        assert link.get("title") is None
-        assert parent.uri in broader_dd.get_text()
+        assert link.get("title") == parent.uri
+        assert link.get("data-tip") == parent.uri
+        assert parent.uri not in broader_dd.get_text()
         assert link["href"] == reverse(
             "controlled_vocabularies_ui:concept-detail",
             kwargs={"slug": parent.scheme.slug, "concept_slug": parent.slug},
@@ -2669,7 +2671,9 @@ class TestConceptDetailRelatedRecordIdentifiers:
         link = broader_dd.find("a")
 
         assert parent.static_uri.startswith("http://publisher.example.org/")
-        assert parent.static_uri in broader_dd.get_text()
+        assert link.get("title") == parent.static_uri
+        assert link.get("data-tip") == parent.static_uri
+        assert parent.static_uri not in broader_dd.get_text()
         assert link["href"] == reverse(
             "controlled_vocabularies_ui:concept-detail",
             kwargs={"slug": parent.scheme.slug, "concept_slug": parent.slug},
@@ -2974,6 +2978,30 @@ class TestConceptAndCollectionValuesReachTheReaderEscaped:
 
         assert soup.find("script", string=self._INJECTED_SCRIPT) is None
         assert "<script>alert(1)</script>" in soup.find("dl").get_text()
+
+    @pytest.mark.django_db
+    def test_a_related_records_publisher_supplied_identifier_is_escaped_in_its_tooltip_and_title(self, client):
+        # 015-read-single-record T029: the identifier now reaches two attributes it
+        # did not before, title and data-tip — a quote inside it would break out of
+        # either the same way it would have broken out of href.
+        concept = ConceptFactory(label="Granite")
+        parent = ConceptFactory(scheme=concept.scheme, label="Igneous Rock", external=True)
+        parent.static_uri = 'http://publisher.example.org/x"><script>alert(1)</script>'
+        parent.save()
+        concept.add_broader(parent)
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        assert soup.find("script", string=self._INJECTED_SCRIPT) is None
+        link = soup.find("a", attrs={"data-tip": parent.static_uri})
+        assert link is not None
+        assert link.get("title") == parent.static_uri
 
     @pytest.mark.django_db
     def test_a_collections_name_containing_markup_is_escaped_on_the_collection_page(self, client):
