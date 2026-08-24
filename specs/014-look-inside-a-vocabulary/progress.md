@@ -484,3 +484,38 @@ passed, 3 skipped; 30 new tests added across T013-T017, T018 added none).
 `forge verify --repo /home/sam/projects/samueljennings/dcv-014-us3`: conformance passed,
 poetry:lint passed, poetry:typecheck passed, poetry:test passed, poetry:build passed, docs
 skipped (needs `--base`).
+
+## 2026-08-24 · Implementer US-4 · T019
+
+Did: `VocabularyDetailView.get_context_data` now puts `collections` in context —
+`self.vocabulary.collections.order_by(Lower("name"))`, so the page's own list is deterministic
+the same way the vocabulary and concept lists already are. `conceptscheme_detail.html` renders
+them with an ordinary `{% for %}` loop inside a `vocabulary-collections` div, above
+`{{ block.super }}`'s concept list — never django-mvp's list component, per plan.md item 5. An
+ordered collection carries a `<c-badge>{% trans "Ordered" %}</c-badge>`; an unordered one carries
+none. A vocabulary with no collections renders no `vocabulary-collections` div at all — the
+`{% if collections %}` guards the whole block, not just its contents (decisions.md D7). No
+anchor is rendered anywhere in the block; nothing links to a collection (issue #142 owns that
+address).
+
+Five new tests in `tests/test_ui/test_views.py::TestVocabularyDetailCollections`: each
+collection is named; an ordered one carries a badge an unordered one does not; a vocabulary
+holding none shows no section (asserted as the section's absence, not an empty one); the section
+holds no concept-card markup and the concept queryset is unaffected by collection membership; no
+anchor's `href` names a collection's `local_url` or contains a `/collection/` segment.
+
+RED observed first: wrote the five tests against the unmodified view/template, ran them —
+`test_each_collection_is_named` failed on `assert 'Collection 0' in content`, the right reason
+(nothing renders collections yet). Implemented the context key and the template block, reran:
+4 of 5 passed; `test_an_ordered_collection_is_distinguishable_from_an_unordered_one` failed with
+`AttributeError: 'NoneType' object has no attribute 'find_parent'` — a test bug, not a production
+one: `soup.find(string=...)` matches exact text-node equality, and the rendered `<li>` carries
+surrounding template whitespace, so no node equals the bare name. Fixed by scanning `<li>` tags
+and matching on `.get_text()` containment instead; reran: 5 passed.
+
+Verified: `poetry run pytest tests/test_ui/test_views.py::TestVocabularyDetailCollections -v` —
+5 passed. `poetry run pytest tests/test_ui/test_templates.py tests/test_ui/test_views.py -q` —
+95 passed, 3 skipped (the pre-existing #147 skips, untouched), no regressions. `poetry run
+pre-commit run --files controlled_vocabularies/ui/templates/controlled_vocabularies/ui/
+conceptscheme_detail.html controlled_vocabularies/ui/views.py tests/test_ui/test_views.py` — all
+hooks passed, including the mechanical translation-tag check against the new template markup.
