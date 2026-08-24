@@ -1,10 +1,11 @@
 """Views for the opt-in vocabulary-browsing front end (013-find-a-vocabulary,
-014-look-inside-a-vocabulary).
+014-look-inside-a-vocabulary, 015-read-single-record).
 
-Two views: ``VocabularyListView`` over the vocabularies a site holds, and
-``VocabularyDetailView`` over the concepts inside one of them. Both are list views, and
-in each of them search narrows that same view rather than adding another, so every user
-story from both features lands in one of the two.
+``VocabularyListView`` over the vocabularies a site holds, ``VocabularyDetailView`` over
+the concepts inside one of them, and ``ConceptDetailView``/``CollectionDetailView`` over
+one record's own page. The first two are list views, with search narrowing each rather
+than adding another. The last two are detail views (plan.md Key design decision #1) that
+share one thing: resolving the record named by an address scoped to its vocabulary.
 """
 
 from django.db.models import Count, F, OuterRef, Subquery
@@ -12,9 +13,9 @@ from django.db.models.functions import Coalesce, Lower
 from django.http import Http404
 from django.utils.translation import get_language
 from django.utils.translation import gettext_lazy as _
-from mvp.views import MVPListView
+from mvp.views import MVPDetailView, MVPListView
 
-from controlled_vocabularies.models import Concept, ConceptLabel, ConceptScheme
+from controlled_vocabularies.models import Collection, Concept, ConceptLabel, ConceptScheme
 
 
 class VocabularyListView(MVPListView):
@@ -138,6 +139,51 @@ class VocabularyListView(MVPListView):
         # does not show (show_create_action is never set), and this empty state has
         # nothing else useful to add beyond the heading.
         return None
+
+
+class ConceptDetailView(MVPDetailView):
+    """A single concept's own page (015-read-single-record T000).
+
+    Only the record resolution :class:`CollectionDetailView` also needs lands here: the
+    vocabulary segment is resolved once, in ``setup()``, exactly as
+    ``VocabularyDetailView.setup()`` already does for a vocabulary itself, then the slug
+    lookup is retargeted to the *concept's* segment and scoped to that vocabulary — an
+    unscoped lookup would 200 at an address whose vocabulary segment names nothing and
+    raise ``MultipleObjectsReturned`` the moment two vocabularies share a concept slug
+    (plan.md Key design decision #1). No page-specific context or content: that is US-1's.
+    """
+
+    model = Concept
+    slug_url_kwarg = "concept_slug"
+
+    def setup(self, request, *args, **kwargs):
+        super().setup(request, *args, **kwargs)
+        try:
+            self.vocabulary = ConceptScheme.objects.get(slug=kwargs["slug"])
+        except ConceptScheme.DoesNotExist as exc:
+            raise Http404(_("No vocabulary matches this address.")) from exc
+
+    def get_queryset(self):
+        return Concept.objects.filter(scheme=self.vocabulary)
+
+
+class CollectionDetailView(MVPDetailView):
+    """A single collection's own page (015-read-single-record T000). Same treatment as
+    :class:`ConceptDetailView`, over :class:`Collection` instead.
+    """
+
+    model = Collection
+    slug_url_kwarg = "collection_slug"
+
+    def setup(self, request, *args, **kwargs):
+        super().setup(request, *args, **kwargs)
+        try:
+            self.vocabulary = ConceptScheme.objects.get(slug=kwargs["slug"])
+        except ConceptScheme.DoesNotExist as exc:
+            raise Http404(_("No vocabulary matches this address.")) from exc
+
+    def get_queryset(self):
+        return Collection.objects.filter(scheme=self.vocabulary)
 
 
 class VocabularyDetailView(MVPListView):
