@@ -18,11 +18,15 @@ from mvp.views import MVPDetailView, MVPListView
 
 from controlled_vocabularies.exchange.mapping import (
     BROADER_CURIE,
+    COLLECTION_TYPE_CURIE,
     CONCEPT_TYPE_CURIE,
     IN_SCHEME_CURIE,
     LABEL_CURIES,
+    MEMBER_CURIE,
+    MEMBER_LIST_CURIE,
     NARROWER_CURIE,
     NOTE_CURIES,
+    ORDERED_COLLECTION_TYPE_CURIE,
     RELATED_CURIE,
     TYPE_CURIE,
 )
@@ -251,6 +255,62 @@ def concept_property_rows(concept: Concept, language: str, default_language: str
     return rows
 
 
+def collection_property_rows(collection: Collection) -> list[dict]:
+    """The fixed-order rows a collection's own page renders (015-read-single-record
+    T011, T012, FR-008, FR-012, FR-013, FR-017).
+
+    Mirrors :func:`concept_property_rows`'s shape (plan.md Key design decision #4):
+    type, name, members, then the vocabulary holding it. Unlike a concept's, a
+    collection's ``name`` carries no per-language variants (a plain ``CharField``), so
+    there is no reading-language argument here. The type row and the membership
+    property both depend on :attr:`Collection.ordered` (decisions.md, "What
+    distinguishes an ordered collection..."): an ordered collection is
+    ``skos:OrderedCollection`` with members under ``skos:memberList``, an unordered one
+    is ``skos:Collection`` with members under ``skos:member``. A collection holding no
+    members contributes no membership row at all (FR-017) — the same "absent, not
+    empty" rule T003's ``concept_property_rows`` already follows (FR-018).
+    """
+
+    def row(term: str, *, value=None, short_form=None, uri=None, href=None) -> dict:
+        return {"term": term, "value": value, "short_form": short_form, "uri": uri, "href": href}
+
+    def member_row(term: str, member: Concept) -> dict:
+        # D-015-02: Collection.members() (models.py, out of this feature's scope)
+        # only select_relates "concept", not "concept__scheme", and every membership
+        # is intra-vocabulary by construction (CollectionMember._reject_cross_scheme).
+        # The collection's own already-loaded scheme is therefore assigned onto the
+        # member before its uri is read, populating Django's FK cache without a
+        # query — the same trick D-015-02 describes for collections()/members().
+        member.scheme = collection.scheme
+        return row(
+            term,
+            short_form=f"{collection.scheme.slug}:{member.slug}",
+            uri=member.uri,
+            href=reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": collection.scheme.slug, "concept_slug": member.slug},
+            ),
+        )
+
+    type_curie = ORDERED_COLLECTION_TYPE_CURIE if collection.ordered else COLLECTION_TYPE_CURIE
+    member_curie = MEMBER_LIST_CURIE if collection.ordered else MEMBER_CURIE
+
+    rows = [row(TYPE_CURIE, value=type_curie), row(LABEL_CURIES[ConceptLabel.Kind.PREFERRED], value=collection.name)]
+    rows.extend(member_row(member_curie, member) for member in collection.members())
+
+    scheme = collection.scheme
+    rows.append(
+        row(
+            IN_SCHEME_CURIE,
+            short_form=scheme.name,
+            uri=scheme.uri,
+            href=reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}),
+        )
+    )
+
+    return rows
+
+
 class ConceptDetailView(MVPDetailView):
     """A single concept's own page (015-read-single-record T000).
 
@@ -306,6 +366,7 @@ class CollectionDetailView(MVPDetailView):
 
     model = Collection
     slug_url_kwarg = "collection_slug"
+    template_name = "controlled_vocabularies/ui/collection_detail.html"
 
     def setup(self, request, *args, **kwargs):
         super().setup(request, *args, **kwargs)
@@ -316,6 +377,11 @@ class CollectionDetailView(MVPDetailView):
 
     def get_queryset(self):
         return Collection.objects.filter(scheme=self.vocabulary)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["rows"] = collection_property_rows(self.object)
+        return context
 
 
 class VocabularyDetailView(MVPListView):

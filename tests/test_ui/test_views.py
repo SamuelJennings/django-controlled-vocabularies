@@ -26,9 +26,11 @@ from controlled_vocabularies.models import ConceptLabel, ConceptNote, ConceptRel
 from controlled_vocabularies.ui.views import (
     VocabularyDetailView,
     VocabularyListView,
+    collection_property_rows,
     concept_property_rows,
 )
 from tests.factories import (
+    CollectionFactory,
     ConceptFactory,
     ConceptNoteFactory,
     ConceptRelationFactory,
@@ -2020,3 +2022,99 @@ class TestConceptDetailQueryCount:
 
         with django_assert_num_queries(baseline):
             client.get(url)
+
+
+class TestCollectionDetail:
+    """A collection's own address serves a read-only page, and an unknown one does
+    not (015-read-single-record T011, FR-002, FR-009, Edge case 2).
+    """
+
+    @pytest.mark.django_db
+    def test_a_known_collection_serves_its_page_anonymously(self, client):
+        collection = CollectionFactory()
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:collection-detail",
+                kwargs={"slug": collection.scheme.slug, "collection_slug": collection.slug},
+            )
+        )
+
+        assert response.status_code == 200
+
+    @pytest.mark.django_db
+    def test_a_collection_slug_naming_nothing_in_a_real_vocabulary_returns_404(self, client):
+        scheme = ConceptSchemeFactory()
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:collection-detail",
+                kwargs={"slug": scheme.slug, "collection_slug": "no-such-collection"},
+            )
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.django_db
+    def test_a_vocabulary_segment_naming_nothing_also_returns_404(self, client):
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:collection-detail",
+                kwargs={"slug": "no-such-vocabulary", "collection_slug": "whatever"},
+            )
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.django_db
+    def test_a_concept_and_a_collection_sharing_one_slug_are_both_reachable(self, client):
+        scheme = ConceptSchemeFactory()
+        concept = ConceptFactory(scheme=scheme, label="Granite")
+        collection = CollectionFactory(scheme=scheme, name=concept.label, slug_is_manual=True, slug=concept.slug)
+
+        concept_response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        collection_response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:collection-detail",
+                kwargs={"slug": scheme.slug, "collection_slug": collection.slug},
+            )
+        )
+
+        assert concept_response.status_code == 200
+        assert collection_response.status_code == 200
+        assert concept_response.context["object"] == concept
+        assert collection_response.context["object"] == collection
+
+    @pytest.mark.django_db
+    def test_the_page_shows_no_editing_control(self, client):
+        collection = CollectionFactory()
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:collection-detail",
+                kwargs={"slug": collection.scheme.slug, "collection_slug": collection.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        assert response.context["directory"] == {}
+        assert soup.find(string=re.compile("Edit")) is None
+        assert soup.find(string=re.compile("Delete")) is None
+
+    @pytest.mark.django_db
+    def test_the_context_carries_the_collections_property_rows(self, client):
+        collection = CollectionFactory(name="Rock Types")
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:collection-detail",
+                kwargs={"slug": collection.scheme.slug, "collection_slug": collection.slug},
+            )
+        )
+
+        assert response.context["rows"] == collection_property_rows(collection)
