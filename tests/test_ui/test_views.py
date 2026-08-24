@@ -1893,3 +1893,62 @@ class TestConceptDetailValuesInTheReadingLanguage:
         assert concept.label in values
         assert "granite stone" in values
         assert "An igneous rock." in values
+
+
+class TestConceptDetailTypeAndIdentifier:
+    """A row saying what kind of thing the record is, keyed by the literal RDF type
+    property, and the record's own identifier shown as a link — the treatment the
+    vocabulary page already gives a vocabulary's (015-read-single-record T007, FR-008,
+    FR-012).
+    """
+
+    @pytest.mark.django_db
+    def test_the_type_row_is_keyed_by_the_literal_rdf_type_not_a_skos_curie(self, client):
+        concept = ConceptFactory(label="Granite")
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        pairs = [
+            (dt.get_text(strip=True), dt.find_next_sibling("dd").get_text(strip=True)) for dt in soup.find_all("dt")
+        ]
+
+        assert TYPE_CURIE == "rdf:type"
+        assert (TYPE_CURIE, CONCEPT_TYPE_CURIE) in pairs
+
+    @pytest.mark.django_db
+    def test_the_identifier_appears_as_an_anchor_to_the_records_own_uri(self, client):
+        concept = ConceptFactory(label="Granite")
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        identifier_link = soup.find("a", href=concept.uri)
+
+        assert identifier_link is not None
+        assert concept.uri in identifier_link.get_text(strip=True)
+
+    @pytest.mark.django_db
+    def test_an_imported_concept_shows_its_publishers_identifier(self, client):
+        concept = ConceptFactory(label="Granite", external=True)
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        identifier_link = soup.find("a", href=concept.static_uri)
+
+        assert concept.static_uri.startswith("http://publisher.example.org/")
+        assert identifier_link is not None
+        assert concept.static_uri in identifier_link.get_text(strip=True)

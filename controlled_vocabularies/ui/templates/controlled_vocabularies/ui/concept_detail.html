@@ -21,4 +21,11 @@
       {% endif %}
     {% endfor %}
   </dl>
+  {% comment %}
+    015-read-single-record T007, FR-008: the record's own identifier as an outbound
+    link, the same treatment conceptscheme_detail.html already gives a vocabulary's.
+    Not a dl row — plan.md Key design decision #4's fixed row order names no
+    identifier row, only the SKOS statements the record makes about itself.
+  {% endcomment %}
+  <c-text size="xs" muted><a href="{{ object.uri }}" rel="noopener">{{ object.uri }}</a></c-text>
 {% endblock page.content %}
