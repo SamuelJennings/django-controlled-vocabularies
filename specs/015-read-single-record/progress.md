@@ -173,3 +173,39 @@ template is not a Python file). `poetry run python manage.py makemigrations --ch
 
 Next: T006 (the reading-language rule, applied to notes and alternative labels).
 Watch: nothing outstanding.
+
+## 2026-08-24T17:28:04Z · Implementer US1 · T006
+
+Did: gave `concept_property_rows()` an opt-in `default_language: str | None = None`
+parameter. Two local helpers, `localized_text`/`localized_list`, retry a property's
+getter in `default_language` when `language` produced nothing and a `default_language`
+was actually given — mirroring `Concept.display_label()`'s own
+`preferred_label(active) or label` pattern, extended here to alternative labels and
+every note kind, per-property rather than as one whole-concept decision (FR-005: "each
+value appears in that language, and where the concept has no value in it, in the
+vocabulary's own default language"). `default_language=None` (the default) keeps the
+prior no-fallback contract exactly, which is why `TestConceptPropertyRowsLanguageScoping`
+(T003, calling the function with only two positional args) needed no change and stayed
+green throughout — decisions.md D6's "the caller's decision, not this function's" is now
+literally which optional argument the caller passes. `ConceptDetailView.get_context_data`
+opts in by passing `self.object.scheme.effective_default_language`.
+
+Verified: extended `tests/test_ui/test_views.py` first
+(`TestConceptDetailValuesInTheReadingLanguage`, 2 tests) and watched them fail before the
+fallback existed. The first test (values present in both languages) passed immediately
+on first run — a concept carrying full German content needs no fallback to prove
+anything, so it is not a reproduction of the missing behaviour but a real coverage case
+for "each value appears in that language" across three property types at once, kept for
+that reason. The second (a concept holding only default-language content, read in
+German) failed for the right reason — `AssertionError: assert 'Granite' in [...]`, the
+expected fallback value simply absent from the rendered `<dl>` — before the fallback
+existed. `poetry run pytest tests/test_ui/test_views.py -q -k "TestConceptDetail or
+TestConceptPropertyRows"` — 18 passed, confirming the T003 language-scoping test and
+every T004/T005 test stayed green unmodified. `poetry run pytest
+tests/test_ui/test_views.py -q` — 123 passed, 1 skipped (the pre-existing
+django-mvp#291 skip, untouched) — no regressions. `poetry run ruff check`, `poetry run
+ruff format --check` and `poetry run mypy` on both changed files — clean. `poetry run
+python manage.py makemigrations --check --dry-run` — no changes detected.
+
+Next: T007 (the type row's literal key, and the identifier link).
+Watch: nothing outstanding.
