@@ -431,3 +431,38 @@ run python manage.py makemigrations --check --dry-run` — no changes detected.
 
 Next: T014 (the collection page's query count does not grow with what it shows).
 Watch: nothing outstanding.
+
+## 2026-08-24T20:20:00Z · Implementer US2 · T014
+
+Did: added `.select_related("scheme")` to `CollectionDetailView.get_queryset()`, joining
+the vocabulary row's own scheme lookup into the object fetch — the same `collection.scheme`
+`collection_property_rows()` already reads once for the `skos:inScheme` row and, since T011,
+reuses (via `member.scheme = collection.scheme`) for every member row's short-form prefix
+instead of querying each member's own (D-015-02). `Collection.members()` itself
+(`models.py`, out of this feature's scope) still only `select_related`s `"concept"`, not
+`"concept__scheme"` — the member-row reuse from T011 is what makes that not cost a query
+per member, and this task's own addition removes the one remaining per-request query (the
+collection's own scheme, previously fetched lazily on first access).
+
+Verified: extended `tests/test_ui/test_views.py` first
+(`TestCollectionDetailQueryCount`, 1 test) and it **passed on first run** — T011 had
+already built the member-row reuse this task's own docstring describes, so nothing new
+needed proving there; per craft-tdd, a claim of pre-existing coverage must be probed
+rather than just read. Probed by temporarily disabling the `member.scheme = collection.scheme`
+line (`sed`-style edit, reverted via `git checkout` immediately after) and re-running a
+one-off script hitting the view directly with `CaptureQueriesContext`: baseline query
+count rose from 3 to 6 for a 2-member collection — two extra queries, one per member's
+own `scheme` lookup — confirming the reuse is load-bearing and the test would catch its
+removal. `poetry run pytest tests/test_ui/test_views.py -q -k
+TestCollectionDetailQueryCount` — 1 passed, before and after the probe/revert cycle
+(confirmed clean via `git status` after the revert). The `assert baseline <= 3` ceiling
+was set from the same probe script's measured count after `select_related("scheme")`
+was added (vocabulary lookup + joined object fetch + one memberships query — a real
+ceiling a caller can regress past, not only a bound flat by construction). `poetry run
+pytest tests/test_ui/ -q` — 209 passed, 1 skipped (the pre-existing django-mvp#291 skip,
+untouched) — no regressions. `poetry run ruff check`, `poetry run ruff format --check`
+and `poetry run mypy` on both changed files — clean. `poetry run python manage.py
+makemigrations --check --dry-run` — no changes detected.
+
+Next: T015 (the README documents the collection page) — the last task of Story US-2.
+Watch: nothing outstanding.
