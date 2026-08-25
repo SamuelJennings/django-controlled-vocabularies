@@ -3,7 +3,7 @@
   "feature": "016-narrow-field-choices",
   "branch": "016-narrow-field-choices",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "GATE_MERGE",
+  "state": "MERGED",
   "state_history": [
     {
       "state": "INTAKE",
@@ -59,6 +59,11 @@
       "state": "GATE_MERGE",
       "at": "2026-08-25T14:17:51Z",
       "note": "All 11 checks green (GitGuardian, Walk the demo, call-build x3, call-tests x4, codecov x2). Awaiting Sam."
+    },
+    {
+      "state": "MERGED",
+      "at": "2026-08-25T14:36:20Z",
+      "note": "PR #172 merged; approved by SamuelJennings"
     }
   ],
   "gates": {
@@ -88,8 +93,8 @@
       ]
     },
     "merge": {
-      "approved_by": null,
-      "at": null
+      "approved_by": "SamuelJennings",
+      "at": "2026-08-25T14:34:57Z"
     }
   },
   "stories": [
@@ -535,5 +540,9 @@
       "used": 0,
       "max": 120
     }
+  },
+  "pr": {
+    "number": 172,
+    "draft": false
   }
 }
