@@ -303,28 +303,68 @@
       "id": "US3",
       "priority": "P1",
       "issue": 167,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T015",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_fields.py::TestBranchClosure"
+            ],
+            "commands": [
+              "poetry run pytest",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
         },
         {
           "id": "T016",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_fields.py::TestBranchClosureCycles"
+            ],
+            "commands": [
+              "poetry run pytest",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
         },
         {
           "id": "T017",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_fields.py::TestConceptFieldBranchRestrictionValidation",
+              "tests/test_fields.py::TestConceptFieldBranchRestrictionRefusalMessage",
+              "tests/test_fields.py::TestConceptsFieldBranchRestrictionWritePath"
+            ],
+            "commands": [
+              "poetry run pytest",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
         },
         {
           "id": "T018",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_fields.py::TestBranchRestrictionResolves",
+              "tests/test_fields.py::TestBranchRestrictionResolvesLive",
+              "tests/test_forms.py::TestConceptFieldBranchRestrictionFormChoices"
+            ],
+            "commands": [
+              "poetry run pytest",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
         }
       ]
     },
