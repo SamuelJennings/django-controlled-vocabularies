@@ -301,6 +301,42 @@ class TestPropertyRowRecordValueDisclosesIdentifierOnHover:
         assert "http://publisher.example.org/concept/granite" not in visible_text(dd)
 
 
+class TestPropertyRowTermDisclosesItsOwnURI:
+    """015-read-single-record second round: the ``<dt>`` lost the ``<abbr title=...>``
+    arrangement T031 first used, in favour of the same wrapping-``.tooltip``-span and
+    visually-hidden ``.sr-only``-span shape
+    :class:`TestPropertyRowRecordValueDisclosesIdentifierOnHover` proves for a ``<dd>``.
+    Covers what none of the tests above prove about the ``<dt>`` itself.
+    """
+
+    def test_the_dt_carries_neither_text_xs_nor_uppercase(self):
+        html = render_to_string(
+            PROPERTY_ROW_TEMPLATE,
+            {"term": "skos:broader", "term_uri": "http://publisher.example.org/broader", "value": "x"},
+        )
+        soup = BeautifulSoup(html, "html.parser")
+        dt = soup.find("dt")
+
+        classes = dt.get("class", [])
+        assert "text-xs" not in classes
+        assert "uppercase" not in classes
+
+    def test_the_terms_uri_is_reachable_as_text_and_carries_no_title(self):
+        html = render_to_string(
+            PROPERTY_ROW_TEMPLATE,
+            {"term": "skos:broader", "term_uri": "http://publisher.example.org/broader", "value": "x"},
+        )
+        soup = BeautifulSoup(html, "html.parser")
+        dt = soup.find("dt")
+
+        assert dt.get("title") is None
+        assert dt.find(attrs={"title": True}) is None
+        hidden_span = dt.find("span", class_="sr-only")
+        assert hidden_span is not None
+        assert hidden_span.get_text() == "http://publisher.example.org/broader"
+        assert "http://publisher.example.org/broader" not in visible_text(dt)
+
+
 # A class name never continues past one of these in the shipped stylesheet: the brace of a
 # standalone rule, or a combinator, attribute selector, pseudo-class or list separator gluing
 # it to the rest of a compound selector. Required so "tooltip-right" cannot match a would-be
@@ -362,3 +398,29 @@ class TestPropertyRowClasses:
         # all, so the check for the shorter name must still report it absent.
         css = ".tooltip-rightmost{color:red}"
         assert _tailwind_selector_pattern("tooltip-right").search(css) is None
+
+
+# The tag name portion only — up to the first whitespace, "/" or ">" — so a cotton
+# directive's own variables (e.g. <c-vars term term_uri ...>, which legitimately name
+# underscored context keys after the tag name) are never mistaken for the tag name itself.
+_COTTON_TAG_NAME_RE = re.compile(r"</?c-([A-Za-z0-9_.:-]*)")
+
+
+class TestNoTemplateNamesACottonComponentWithAnUnderscore:
+    """Repo-wide convention: a cotton component tag always uses hyphens, never
+    underscores — property_row.html's own three call sites were still written
+    ``<c-controlled_vocabularies.property_row />`` until this round (the file path on
+    disk keeps its own underscores; this is about what a template writes, not what
+    cotton resolves the tag from). Asserted across every shipped template, not only the
+    two this feature touched, because the convention holds regardless of which feature
+    next writes a cotton tag.
+    """
+
+    @pytest.mark.parametrize(
+        "path",
+        sorted(TEMPLATES_ROOT.rglob("*.html")),
+        ids=lambda p: str(p.relative_to(TEMPLATES_ROOT)),
+    )
+    def test_no_cotton_tag_name_contains_an_underscore(self, path):
+        offenders = [name for name in _COTTON_TAG_NAME_RE.findall(path.read_text()) if "_" in name]
+        assert offenders == [], f"{path.relative_to(TEMPLATES_ROOT)} names a cotton tag with an underscore: {offenders}"

@@ -3192,3 +3192,137 @@ class TestPropertyTermDisclosesItsOwnURI:
         assert terms[MEMBER_CURIE].get("data-tip") == "http://www.w3.org/2004/02/skos/core#member"
         for curie, wrapper in terms.items():
             assert wrapper is not None, f"{curie} discloses nothing"
+
+
+class TestPropertyTermsCarryNoTitle:
+    """015-read-single-record second round: a reader hovering a term got the native
+    ``title`` tooltip and daisyUI's own firing at once, one on top of the other, saying
+    the same thing. The tests above prove the replacement disclosure works; only this
+    negative one stops the doubled tooltip coming back, on either detail page.
+    """
+
+    @pytest.mark.django_db
+    def test_no_element_in_a_concept_pages_definition_list_carries_a_title(self, client):
+        concept = ConceptFactory(label="Granite")
+        parent = ConceptFactory(scheme=concept.scheme, label="Igneous Rock")
+        concept.add_broader(parent)
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        assert soup.find("dl").find(attrs={"title": True}) is None
+
+    @pytest.mark.django_db
+    def test_no_element_in_a_collection_pages_definition_list_carries_a_title(self, client):
+        collection, _members = collection_with_members(labels=("Granite", "Basalt"))
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:collection-detail",
+                kwargs={"slug": collection.scheme.slug, "collection_slug": collection.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        assert soup.find("dl").find(attrs={"title": True}) is None
+
+
+class TestEveryTooltipOpensToTheRight:
+    """Every ``.tooltip`` element on both detail pages carries ``tooltip-right``
+    (015-read-single-record second round) — a term's own disclosure and a value's
+    alike, so a term's tooltip opening a different direction than a value's does not
+    reappear unnoticed.
+    """
+
+    @pytest.mark.django_db
+    def test_every_tooltip_on_a_concept_page_opens_right(self, client):
+        concept = ConceptFactory(label="Granite")
+        parent = ConceptFactory(scheme=concept.scheme, label="Igneous Rock")
+        concept.add_broader(parent)
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        tooltips = soup.find_all(class_="tooltip")
+
+        assert tooltips, "the page rendered no tooltip at all"
+        for tooltip in tooltips:
+            assert "tooltip-right" in tooltip.get("class", [])
+
+    @pytest.mark.django_db
+    def test_every_tooltip_on_a_collection_page_opens_right(self, client):
+        collection, _members = collection_with_members(labels=("Granite", "Basalt"))
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:collection-detail",
+                kwargs={"slug": collection.scheme.slug, "collection_slug": collection.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        tooltips = soup.find_all(class_="tooltip")
+
+        assert tooltips, "the page rendered no tooltip at all"
+        for tooltip in tooltips:
+            assert "tooltip-right" in tooltip.get("class", [])
+
+
+class TestIdentifierLinkUnderlinesOnHover:
+    """The identifier link above the definition list, on all three detail pages a
+    vocabulary's, a concept's and a collection's, composes ``c-link`` with
+    ``hover=True`` (015-read-single-record second round), so it carries django-mvp's
+    ``link-hover`` class and underlines on hover like every other in-site link, rather
+    than a bare anchor.
+    """
+
+    @pytest.mark.django_db
+    def test_a_vocabularys_identifier_link_underlines_on_hover(self, client):
+        scheme = ConceptSchemeFactory()
+
+        response = client.get(reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}))
+        soup = BeautifulSoup(response.content, "html.parser")
+        identifier_link = soup.find("a", href=scheme.uri)
+
+        assert identifier_link is not None
+        assert "link-hover" in identifier_link.get("class", [])
+
+    @pytest.mark.django_db
+    def test_a_concepts_identifier_link_underlines_on_hover(self, client):
+        concept = ConceptFactory(label="Granite")
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": concept.scheme.slug, "concept_slug": concept.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        identifier_link = soup.find("a", href=concept.uri)
+
+        assert identifier_link is not None
+        assert "link-hover" in identifier_link.get("class", [])
+
+    @pytest.mark.django_db
+    def test_a_collections_identifier_link_underlines_on_hover(self, client):
+        collection = CollectionFactory(name="Rock Types")
+
+        response = client.get(
+            reverse(
+                "controlled_vocabularies_ui:collection-detail",
+                kwargs={"slug": collection.scheme.slug, "collection_slug": collection.slug},
+            )
+        )
+        soup = BeautifulSoup(response.content, "html.parser")
+        identifier_link = soup.find("a", href=collection.uri)
+
+        assert identifier_link is not None
+        assert "link-hover" in identifier_link.get("class", [])
