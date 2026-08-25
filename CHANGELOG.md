@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+## [v0.0.3] - 2026-08-25
+
 ### Added
 
 - Finding a vocabulary: an opt-in `ui` extra (`pip install django-controlled-vocabularies[ui]`)
