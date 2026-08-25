@@ -447,23 +447,53 @@
       "id": "US7",
       "priority": "P3",
       "issue": 171,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T023",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_fields.py::TestSharedRestrictedHelpText"
+            ],
+            "commands": [
+              "poetry run pytest",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
         },
         {
           "id": "T024",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_fields.py::TestRestrictionErrorMessagesAreTranslatable",
+              "tests/test_fields.py::TestWriteGuardRefusalsAreTranslatable",
+              "tests/test_fields.py::TestW005MessagesAreStaticWithNamedPlaceholders",
+              "tests/test_fields.py::TestDeclarationRuleTypeErrorsStayUntranslated"
+            ],
+            "commands": [
+              "poetry run pytest",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
         },
         {
           "id": "T025",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_standards.py"
+            ],
+            "commands": [
+              "poetry run pytest",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
         }
       ]
     }
