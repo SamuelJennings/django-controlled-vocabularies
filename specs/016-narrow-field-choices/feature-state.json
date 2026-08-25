@@ -156,7 +156,7 @@
       "id": "US1",
       "priority": "P1",
       "issue": 165,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
@@ -263,7 +263,7 @@
       "id": "US2",
       "priority": "P1",
       "issue": 166,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
