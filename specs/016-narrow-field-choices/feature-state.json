@@ -424,13 +424,22 @@
       "id": "US6",
       "priority": "P2",
       "issue": 170,
-      "status": "todo",
+      "status": "done",
       "replans": 0,
       "tasks": [
         {
           "id": "T022",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_views.py::TestConceptAutocompleteOrderedCollectionSequence"
+            ],
+            "commands": [
+              "poetry run pytest",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
         }
       ]
     },
