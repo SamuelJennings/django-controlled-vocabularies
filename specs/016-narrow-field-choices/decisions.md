@@ -193,3 +193,33 @@ placeholder) while keeping the sentence true.
 **Revisit if:** a future restriction kind (the branch axis) turns out to want a fourth message
 naming a root concept, at which point the naming pattern here (`invalid_restricted_<axis>`) is
 either continued or replaced with something that scales better than one msgid per axis.
+
+## D12 — T022 overrides `order_queryset()`, not `apply_ordering()`
+
+**Ambiguous:** nothing about where the ordering belongs or how it is built — D8 already settled
+that (the endpoint, a `Subquery` annotation, empty-query only). What's addressed here is the exact
+method name T022's brief, `tasks.md`, `plan.md` A5 and `research.md` R6 all give for the override:
+`apply_ordering()`.
+
+**What was found:** the installed `django-tomselect` 2026.6.2 (`autocompletes.py`) exposes no
+method named `apply_ordering`. The base view's `get_queryset()` (`autocompletes.py:399`) calls
+`self.order_queryset(queryset)`, and `order_queryset()` (`autocompletes.py:685-727`) is the actual
+method reading `self.ordering` and applying it via `queryset.order_by(*ordering)` — the same method
+the design's own line numbers (`686-727`) point at, under the wrong name. An override literally
+named `apply_ordering` would sit on the class unused and never run; the base would keep applying
+`("label", "pk")` regardless, and every T022 test would fail exactly the way it did before this
+story existed.
+
+**Chosen:** override `order_queryset()` instead, implementing precisely the condition and mechanism
+D8/A5/R6 describe (empty query, an ordered collection, a `Subquery` on `CollectionMember` keyed on
+the declaration's own collection and vocabulary slugs). Nothing about *where* or *how* changes —
+only the identifier the story's design documents used to name the seam.
+
+**Why defensible:** the story's whole test (per its own acceptance criteria) is behavioural — the
+browsable list arrives in the curator's sequence — not that a method with a particular name exists
+on the class. Implementing the design under a name the library does not expose would satisfy no
+test and ship no behaviour; the "one method override" T022 promises only exists under the name the
+library actually calls.
+
+**Revisit if:** a future `django-tomselect` release renames or restructures this hook again, in
+which case this override moves with it under the same reasoning.

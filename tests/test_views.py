@@ -20,6 +20,14 @@ classes are about result shaping and label matching rather than the restriction,
 they name :class:`~tests.testapp.models.Sketch`'s ``subject`` — the declaration that
 names no vocabulary and so makes every concept eligible — leaving each assertion
 about exactly what its own name says.
+
+``TestConceptAutocompleteOrderedCollectionSequence`` (T022, FR-010, plan.md A5,
+decisions.md D8) — an ordered collection's own member sequence reaches this list,
+not alphabetical order and not creation order, because that sequence is the whole
+reason ``Collection.ordered`` means anything to somebody picking from it. Every
+case names :class:`~tests.testapp.models.CoreSample`'s ``rock_type``, the one field
+this suite restricts to a collection slug, since a ``field=`` reference is resolved
+through Django's app registry rather than built ad hoc in a test.
 """
 
 import json
@@ -36,8 +44,8 @@ from django.utils import translation
 from django_tomselect.middleware import TomSelectMiddleware
 
 from controlled_vocabularies.views import ConceptAutocompleteView
-from tests.factories import ConceptFactory, ConceptSchemeFactory
-from tests.testapp.models import Borehole, Sketch, Specimen
+from tests.factories import CollectionFactory, ConceptFactory, ConceptSchemeFactory, collection_with_members
+from tests.testapp.models import Borehole, CoreSample, Sketch, Specimen
 
 
 def _field_reference(model, field_name):
@@ -491,3 +499,125 @@ class TestConceptAutocompleteRequestControlledSurfacesAreClosed:
         ordered_ids = [result["id"] for result in json.loads(with_ordering.content)["results"]]
         assert default_ids  # the guard is being tested against real, non-empty results
         assert ordered_ids == default_ids
+
+
+@pytest.mark.django_db
+class TestConceptAutocompleteOrderedCollectionSequence:
+    """T022, FR-010, plan.md A5, research.md R6, decisions.md D8: the endpoint
+    serves an ordered collection's members in the curator's own sequence, not
+    alphabetical order and not creation order — the one requirement
+    ``limit_choices_to`` cannot carry, so it is applied here rather than on
+    the widget's queryset (which nobody browsing the control ever sees).
+
+    Every case names :class:`~tests.testapp.models.CoreSample`'s ``rock_type``
+    — declared with ``vocabulary="rock-type"``, ``collection="core-samples"``
+    — so the scheme built here is named "Rock type" (slug ``rock-type``) and
+    the collection "core-samples", matching that static declaration exactly;
+    a ``field=`` reference only resolves against a real, registered model
+    field, not one built ad hoc in a test.
+    """
+
+    def _get(self, **params):
+        return Client().get(
+            reverse("controlled_vocabularies:concept-autocomplete"),
+            {"field": _field_reference(CoreSample, "rock_type"), **params},
+        )
+
+    def test_an_ordered_collections_sequence_differs_from_both_alphabetical_and_creation_order(self):
+        # Created Bravo, Alpha, Charlie in that order (creation/pk order).
+        # Alphabetical would read Alpha, Bravo, Charlie. The curator's chosen
+        # sequence below is neither, so a missing override (falls to
+        # "label") or an accidental default (falls to creation/pk order)
+        # both fail this.
+        scheme = ConceptSchemeFactory(name="Rock type")
+        collection, members = collection_with_members(
+            scheme=scheme, name="core-samples", ordered=True, labels=("Bravo", "Alpha", "Charlie")
+        )
+        bravo, alpha, charlie = members
+        collection.set_member_order([charlie, bravo, alpha])
+
+        body = json.loads(self._get().content)
+
+        assert [result["id"] for result in body["results"]] == [charlie.pk, bravo.pk, alpha.pk]
+
+    def test_a_position_change_is_reflected_on_the_next_read(self):
+        scheme = ConceptSchemeFactory(name="Rock type")
+        collection, members = collection_with_members(
+            scheme=scheme, name="core-samples", ordered=True, labels=("Bravo", "Alpha", "Charlie")
+        )
+        bravo, alpha, charlie = members
+        collection.set_member_order([charlie, bravo, alpha])
+        first_read = json.loads(self._get().content)
+        assert [result["id"] for result in first_read["results"]] == [charlie.pk, bravo.pk, alpha.pk]
+
+        collection.set_member_order([alpha, charlie, bravo])
+
+        second_read = json.loads(self._get().content)
+        assert [result["id"] for result in second_read["results"]] == [alpha.pk, charlie.pk, bravo.pk]
+
+    def test_a_typed_search_term_returns_to_relevance_order(self):
+        scheme = ConceptSchemeFactory(name="Rock type")
+        collection, members = collection_with_members(
+            scheme=scheme,
+            name="core-samples",
+            ordered=True,
+            labels=("Bravo Basalt", "Alpha Basalt", "Charlie Basalt"),
+        )
+        bravo, alpha, charlie = members
+        collection.set_member_order([charlie, bravo, alpha])
+
+        body = json.loads(self._get(q="Basalt").content)
+
+        # Falls through to the inherited ("label", "pk") ordering once a
+        # search term is present (plan.md A5) — alphabetical by label, not
+        # the curator's sequence asserted above for the same collection.
+        assert [result["id"] for result in body["results"]] == [alpha.pk, bravo.pk, charlie.pk]
+
+    def test_an_unordered_collection_stays_restricted_with_no_sequence_promised(self):
+        scheme = ConceptSchemeFactory(name="Rock type")
+        collection, members = collection_with_members(
+            scheme=scheme, name="core-samples", ordered=False, labels=("Charlie", "Bravo", "Alpha")
+        )
+        charlie, bravo, alpha = members
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+
+        body = json.loads(self._get().content)
+
+        returned_ids = [result["id"] for result in body["results"]]
+        assert set(returned_ids) == {charlie.pk, bravo.pk, alpha.pk}
+        assert outsider.pk not in returned_ids
+        # No sequence is promised for an unordered collection: it falls
+        # through to the inherited alphabetical ordering, the same as any
+        # other unordered result set (plan.md A5).
+        assert returned_ids == [alpha.pk, bravo.pk, charlie.pk]
+
+    def test_a_removed_member_leaves_the_survivors_in_relative_order(self):
+        scheme = ConceptSchemeFactory(name="Rock type")
+        collection, members = collection_with_members(
+            scheme=scheme, name="core-samples", ordered=True, labels=("Bravo", "Alpha", "Charlie", "Delta")
+        )
+        bravo, alpha, charlie, delta = members
+        collection.set_member_order([delta, bravo, charlie, alpha])
+        collection.remove(bravo)
+
+        body = json.loads(self._get().content)
+
+        assert [result["id"] for result in body["results"]] == [delta.pk, charlie.pk, alpha.pk]
+
+    def test_a_concept_in_a_second_collection_too_is_not_duplicated(self):
+        # research.md R3/R6: a concept belonging to a second collection must
+        # not duplicate through a collection_memberships__ join.
+        scheme = ConceptSchemeFactory(name="Rock type")
+        collection, members = collection_with_members(
+            scheme=scheme, name="core-samples", ordered=True, labels=("Bravo", "Alpha")
+        )
+        bravo, alpha = members
+        collection.set_member_order([alpha, bravo])
+        other_collection = CollectionFactory(scheme=scheme, name="Display Samples")
+        other_collection.add(bravo)
+
+        body = json.loads(self._get().content)
+
+        ids = [result["id"] for result in body["results"]]
+        assert len(ids) == len(set(ids))
+        assert set(ids) == {alpha.pk, bravo.pk}

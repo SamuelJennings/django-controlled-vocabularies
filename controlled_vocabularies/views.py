@@ -13,12 +13,12 @@ from typing import TYPE_CHECKING
 from django.apps import apps
 from django.conf import settings
 from django.core.exceptions import FieldDoesNotExist
-from django.db.models import Q, QuerySet
+from django.db.models import OuterRef, Q, QuerySet, Subquery
 from django.utils.translation import get_language
 from django_tomselect.autocompletes import AutocompleteModelView
 
 from .fields import ConceptFieldMixin
-from .models import Concept, ConceptLabel
+from .models import Collection, CollectionMember, Concept, ConceptLabel
 
 if TYPE_CHECKING:
     # Matches the base view's own guarded import (autocompletes.py) — this
@@ -78,9 +78,10 @@ class ConceptAutocompleteView(AutocompleteModelView):
         queryset = queryset.select_related("scheme").prefetch_related("labels")
         return self._restrict_to_declaration(queryset)
 
-    def _restrict_to_declaration(self, queryset: QuerySet) -> QuerySet:
-        """Derive the restriction from the field declaration the request
-        names, never from the request itself (FR-006, decisions.md D11).
+    def _resolve_declared_field(self) -> ConceptFieldMixin | None:
+        """Resolve the ``field=`` reference the request names to the concept
+        field declaration it identifies, or ``None`` when it does not
+        resolve (FR-006, decisions.md D11).
 
         ``field`` is a ``<app_label>.<model>.<field_name>`` reference the
         control's widget appends (plan.md A6 path one); it identifies which
@@ -88,8 +89,30 @@ class ConceptAutocompleteView(AutocompleteModelView):
         altering it can only name a different declaration, whose own
         restriction then applies. Resolution happens through Django's app
         registry, exactly as it does when Django itself loads a string
-        ``to``; nothing here reads a vocabulary, a scheme, or anything else
-        directly off the request.
+        ``to``; nothing here reads a vocabulary, a collection, an ordering,
+        or anything else directly off the request.
+
+        Shared by :meth:`_restrict_to_declaration` (T006, filtering) and
+        :meth:`order_queryset` (T022, ordering) — both need exactly the same
+        declaration, resolved the same way, rather than parsing the
+        reference twice.
+        """
+        reference = self.request.GET.get("field")
+        if not reference:
+            return None
+        try:
+            app_label, model_name, field_name = reference.split(".", 2)
+            model = apps.get_model(app_label, model_name)
+            field = model._meta.get_field(field_name)
+        except (ValueError, LookupError, FieldDoesNotExist):
+            return None
+        if not isinstance(field, ConceptFieldMixin):
+            return None
+        return field
+
+    def _restrict_to_declaration(self, queryset: QuerySet) -> QuerySet:
+        """Narrow ``queryset`` to what the field declaration the request
+        names allows (FR-006, decisions.md D11).
 
         A reference that fails to resolve, names a field that is not one of
         this package's concept fields, or is absent, returns
@@ -98,22 +121,73 @@ class ConceptAutocompleteView(AutocompleteModelView):
         escapes, so a missing model and an existing-but-wrong field are
         indistinguishable from outside (plan.md A6 point 3).
         """
-        reference = self.request.GET.get("field")
-        if not reference:
-            return queryset.none()
-        try:
-            app_label, model_name, field_name = reference.split(".", 2)
-            model = apps.get_model(app_label, model_name)
-            field = model._meta.get_field(field_name)
-        except (ValueError, LookupError, FieldDoesNotExist):
-            return queryset.none()
-        if not isinstance(field, ConceptFieldMixin):
+        field = self._resolve_declared_field()
+        if field is None:
             return queryset.none()
         # ConceptFieldMixin is a plain mixin, not itself a RelatedField, so
         # get_limit_choices_to() (from ForeignKey/ManyToManyField, which
         # ConceptField/ConceptsField also inherit) is invisible to mypy after
         # narrowing on the mixin alone.
         return queryset.complex_filter(field.get_limit_choices_to())  # type: ignore[attr-defined]
+
+    def order_queryset(self, queryset: QuerySet) -> QuerySet:
+        """Apply an ordered collection's own member sequence, and only while
+        the search box is empty (T022, FR-010, plan.md A5, decisions.md D8,
+        research.md R6).
+
+        This overrides the hook the base view's own ``get_queryset()``
+        actually calls (``django_tomselect/autocompletes.py:399``,
+        ``order_queryset()`` at line 685). The design notes for this story
+        name the method ``apply_ordering()``; the installed
+        ``django-tomselect`` exposes no method by that name, so an override
+        written under it would sit dead and never run. ``order_queryset()``
+        is the real seam and reads exactly the way the design intended:
+        overridden outright, one condition, one annotation.
+
+        The collection's order applies when, and only when, both hold: the
+        request carries no search term (``self.query``, set in ``setup()``
+        before this runs — never read again here), and the field
+        declaration's restriction is a collection the curator marked
+        ``ordered``. Everything else — no restriction, an unordered
+        collection, an unresolved declaration, a typed query — falls
+        through to ``super()`` and the inherited ``("label", "pk")``: a
+        typed query wants relevance, not the curator's browsing sequence.
+
+        The position is read through a ``Subquery`` annotation keyed on the
+        declaration's own collection and vocabulary slugs, never through a
+        ``collection_memberships__`` lookup: a concept may belong to more
+        than one collection, and that lookup joins ``CollectionMember`` onto
+        a queryset this view reaches with ``complex_filter()`` bare —
+        duplicate rows, silently (research.md R3).
+        """
+        if self.query:
+            return super().order_queryset(queryset)
+
+        field = self._resolve_declared_field()
+        if field is None or field.collection is None:
+            return super().order_queryset(queryset)
+
+        (vocabulary,) = field.vocabulary
+        is_ordered_collection = Collection.objects.filter(
+            slug=field.collection, scheme__slug=vocabulary, ordered=True
+        ).exists()
+        if not is_ordered_collection:
+            return super().order_queryset(queryset)
+
+        position = Subquery(
+            CollectionMember.objects.filter(
+                concept=OuterRef("pk"),
+                collection__slug=field.collection,
+                collection__scheme__slug=vocabulary,
+            ).values("position")[:1]
+        )
+        # ``QuerySet.annotate()``'s stub returns ``Self``, which mypy cannot
+        # resolve past ``Any`` when ``queryset`` is a bare, unparametrised
+        # ``QuerySet`` parameter rather than a manager's own result — an
+        # explicit variable annotation gives ``order_by()`` a concrete type
+        # to resolve ``Self`` against, rather than suppressing the check.
+        annotated: QuerySet = queryset.annotate(_collection_position=position)
+        return annotated.order_by("_collection_position", "pk")
 
     def paginate_queryset(self, queryset: QuerySet) -> "PaginatedResponse":
         """Bounded and stable past the end (FR-007, plan.md A7).
