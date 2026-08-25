@@ -17,7 +17,7 @@
     {% endif %}
     {% comment %} The identifier is an outbound link (T003 reverses #140's D6): nothing is marked
        safe and nothing is interpolated into any attribute besides href {% endcomment %}
-    <c-text size="xs" muted><a href="{{ vocabulary.uri }}" rel="noopener">{{ vocabulary.uri }}</a></c-text>
+    <c-text size="xs" muted><c-link href="{{ vocabulary.uri }}" text="{{ vocabulary.uri }}" hover=True rel="noopener" /></c-text>
   </div>
   {% if collections %}
     {% comment %} T019, decisions.md D5/D7: named, separate from the concept list, an ordered

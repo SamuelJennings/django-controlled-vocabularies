@@ -33,21 +33,26 @@
   disclosure, its own identifier_id keeping every member's hidden span distinct.
 
   term_uri (015-read-single-record T031) is the URI the term's own CURIE abbreviates,
-  disclosed the same way a value's is. <abbr> rather than a bare span: a CURIE *is* an
-  abbreviation of a URI, so the element says what the row means, and a screen reader
-  announces the title where daisyUI's pointer-only tooltip cannot reach it. The <abbr>
-  wraps the term instead of the <dt> carrying the tooltip itself — .tooltip sets
-  display:inline-block, which on the <dt> would shrink-wrap the whole term row.
+  disclosed the same way a value's is: the tooltip for a pointer, a visually-hidden
+  ".sr-only" span for assistive technology. It carried a title attribute as well until
+  a reader saw both fire at once — the native title tooltip and daisyUI's, one on top
+  of the other, saying the same thing. Nothing needed the title: the term is not
+  interactive, so its hidden text is simply read in flow and needs no aria-describedby
+  to tie it to anything, which is the same disclosure the <dd> below makes and the
+  reason there was never an asymmetry to justify. The tooltip class sits on a wrapping
+  span rather than on the <dt>, which sets display:inline-block and would shrink-wrap
+  the whole term row.
 {% endcomment %}
-<dt class="text-base-content/60 text-xs uppercase font-semibold">
-  <abbr class="tooltip" title="{{ term_uri }}" data-tip="{{ term_uri }}">{{ term }}</abbr>
+<dt class="text-base-content/60 font-semibold">
+  <span class="tooltip tooltip-right" data-tip="{{ term_uri }}">{{ term }}</span>
+  <span class="sr-only">{{ term_uri }}</span>
 </dt>
 <dd class="mb-3">
   {% if entries %}
     <ul>
       {% for entry in entries %}
         <li>
-          <span class="tooltip" data-tip="{{ entry.uri }}">
+          <span class="tooltip tooltip-right" data-tip="{{ entry.uri }}">
             <c-link href="{{ entry.href }}"
                     text="{{ entry.short_form }}"
                     hover=True
@@ -58,7 +63,7 @@
       {% endfor %}
     </ul>
   {% elif short_form %}
-    <span class="tooltip" data-tip="{{ uri }}">
+    <span class="tooltip tooltip-right" data-tip="{{ uri }}">
       <c-link href="{{ href }}"
               text="{{ short_form }}"
               hover=True

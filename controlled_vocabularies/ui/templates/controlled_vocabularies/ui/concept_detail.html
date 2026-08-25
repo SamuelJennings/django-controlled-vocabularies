@@ -19,18 +19,18 @@
     a dl row — plan.md Key design decision #4's fixed row order names no identifier
     row, only the SKOS statements the record makes about itself.
   {% endcomment %}
-  <c-text size="xs" muted><a href="{{ object.uri }}" rel="noopener">{{ object.uri }}</a></c-text>
+  <c-text size="xs" muted><c-link href="{{ object.uri }}" text="{{ object.uri }}" hover=True rel="noopener" /></c-text>
   <dl>
     {% for row in rows %}
       {% if row.short_form %}
-        <c-controlled_vocabularies.property_row term="{{ row.term }}"
+        <c-controlled-vocabularies.property-row term="{{ row.term }}"
                                                   term_uri="{{ row.term_uri }}"
                                                   short_form="{{ row.short_form }}"
                                                   uri="{{ row.uri }}"
                                                   href="{{ row.href }}"
                                                   identifier_id="{{ row.identifier_id }}" />
       {% else %}
-        <c-controlled_vocabularies.property_row term="{{ row.term }}"
+        <c-controlled-vocabularies.property-row term="{{ row.term }}"
                                                   term_uri="{{ row.term_uri }}"
                                                   value="{{ row.value }}" />
       {% endif %}
