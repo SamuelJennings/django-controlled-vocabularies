@@ -38,7 +38,7 @@ from tests.factories import (
     SampleFactory,
     collection_with_members,
 )
-from tests.testapp.models import ChipSample, CoreSample, Deposit, Outcrop, Sample
+from tests.testapp.models import BranchSample, ChipSample, CoreSample, Deposit, Outcrop, Sample
 
 
 def _rendered_under_an_ambient_request(build):
@@ -84,6 +84,12 @@ class CoreSampleForm(forms.ModelForm):
 class ChipSampleForm(forms.ModelForm):
     class Meta:
         model = ChipSample
+        fields = ["name", "rock_type"]
+
+
+class BranchSampleForm(forms.ModelForm):
+    class Meta:
+        model = BranchSample
         fields = ["name", "rock_type"]
 
 
@@ -264,6 +270,56 @@ class TestConceptFieldConceptsRestrictionFormChoices:
         assert set(choices) == {granite, basalt}
         assert len(choices) == 2
         assert outsider not in choices
+
+
+@pytest.mark.django_db
+class TestConceptFieldBranchRestrictionFormChoices:
+    """T018 (US-3, FR-008's choices half, "as T009, for this axis") — a
+    ``branch`` restriction narrows the offered choices on both paths a form
+    can build them from, asserted by count as well as by membership,
+    through :class:`~tests.testapp.models.BranchSample`, restricted to the
+    "igneous" branch."""
+
+    def test_the_modelforms_own_queryset_is_exactly_the_closure(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        root = ConceptFactory(scheme=scheme, label="Igneous")
+        child = ConceptFactory(scheme=scheme, label="Granite")
+        child.add_broader(root)
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+
+        choices = list(BranchSampleForm().fields["rock_type"].queryset)
+
+        assert set(choices) == {root, child}
+        assert len(choices) == 2
+        assert outsider not in choices
+
+    def test_the_widgets_own_queryset_is_exactly_the_closure(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        root = ConceptFactory(scheme=scheme, label="Igneous")
+        child = ConceptFactory(scheme=scheme, label="Granite")
+        child.add_broader(root)
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+
+        widget = BranchSampleForm().fields["rock_type"].widget
+        choices = list(widget.get_queryset())
+
+        assert set(choices) == {root, child}
+        assert len(choices) == 2
+        assert outsider not in choices
+
+    def test_a_concept_added_below_the_root_appears_on_the_next_read(self):
+        # As T010 asserts for collection membership.
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        root = ConceptFactory(scheme=scheme, label="Igneous")
+
+        form = BranchSampleForm()
+        assert set(form.fields["rock_type"].queryset) == {root}
+
+        newcomer = ConceptFactory(scheme=scheme, label="Granite")
+        newcomer.add_broader(root)
+
+        form_again = BranchSampleForm()
+        assert set(form_again.fields["rock_type"].queryset) == {root, newcomer}
 
 
 class TestConceptFieldRenderingWithoutTheRouteIncluded:

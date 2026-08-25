@@ -110,6 +110,7 @@ cannot run ``validate()`` at all.
   is duplicated here.
 """
 
+import signal
 import warnings
 
 import pytest
@@ -124,11 +125,12 @@ from django.utils import translation
 from django.utils.functional import Promise
 from django.utils.module_loading import import_string
 
-from controlled_vocabularies.fields import ConceptField, ConceptFieldMixin, ConceptsField
+from controlled_vocabularies.fields import ConceptField, ConceptFieldMixin, ConceptsField, _branch_closure
 from controlled_vocabularies.models import Concept, ConceptLabel, ConceptScheme
 from tests.factories import (
     ArtifactFactory,
     BoreholeFactory,
+    BranchTrayFactory,
     ChipTrayFactory,
     CollectionFactory,
     ConceptFactory,
@@ -148,6 +150,7 @@ from tests.factories import (
 from tests.testapp.models import (
     Artifact,
     Borehole,
+    BranchSample,
     ChipSample,
     CoreSample,
     Deposit,
@@ -614,6 +617,153 @@ class TestConceptsRestrictionResolves:
         resolved = Concept.objects.complex_filter(field.get_limit_choices_to())
 
         assert list(resolved) == [granite]
+
+
+class TestBranchClosure:
+    """T015 (US-3, plan.md A3, research.md R5) — the branch axis's downward
+    closure, unit-tested directly against ``_branch_closure()`` rather than
+    through a field: the concept named ``branch`` within ``vocabulary``,
+    plus everything narrower than it at any depth. Iterative widening over
+    the stored ``broader`` edges, in the direction ``models.py:1161-1174``
+    fixes: a ``BROADER`` row's ``source`` is the narrower concept and its
+    ``target`` the broader one, so walking downward means matching
+    ``target`` and collecting ``source`` — the opposite of what an inverted
+    walk would do."""
+
+    @pytest.mark.django_db
+    def test_a_three_level_tree_returns_root_plus_children_plus_grandchildren(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        root = ConceptFactory(scheme=scheme, label="Igneous")
+        child = ConceptFactory(scheme=scheme, label="Granite")
+        grandchild = ConceptFactory(scheme=scheme, label="Porphyritic Granite")
+        child.add_broader(root)
+        grandchild.add_broader(child)
+
+        closure = _branch_closure("rock-type", root.slug)
+
+        assert closure == {root.pk, child.pk, grandchild.pk}
+
+    @pytest.mark.django_db
+    def test_a_root_with_no_children_returns_just_the_root(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        root = ConceptFactory(scheme=scheme, label="Obsidian")
+
+        closure = _branch_closure("rock-type", root.slug)
+
+        assert closure == {root.pk}
+
+    @pytest.mark.django_db
+    def test_a_wide_level_returns_every_sibling(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        root = ConceptFactory(scheme=scheme, label="Igneous")
+        granite = ConceptFactory(scheme=scheme, label="Granite")
+        basalt = ConceptFactory(scheme=scheme, label="Basalt")
+        gabbro = ConceptFactory(scheme=scheme, label="Gabbro")
+        granite.add_broader(root)
+        basalt.add_broader(root)
+        gabbro.add_broader(root)
+
+        closure = _branch_closure("rock-type", root.slug)
+
+        assert closure == {root.pk, granite.pk, basalt.pk, gabbro.pk}
+
+    @pytest.mark.django_db
+    def test_a_root_belonging_to_another_vocabulary_resolves_to_nothing(self):
+        mineral_scheme = ConceptSchemeFactory(name="Mineral")
+        mineral_root = ConceptFactory(scheme=mineral_scheme, label="Igneous")
+
+        closure = _branch_closure("rock-type", mineral_root.slug)
+
+        assert closure == set()
+
+
+class TestBranchClosureCycles:
+    """T016 (FR-004, SC-006, decisions.md D5) — a two-edge cycle, built with
+    two ordinary ``add_broader()`` calls exactly as ``decisions.md`` D5
+    describes, still terminates and yields each concept exactly once. The
+    relation model refuses a self-relation and a mirror-order *related*
+    duplicate, but not a reversed *broader* edge (``models.py:1209-1211``),
+    so this is the shortest cycle storable through the public API — nothing
+    contrived needed to reach it. Bounded by an alarm so a regression in the
+    seen-set logic fails this test rather than hanging the whole suite."""
+
+    @pytest.mark.django_db
+    def test_a_two_edge_cycle_terminates_and_yields_each_concept_once(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        alpha = ConceptFactory(scheme=scheme, label="Alpha")
+        beta = ConceptFactory(scheme=scheme, label="Beta")
+        alpha.add_broader(beta)
+        beta.add_broader(alpha)
+
+        def _raise_timeout(signum, frame):
+            raise TimeoutError("branch closure did not terminate on a two-edge cycle")
+
+        previous_handler = signal.signal(signal.SIGALRM, _raise_timeout)
+        signal.alarm(5)
+        try:
+            closure = _branch_closure("rock-type", alpha.slug)
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, previous_handler)
+
+        assert closure == {alpha.pk, beta.pk}
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("field_class", [ConceptField, ConceptsField])
+class TestBranchRestrictionResolves:
+    """T018 (US-3, FR-004, plan.md A2) — the callable from T005 gains its
+    third and final term: ``Q(pk__in=<the closure from T015>)`` when
+    ``branch`` is set. As with the collection axis (research.md R3), the
+    closure is a ``pk__in`` subquery, never a join, and the vocabulary term
+    is never dropped — a same-slugged concept in another vocabulary cannot
+    be reached as a root."""
+
+    def test_resolves_to_exactly_the_closure(self, field_class):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        root = ConceptFactory(scheme=scheme, label="Igneous")
+        child = ConceptFactory(scheme=scheme, label="Granite")
+        child.add_broader(root)
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+
+        field = field_class(vocabulary="rock-type", branch=root.slug)
+        resolved = Concept.objects.complex_filter(field.get_limit_choices_to())
+
+        assert set(resolved) == {root, child}
+        assert outsider not in resolved
+
+    def test_a_same_slugged_root_in_another_vocabulary_does_not_widen_the_field(self, field_class):
+        rock_scheme = ConceptSchemeFactory(name="Rock Type")
+        rock_root = ConceptFactory(scheme=rock_scheme, label="Igneous")
+        mineral_scheme = ConceptSchemeFactory(name="Mineral")
+        mineral_root = ConceptFactory(scheme=mineral_scheme, label="Igneous")
+        assert mineral_root.slug == rock_root.slug
+
+        field = field_class(vocabulary="rock-type", branch=rock_root.slug)
+        resolved = Concept.objects.complex_filter(field.get_limit_choices_to())
+
+        assert list(resolved) == [rock_root]
+        assert mineral_root not in resolved
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("field_class", [ConceptField, ConceptsField])
+class TestBranchRestrictionResolvesLive:
+    """T018 — no cache to invalidate, the same guarantee
+    ``TestCollectionRestrictionResolvesLive`` proves for the collection axis:
+    a concept added below the root at any depth appears on the next read."""
+
+    def test_a_concept_added_below_the_root_after_construction_appears_on_the_next_read(self, field_class):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        root = ConceptFactory(scheme=scheme, label="Igneous")
+        field = field_class(vocabulary="rock-type", branch=root.slug)
+        assert set(Concept.objects.complex_filter(field.get_limit_choices_to())) == {root}
+
+        newcomer = ConceptFactory(scheme=scheme, label="Granite")
+        newcomer.add_broader(root)
+
+        resolved_again = Concept.objects.complex_filter(field.get_limit_choices_to())
+        assert set(resolved_again) == {root, newcomer}
 
 
 class TestConceptFieldConstruction:
@@ -1368,6 +1518,101 @@ class TestConceptsFieldConceptsRestrictionWritePath:
         chip_tray.rock_types.add(granite, basalt)
 
         assert set(chip_tray.rock_types.all()) == {granite, basalt}
+
+
+class TestConceptsFieldBranchRestrictionWritePath:
+    """T017 (US-3, plan.md A4) — the many-valued write guard needs no
+    further change of its own beyond naming the axis in its message: it
+    already reads ``field.get_limit_choices_to()`` (T012), and
+    ``TestBranchRestrictionResolves`` above proves that method now resolves
+    the branch axis too. Driven entirely through
+    :class:`~tests.testapp.models.BranchTray`'s real relation manager, the
+    branch-axis counterpart of ``TestConceptsFieldConceptsRestrictionWritePath``."""
+
+    @pytest.mark.django_db
+    def test_forward_add_of_a_sibling_branch_concept_is_refused_and_the_set_is_unchanged(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        root = ConceptFactory(scheme=scheme, label="Igneous")
+        child = ConceptFactory(scheme=scheme, label="Granite")
+        child.add_broader(root)
+        sibling_root = ConceptFactory(scheme=scheme, label="Sedimentary")
+        sibling_child = ConceptFactory(scheme=scheme, label="Sandstone")
+        sibling_child.add_broader(sibling_root)
+        branch_tray = BranchTrayFactory()
+        branch_tray.rock_types.add(child)
+
+        with pytest.raises(ValidationError), transaction.atomic():
+            branch_tray.rock_types.add(sibling_child)
+
+        assert list(branch_tray.rock_types.all()) == [child]
+
+    @pytest.mark.django_db
+    def test_the_refusal_names_the_branch_root(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        ConceptFactory(scheme=scheme, label="Igneous")
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+        branch_tray = BranchTrayFactory()
+
+        with pytest.raises(ValidationError) as excinfo:
+            branch_tray.rock_types.add(outsider)
+
+        assert any("igneous" in message for message in excinfo.value.messages)
+
+    @pytest.mark.django_db
+    def test_the_reverse_accessor_refuses_a_non_descendant(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        ConceptFactory(scheme=scheme, label="Igneous")
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+        branch_tray = BranchTrayFactory()
+
+        with pytest.raises(ValidationError), transaction.atomic():
+            outsider.branch_trays.add(branch_tray)
+
+        assert list(branch_tray.rock_types.all()) == []
+
+    @pytest.mark.django_db
+    def test_the_reverse_accessor_attaches_a_descendant(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        root = ConceptFactory(scheme=scheme, label="Igneous")
+        child = ConceptFactory(scheme=scheme, label="Granite")
+        child.add_broader(root)
+        branch_tray = BranchTrayFactory()
+
+        child.branch_trays.add(branch_tray)
+
+        assert list(branch_tray.rock_types.all()) == [child]
+
+    @pytest.mark.django_db
+    def test_a_set_carrying_a_mix_is_refused_whole_and_the_set_is_unchanged_afterwards(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        root = ConceptFactory(scheme=scheme, label="Igneous")
+        child = ConceptFactory(scheme=scheme, label="Granite")
+        second_child = ConceptFactory(scheme=scheme, label="Basalt")
+        child.add_broader(root)
+        second_child.add_broader(root)
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+        branch_tray = BranchTrayFactory()
+        branch_tray.rock_types.add(child)
+
+        with pytest.raises(ValidationError), transaction.atomic():
+            branch_tray.rock_types.set([second_child, outsider])
+
+        # Asserted after the failed write, not merely that it raised (D2's whole-write refusal).
+        assert set(branch_tray.rock_types.all()) == {child}
+
+    @pytest.mark.django_db
+    def test_several_descendants_all_attach(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        root = ConceptFactory(scheme=scheme, label="Igneous")
+        child = ConceptFactory(scheme=scheme, label="Granite")
+        second_child = ConceptFactory(scheme=scheme, label="Basalt")
+        child.add_broader(root)
+        second_child.add_broader(root)
+        branch_tray = BranchTrayFactory()
+
+        branch_tray.rock_types.add(child, second_child)
+
+        assert set(branch_tray.rock_types.all()) == {child, second_child}
 
 
 class TestConceptsFieldSeveralVocabulariesWritePath:
@@ -2275,6 +2520,103 @@ class TestConceptFieldConceptsRestrictionRefusalMessage:
             assert any("granite" in message for message in excinfo.value.messages)
         finally:
             field.error_messages["invalid_restricted_concepts"] = original
+
+
+class TestConceptFieldBranchRestrictionValidation:
+    """T017 (US-3, FR-008 for the single-value field) — no new constraint
+    code: ``ForeignKey.validate()`` already applies ``limit_choices_to``
+    (research.md R1), and T018 taught the resolved ``Q`` the branch axis.
+    Proves the behavioural chain end to end through
+    :class:`~tests.testapp.models.BranchSample`'s real ``rock_type`` field,
+    restricted to the "igneous" branch: the root itself validates, a
+    grandchild validates, a sibling branch is refused, and the concept the
+    root sits *below* is refused. The last two are the ones an inverted
+    walk (T015) passes anyway, so neither is optional."""
+
+    @pytest.mark.django_db
+    def test_the_root_itself_validates(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        root = ConceptFactory(scheme=scheme, label="Igneous")
+        sample = BranchSample(name="Sample A", rock_type=root)
+
+        sample.full_clean()
+
+    @pytest.mark.django_db
+    def test_a_grandchild_validates(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        root = ConceptFactory(scheme=scheme, label="Igneous")
+        child = ConceptFactory(scheme=scheme, label="Granite")
+        grandchild = ConceptFactory(scheme=scheme, label="Porphyritic Granite")
+        child.add_broader(root)
+        grandchild.add_broader(child)
+        sample = BranchSample(name="Sample B", rock_type=grandchild)
+
+        sample.full_clean()
+
+    @pytest.mark.django_db
+    def test_a_sibling_branch_is_refused(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        ConceptFactory(scheme=scheme, label="Igneous")
+        sibling_root = ConceptFactory(scheme=scheme, label="Sedimentary")
+        sibling_child = ConceptFactory(scheme=scheme, label="Sandstone")
+        sibling_child.add_broader(sibling_root)
+        sample = BranchSample(name="Sample C", rock_type=sibling_child)
+
+        with pytest.raises(ValidationError):
+            sample.full_clean()
+
+    @pytest.mark.django_db
+    def test_the_concept_the_root_sits_below_is_refused(self):
+        # An inverted walk (T015) would pass this refusal too, which is
+        # exactly why tasks.md marks it non-optional.
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        root = ConceptFactory(scheme=scheme, label="Igneous")
+        ancestor = ConceptFactory(scheme=scheme, label="Rock")
+        root.add_broader(ancestor)
+        sample = BranchSample(name="Sample D", rock_type=ancestor)
+
+        with pytest.raises(ValidationError):
+            sample.full_clean()
+
+
+class TestConceptFieldBranchRestrictionRefusalMessage:
+    """T017 — extends the same re-raise with a fifth message id
+    (``decisions.md`` D11's naming pattern, ``invalid_restricted_<axis>``):
+    a field restricted to a branch names the branch root, as one static
+    msgid with a single named placeholder (Article XII), the same shape
+    T008 and T013 established. A consumer's own ``error_messages`` override
+    still works and the ``ForeignKey``'s own ``params`` are still carried
+    through."""
+
+    @pytest.mark.django_db
+    def test_the_refusal_names_the_branch_root(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        ConceptFactory(scheme=scheme, label="Igneous")
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+        sample = BranchSample(name="Sample E", rock_type=outsider)
+
+        with pytest.raises(ValidationError) as excinfo:
+            sample.full_clean()
+
+        assert any("igneous" in message for message in excinfo.value.messages)
+
+    @pytest.mark.django_db
+    def test_a_consumers_own_error_messages_override_still_works(self):
+        field = BranchSample._meta.get_field("rock_type")
+        original = field.error_messages["invalid_restricted_branch"]
+        field.error_messages["invalid_restricted_branch"] = "%(model)s pk=%(pk)s field=%(field)s in %(restriction)s"
+        try:
+            scheme = ConceptSchemeFactory(name="Rock Type")
+            ConceptFactory(scheme=scheme, label="Igneous")
+            outsider = ConceptFactory(scheme=scheme, label="Marble")
+            sample = BranchSample(name="Sample F", rock_type=outsider)
+
+            with pytest.raises(ValidationError) as excinfo:
+                sample.full_clean()
+
+            assert any("igneous" in message for message in excinfo.value.messages)
+        finally:
+            field.error_messages["invalid_restricted_branch"] = original
 
 
 class SpecimenForm(forms.ModelForm):

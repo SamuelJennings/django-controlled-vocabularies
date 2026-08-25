@@ -23,6 +23,8 @@ from controlled_vocabularies.models import (
 from tests.testapp.models import (
     Artifact,
     Borehole,
+    BranchSample,
+    BranchTray,
     ChipSample,
     ChipTray,
     CoreSample,
@@ -421,3 +423,26 @@ class ChipTrayFactory(factory.django.DjangoModelFactory):
         model = ChipTray
 
     name = factory.Sequence(lambda n: f"Chip tray {n}")
+
+
+class BranchSampleFactory(factory.django.DjangoModelFactory):
+    """Build a saved :class:`~tests.testapp.models.BranchSample` (FS-016
+    US-3). ``rock_type`` is optional and left unset by default — pass a
+    concept explicitly where a test needs one attached."""
+
+    class Meta:
+        model = BranchSample
+
+    name = factory.Sequence(lambda n: f"Branch sample {n}")
+
+
+class BranchTrayFactory(factory.django.DjangoModelFactory):
+    """Build a saved :class:`~tests.testapp.models.BranchTray` (FS-016
+    US-3). ``rock_types`` is a many-valued relation and cannot be set at
+    construction — attach concepts with ``.add()`` after the instance
+    exists."""
+
+    class Meta:
+        model = BranchTray
+
+    name = factory.Sequence(lambda n: f"Branch tray {n}")

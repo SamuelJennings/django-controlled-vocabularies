@@ -26,6 +26,51 @@ from django.utils.functional import Promise
 from django.utils.translation import gettext_lazy as _
 
 
+def _branch_closure(vocabulary, branch):
+    """The branch axis's downward closure (plan.md A3, research.md R5): the
+    concept named ``branch`` within ``vocabulary``, plus everything narrower
+    than it at any depth.
+
+    Iterative widening over the stored ``broader`` edges, never a single
+    recursive statement (Article II, research.md R5 — both backends support
+    a recursive CTE and neither is used anywhere in this package, and this
+    function is deliberately the only thing R7 would have to replace). The
+    direction is not obvious and is easy to invert: a ``BROADER`` row's
+    ``source`` is the *narrower* concept and its ``target`` the broader one
+    (``models.py:1161-1174``), and ``narrower`` is a reverse read rather
+    than a stored edge. Walking downward means matching each round's
+    frontier against ``target`` and collecting ``source`` as the next one.
+
+    Each round is subtracted against everything already seen before it is
+    added to the frontier — that subtraction, not a depth counter or a
+    separate guard, is what terminates the walk on a cyclic hierarchy
+    (FR-004, decisions.md D5): a two-edge cycle is storable through the
+    public API today, and a round that could re-add an already-seen concept
+    would loop forever without it.
+
+    A ``branch`` slug that does not resolve within ``vocabulary`` — absent
+    altogether, or belonging to a different one — starts with an empty
+    frontier and returns the empty set, the same unresolvable-target shape
+    the other two axes already give (plan.md A2).
+    """
+    from .models import Concept, ConceptRelation
+
+    seen = set(Concept.objects.filter(scheme__slug=vocabulary, slug=branch).values_list("pk", flat=True))
+    frontier = set(seen)
+    while frontier:
+        frontier = (
+            set(
+                ConceptRelation.objects.filter(
+                    kind=ConceptRelation.Kind.BROADER,
+                    target_id__in=frontier,
+                ).values_list("source_id", flat=True)
+            )
+            - seen
+        )
+        seen |= frontier
+    return seen
+
+
 class ConceptFieldMixin:
     """The ``vocabulary`` contract both concept fields keep, held in one place.
 
@@ -174,8 +219,10 @@ class ConceptFieldMixin:
         exactly those two places. The concepts axis (T013) needs none of
         that: ``slug__in`` is a plain column filter on ``Concept`` itself, so
         it cannot duplicate a row and is joined to the vocabulary term
-        directly rather than through a subquery. The branch axis adds its
-        own term in the story that follows.
+        directly rather than through a subquery. The branch axis (T018)
+        also needs a subquery, for the same reason as the collection axis:
+        it narrows with ``pk__in`` over :func:`_branch_closure`'s
+        materialised id set.
 
         The import is local, not top-level, for the same reason
         :meth:`formfield` defers its own: this method runs only once every
@@ -196,6 +243,9 @@ class ConceptFieldMixin:
             return vocabulary_term & Q(pk__in=members)
         if self.concepts is not None:
             return vocabulary_term & Q(slug__in=self.concepts)
+        if self.branch is not None:
+            (vocabulary,) = self.vocabulary
+            return vocabulary_term & Q(pk__in=_branch_closure(vocabulary, self.branch))
         return vocabulary_term
 
     def _apply_vocabulary(self, vocabulary, collection, concepts, branch, kwargs):
@@ -352,6 +402,11 @@ class ConceptField(ConceptFieldMixin, ForeignKey):
         # msgid from `invalid_restricted` because that one's text names a
         # *collection*, which would misdescribe this axis.
         "invalid_restricted_concepts": _("%(value)s is not one of the permitted concepts: '%(restriction)s'."),
+        # T017 (US-3, decisions.md D11's invalid_restricted_<axis> pattern):
+        # a branch-restricted field names the branch root, not the
+        # collection or concept list `invalid_restricted`/
+        # `invalid_restricted_concepts` would misdescribe it as.
+        "invalid_restricted_branch": _("%(value)s is not a valid concept in the '%(restriction)s' branch."),
     }
 
     default_help_text = _("A concept from this field's configured vocabulary or vocabularies.")
@@ -391,7 +446,8 @@ class ConceptField(ConceptFieldMixin, ForeignKey):
         instead of the vocabulary — that is what actually decided the
         refusal, and naming the wider vocabulary would tell a curator
         nothing about why a same-vocabulary concept was rejected. A
-        concepts-restricted field (T013, US-2) names the permitted concepts
+        concepts-restricted field (T013, US-2) names the permitted concepts,
+        and a branch-restricted field (T017, US-3) names the branch root,
         on the same reasoning.
         """
         try:
@@ -401,9 +457,10 @@ class ConceptField(ConceptFieldMixin, ForeignKey):
                 raise
             # Carry the ForeignKey's own params through. A consumer's
             # error_messages["invalid"]/["invalid_restricted"]/
-            # ["invalid_restricted_concepts"] is free to use `model`, `pk` or
-            # `field`, and dropping them would reproduce the same
-            # KeyError-on-read this override exists to prevent.
+            # ["invalid_restricted_concepts"]/["invalid_restricted_branch"]
+            # is free to use `model`, `pk` or `field`, and dropping them
+            # would reproduce the same KeyError-on-read this override
+            # exists to prevent.
             params = {**(exc.params or {}), "value": value}
             if self.collection is not None:
                 message = self.error_messages["invalid_restricted"]
@@ -411,6 +468,9 @@ class ConceptField(ConceptFieldMixin, ForeignKey):
             elif self.concepts is not None:
                 message = self.error_messages["invalid_restricted_concepts"]
                 params["restriction"] = ", ".join(self.concepts)
+            elif self.branch is not None:
+                message = self.error_messages["invalid_restricted_branch"]
+                params["restriction"] = self.branch
             elif self.vocabulary:
                 message = self.error_messages["invalid"]
                 params["vocabulary"] = ", ".join(self.vocabulary)
@@ -589,6 +649,14 @@ def _refuse_concepts_the_restriction_does_not_admit(*, field, instance, action, 
             _("%(value)s is not one of the permitted concepts: '%(restriction)s'."),
             code="invalid",
             params={"value": value, "restriction": ", ".join(field.concepts)},
+        )
+    if field.branch is not None:
+        raise ValidationError(
+            # T017 (US-3), same reasoning: the refusal names the branch
+            # root, which is what actually decided it.
+            _("%(value)s is not a valid concept in the '%(restriction)s' branch."),
+            code="invalid",
+            params={"value": value, "restriction": field.branch},
         )
     raise ValidationError(
         # A static message, with the vocabulary slugs joined into ONE

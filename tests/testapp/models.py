@@ -52,6 +52,13 @@ Two more carry a ``concepts`` restriction (FS-016 US-2):
   T014).
 - :class:`ChipTray` — an optional ``ConceptsField`` restricted the same
   way, for the many-valued write guard (T013).
+
+Two more carry a ``branch`` restriction (FS-016 US-3):
+
+- :class:`BranchSample` — an optional ``ConceptField`` restricted to the
+  "igneous" branch of the "rock-type" vocabulary's hierarchy (T017, T018).
+- :class:`BranchTray` — an optional ``ConceptsField`` restricted the same
+  way, for the many-valued write guard (T017).
 """
 
 from django.db import models
@@ -419,6 +426,57 @@ class ChipTray(models.Model):
         related_name="chip_trays",
         verbose_name=_("rock types"),
         help_text=_("The rock types logged for this chip tray, restricted to granite and basalt."),
+    )
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class BranchSample(models.Model):
+    """Carries an optional ``ConceptField`` restricted to the "igneous"
+    branch of the "rock-type" vocabulary's hierarchy (FS-016 US-3, T017).
+    The concept named "igneous" and everything narrower than it are built
+    per test, through ``add_broader()`` — this declaration only names the
+    root, exactly as ``CoreSample`` and ``ChipSample`` only name a
+    collection or a concept list without knowing its members."""
+
+    name = models.CharField(
+        max_length=255,
+        verbose_name=_("name"),
+        help_text=_("The branch sample's catalogue name."),
+    )
+    rock_type = ConceptField(
+        vocabulary="rock-type",
+        branch="igneous",
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name=_("rock type"),
+        help_text=_("The rock type this sample is classified as, drawn from the igneous branch."),
+    )
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class BranchTray(models.Model):
+    """Carries an optional ``ConceptsField`` restricted the same way, for the
+    many-valued write guard (FS-016 US-3, T017). ``related_name`` is a real
+    name, not ``"+"``, so the reverse-write branch of the guard has a live
+    accessor (``concept.branch_trays``) to drive it through."""
+
+    name = models.CharField(
+        max_length=255,
+        verbose_name=_("name"),
+        help_text=_("The branch tray's catalogue name."),
+    )
+    rock_types = ConceptsField(
+        vocabulary="rock-type",
+        branch="igneous",
+        blank=True,
+        related_name="branch_trays",
+        verbose_name=_("rock types"),
+        help_text=_("The rock types logged for this tray, drawn from the igneous branch."),
     )
 
     def __str__(self) -> str:
