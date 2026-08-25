@@ -226,6 +226,244 @@ class TestSharedVocabularyContract:
         assert field.clone().vocabulary == ("rock-type", "mineral")
 
 
+@pytest.mark.parametrize("field_class", [ConceptField, ConceptsField])
+class TestSharedRestrictionArguments:
+    """T001 (FR-001, FR-003, decisions.md D4) — both fields accept the three
+    restriction arguments — ``collection``, ``concepts``, ``branch`` — each
+    defaulting to ``None`` and normalised by the same rule
+    ``_normalise_vocabulary`` already applies to a vocabulary slug: a
+    non-empty string, or a ``TypeError`` naming the class. ``concepts``
+    additionally collapses duplicates and refuses an empty list.
+
+    Nothing resolves yet (plan.md A1): a restricted field still behaves
+    exactly like an unrestricted one until a later story teaches
+    ``get_limit_choices_to()`` to read these attributes. Every field built
+    here names exactly one vocabulary so FR-005 (T002) never fires and this
+    class tests normalisation alone.
+    """
+
+    def test_collection_defaults_to_none(self, field_class):
+        field = field_class(vocabulary="rock-type")
+        assert field.collection is None
+
+    def test_concepts_defaults_to_none(self, field_class):
+        field = field_class(vocabulary="rock-type")
+        assert field.concepts is None
+
+    def test_branch_defaults_to_none(self, field_class):
+        field = field_class(vocabulary="rock-type")
+        assert field.branch is None
+
+    def test_collection_normalises_and_stores_the_slug(self, field_class):
+        field = field_class(vocabulary="rock-type", collection="core-samples")
+        assert field.collection == "core-samples"
+
+    def test_branch_normalises_and_stores_the_slug(self, field_class):
+        field = field_class(vocabulary="rock-type", branch="igneous")
+        assert field.branch == "igneous"
+
+    def test_concepts_normalises_and_collapses_duplicates(self, field_class):
+        field = field_class(vocabulary="rock-type", concepts=["granite", "basalt", "granite"])
+        assert field.concepts == ("granite", "basalt")
+
+    def test_collection_rejects_a_non_string(self, field_class):
+        with pytest.raises(TypeError, match=field_class.__name__):
+            field_class(vocabulary="rock-type", collection=42)
+
+    def test_collection_rejects_an_empty_string(self, field_class):
+        with pytest.raises(TypeError, match=field_class.__name__):
+            field_class(vocabulary="rock-type", collection="")
+
+    def test_branch_rejects_a_non_string(self, field_class):
+        with pytest.raises(TypeError, match=field_class.__name__):
+            field_class(vocabulary="rock-type", branch=42)
+
+    def test_branch_rejects_an_empty_string(self, field_class):
+        with pytest.raises(TypeError, match=field_class.__name__):
+            field_class(vocabulary="rock-type", branch="")
+
+    def test_concepts_rejects_a_non_string_element(self, field_class):
+        with pytest.raises(TypeError, match=field_class.__name__):
+            field_class(vocabulary="rock-type", concepts=["granite", 42])
+
+    def test_concepts_rejects_an_empty_string_element(self, field_class):
+        with pytest.raises(TypeError, match=field_class.__name__):
+            field_class(vocabulary="rock-type", concepts=["granite", ""])
+
+    def test_concepts_rejects_an_empty_list(self, field_class):
+        """FR-003, decisions.md D4 — a restriction that offers nothing while
+        reading as restricted is not what a consumer writing it meant."""
+        with pytest.raises(TypeError, match=field_class.__name__):
+            field_class(vocabulary="rock-type", concepts=[])
+
+    def test_concepts_accepts_a_single_slug_without_splitting_it(self, field_class):
+        """``collection`` and ``branch`` both take a bare slug, so a consumer
+        will write one for ``concepts`` too. It has to become a one-element
+        restriction, the shape ``vocabulary`` already accepts — iterating the
+        string instead yields a slug per character, which every check here
+        would pass."""
+        field = field_class(vocabulary="rock-type", concepts="granite")
+        assert field.concepts == ("granite",)
+
+
+@pytest.mark.parametrize("field_class", [ConceptField, ConceptsField])
+class TestSharedRestrictionRequiresOneVocabulary:
+    """T002 (FR-005) — a restriction needs exactly one named vocabulary,
+    checked after ``_normalise_vocabulary`` has run so "several" and "none"
+    are one condition rather than two branches (plan.md A1)."""
+
+    def test_a_restriction_naming_no_vocabulary_is_refused(self, field_class):
+        with pytest.raises(TypeError, match=field_class.__name__):
+            field_class(branch="igneous")
+
+    def test_a_restriction_naming_several_vocabularies_is_refused(self, field_class):
+        with pytest.raises(TypeError, match=field_class.__name__):
+            field_class(vocabulary=["rock-type", "mineral"], collection="core-samples")
+
+    def test_a_restriction_naming_exactly_one_vocabulary_is_accepted(self, field_class):
+        field = field_class(vocabulary="rock-type", collection="core-samples")
+        assert field.collection == "core-samples"
+
+    def test_no_restriction_naming_no_vocabulary_is_unaffected(self, field_class):
+        """FR-014 — a declaration using none of the three restrictions behaves
+        exactly as it did before this feature existed, including naming no
+        vocabulary at all."""
+        field = field_class()
+        assert field.vocabulary == ()
+
+    def test_no_restriction_naming_several_vocabularies_is_unaffected(self, field_class):
+        field = field_class(vocabulary=["rock-type", "mineral"])
+        assert field.vocabulary == ("rock-type", "mineral")
+
+
+@pytest.mark.parametrize("field_class", [ConceptField, ConceptsField])
+class TestSharedRestrictionExclusivity:
+    """T003 (FR-006, decisions.md D1) — at most one of collection/concepts/
+    branch. Two or more has no single defensible reading — an intersection
+    and a union are equally plausible — so no reading is chosen."""
+
+    def test_collection_and_concepts_together_are_refused(self, field_class):
+        with pytest.raises(TypeError, match=field_class.__name__):
+            field_class(vocabulary="rock-type", collection="core-samples", concepts=["granite"])
+
+    def test_collection_and_branch_together_are_refused(self, field_class):
+        with pytest.raises(TypeError, match=field_class.__name__):
+            field_class(vocabulary="rock-type", collection="core-samples", branch="igneous")
+
+    def test_concepts_and_branch_together_are_refused(self, field_class):
+        with pytest.raises(TypeError, match=field_class.__name__):
+            field_class(vocabulary="rock-type", concepts=["granite"], branch="igneous")
+
+    def test_all_three_together_are_refused(self, field_class):
+        with pytest.raises(TypeError, match=field_class.__name__):
+            field_class(vocabulary="rock-type", collection="core-samples", concepts=["granite"], branch="igneous")
+
+
+@pytest.mark.parametrize("field_class", [ConceptField, ConceptsField])
+class TestSharedRestrictionDeconstruct:
+    """T004 (FR-011, FR-014, plan.md A7) — a restriction survives
+    ``deconstruct()`` and rebuilds. Emitted only when set, so a declaration
+    using none produces byte-identical output to before this feature
+    (already covered by ``TestSharedVocabularyContract``); this class covers
+    the restricted case, one axis at a time."""
+
+    def test_collection_is_emitted_and_survives_the_round_trip(self, field_class):
+        field = field_class(vocabulary="rock-type", collection="core-samples")
+        _name, path, args, kwargs = field.deconstruct()
+
+        assert kwargs["collection"] == "core-samples"
+        assert "concepts" not in kwargs
+        assert "branch" not in kwargs
+
+        rebuilt = import_string(path)(*args, **kwargs)
+        assert rebuilt.collection == "core-samples"
+
+    def test_concepts_is_emitted_and_survives_the_round_trip(self, field_class):
+        field = field_class(vocabulary="rock-type", concepts=["granite", "basalt"])
+        _name, path, args, kwargs = field.deconstruct()
+
+        assert kwargs["concepts"] == ("granite", "basalt")
+        assert "collection" not in kwargs
+        assert "branch" not in kwargs
+
+        rebuilt = import_string(path)(*args, **kwargs)
+        assert rebuilt.concepts == ("granite", "basalt")
+
+    def test_branch_is_emitted_and_survives_the_round_trip(self, field_class):
+        field = field_class(vocabulary="rock-type", branch="igneous")
+        _name, path, args, kwargs = field.deconstruct()
+
+        assert kwargs["branch"] == "igneous"
+        assert "collection" not in kwargs
+        assert "concepts" not in kwargs
+
+        rebuilt = import_string(path)(*args, **kwargs)
+        assert rebuilt.branch == "igneous"
+
+    def test_no_restriction_emits_none_of_the_three(self, field_class):
+        field = field_class(vocabulary="rock-type")
+        _name, _path, _args, kwargs = field.deconstruct()
+
+        assert "collection" not in kwargs
+        assert "concepts" not in kwargs
+        assert "branch" not in kwargs
+
+    def test_a_restricted_fields_deconstructed_kwargs_carry_no_limit_choices_to(self, field_class):
+        """Guards the unconditional ``kwargs.pop("limit_choices_to", None)``
+        that keeps T005's callable out of migration output — a later change
+        to that pop should fail here, not in a generated migration."""
+        field = field_class(vocabulary="rock-type", collection="core-samples")
+        _name, _path, _args, kwargs = field.deconstruct()
+        assert "limit_choices_to" not in kwargs
+
+    def test_clone_rebuilds_a_restricted_field(self, field_class):
+        """``clone()`` is what ``ModelState.from_model()`` calls on every
+        local field, so a contract that does not survive it breaks every
+        ``makemigrations`` and every test-database build."""
+        field = field_class(vocabulary="rock-type", branch="igneous")
+        cloned = field.clone()
+        assert cloned.branch == "igneous"
+
+
+@pytest.mark.parametrize("field_class", [ConceptField, ConceptsField])
+class TestSharedLimitChoicesToCallable:
+    """T005 (FR-007, research.md R2) — ``limit_choices_to`` becomes a
+    callable returning today's vocabulary ``Q``, installed as the seam later
+    stories resolve a restriction through. This task changes no observable
+    behaviour: every existing field test in this module still proves it,
+    unmodified."""
+
+    def test_get_limit_choices_to_returns_the_vocabulary_q(self, field_class):
+        field = field_class(vocabulary="rock-type")
+        assert field.get_limit_choices_to() == Q(scheme__slug__in=("rock-type",))
+
+    def test_limit_choices_to_is_callable_when_a_vocabulary_is_named(self, field_class):
+        field = field_class(vocabulary="rock-type")
+        assert callable(field.remote_field.limit_choices_to)
+
+    @pytest.mark.django_db
+    def test_construction_issues_no_query(self, field_class):
+        """FR-007 — the callable is installed, never invoked, while the
+        declaration is only being read."""
+        with CaptureQueriesContext(connection) as ctx:
+            field_class(vocabulary="rock-type")
+        assert len(ctx.captured_queries) == 0
+
+    def test_no_vocabulary_named_sets_no_restriction_at_all(self, field_class):
+        """Not a callable returning an empty Q that matches everything —
+        nothing is set, exactly as before this feature."""
+        field = field_class()
+        assert field.get_limit_choices_to() == {}
+        assert field.remote_field.limit_choices_to == {}
+
+    def test_a_restriction_present_still_resolves_to_only_the_vocabulary_q(self, field_class):
+        """T005's own scope: the seam is installed with no restriction
+        behind it yet. A restricted field's choices resolve exactly like an
+        unrestricted one until a later story teaches this method the axis."""
+        field = field_class(vocabulary="rock-type", collection="core-samples")
+        assert field.get_limit_choices_to() == Q(scheme__slug__in=("rock-type",))
+
+
 class TestConceptFieldConstruction:
     """FR-001, FR-002, FR-007, FR-010 — the kwargs a consumer does not supply."""
 

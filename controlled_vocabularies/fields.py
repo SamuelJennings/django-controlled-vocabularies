@@ -85,14 +85,102 @@ class ConceptFieldMixin:
                 raise TypeError(f"{type(self).__name__}() vocabulary elements must be non-empty strings; got {slug!r}.")
         return tuple(dict.fromkeys(slugs))
 
-    def _apply_vocabulary(self, vocabulary, kwargs):
-        """Store the normalised ``vocabulary`` and fill in the kwargs it decides.
+    def _normalise_restriction_slug(self, value, argument_name):
+        """Validate a single restriction target (``collection``, ``branch``) by
+        the same rule :meth:`_normalise_vocabulary` applies to a vocabulary
+        slug: a non-empty string, or a ``TypeError`` naming the class.
+        """
+        if not isinstance(value, str) or not value:
+            raise TypeError(f"{type(self).__name__}() {argument_name} must be a non-empty string; got {value!r}.")
+        return value
+
+    def _normalise_concepts(self, concepts):
+        """Validate and normalise the ``concepts`` restriction (FR-003).
+
+        Every element must be a non-empty string, duplicates are collapsed
+        with the same ``dict.fromkeys`` idiom :meth:`_normalise_vocabulary`
+        uses, and an empty list is refused — the same reasoning that already
+        refuses an empty vocabulary slug: it reads as a restriction and
+        offers nothing (``decisions.md`` D4).
+
+        A single slug is accepted as a one-element restriction, the shape
+        :meth:`_normalise_vocabulary` already accepts. Without that branch a
+        string is iterated character by character, so ``concepts="granite"``
+        would become seven one-letter slugs and pass every check here — a
+        declaration that is wrong in a way nothing downstream can name.
+        """
+        slugs = (concepts,) if isinstance(concepts, str) else tuple(concepts)
+        for slug in slugs:
+            if not isinstance(slug, str) or not slug:
+                raise TypeError(f"{type(self).__name__}() concepts elements must be non-empty strings; got {slug!r}.")
+        normalised = tuple(dict.fromkeys(slugs))
+        if not normalised:
+            raise TypeError(
+                f"{type(self).__name__}() concepts must not be an empty list; omit the argument for no restriction."
+            )
+        return normalised
+
+    def _apply_restriction(self, collection, concepts, branch):
+        """Normalise the three restriction arguments and enforce the two
+        declaration rules that keep them meaningful (FR-005, FR-006).
+
+        Stores the normalised values as ``self.collection``, ``self.concepts``
+        and ``self.branch`` — ``None`` when the declaration did not name that
+        restriction. Must run after ``self.vocabulary`` is set, since FR-005
+        reads it. Resolving a restriction into a queryset is a later story's
+        work; this only decides whether the declaration is one this package
+        accepts.
+        """
+        self.collection = None if collection is None else self._normalise_restriction_slug(collection, "collection")
+        self.concepts = None if concepts is None else self._normalise_concepts(concepts)
+        self.branch = None if branch is None else self._normalise_restriction_slug(branch, "branch")
+
+        restriction_names = [
+            name
+            for name, value in (
+                ("collection", self.collection),
+                ("concepts", self.concepts),
+                ("branch", self.branch),
+            )
+            if value is not None
+        ]
+
+        if restriction_names and len(self.vocabulary) != 1:
+            raise TypeError(
+                f"{type(self).__name__}() a restriction ({', '.join(restriction_names)}) requires the "
+                f"declaration to name exactly one vocabulary; got {len(self.vocabulary)}."
+            )
+        if len(restriction_names) > 1:
+            raise TypeError(
+                f"{type(self).__name__}() at most one of collection, concepts, branch may be given; "
+                f"got {', '.join(restriction_names)}."
+            )
+
+    def _resolve_restriction(self):
+        """The callable installed as ``limit_choices_to`` (research.md R2):
+        resolved at validation time, form-build time, widget-render time and
+        search time alike, never while the declaration is merely being read
+        (FR-007).
+
+        Only the vocabulary term resolves today — the collection, concepts
+        and branch axes each add their own term to this method in the
+        stories that follow.
+        """
+        return Q(scheme__slug__in=self.vocabulary)
+
+    def _apply_vocabulary(self, vocabulary, collection, concepts, branch, kwargs):
+        """Store the normalised ``vocabulary`` and restriction, and fill in the
+        kwargs they decide.
 
         ``limit_choices_to`` is set only when the declaration named at least one
         vocabulary — an empty restriction is not set at all, rather than a
         restriction that matches everything by accident. It is also refused from
         a consumer, because the vocabulary constraint *is* ``limit_choices_to``,
         so accepting one would silently discard either theirs or the constraint.
+
+        Installed as a **callable** (research.md R2) rather than a bare ``Q``,
+        so it is re-resolved at every one of the four paths research.md R1
+        found, and never evaluated while the declaration is only being read.
         """
         if "limit_choices_to" in kwargs:
             raise TypeError(
@@ -100,9 +188,10 @@ class ConceptFieldMixin:
                 "to 'vocabulary'; a consumer may not override it."
             )
         self.vocabulary = self._normalise_vocabulary(vocabulary)
+        self._apply_restriction(collection, concepts, branch)
         kwargs["to"] = "controlled_vocabularies.Concept"
         if self.vocabulary:
-            kwargs["limit_choices_to"] = Q(scheme__slug__in=self.vocabulary)
+            kwargs["limit_choices_to"] = self._resolve_restriction
         kwargs.setdefault("help_text", self.default_help_text)
         return kwargs
 
@@ -167,6 +256,12 @@ class ConceptFieldMixin:
         kwargs.pop("on_delete", None)
         kwargs.pop("limit_choices_to", None)
         kwargs["vocabulary"] = self.vocabulary
+        if self.collection is not None:
+            kwargs["collection"] = self.collection
+        if self.concepts is not None:
+            kwargs["concepts"] = self.concepts
+        if self.branch is not None:
+            kwargs["branch"] = self.branch
         return name, path, args, kwargs
 
 
@@ -221,11 +316,11 @@ class ConceptField(ConceptFieldMixin, ForeignKey):
 
     default_help_text = _("A concept from this field's configured vocabulary or vocabularies.")
 
-    def __init__(self, vocabulary=None, **kwargs):
+    def __init__(self, vocabulary=None, collection=None, concepts=None, branch=None, **kwargs):
         if "on_delete" in kwargs:
             raise TypeError("ConceptField() sets on_delete=PROTECT itself; a consumer may not override it.")
         kwargs["on_delete"] = PROTECT
-        super().__init__(**self._apply_vocabulary(vocabulary, kwargs))
+        super().__init__(**self._apply_vocabulary(vocabulary, collection, concepts, branch, kwargs))
 
     def validate(self, value, model_instance):
         """Refuse a concept outside the named vocabulary, with a message that
@@ -534,13 +629,13 @@ class ConceptsField(ConceptFieldMixin, ManyToManyField):
 
     default_help_text = _("Concepts from this field's configured vocabulary or vocabularies.")
 
-    def __init__(self, vocabulary=None, **kwargs):
+    def __init__(self, vocabulary=None, collection=None, concepts=None, branch=None, **kwargs):
         if "through" in kwargs:
             raise TypeError(
                 "ConceptsField() generates its own through model with PROTECT on the "
                 "foreign key to Concept; a consumer may not override it."
             )
-        super().__init__(**self._apply_vocabulary(vocabulary, kwargs))
+        super().__init__(**self._apply_vocabulary(vocabulary, collection, concepts, branch, kwargs))
 
     def contribute_to_class(self, cls, name, **kwargs):
         """Attach the field, then generate the ``PROTECT`` membership model in
