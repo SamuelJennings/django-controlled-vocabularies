@@ -14,6 +14,7 @@ from django.urls import reverse
 
 from tests.factories import ConceptSchemeFactory
 
+
 def visible_text(element) -> str:
     """``element``'s text with any ``.sr-only`` descendant's own text left out.
 
@@ -300,15 +301,26 @@ class TestPropertyRowRecordValueDisclosesIdentifierOnHover:
         assert "http://publisher.example.org/concept/granite" not in visible_text(dd)
 
 
-def _tailwind_selector(class_token: str) -> str:
-    """The class selector as the shipped stylesheet actually spells it: Tailwind
-    backslash-escapes a colon or a slash inside a compiled class name (memory: "built CSS
-    escapes the colon" — the same is true of the slash a class like
-    ``text-base-content/60`` carries), so a plain ``.token{`` search returns a false zero
-    for a class that is plainly present.
+# A class name never continues past one of these in the shipped stylesheet: the brace of a
+# standalone rule, or a combinator, attribute selector, pseudo-class or list separator gluing
+# it to the rest of a compound selector. Required so "tooltip-right" cannot match a would-be
+# "tooltip-rightmost" — the boundary check is what makes the match a name match rather than a
+# prefix match.
+_SELECTOR_BOUNDARY = r"[{>:,\[)\s]"
+
+
+def _tailwind_selector_pattern(class_token: str) -> re.Pattern[str]:
+    """A regex matching ``class_token`` as the shipped stylesheet actually spells it, at a
+    real selector boundary: Tailwind backslash-escapes a colon or a slash inside a compiled
+    class name (memory: "built CSS escapes the colon" — the same is true of the slash a class
+    like ``text-base-content/60`` carries), so the escaped spelling is matched, not the raw
+    token. And daisyUI's positional tooltip classes such as ``tooltip-right`` never appear as
+    a standalone ``.token{`` rule — only glued to a combinator or another selector, e.g.
+    ``.tooltip-right>.tooltip-content`` or ``.tooltip-right:after`` — so a bare ``{`` search
+    returns a false negative for a class that is plainly shipped and would work.
     """
-    escaped = class_token.replace("/", r"\/").replace(":", r"\:")
-    return f".{escaped}{{"
+    escaped = re.escape(class_token.replace("/", r"\/").replace(":", r"\:"))
+    return re.compile(rf"\.{escaped}(?={_SELECTOR_BOUNDARY})")
 
 
 class TestPropertyRowClasses:
@@ -325,7 +337,16 @@ class TestPropertyRowClasses:
 
         assert tokens, "the component names no class at all — nothing for this test to prove"
         for token in tokens:
-            assert _tailwind_selector(token) in css, f"{token!r} is not in the shipped stylesheet"
+            assert _tailwind_selector_pattern(token).search(css), f"{token!r} is not in the shipped stylesheet"
+
+    def test_a_class_shipped_only_inside_a_compound_selector_is_still_found(self):
+        # tooltip-right (015-read-single-record second round) never appears as a standalone
+        # rule — only as ".tooltip-right>.tooltip-content,.tooltip-right[data-tip]:before" and
+        # ".tooltip-right:after". A matcher that only accepted a trailing "{" would report this
+        # class absent though it ships and works, which is the false negative this guard exists
+        # to fix.
+        css = MVP_CSS_PATH.read_text()
+        assert _tailwind_selector_pattern("tooltip-right").search(css)
 
     def test_the_presence_check_discriminates_rather_than_passing_regardless(self):
         # A control class the build has no reason to emit: this package's own component
@@ -333,4 +354,11 @@ class TestPropertyRowClasses:
         # real class from an absent one instead of matching anything handed to it — which
         # is exactly the failure mode an invented class would hit in silence otherwise.
         css = MVP_CSS_PATH.read_text()
-        assert _tailwind_selector("cv-property-row-invented-class") not in css
+        assert _tailwind_selector_pattern("cv-property-row-invented-class").search(css) is None
+
+    def test_the_boundary_does_not_let_a_shorter_class_match_inside_a_longer_ones_name(self):
+        # Widening the boundary to accept a compound selector must not widen it into a prefix
+        # match: a stylesheet naming only ".tooltip-rightmost" never ships "tooltip-right" at
+        # all, so the check for the shorter name must still report it absent.
+        css = ".tooltip-rightmost{color:red}"
+        assert _tailwind_selector_pattern("tooltip-right").search(css) is None
