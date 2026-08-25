@@ -6,7 +6,7 @@ authors = ["Sam Jennings"]
 license = "MIT"
 readme = "README.md"
 packages = [{include = "controlled_vocabularies"}]
-homepage = "https://github.com/SamuelJennings/django-controlled-vocabularies"
+homepage = "https://github.com/FAIR-DM/django-controlled-vocabularies"
 keywords = ["django", "SKOS", "RDF", "controlled vocabulary", "thesaurus", "research", "FAIR", "metadata"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",

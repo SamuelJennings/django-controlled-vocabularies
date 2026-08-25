@@ -40,13 +40,13 @@ Nothing else can be built until the system can represent a vocabulary and everyt
 this goes first. It shipped as four features:
 
 - a vocabulary and its concepts
-  ([#15](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/15));
+  ([#15](https://github.com/FAIR-DM/django-controlled-vocabularies/issues/15));
 - multilingual labels and notes
-  ([#16](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/16));
+  ([#16](https://github.com/FAIR-DM/django-controlled-vocabularies/issues/16));
 - the relationship graph
-  ([#17](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/17));
+  ([#17](https://github.com/FAIR-DM/django-controlled-vocabularies/issues/17));
 - collections
-  ([#18](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/18)).
+  ([#18](https://github.com/FAIR-DM/django-controlled-vocabularies/issues/18)).
 
 **Deliverables:**
 
@@ -62,7 +62,7 @@ curator-facing interface is one coherent piece of work, and building a quarter o
 model in turn produces something nobody would want to keep.
 
 The concept lifecycle moved to R4
-([#19](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/19), closed as
+([#19](https://github.com/FAIR-DM/django-controlled-vocabularies/issues/19), closed as
 deferred rather than rejected). A concept only becomes unsafe to remove once the vocabulary holding
 it has been published, and publication is a vocabulary-level release event that arrives with R4.
 Until something can reference a concept, a delete guard defends against a harm that cannot happen.
@@ -79,13 +79,13 @@ published as Turtle, large external sets, and whatever a curator starts from. Un
 nothing downstream could be tested against real data. It shipped as four features:
 
 - concepts keeping the identifier they were published under
-  ([#49](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/49));
+  ([#49](https://github.com/FAIR-DM/django-controlled-vocabularies/issues/49));
 - importing a published SKOS vocabulary from a file, in any of Turtle, RDF/XML, or JSON-LD
-  ([#50](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/50));
+  ([#50](https://github.com/FAIR-DM/django-controlled-vocabularies/issues/50));
 - keeping the languages the site supports and reporting the rest
-  ([#51](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/51));
+  ([#51](https://github.com/FAIR-DM/django-controlled-vocabularies/issues/51));
 - running an import from the command line
-  ([#52](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/52)).
+  ([#52](https://github.com/FAIR-DM/django-controlled-vocabularies/issues/52)).
 
 **Deliverables:**
 

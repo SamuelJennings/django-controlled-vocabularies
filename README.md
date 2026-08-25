@@ -1,10 +1,10 @@
 # django-controlled-vocabularies
 
-[![Tests](https://github.com/SamuelJennings/django-controlled-vocabularies/actions/workflows/tests.yml/badge.svg)](https://github.com/SamuelJennings/django-controlled-vocabularies/actions/workflows/tests.yml)
-[![Build](https://github.com/SamuelJennings/django-controlled-vocabularies/actions/workflows/build.yml/badge.svg)](https://github.com/SamuelJennings/django-controlled-vocabularies/actions/workflows/build.yml)
-[![Publish](https://github.com/SamuelJennings/django-controlled-vocabularies/actions/workflows/publish.yml/badge.svg)](https://github.com/SamuelJennings/django-controlled-vocabularies/actions/workflows/publish.yml)
+[![Tests](https://github.com/FAIR-DM/django-controlled-vocabularies/actions/workflows/tests.yml/badge.svg)](https://github.com/FAIR-DM/django-controlled-vocabularies/actions/workflows/tests.yml)
+[![Build](https://github.com/FAIR-DM/django-controlled-vocabularies/actions/workflows/build.yml/badge.svg)](https://github.com/FAIR-DM/django-controlled-vocabularies/actions/workflows/build.yml)
+[![Publish](https://github.com/FAIR-DM/django-controlled-vocabularies/actions/workflows/publish.yml/badge.svg)](https://github.com/FAIR-DM/django-controlled-vocabularies/actions/workflows/publish.yml)
 [![PyPI](https://img.shields.io/pypi/v/django-controlled-vocabularies.svg)](https://pypi.org/project/django-controlled-vocabularies/)
-[![codecov](https://codecov.io/gh/SamuelJennings/django-controlled-vocabularies/branch/main/graph/badge.svg)](https://codecov.io/gh/SamuelJennings/django-controlled-vocabularies)
+[![codecov](https://codecov.io/gh/FAIR-DM/django-controlled-vocabularies/branch/main/graph/badge.svg)](https://codecov.io/gh/FAIR-DM/django-controlled-vocabularies)
 [![Python Versions](https://img.shields.io/pypi/pyversions/django-controlled-vocabularies.svg)](https://pypi.org/project/django-controlled-vocabularies/)
 [![Django Versions](https://img.shields.io/pypi/djversions/django-controlled-vocabularies.svg)](https://pypi.org/project/django-controlled-vocabularies/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -493,7 +493,7 @@ area, and django-mvp offers no way to add anything there without replacing the w
 Until django-mvp 0.19.2 the search box on this page could not be submitted at all: its input was
 tied to a form only the filter control created
 ([django-mvp#282](https://github.com/django-mvp/django-mvp/issues/282), tracked here as
-[#147](https://github.com/SamuelJennings/django-controlled-vocabularies/issues/147)). This package
+[#147](https://github.com/FAIR-DM/django-controlled-vocabularies/issues/147)). This package
 waited for the upstream fix rather than shipping a patched copy of django-mvp's page, and the
 version floor moved once the fix was released. An override in a package like this one outlives the
 release that makes it unnecessary, and nothing ever reports that it has
