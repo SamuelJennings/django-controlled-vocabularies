@@ -571,10 +571,10 @@ A CURIE abbreviates a URI, and both kinds on the page disclose the URI they stan
 rather than printing it. A term's comes from `curie_uri()` in the same module, which expands a
 prefixed name against the namespaces the package declares and refuses one it does not. A
 record-valued row's is the record's own canonical identifier. Hovering is not the only way to reach
-either. A term is marked up as an `<abbr>` carrying its URI as the expansion a screen reader
-announces. A record-valued row's short form is a link, so its URI lives in a visually-hidden element
-the link points at as its own description, which a screen reader reads out and which keyboard focus
-reveals along with the tooltip.
+either. A term is not interactive, so its URI sits beside it in a visually-hidden element a screen
+reader reads out in place. A record-valued row's short form is a link, so its URI lives in a
+visually-hidden element the link points at as its own description, which a screen reader reads out
+and which keyboard focus reveals along with the tooltip.
 
 Below the definition list and outside it, the page also names every collection that gathers the
 concept, under a heading reading "Member of". Membership is a statement other records make about
