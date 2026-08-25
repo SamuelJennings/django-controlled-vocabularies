@@ -3,38 +3,48 @@
   "feature": "016-narrow-field-choices",
   "branch": "016-narrow-field-choices",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "PLAN",
+  "state": "IMPLEMENT",
   "state_history": [
     {
       "state": "INTAKE",
-      "at": "2026-08-25T00:00:00+02:00",
-      "note": "Grilled from free text; issue #164 filed."
+      "at": "2026-08-25T11:00:00Z",
+      "note": "Grilled from free text; issue #164 filed. (timestamp approximate: S0-S3 ran in one session and were backfilled at S3 exit)"
     },
     {
       "state": "SPECIFY",
-      "at": "2026-08-25T00:00:00+02:00",
-      "note": "spec.md, decisions.md; spec lint green."
+      "at": "2026-08-25T11:00:00Z",
+      "note": "spec.md, decisions.md; spec lint green. (timestamp approximate: S0-S3 ran in one session and were backfilled at S3 exit)"
     },
     {
       "state": "SETUP",
-      "at": "2026-08-25T00:00:00+02:00",
-      "note": "Epic #164; stories #165-#171; draft PR #172."
+      "at": "2026-08-25T11:00:00Z",
+      "note": "Epic #164; stories #165-#171; draft PR #172. (timestamp approximate: S0-S3 ran in one session and were backfilled at S3 exit)"
     },
     {
       "state": "GATE_SPEC",
-      "at": "2026-08-25T00:00:00+02:00",
-      "note": "Approved by Sam."
+      "at": "2026-08-25T11:00:00Z",
+      "note": "Approved by Sam. (timestamp approximate: S0-S3 ran in one session and were backfilled at S3 exit)"
     },
     {
       "state": "PLAN",
-      "at": "2026-08-25T00:00:00+02:00",
-      "note": "research.md R1-R8, plan.md, tasks.md T001-T025."
+      "at": "2026-08-25T11:00:00Z",
+      "note": "research.md R1-R8, plan.md, tasks.md T001-T025. (timestamp approximate: S0-S3 ran in one session and were backfilled at S3 exit)"
+    },
+    {
+      "state": "DESIGN_REVIEW",
+      "at": "2026-08-25T11:04:51Z",
+      "note": "S3 exit green; dispatching the design reviewer"
+    },
+    {
+      "state": "IMPLEMENT",
+      "at": "2026-08-25T11:30:00Z",
+      "note": "Design review returned request_changes (1 high, 4 medium, 1 low). All six applied to the design artefacts; the high moved the ordered sequence from the widget to the autocomplete endpoint (D8). Plan filed as a veto notification, not a gate. Implementation starting."
     }
   ],
   "gates": {
     "spec": {
       "approved_by": "SamuelJennings",
-      "at": "2026-08-25T00:00:00+02:00",
+      "at": "2026-08-25T11:00:00Z",
       "self_resolved": [
         "D1 three restrictions exclude one another rather than composing",
         "D2 declaration rules fail at declaration read, not at validation",
@@ -46,8 +56,16 @@
       ]
     },
     "plan": {
-      "approved_by": null,
-      "at": null
+      "approved_by": "forge",
+      "at": "2026-08-25T11:30:00Z",
+      "self_resolved": [
+        "D8 ordered sequence applied at the autocomplete endpoint, empty-query only, via a Subquery annotation",
+        "D9 branch closure cost recorded as per-request on an anonymous endpoint, inherited by R7",
+        "W005 resolves targets on (vocabulary slug, target slug) pairs, not a flat slug set",
+        "test-app models and one consolidated migration added to plan scope",
+        "T016 cycle built with two add_broader() calls; D5 and spec prose corrected on what the relation model refuses",
+        "_refuse_concepts_outside_vocabulary renamed to match what it now tests"
+      ]
     },
     "merge": {
       "approved_by": null,
@@ -254,7 +272,7 @@
       "max": 1
     },
     "design_review_cycles": {
-      "used": 0,
+      "used": 1,
       "max": 1
     },
     "tokens": {

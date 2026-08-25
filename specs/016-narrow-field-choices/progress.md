@@ -6,3 +6,6 @@
 | 2026-08-25 | S1 SPECIFY — `specs/016-narrow-field-choices/` created on branch `016-narrow-field-choices`. spec.md: 7 stories, 14 FRs, 7 SCs. Coverage scan resolved 3 further ambiguities into `## Clarifications`; 7 decisions recorded in decisions.md. Spec lint green. |
 | 2026-08-25 | S2 SETUP — #164 promoted to epic; stories #165–#171 created and linked; draft PR #172 opened (bot-authored, milestone v0.1.0, `Closes` block for epic + all 7 stories). Title lint green. |
 | 2026-08-25 | **Spec gate: APPROVED** by Sam. Proceeding to S3 PLAN. |
+| 2026-08-25 | S3 PLAN — research.md R1–R8, plan.md, tasks.md T001–T025, ledger. Machine checks green. |
+| 2026-08-25 | S3R DESIGN REVIEW — one reviewer, three lenses, single round. `request_changes`: 1 high, 4 medium, 1 low. All six applied. The high: the ordered sequence was placed on the widget queryset, which the selection control never renders — moved to `ConceptAutocompleteView.apply_ordering()`, empty-query only (D8). Also: test-app models and their migration added to plan scope; W005 resolves on (vocabulary, target) pairs; branch closure cost recorded as per-request and unauthenticated (D9); cycle construction and the relation-model prose corrected. |
+| 2026-08-25 | **Plan filed for veto**, not gated. Proceeding to S4 IMPLEMENT. |

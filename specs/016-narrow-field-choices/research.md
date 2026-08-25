@@ -127,22 +127,36 @@ filter. Can it carry an ordering?
 applies a `Q`; it cannot impose an `order_by`. The ordering has to be applied where a queryset is
 built, and R1 lists three such places, of which two belong to this package:
 
-- `forms.py:85`, `ConceptWidgetValidationMixin.get_queryset()` — the choices the control offers.
-- `views.py:116`, `_restrict_to_declaration()` — the search endpoint's results. This one already
-  paginates and sorts by relevance, so imposing a curator order here is a change to search
-  behaviour, not a small addition.
+- `forms.py:85`, `ConceptWidgetValidationMixin.get_queryset()` — **not** the browsable list.
+  Verified against the resolved `django_tomselect` 2026.6.2:
+  `templates/django_tomselect/render/select.html` emits a bare `<select></select>` with no option
+  loop, and `tomselect.html:360-377` seeds the client only from `widget.selected_options`. This
+  queryset therefore feeds validation (`django_tomselect/forms.py:209-215`) and the render of a
+  value the record already holds (`widgets.py:965`). Ordering it changes nothing a person sees.
+- `views.py`, `ConceptAutocompleteView` — **this is the browsable list.** Every option a person
+  scrolls arrives over the autocomplete URL, ordered `("label", "pk")` (`views.py:40`) and
+  paginated at 20 (`views.py:39`).
 - Django's own `apply_limit_choices_to_to_formfield` — not ours to change.
 
-**Decision: apply the ordering in the widget path only, and specify it as such.** That is where a
-person picking from a small collection actually sees a list. Leaving the search endpoint alone is
-deliberate — a search result ordered by curator position rather than by match quality is worse, not
-better, and no requirement asks for it. This is the concrete form of the maintainer's "if it's not
-too complicated": one override in one place, with the ordering key already available from
-`CollectionMember.position` and the existing `Meta.ordering = ("collection", "position", "id")`
-(`models.py:1577`).
+**Decision: apply the ordering in the autocomplete view, and only while the search box is empty.**
+The library gives a seam for exactly this — `AutocompleteModelView.apply_ordering()`
+(`autocompletes.py:686-727`) is a single method reading `self.ordering`, and the declaration is
+already resolved on that request by `_restrict_to_declaration()`. So the change is one override,
+not a rework of search. Restricting it to the empty-query case settles the tension the earlier
+reading missed: browsing a small ordered collection wants the curator's sequence, and a typed query
+wants match quality. Both are served, neither is guessed at.
 
-**Consequence for sequencing:** US-6 depends on US-1 and touches a file no other story in this
-feature needs to change for ordering purposes. It is genuinely droppable, as the spec claims.
+The ordering key comes from `CollectionMember.position`, obtained as a `Subquery` annotation keyed
+on the declaration's own collection — never through a `collection_memberships__` lookup, which
+joins and duplicates rows for a concept belonging to more than one collection (see R3).
+
+This is the concrete form of the maintainer's "if it's not too complicated": one method, one
+annotation, one condition.
+
+**Consequence for sequencing:** US-6 depends on US-1 only. The plumbing that makes the declaration
+reachable from the endpoint — the `field=` autocomplete parameter and `_restrict_to_declaration()`
+— already ships on `main`, so nothing in this feature has to build it. US-6 stays droppable:
+dropping it leaves the inherited `("label", "pk")` ordering untouched.
 
 ## R7 — The declaration rules have an existing precedent to copy exactly
 

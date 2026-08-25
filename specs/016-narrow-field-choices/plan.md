@@ -28,7 +28,7 @@ so it is applied in the widget's queryset and nowhere else (R6).
 
 ## Technical Context
 
-**Language/Version**: Python 3.12+ (floor 3.11 per Article X); Poetry-managed
+**Language/Version**: Python 3.11+ per Article X; the resolved development environment is 3.14
 
 **Primary Dependencies**: Django 5.2 LTS and 6.0; `django-tomselect` 2026.6.2 (already a runtime
 dependency — this feature adds none)
@@ -44,14 +44,20 @@ tree per Article XIV
 **Project Type**: Reusable Django package
 
 **Performance Goals**: None set for this feature, deliberately. A branch restriction costs one query
-per level of hierarchy depth; making that one query is R7 work and is out of scope by the spec's own
-Assumptions.
+per level of hierarchy depth **per resolution**, not once per declaration — the callable is
+re-resolved on every autocomplete request, on every widget render and at every validation. The
+autocomplete endpoint allows anonymous access (`views.py:42`), so that work is reachable without
+authentication and repeats per keystroke. Making the closure one query is R7 work and is out of
+scope by the spec's own Assumptions; R7 inherits the repetition as well as the depth.
 
 **Constraints**: No database query while a declaration is read (FR-007). No new runtime dependency.
 No change in meaning for any declaration that exists today (FR-014).
 
-**Scale/Scope**: Four source files (`fields.py`, `forms.py`, `checks.py`, `apps.py`), their mirrored
-test modules, the README and `CONTEXT.md`. No model changes, therefore no migration.
+**Scale/Scope**: Four source files (`fields.py`, `views.py`, `checks.py`, `apps.py`), their mirrored
+test modules, the README and `CONTEXT.md`. Plus the test app: every restriction is a declaration
+argument, so each axis needs a consuming model in `tests/testapp/models.py` and therefore a test-app
+migration, exactly as each prior feature added one. No change to this package's own models, and so
+no migration under `controlled_vocabularies/migrations/`.
 
 ## Constitution Check
 
@@ -70,7 +76,8 @@ test modules, the README and `CONTEXT.md`. No model changes, therefore no migrat
 | IX — URI identity & data safety | Unchanged. The delete protection and the through model's `PROTECT` are untouched. | Pass |
 | X — Stack & architecture | No raw SQL, no backend-specific construct (R5). Models stay the source of truth. | Pass |
 | XII — Internationalization | Curator-facing refusal messages are translated with named placeholders. The two declaration rules raise `TypeError`, which the article exempts as a developer-facing diagnostic — and which every existing refusal in `fields.py` already is (R7). | Pass |
-| XIII — Data-model conventions | No model field added, so no indexing decision and no migration. The queries the restrictions issue ride existing indexes: `unique_collection_member` and `cv_collection_member_order_idx` for membership, the auto-indexed FKs on `ConceptRelation` for the closure. | Pass |
+| XI — RDF fidelity | Does not bear. A restriction narrows what a *consuming project's* field accepts. No vocabulary content, no published URI and no serialization changes, so nothing round-trips differently. | Pass |
+| XIII — Data-model conventions | No field added to this package's models, so no indexing decision and no migration of its own. The test app gains consuming models and one migration, consolidated to a single file before the PR as the article requires. The queries the restrictions issue ride existing indexes: `unique_collection_member` and `cv_collection_member_order_idx` for membership, the auto-indexed FKs on `ConceptRelation` for the closure. | Pass |
 | XIV — Test structure | New tests land in the existing `tests/test_fields.py`, `tests/test_forms.py`, `tests/test_checks.py` as new `Test<Subject>` classes. No new factories: `CollectionFactory` and `ConceptRelation` helpers already exist. | Pass |
 | XV — Cohesion | Restriction resolution is a small group of related behaviours sharing a subject, so it lives on `ConceptFieldMixin` beside `_normalise_vocabulary`/`_apply_vocabulary` rather than as loose module functions. | Pass |
 
@@ -100,14 +107,18 @@ contract is a Python declaration, specified in `spec.md` and documented in the R
 controlled_vocabularies/
 ├── fields.py       # ConceptFieldMixin: accept, validate and resolve the three restrictions;
 │                   # deconstruct them; make the m2m receiver restriction-aware
-├── forms.py        # ConceptWidgetValidationMixin.get_queryset(): ordered-collection sequence
+├── views.py        # ConceptAutocompleteView.apply_ordering(): ordered-collection sequence
 ├── checks.py       # new W005 — a restriction naming an absent target
 └── apps.py         # register the new check
 
 tests/
 ├── test_fields.py  # declaration rules, resolution, enforcement, deconstruct
-├── test_forms.py   # offered choices, ordering
-└── test_checks.py  # W005
+├── test_forms.py   # the choices a form and the widget carry
+├── test_views.py   # the choices the endpoint serves, and their order
+├── test_checks.py  # W005
+└── testapp/
+    ├── models.py       # one consuming model per restriction axis
+    └── migrations/     # their table, consolidated to one file before the PR
 
 README.md · CONTEXT.md · CHANGELOG.md
 ```
@@ -198,10 +209,23 @@ reason.
 
 ### A5 — Ordering
 
-`ConceptWidgetValidationMixin.get_queryset()` (`forms.py:82-85`) applies the collection's member
-order when, and only when, the field's restriction is a collection the curator marked `ordered`
-(R6). The search endpoint is deliberately untouched: its results are relevance-ranked and paginated,
-and no requirement asks for a curator order there.
+`ConceptAutocompleteView.apply_ordering()` overrides the base method
+(`django_tomselect/autocompletes.py:686-727`) and applies the collection's member order when, and
+only when, both hold: the field's restriction is a collection the curator marked `ordered`, and the
+request carries no search term. Anything else falls through to `super()` and the inherited
+`("label", "pk")`. The declaration is already resolved on that request by `_restrict_to_declaration`
+(`views.py:105-116`), so nothing new has to be plumbed through.
+
+This is the browsable list — the widget's own queryset is not (R6). `forms.py` is not changed by
+this story.
+
+**The position is a `Subquery` annotation, never a join.** `CollectionMember.concept` carries
+`related_name="collection_memberships"` and a concept may belong to several collections, so ordering
+through `collection_memberships__position` duplicates rows for any concept with a second membership.
+The annotation is `Subquery(CollectionMember.objects.filter(concept=OuterRef("pk"),
+collection__slug=<declared>, collection__scheme__slug=<declared>).values("position")[:1])`, and the
+ordering is on that annotation. Its tests assert no duplicate rows by count, matching the assertion
+US-1 already carries.
 
 ### A6 — The system check
 
@@ -233,7 +257,7 @@ the three that follow are independent of each other.
 | 3 | US-2 concepts list | US-4, US-1 | Smallest increment; the only axis needing no subquery. |
 | 4 | US-3 branch | US-4, US-1 | A3. The largest single piece of new logic. |
 | 5 | US-5 absent targets | US-1..3 | A6. Needs all three target kinds to exist to report them. |
-| 6 | US-6 ordered sequence | US-1 | A5. Droppable — one override in one file, no other story depends on it. |
+| 6 | US-6 ordered sequence | US-1 | A5. Droppable — one method override in `views.py`, no other story depends on it. |
 | 7 | US-7 docs and messages | all | Documents the delivered surface, so it goes last. |
 
 Stories 2 and 3 in this order both touch `fields.py`; they run sequentially in one checkout rather

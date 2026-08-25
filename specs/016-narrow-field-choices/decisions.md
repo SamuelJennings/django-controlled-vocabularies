@@ -63,9 +63,13 @@ that path already exists and is already tested.
 
 **Chosen:** the traversal terminates and yields each concept once regardless (FR-004, SC-006).
 
-**Why defensible:** `ConceptRelation` validates a self-relation, a cross-vocabulary relation and a
-reversed duplicate of an existing edge, but nothing in it walks the graph, so a three-edge cycle is
-not currently prevented from being stored. Whether that gap should be closed is a separate question
+**Why defensible:** `ConceptRelation` refuses a self-relation, a cross-vocabulary relation, and a
+mirror-order duplicate of a *related* edge — the last through `_canonicalise`, which orders that
+kind's endpoints by primary key. A reversed *broader* edge is a different, permitted edge, stated as
+such at `models.py:1209-1211`, and nothing walks the graph. So the shortest storable cycle is two
+edges, built with two ordinary `add_broader()` calls, which strengthens this decision rather than
+weakening it: the state the traversal must survive is reachable through the public API and needs no
+contrived construction. Whether that gap should be closed is a separate question
 about the relation model, not about this field. What is not separable is that a restriction reading
 that data must not hang or exhaust memory: the field cannot assume an invariant the database does
 not enforce. Specifying termination costs nothing and removes a failure mode that would present as
@@ -90,3 +94,47 @@ consequence the spec does not spell out: because a slug is unique only within it
 target resolves inside the single named vocabulary. That is what makes "exactly one vocabulary"
 (FR-005) a precondition rather than a preference — with two vocabularies named, a collection slug
 could resolve to two different collections, and there would be no way to say which was meant.
+
+## D8 — The ordered sequence is applied at the endpoint, and only while the search box is empty
+
+**Ambiguous:** the plan placed the ordering on the widget's own queryset, on the reading that this
+is the list a person picks from. It is not. The selection control renders an empty `<select>` and
+fetches every browsable option over this package's autocomplete URL; the widget queryset feeds
+validation and the render of a value the record already holds. Ordering it would have shipped a
+story whose tests pass and whose sequence no human ever sees.
+
+**Chosen:** override `apply_ordering()` on `ConceptAutocompleteView` (FR-010, plan A5). It applies
+the collection's member order when the restriction is an ordered collection *and* the request
+carries no search term, and falls through to the inherited relevance order otherwise.
+
+**Why defensible:** the maintainer's approval was conditional — honour the sequence if it is not too
+complicated — so the cost is the whole question. The library exposes `apply_ordering()` as a single
+method reading one attribute, and the declaration is already resolved on that request, so the change
+is one override and one annotation. That is cheap enough to keep the story rather than drop it.
+
+The empty-query condition settles a tension the first reading did not see. Browsing a small ordered
+collection wants the curator's sequence; a typed query wants match quality. Conditioning on the
+search term serves both rather than trading one for the other, which is what made the earlier
+"leave the endpoint alone" argument look correct.
+
+The position is read through a `Subquery` annotation keyed on the declaration's own collection, not
+a membership join. A concept may belong to more than one collection, and this queryset reaches
+`complex_filter()` without Django's `Exists()` wrapper, so a join would duplicate rows silently.
+
+## D9 — A branch restriction's closure is recomputed per request, on an endpoint open to anyone
+
+**Ambiguous:** nothing, in the sense that no requirement changes. Recorded because the plan stated
+the branch cost as a per-declaration property — "one query per level of hierarchy depth" — which
+reads as a one-off and is not.
+
+**Chosen:** ship as specified, and record the cost accurately. The restriction resolves as a
+callable, deliberately (FR-007), so it is re-resolved at every validation, every widget render and
+every autocomplete request. The autocomplete endpoint allows anonymous access, so an unauthenticated
+client re-runs the full downward closure — depth-many queries plus the materialised id set — on
+every keystroke, before the 20-row page is cut.
+
+**Why defensible:** the spec's Assumptions already defer branch-read performance to R7, and this
+review is not reopening that. What R7 inherits is now stated in full: the single-query rewrite *and*
+the repetition, which is the part that decides whether a cache or a bounded depth is the right
+answer. The README says what a branch restriction costs, so a consumer choosing it for a public form
+is choosing it knowingly.
