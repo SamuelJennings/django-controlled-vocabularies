@@ -22,6 +22,7 @@ CHECK_ID = "controlled_vocabularies.W001"
 CHECK_ID_MISSING_ROUTE = "controlled_vocabularies.W002"
 CHECK_ID_MISSING_INSTALLED_APP = "controlled_vocabularies.W003"
 CHECK_ID_MISSING_MIDDLEWARE = "controlled_vocabularies.W004"
+CHECK_ID_MISSING_RESTRICTION_TARGET = "controlled_vocabularies.W005"
 
 #: The middleware the control's widget needs on the page (``forms.py``). Named
 #: once here for the same reason as :data:`AUTOCOMPLETE_URL_NAME`.
@@ -79,6 +80,131 @@ def check_concept_field_vocabularies(app_configs, **kwargs):
         for slug in field.vocabulary
         if slug not in existing
     ]
+
+
+def check_concept_field_restriction_targets(app_configs, **kwargs):
+    """Warn about every ``collection``, ``concepts`` or ``branch`` restriction
+    naming a target absent from the vocabulary the field itself names
+    (FR-009, ``plan.md`` A6, ``research.md`` R8).
+
+    A restriction always names exactly one vocabulary (FR-005), so every
+    declared target is a ``(vocabulary slug, target slug)`` pair. **The
+    resolved set is built on that pair, never on a flat set of target
+    slugs**: a collection slug is unique only within its own scheme
+    (``unique_collection_slug_per_scheme``) and the same holds for a
+    concept's (``unique_concept_slug_per_scheme``), unlike a vocabulary slug,
+    which is unique app-wide. A flat set of slugs would report a mistyped
+    name "present" whenever some other vocabulary happens to use it — exactly
+    the state this check exists to surface (``decisions.md`` D7).
+
+    Walks every installed model's fields once and batches the lookups by
+    target kind: three queries total — one for ``collection`` targets, one
+    for ``concepts`` targets and one for ``branch`` targets — never one per
+    field, the same batching :func:`check_concept_field_vocabularies` already
+    uses. A collection or concept that exists and holds no members is a
+    curator's legitimate state, not a declaration error: only existence of
+    the row is tested, never its membership.
+
+    The check runs before ``migrate``, so on a fresh install it runs against
+    a database with no tables yet. A missing table is not evidence that a
+    target is absent, so that state — the same ``DatabaseError`` guard
+    :func:`check_concept_field_vocabularies` already applies — yields no
+    warnings rather than raising.
+
+    A new id (``W005``) rather than folding into ``W001``: a project that has
+    silenced "this vocabulary is not imported yet" has not thereby said
+    anything about a mistyped collection slug, and a project silences by id.
+    """
+    fields = [
+        field
+        for model in apps.get_models()
+        for field in model._meta.get_fields()
+        if isinstance(field, (ConceptField, ConceptsField))
+    ]
+
+    collection_targets = []
+    concepts_targets = []
+    branch_targets = []
+    for field in fields:
+        if field.collection is not None:
+            (vocabulary,) = field.vocabulary
+            collection_targets.append((field, vocabulary, field.collection))
+        if field.concepts is not None:
+            (vocabulary,) = field.vocabulary
+            concepts_targets.extend((field, vocabulary, slug) for slug in field.concepts)
+        if field.branch is not None:
+            (vocabulary,) = field.vocabulary
+            branch_targets.append((field, vocabulary, field.branch))
+
+    if not (collection_targets or concepts_targets or branch_targets):
+        return []
+
+    from .models import Collection, Concept
+
+    def _existing_pairs(model, targets):
+        if not targets:
+            return set()
+        return set(
+            model.objects.filter(
+                scheme__slug__in={vocabulary for _, vocabulary, _ in targets},
+                slug__in={slug for _, _, slug in targets},
+            ).values_list("scheme__slug", "slug")
+        )
+
+    try:
+        existing_collections = _existing_pairs(Collection, collection_targets)
+        existing_concepts = _existing_pairs(Concept, concepts_targets)
+        existing_branch_roots = _existing_pairs(Concept, branch_targets)
+    except DatabaseError:
+        return []
+
+    messages = {
+        "collection": (
+            _(
+                "%(model)s.%(field)s names collection '%(target)s', which does not exist in the '%(vocabulary)s' vocabulary."
+            ),
+            _("Create this collection, or correct the name."),
+        ),
+        "concepts": (
+            _(
+                "%(model)s.%(field)s names concept '%(target)s', which does not exist in the '%(vocabulary)s' vocabulary."
+            ),
+            _("Create this concept, or correct the name."),
+        ),
+        "branch": (
+            _(
+                "%(model)s.%(field)s names branch root '%(target)s', which does not exist in the "
+                "'%(vocabulary)s' vocabulary."
+            ),
+            _("Create this concept, or correct the name."),
+        ),
+    }
+
+    warnings = []
+    for kind, targets, existing in (
+        ("collection", collection_targets, existing_collections),
+        ("concepts", concepts_targets, existing_concepts),
+        ("branch", branch_targets, existing_branch_roots),
+    ):
+        message, hint = messages[kind]
+        for field, vocabulary, slug in targets:
+            if (vocabulary, slug) in existing:
+                continue
+            warnings.append(
+                checks.Warning(
+                    message
+                    % {
+                        "model": field.model._meta.label,
+                        "field": field.name,
+                        "target": slug,
+                        "vocabulary": vocabulary,
+                    },
+                    hint=hint,
+                    obj=field,
+                    id=CHECK_ID_MISSING_RESTRICTION_TARGET,
+                )
+            )
+    return warnings
 
 
 def check_concept_autocomplete_route_included(app_configs, **kwargs):

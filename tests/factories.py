@@ -23,7 +23,13 @@ from controlled_vocabularies.models import (
 from tests.testapp.models import (
     Artifact,
     Borehole,
+    BranchSample,
+    BranchTray,
+    ChipSample,
+    ChipTray,
+    CoreSample,
     Deposit,
+    DrillCore,
     FieldNote,
     Locality,
     Outcrop,
@@ -215,7 +221,7 @@ class CollectionMemberFactory(factory.django.DjangoModelFactory):
     concept = factory.SubFactory(ConceptFactory, scheme=factory.SelfAttribute("..collection.scheme"))
 
 
-def collection_with_members(scheme=None, labels=("Granite", "Basalt", "Gabbro"), ordered=False):
+def collection_with_members(scheme=None, labels=("Granite", "Basalt", "Gabbro"), ordered=False, name=None):
     """Build a collection populated with concepts and return ``(collection, members)``.
 
     The concepts are created in the collection's own scheme and added through
@@ -223,9 +229,14 @@ def collection_with_members(scheme=None, labels=("Granite", "Basalt", "Gabbro"),
     honoured). ``members`` is the list in the order they were added — for an ordered
     collection this is the sequence :meth:`Collection.members` reads back. Lets a test
     assert on a populated (or ordered) collection in a couple of lines.
+
+    ``name`` is left to :class:`CollectionFactory`'s own sequence by default; pass it
+    explicitly when a test needs a specific, predictable slug (FS-016 US-1) — a
+    consuming model's ``collection=`` restriction names one, and the field cannot be
+    pointed at whatever slug a sequence happened to produce.
     """
     scheme = scheme or ConceptSchemeFactory()
-    collection = CollectionFactory(scheme=scheme, ordered=ordered)
+    collection = CollectionFactory(scheme=scheme, ordered=ordered, **({"name": name} if name is not None else {}))
     members = [ConceptFactory(scheme=scheme, label=label) for label in labels]
     for concept in members:
         collection.add(concept)
@@ -366,3 +377,72 @@ class SketchFactory(factory.django.DjangoModelFactory):
         model = Sketch
 
     name = factory.Sequence(lambda n: f"Sketch {n}")
+
+
+class CoreSampleFactory(factory.django.DjangoModelFactory):
+    """Build a saved :class:`~tests.testapp.models.CoreSample` (FS-016 US-1).
+    ``rock_type`` is optional and left unset by default — pass a concept
+    explicitly where a test needs one attached."""
+
+    class Meta:
+        model = CoreSample
+
+    name = factory.Sequence(lambda n: f"Core sample {n}")
+
+
+class DrillCoreFactory(factory.django.DjangoModelFactory):
+    """Build a saved :class:`~tests.testapp.models.DrillCore` (FS-016 US-1,
+    T012). ``rock_types`` is a many-valued relation and cannot be set at
+    construction — attach concepts with ``.add()`` after the instance
+    exists."""
+
+    class Meta:
+        model = DrillCore
+
+    name = factory.Sequence(lambda n: f"Drill core {n}")
+
+
+class ChipSampleFactory(factory.django.DjangoModelFactory):
+    """Build a saved :class:`~tests.testapp.models.ChipSample` (FS-016 US-2).
+    ``rock_type`` is optional and left unset by default — pass a concept
+    explicitly where a test needs one attached."""
+
+    class Meta:
+        model = ChipSample
+
+    name = factory.Sequence(lambda n: f"Chip sample {n}")
+
+
+class ChipTrayFactory(factory.django.DjangoModelFactory):
+    """Build a saved :class:`~tests.testapp.models.ChipTray` (FS-016 US-2).
+    ``rock_types`` is a many-valued relation and cannot be set at
+    construction — attach concepts with ``.add()`` after the instance
+    exists."""
+
+    class Meta:
+        model = ChipTray
+
+    name = factory.Sequence(lambda n: f"Chip tray {n}")
+
+
+class BranchSampleFactory(factory.django.DjangoModelFactory):
+    """Build a saved :class:`~tests.testapp.models.BranchSample` (FS-016
+    US-3). ``rock_type`` is optional and left unset by default — pass a
+    concept explicitly where a test needs one attached."""
+
+    class Meta:
+        model = BranchSample
+
+    name = factory.Sequence(lambda n: f"Branch sample {n}")
+
+
+class BranchTrayFactory(factory.django.DjangoModelFactory):
+    """Build a saved :class:`~tests.testapp.models.BranchTray` (FS-016
+    US-3). ``rock_types`` is a many-valued relation and cannot be set at
+    construction — attach concepts with ``.add()`` after the instance
+    exists."""
+
+    class Meta:
+        model = BranchTray
+
+    name = factory.Sequence(lambda n: f"Branch tray {n}")

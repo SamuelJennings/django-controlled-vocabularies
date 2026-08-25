@@ -12,12 +12,14 @@ class ControlledVocabulariesConfig(AppConfig):
 
         from .checks import (
             check_concept_autocomplete_route_included,
+            check_concept_field_restriction_targets,
             check_concept_field_vocabularies,
             check_django_tomselect_installed,
             check_tomselect_middleware_installed,
         )
 
         register(check_concept_field_vocabularies)
+        register(check_concept_field_restriction_targets)
         register(check_concept_autocomplete_route_included)
         register(check_django_tomselect_installed)
         register(check_tomselect_middleware_installed)

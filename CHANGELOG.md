@@ -91,6 +91,22 @@ All notable changes to this project are documented in this file. The format foll
   German, to exercise the language fallback above — and then to one of its collections, failing
   the build if either page stops showing what the seed puts there. See the README's "Try it"
   section.
+- `ConceptField` and `ConceptsField` can now be narrowed to part of the one vocabulary they name,
+  with a new argument on top of `vocabulary`: `collection` restricts to a curator-made grouping,
+  `concepts` restricts to an explicit, named list, and `branch` restricts to a hierarchy root and
+  everything narrower than it, at any depth. A field carries at most one of the three, and
+  declaring one requires the field to name exactly one vocabulary. Both rules are enforced when the
+  declaration is read, before the app starts. A restriction naming a target that does not exist yet
+  offers no choices at all rather than raising, and a new system check,
+  `controlled_vocabularies.W005`, reports it by model, field and missing target. Reading a branch's
+  descendants re-walks the stored hierarchy on every request rather than caching it, so a very deep
+  branch on a form the public can reach is worth choosing deliberately. Marking a collection
+  `ordered` in the vocabulary editor now also carries through to the concept search: a field
+  restricted to that collection offers the curator's own sequence while the search box is empty,
+  then falls back to relevance order as soon as someone types. A restricted field with no
+  `help_text` of its own now describes itself as restricted within its vocabulary, in place of the
+  unrestricted wording that no longer fit it. See the README's "Restricting a field to part of a
+  vocabulary".
 
 ### Known limitations
 
