@@ -36,6 +36,14 @@ Six more models carry ``ConceptsField`` (FS-010 Phase F), one per shape
 :class:`Deposit` and :class:`Survey` were added in T003, since T003's own
 acceptance needs a real declaration to test the generated membership model
 against (`decisions.md` D10). The remaining four are T001's.
+
+Two more carry a ``collection`` restriction (FS-016 US-1):
+
+- :class:`CoreSample` — an optional ``ConceptField`` restricted to the
+  "core-samples" collection within the "rock-type" vocabulary (T007, T009,
+  T010, T011).
+- :class:`DrillCore` — an optional ``ConceptsField`` restricted the same
+  way, for the many-valued write guard (T012).
 """
 
 from django.db import models
@@ -305,6 +313,57 @@ class Photograph(models.Model):
         related_name="+",
         verbose_name=_("keywords"),
         help_text=_("Keywords drawn from any vocabulary; this field names none in particular."),
+    )
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class CoreSample(models.Model):
+    """Carries an optional ``ConceptField`` restricted to the "core-samples"
+    collection within the "rock-type" vocabulary (FS-016 US-1, T007, T009,
+    T010, T011)."""
+
+    name = models.CharField(
+        max_length=255,
+        verbose_name=_("name"),
+        help_text=_("The core sample's catalogue name."),
+    )
+    rock_type = ConceptField(
+        vocabulary="rock-type",
+        collection="core-samples",
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name=_("rock type"),
+        help_text=_("The rock type this core sample is classified as, drawn from the core-samples collection."),
+    )
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class DrillCore(models.Model):
+    """Carries an optional ``ConceptsField`` restricted to the "core-samples"
+    collection within the "rock-type" vocabulary (FS-016 US-1, T012's
+    many-valued write guard). ``related_name`` is a real name, not ``"+"``,
+    so T012 has a live reverse accessor (``concept.drill_cores``) to drive
+    the reverse-write branch of the guard through, the way
+    :class:`Outcrop`'s ``minerals``/``outcrops`` already does for the
+    vocabulary-only case."""
+
+    name = models.CharField(
+        max_length=255,
+        verbose_name=_("name"),
+        help_text=_("The drill core's catalogue name."),
+    )
+    rock_types = ConceptsField(
+        vocabulary="rock-type",
+        collection="core-samples",
+        blank=True,
+        related_name="drill_cores",
+        verbose_name=_("rock types"),
+        help_text=_("The rock types logged for this drill core, drawn from the core-samples collection."),
     )
 
     def __str__(self) -> str:

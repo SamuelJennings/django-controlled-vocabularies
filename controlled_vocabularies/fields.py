@@ -162,11 +162,36 @@ class ConceptFieldMixin:
         search time alike, never while the declaration is merely being read
         (FR-007).
 
-        Only the vocabulary term resolves today — the collection, concepts
-        and branch axes each add their own term to this method in the
-        stories that follow.
+        The vocabulary term is always present and never dropped (plan.md A2):
+        a collection slug that happens to exist in another vocabulary cannot
+        widen the field, because every restriction is joined to it with
+        ``&``. The collection axis (T006, research.md R3) narrows further
+        with a ``pk__in`` subquery over :class:`~controlled_vocabularies.models.CollectionMember`
+        — a subquery rather than a ``collection_memberships__…`` join, since
+        this package's own widget and search endpoint call
+        ``complex_filter()`` bare, where Django wraps a ``ModelChoiceField``'s
+        own ``Q`` in ``Exists()``: a join-shaped ``Q`` would duplicate rows in
+        exactly those two places. The concepts and branch axes each add their
+        own term in the stories that follow.
+
+        The import is local, not top-level, for the same reason
+        :meth:`formfield` defers its own: this method runs only once every
+        app's models have loaded (validation time, form-build time,
+        widget-render time, search time), so a top-level import here would
+        tie the *consuming* project's app-loading order to something a
+        top-level import cannot assume.
         """
-        return Q(scheme__slug__in=self.vocabulary)
+        vocabulary_term = Q(scheme__slug__in=self.vocabulary)
+        if self.collection is not None:
+            from .models import CollectionMember
+
+            (vocabulary,) = self.vocabulary
+            members = CollectionMember.objects.filter(
+                collection__slug=self.collection,
+                collection__scheme__slug=vocabulary,
+            ).values("concept")
+            return vocabulary_term & Q(pk__in=members)
+        return vocabulary_term
 
     def _apply_vocabulary(self, vocabulary, collection, concepts, branch, kwargs):
         """Store the normalised ``vocabulary`` and restriction, and fill in the
@@ -312,6 +337,11 @@ class ConceptField(ConceptFieldMixin, ForeignKey):
         # it needs its own message rather than the one above with an empty
         # interpolation. Both are overridable through `error_messages`.
         "invalid_unrestricted": _("%(value)s is not a valid concept."),
+        # T008 (US-1): a collection-restricted field names the collection,
+        # not the vocabulary — the restriction is what actually decided the
+        # refusal. One static msgid with the restriction joined into a
+        # single named placeholder, the same shape `invalid` already uses.
+        "invalid_restricted": _("%(value)s is not a valid concept in the '%(restriction)s' collection."),
     }
 
     default_help_text = _("A concept from this field's configured vocabulary or vocabularies.")
@@ -346,6 +376,11 @@ class ConceptField(ConceptFieldMixin, ForeignKey):
         concept carries. It has no vocabulary to name, so it re-raises with
         ``invalid_unrestricted`` — the same ``KeyError`` would otherwise fire
         on a placeholder nothing could fill.
+
+        A collection-restricted field (T008, US-1) names the collection
+        instead of the vocabulary — that is what actually decided the
+        refusal, and naming the wider vocabulary would tell a curator
+        nothing about why a same-vocabulary concept was rejected.
         """
         try:
             super().validate(value, model_instance)
@@ -353,11 +388,14 @@ class ConceptField(ConceptFieldMixin, ForeignKey):
             if exc.code != "invalid":
                 raise
             # Carry the ForeignKey's own params through. A consumer's
-            # error_messages["invalid"] is free to use `model`, `pk` or
-            # `field`, and dropping them would reproduce the same
-            # KeyError-on-read this override exists to prevent.
+            # error_messages["invalid"]/["invalid_restricted"] is free to use
+            # `model`, `pk` or `field`, and dropping them would reproduce the
+            # same KeyError-on-read this override exists to prevent.
             params = {**(exc.params or {}), "value": value}
-            if self.vocabulary:
+            if self.collection is not None:
+                message = self.error_messages["invalid_restricted"]
+                params["restriction"] = self.collection
+            elif self.vocabulary:
                 message = self.error_messages["invalid"]
                 params["vocabulary"] = ", ".join(self.vocabulary)
             else:
@@ -468,15 +506,23 @@ def _create_membership_model(field, cls):
     )
 
 
-def _refuse_concepts_outside_vocabulary(*, vocabulary, instance, action, reverse, model, pk_set, **kwargs):
+def _refuse_concepts_the_restriction_does_not_admit(*, field, instance, action, reverse, model, pk_set, **kwargs):
     """``m2m_changed`` receiver for a :class:`ConceptsField`'s generated
-    through model (FR-005, D2, R1, R3, R6): refuse the whole write when any
-    incoming concept falls outside the declared ``vocabulary``.
+    through model (FR-005, D2, R1, R3, R6, T012): refuse the whole write when
+    any incoming concept falls outside ``field``'s resolved restriction — of
+    which the vocabulary-only case (no ``collection``/``concepts``/``branch``
+    named) is one, not a separate check.
 
     Connected only against a field whose declaration named at least one
     vocabulary (:meth:`ConceptsField.contribute_to_class`) — a field naming
     none has nothing to enforce, and this receiver is never bound to its
     through model in that case.
+
+    Bound with the field itself (T012), not with ``vocabulary`` alone: both
+    branches below read ``field.get_limit_choices_to()``, so this and every
+    other enforcement path (research.md R1) resolve the same restriction and
+    cannot drift apart the way ``ConceptField`` and ``ConceptsField``
+    themselves once did (#111).
 
     Only ``pre_add`` is checked. ``post_add``, ``pre_remove``, ``post_remove``,
     ``pre_clear`` and ``post_clear`` all reach this same receiver and are
@@ -487,9 +533,11 @@ def _refuse_concepts_outside_vocabulary(*, vocabulary, instance, action, reverse
     it, so ``concept.deposit_set.add(a_deposit)`` reaches the same through
     model as ``deposit.rock_types.add(a_concept)`` and has to be refused on
     the same terms. What differs is where the concept is: on a forward write
-    ``pk_set`` holds the incoming concepts' primary keys, while on a reverse
-    write it holds the *owner* model's, and the single concept being attached
-    is ``instance`` (D16).
+    ``pk_set`` holds the incoming concepts' primary keys, so ``model``
+    (``Concept``) is queried directly; on a reverse write ``pk_set`` holds the
+    *owner* model's keys instead, and the single concept being attached is
+    ``instance`` (D16) — so its own admission is checked with ``type(instance)``,
+    never with ``model``, which is the *owner*'s class on that branch.
 
     Raising here aborts the whole write before any row is inserted (FR-005).
     ``QuerySet.set()`` is implemented as ``remove()`` then ``add()``, so the
@@ -498,22 +546,30 @@ def _refuse_concepts_outside_vocabulary(*, vocabulary, instance, action, reverse
     """
     if action != "pre_add":
         return
+    restriction = field.get_limit_choices_to()
     if reverse:
-        invalid = [] if instance.scheme.slug in vocabulary else [instance]
+        invalid = [] if type(instance).objects.filter(pk=instance.pk).filter(restriction).exists() else [instance]
     else:
-        invalid = list(model.objects.filter(pk__in=pk_set).exclude(scheme__slug__in=vocabulary))
+        invalid = list(model.objects.filter(pk__in=pk_set).exclude(restriction))
     if not invalid:
         return
+    value = ", ".join(str(concept) for concept in invalid)
+    if field.collection is not None:
+        raise ValidationError(
+            # T008's placeholder rule applied to the write guard: one static
+            # msgid, the restriction interpolated through a single named
+            # placeholder.
+            _("%(value)s is not a valid concept in the '%(restriction)s' collection."),
+            code="invalid",
+            params={"value": value, "restriction": field.collection},
+        )
     raise ValidationError(
         # A static message, with the vocabulary slugs joined into ONE
         # placeholder (Article XII) so the message identifier stays the same
         # whether the declaration names one vocabulary or several.
         _("%(value)s is not a valid concept in the '%(vocabulary)s' vocabulary."),
         code="invalid",
-        params={
-            "value": ", ".join(str(concept) for concept in invalid),
-            "vocabulary": ", ".join(vocabulary),
-        },
+        params={"value": value, "vocabulary": ", ".join(field.vocabulary)},
     )
 
 
@@ -701,7 +757,7 @@ class ConceptsField(ConceptFieldMixin, ManyToManyField):
             _install_required_set_check(cls)
             if self.vocabulary:
                 m2m_changed.connect(
-                    partial(_refuse_concepts_outside_vocabulary, vocabulary=self.vocabulary),
+                    partial(_refuse_concepts_the_restriction_does_not_admit, field=self),
                     sender=self.remote_field.through,
                     weak=False,
                 )

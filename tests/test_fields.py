@@ -129,9 +129,11 @@ from controlled_vocabularies.models import Concept, ConceptLabel, ConceptScheme
 from tests.factories import (
     ArtifactFactory,
     BoreholeFactory,
+    CollectionFactory,
     ConceptFactory,
     ConceptSchemeFactory,
     DepositFactory,
+    DrillCoreFactory,
     FieldNoteFactory,
     OutcropFactory,
     PhotographFactory,
@@ -140,11 +142,14 @@ from tests.factories import (
     SketchFactory,
     SpecimenFactory,
     SurveyFactory,
+    collection_with_members,
 )
 from tests.testapp.models import (
     Artifact,
     Borehole,
+    CoreSample,
     Deposit,
+    DrillCore,
     FieldNote,
     Outcrop,
     Photograph,
@@ -456,12 +461,108 @@ class TestSharedLimitChoicesToCallable:
         assert field.get_limit_choices_to() == {}
         assert field.remote_field.limit_choices_to == {}
 
-    def test_a_restriction_present_still_resolves_to_only_the_vocabulary_q(self, field_class):
-        """T005's own scope: the seam is installed with no restriction
-        behind it yet. A restricted field's choices resolve exactly like an
-        unrestricted one until a later story teaches this method the axis."""
-        field = field_class(vocabulary="rock-type", collection="core-samples")
-        assert field.get_limit_choices_to() == Q(scheme__slug__in=("rock-type",))
+    @pytest.mark.django_db
+    def test_a_restriction_present_now_narrows_beyond_the_bare_vocabulary_q(self, field_class):
+        """T006 (US-1) is the "later story" this method's own name once
+        promised would teach the axis — it no longer resolves to only the
+        vocabulary ``Q`` once ``collection`` is set. ``Q`` objects wrapping a
+        subquery are not ``==``-comparable across two independently built
+        instances (the embedded ``QuerySet`` compares by identity, not
+        value), so this is checked against real rows rather than by
+        structural equality — the same reason ``TestCollectionRestrictionResolves``
+        below asserts by membership. See ``decisions.md`` for why this
+        pre-existing test's assertion changed rather than being left to fail
+        as the feature that already predicted it landed."""
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        collection, members = collection_with_members(scheme=scheme, labels=("Granite",))
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+
+        field = field_class(vocabulary="rock-type", collection=collection.slug)
+        resolved = Concept.objects.complex_filter(field.get_limit_choices_to())
+
+        assert set(resolved) == set(members)
+        assert outsider not in resolved
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("field_class", [ConceptField, ConceptsField])
+class TestCollectionRestrictionResolves:
+    """T006 (US-1, FR-002, plan.md A2) — the callable from T005 additionally
+    returns a ``pk__in`` subquery over ``CollectionMember`` when ``collection``
+    is set. Both halves of the resolved ``Q`` matter (research.md R3): the
+    vocabulary term is never dropped, so a same-named collection in another
+    vocabulary cannot widen the field, and the membership term is a
+    subquery, never a ``collection_memberships__…`` join, so it cannot
+    duplicate rows for a concept that belongs to more than one collection.
+
+    Two independently resolved ``Q``s wrapping a subquery are not
+    ``==``-comparable (the embedded ``QuerySet`` compares by identity), so
+    every assertion here evaluates the resolved ``Q`` against real rows via
+    ``Concept.objects.complex_filter()`` — the same bare call this package's
+    own widget and search endpoint make (research.md R3), rather than
+    inspecting the ``Q``'s structure."""
+
+    def test_resolves_to_exactly_the_collection_members(self, field_class):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        collection, members = collection_with_members(scheme=scheme, labels=("Granite", "Basalt"))
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+
+        field = field_class(vocabulary="rock-type", collection=collection.slug)
+        resolved = Concept.objects.complex_filter(field.get_limit_choices_to())
+
+        assert set(resolved) == set(members)
+        assert outsider not in resolved
+
+    def test_a_same_named_collection_in_another_vocabulary_does_not_widen_the_field(self, field_class):
+        rock_scheme = ConceptSchemeFactory(name="Rock Type")
+        rock_collection, rock_members = collection_with_members(scheme=rock_scheme, labels=("Granite",))
+        mineral_scheme = ConceptSchemeFactory(name="Mineral")
+        mineral_collection = CollectionFactory(scheme=mineral_scheme, name=rock_collection.name)
+        assert mineral_collection.slug == rock_collection.slug
+        mineral_concept = ConceptFactory(scheme=mineral_scheme, label="Quartz")
+        mineral_collection.add(mineral_concept)
+
+        field = field_class(vocabulary="rock-type", collection=rock_collection.slug)
+        resolved = Concept.objects.complex_filter(field.get_limit_choices_to())
+
+        assert set(resolved) == set(rock_members)
+        assert mineral_concept not in resolved
+
+    def test_a_concept_in_a_second_collection_too_is_not_duplicated(self, field_class):
+        """The row-duplication research.md R3 exists to guard against: a
+        member of both the restricted collection and a second one must
+        still resolve once."""
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        collection, members = collection_with_members(scheme=scheme, labels=("Granite",))
+        other_collection = CollectionFactory(scheme=scheme, name="Display Samples")
+        other_collection.add(members[0])
+
+        field = field_class(vocabulary="rock-type", collection=collection.slug)
+        resolved = Concept.objects.complex_filter(field.get_limit_choices_to())
+
+        assert list(resolved.values_list("pk", flat=True)) == [members[0].pk]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("field_class", [ConceptField, ConceptsField])
+class TestCollectionRestrictionResolvesLive:
+    """T010 (US-1, FR-002's "resolved live") — no cache to invalidate: T005
+    made ``limit_choices_to`` a callable, re-resolved on every read, so a
+    membership change reaches the field with nothing to invalidate and
+    nothing to restart. This test is what stops a later "optimisation" that
+    resolves the restriction once and holds onto it."""
+
+    def test_a_concept_added_to_the_collection_after_construction_appears_on_the_next_read(self, field_class):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        collection, members = collection_with_members(scheme=scheme, labels=("Granite",))
+        field = field_class(vocabulary="rock-type", collection=collection.slug)
+        assert set(Concept.objects.complex_filter(field.get_limit_choices_to())) == set(members)
+
+        newcomer = ConceptFactory(scheme=scheme, label="Basalt")
+        collection.add(newcomer)
+
+        resolved_again = Concept.objects.complex_filter(field.get_limit_choices_to())
+        assert set(resolved_again) == {*members, newcomer}
 
 
 class TestConceptFieldConstruction:
@@ -1049,6 +1150,89 @@ class TestConceptsFieldWritePathVocabularyCheck:
         assert not m2m_changed.has_listeners(sender=through)
 
 
+class TestConceptsFieldCollectionRestrictionWritePath:
+    """T012 (US-1, plan.md A4, research.md R4) — the one enforcement path
+    that does not read ``limit_choices_to``: the ``m2m_changed`` receiver is
+    re-expressed against the resolved restriction and bound with the field
+    itself rather than with ``vocabulary``, so the collection axis reaches
+    this guard exactly as it reaches the other three paths. Driven entirely
+    through :class:`~tests.testapp.models.DrillCore`'s real relation
+    manager, the collection-restricted counterpart of
+    ``TestConceptsFieldWritePathVocabularyCheck`` — which this task must
+    leave passing unmodified alongside these."""
+
+    @pytest.mark.django_db
+    def test_forward_add_of_a_non_member_is_refused_and_the_set_is_unchanged(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        _collection, members = collection_with_members(scheme=scheme, name="Core Samples", labels=("Granite",))
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+        drill_core = DrillCoreFactory()
+        drill_core.rock_types.add(members[0])
+
+        with pytest.raises(ValidationError), transaction.atomic():
+            drill_core.rock_types.add(outsider)
+
+        assert list(drill_core.rock_types.all()) == [members[0]]
+
+    @pytest.mark.django_db
+    def test_the_refusal_names_the_collection(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        collection_with_members(scheme=scheme, name="Core Samples", labels=("Granite",))
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+        drill_core = DrillCoreFactory()
+
+        with pytest.raises(ValidationError) as excinfo:
+            drill_core.rock_types.add(outsider)
+
+        assert any("core-samples" in message for message in excinfo.value.messages)
+
+    @pytest.mark.django_db
+    def test_the_reverse_accessor_refuses_a_non_member(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        collection_with_members(scheme=scheme, name="Core Samples", labels=("Granite",))
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+        drill_core = DrillCoreFactory()
+
+        with pytest.raises(ValidationError), transaction.atomic():
+            outsider.drill_cores.add(drill_core)
+
+        assert list(drill_core.rock_types.all()) == []
+
+    @pytest.mark.django_db
+    def test_the_reverse_accessor_attaches_a_member(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        _collection, members = collection_with_members(scheme=scheme, name="Core Samples", labels=("Granite",))
+        drill_core = DrillCoreFactory()
+
+        members[0].drill_cores.add(drill_core)
+
+        assert list(drill_core.rock_types.all()) == [members[0]]
+
+    @pytest.mark.django_db
+    def test_a_set_carrying_a_mix_is_refused_whole_and_the_set_is_unchanged_afterwards(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        _collection, members = collection_with_members(scheme=scheme, name="Core Samples", labels=("Granite", "Basalt"))
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+        drill_core = DrillCoreFactory()
+        drill_core.rock_types.add(members[0])
+
+        with pytest.raises(ValidationError), transaction.atomic():
+            drill_core.rock_types.set([members[1], outsider])
+
+        # Asserted after the failed write, not merely that it raised (D2's whole-write refusal).
+        assert set(drill_core.rock_types.all()) == {members[0]}
+
+    @pytest.mark.django_db
+    def test_several_members_all_attach(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        _collection, members = collection_with_members(scheme=scheme, name="Core Samples", labels=("Granite", "Basalt"))
+        drill_core = DrillCoreFactory()
+
+        drill_core.rock_types.add(*members)
+
+        assert set(drill_core.rock_types.all()) == set(members)
+
+
 class TestConceptsFieldSeveralVocabulariesWritePath:
     """FS-010 T012 (US-8, FR-002, FR-005, D9) — a field naming several
     vocabularies accepts a concept from either, and refuses one from a third,
@@ -1616,6 +1800,27 @@ class TestConceptFieldMigrations:
         call_command("makemigrations", "--check", "--dry-run", verbosity=0)
 
 
+class TestConceptFieldCollectionRestrictionMigrations:
+    """T011 (US-1, plan.md A7) — a collection-restricted declaration in the
+    test app (:class:`~tests.testapp.models.CoreSample`,
+    :class:`~tests.testapp.models.DrillCore`) migrates from zero and stays
+    ``makemigrations --check`` clean — the same command the story's own
+    rituals gate on, run across all apps rather than scoped to one."""
+
+    @pytest.mark.django_db
+    def test_models_are_queryable(self):
+        """Tables exist and are queryable — proof the restricted
+        declarations' migration applied, rebuilding the field from the
+        ``collection`` kwarg ``deconstruct()`` emits (T004) rather than
+        raising."""
+        assert CoreSample.objects.count() == 0
+        assert DrillCore.objects.count() == 0
+
+    @pytest.mark.django_db
+    def test_makemigrations_check_is_clean_across_all_apps(self):
+        call_command("makemigrations", "--check", "--dry-run", verbosity=0)
+
+
 class TestConceptFieldFactories:
     """The three model factories T002 adds, and the two #111 adds for the
     several- and no-vocabulary shapes, build valid, saved records."""
@@ -1794,6 +1999,78 @@ class TestConceptFieldValidation:
             assert any("rock-type" in message for message in excinfo.value.messages)
         finally:
             field.error_messages["invalid"] = original
+
+
+class TestConceptFieldCollectionRestrictionValidation:
+    """T007 (US-1, FR-008 for the single-value field) — no new constraint
+    code: ``ForeignKey.validate()`` already applies ``limit_choices_to``
+    (research.md R1), and T006 taught the resolved ``Q`` the collection
+    axis. What this class proves is the behavioural chain end to end,
+    through :class:`~tests.testapp.models.CoreSample`'s real ``rock_type``
+    field: a member of the declared collection validates, and a concept
+    from the same vocabulary but outside the collection is refused. The
+    message naming the collection is T008's, not this task's — asserted
+    there, not here."""
+
+    @pytest.mark.django_db
+    def test_a_collection_member_validates(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        _collection, members = collection_with_members(scheme=scheme, name="Core Samples", labels=("Granite",))
+        core_sample = CoreSample(name="Sample A", rock_type=members[0])
+
+        core_sample.full_clean()
+
+    @pytest.mark.django_db
+    def test_a_non_member_of_the_same_vocabulary_is_refused(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        collection_with_members(scheme=scheme, name="Core Samples", labels=("Granite",))
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+        core_sample = CoreSample(name="Sample B", rock_type=outsider)
+
+        with pytest.raises(ValidationError):
+            core_sample.full_clean()
+
+
+class TestConceptFieldCollectionRestrictionRefusalMessage:
+    """T008 — extends the existing re-raise (``fields.py:230-270``, now
+    choosing between three message ids rather than two): a field restricted
+    to a collection names the collection, as one static msgid with a single
+    named placeholder (Article XII), not one that varies with the
+    restriction's contents. A consumer's own ``error_messages`` override
+    still works and the ``ForeignKey``'s own ``params`` are still carried
+    through, the same guarantee ``TestConceptFieldValidation.
+    test_the_re_raise_keeps_the_foreign_keys_own_params`` already proves for
+    the vocabulary-only case."""
+
+    @pytest.mark.django_db
+    def test_the_refusal_names_the_collection(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        collection_with_members(scheme=scheme, name="Core Samples", labels=("Granite",))
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+        core_sample = CoreSample(name="Sample B", rock_type=outsider)
+
+        with pytest.raises(ValidationError) as excinfo:
+            core_sample.full_clean()
+
+        assert any("core-samples" in message for message in excinfo.value.messages)
+
+    @pytest.mark.django_db
+    def test_a_consumers_own_error_messages_override_still_works(self):
+        field = CoreSample._meta.get_field("rock_type")
+        original = field.error_messages["invalid_restricted"]
+        field.error_messages["invalid_restricted"] = "%(model)s pk=%(pk)s field=%(field)s in %(restriction)s"
+        try:
+            scheme = ConceptSchemeFactory(name="Rock Type")
+            collection_with_members(scheme=scheme, name="Core Samples", labels=("Granite",))
+            outsider = ConceptFactory(scheme=scheme, label="Marble")
+            core_sample = CoreSample(name="Sample C", rock_type=outsider)
+
+            with pytest.raises(ValidationError) as excinfo:
+                core_sample.full_clean()
+
+            assert any("core-samples" in message for message in excinfo.value.messages)
+        finally:
+            field.error_messages["invalid_restricted"] = original
 
 
 class SpecimenForm(forms.ModelForm):

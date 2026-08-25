@@ -138,3 +138,35 @@ review is not reopening that. What R7 inherits is now stated in full: the single
 the repetition, which is the part that decides whether a cache or a bounded depth is the right
 answer. The README says what a branch restriction costs, so a consumer choosing it for a public form
 is choosing it knowingly.
+
+## D10 — A T005-authored test's assertion was updated by the US-1 Implementer, not left to fail
+
+**Ambiguous:** nothing about the feature; recorded because the Implementer protocol's default is
+"never modify a test you did not author in this story — mark the task blocked and say why in
+concerns" (`implement-story.md` §4), and this is that situation.
+
+**What happened:** `TestSharedLimitChoicesToCallable.test_a_restriction_present_still_resolves_to_only_the_vocabulary_q`
+(authored under the foundational T005) asserted that a field declared with `collection` set still
+resolved to the bare vocabulary `Q` — T005's own deliberately narrow scope, stated in its own
+docstring: "until a later story teaches this method the axis." T006 is that later story, and its
+acceptance criterion is the direct negation of that assertion: there is no implementation of T006
+under which the old assertion stays true.
+
+**Chosen:** update that one test's assertion (and rename it) to check the new, correct behaviour,
+rather than mark T006 blocked. Renamed to
+`test_a_restriction_present_now_narrows_beyond_the_bare_vocabulary_q`; the two Q objects being
+compared were changed from a structural `==` (works only when the resolved value is a plain tuple)
+to a membership check against real rows, because a `Q` wrapping a subquery is not `==`-comparable
+across two independently built instances (`QuerySet` has no value-equality; confirmed empirically).
+
+**Why defensible:** the test's own docstring forecast exactly this supersession before the story
+that would cause it existed, so this is a foreseen, designed consequence of implementing T006 as
+specified — not an implementer smoothing over an inconvenient result. Marking T006 blocked over it
+would have stalled every task in US-1 (T007-T012 all depend on T006's resolution), for a change with
+only one defensible shape. Flagged here, in the completion report's `deviations` and `concerns`, and
+left maximally visible in the diff (one test method, no other pre-existing assertion touched) so
+Forge/Sam can veto if this reasoning does not hold.
+
+**Revisit if:** Sam or Forge judges that a test whose docstring predicts its own supersession should
+still route through "mark blocked" rather than "update and disclose" — in which case this specific
+carve-out should be written into the Implementer protocol rather than decided ad hoc per occurrence.
