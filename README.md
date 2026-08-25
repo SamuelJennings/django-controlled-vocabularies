@@ -230,6 +230,60 @@ directly against the database outside Django — raw SQL, a database console, a 
 rows without going through the ORM — because Django never writes an `ON DELETE` clause into the
 schema for any relation. The protection lives in application code, not in a database constraint.
 
+## Restricting a field to part of a vocabulary
+
+Naming a vocabulary offers every concept it holds. Large vocabularies are often too much to put in
+front of someone filling in one field. `ConceptField` and `ConceptsField` both take one more
+argument on top of `vocabulary` for this: `collection`, `concepts` or `branch`. Both fields accept
+the same shapes with the same effect.
+
+```python
+from django.db import models
+
+from controlled_vocabularies.fields import ConceptField
+
+
+class CoreSample(models.Model):
+    name = models.CharField(max_length=200)
+
+    # Only concepts in the "core-samples" collection of "rock-type".
+    rock_type = ConceptField(vocabulary="rock-type", collection="core-samples")
+
+    # Only "granite" and "basalt" themselves, named directly.
+    # rock_type = ConceptField(vocabulary="rock-type", concepts=["granite", "basalt"])
+
+    # "igneous" itself and everything narrower than it, at any depth.
+    # rock_type = ConceptField(vocabulary="rock-type", branch="igneous")
+```
+
+Use `collection` where a curator has already grouped the concepts the field should offer. The group
+is then maintained in the vocabulary editor rather than in your code, which is usually what you
+want if it changes at all. `concepts` suits a short list that will not change often and does not
+earn a collection of its own. `branch` suits a field whose subject is a whole part of the
+hierarchy, such as everything under "igneous", where naming each member by hand would go stale the
+moment the publisher adds a term.
+
+A restriction narrows one vocabulary and never several, so declaring one alongside more than one
+`vocabulary` slug is refused when the module is imported, before the app starts. The three
+arguments also exclude each other, and for the same reason: a field naming two of them has no
+single meaning a reader could recover from the code. A field carries at most one restriction.
+
+The target a restriction names does not have to exist when the field is declared, any more than an
+unrestricted field's own `vocabulary` does. If it never arrives, or arrives misspelled, the field
+offers nothing at all rather than raising. Every choice and every search comes back empty, which
+looks the same from outside as a vocabulary that has not been imported. `manage.py check` catches
+it: `controlled_vocabularies.W005` names the model, the field and the missing target, the way
+`controlled_vocabularies.W001` already does for an absent vocabulary.
+
+A branch restriction reads the hierarchy fresh on each request rather than caching it, so every
+search against a deeply nested branch walks it again from the root down. On a form the public can
+reach, a deep branch is worth choosing deliberately.
+
+Marking a collection `ordered` in the vocabulary editor buys a field restricted to it one more
+thing. The concept search offers the collection in the curator's own sequence while the search box
+is still empty, then falls back to relevance order as soon as someone types. No order is promised
+anywhere else, including a `ModelForm`'s rendered choices and any unordered collection.
+
 ## Choosing a concept by typing
 
 `ConceptField` and `ConceptsField` render as a search-as-you-type control by default. A project

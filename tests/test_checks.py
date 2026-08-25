@@ -19,14 +19,16 @@ from controlled_vocabularies.checks import (
     CHECK_ID,
     CHECK_ID_MISSING_INSTALLED_APP,
     CHECK_ID_MISSING_MIDDLEWARE,
+    CHECK_ID_MISSING_RESTRICTION_TARGET,
     CHECK_ID_MISSING_ROUTE,
     TOMSELECT_MIDDLEWARE,
     check_concept_autocomplete_route_included,
+    check_concept_field_restriction_targets,
     check_concept_field_vocabularies,
     check_django_tomselect_installed,
     check_tomselect_middleware_installed,
 )
-from tests.factories import ConceptSchemeFactory
+from tests.factories import CollectionFactory, ConceptFactory, ConceptSchemeFactory
 from tests.testapp.models import Specimen
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -183,6 +185,201 @@ class TestCheckConceptsFieldVocabularies:
             check_concept_field_vocabularies(None)
 
         assert len(ctx.captured_queries) == 1
+
+
+@pytest.mark.django_db
+class TestCheckConceptFieldRestrictionTargets:
+    """T019 (FS-016 US-5, FR-009) — a new check walking every declared
+    ``collection``, ``concepts`` and ``branch`` restriction, warning about the
+    ones naming a target absent from the vocabulary the field itself names.
+    ``CoreSample``/``DrillCore`` (collection), ``ChipSample``/``ChipTray``
+    (concepts) and ``BranchSample``/``BranchTray`` (branch) all restrict to
+    the "rock-type" vocabulary, so no vocabulary needs creating here — only
+    the target rows this check is deciding are present or absent."""
+
+    def test_warns_about_an_absent_collection_target(self):
+        warnings = check_concept_field_restriction_targets(None)
+
+        by_field = {(w.obj.model._meta.label, w.obj.name): w for w in warnings}
+        assert ("testapp.CoreSample", "rock_type") in by_field
+        message = str(by_field[("testapp.CoreSample", "rock_type")].msg)
+        assert "core-samples" in message
+        assert "rock-type" in message
+
+    def test_warns_about_an_absent_concepts_target_naming_the_specific_slug(self):
+        """A ten-item ``concepts`` list with one typo names the one missing
+        slug, not the list — here a two-item list with one present."""
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        ConceptFactory(scheme=scheme, label="Granite")
+
+        warnings = check_concept_field_restriction_targets(None)
+
+        matches = [w for w in warnings if w.obj.model._meta.label == "testapp.ChipSample" and w.obj.name == "rock_type"]
+        assert len(matches) == 1
+        message = str(matches[0].msg)
+        assert "basalt" in message
+        assert "granite" not in message
+
+    def test_warns_about_an_absent_branch_target(self):
+        warnings = check_concept_field_restriction_targets(None)
+
+        matches = [w for w in warnings if w.obj.model._meta.label == "testapp.BranchSample"]
+        assert len(matches) == 1
+        message = str(matches[0].msg)
+        assert "igneous" in message
+
+    def test_reports_nothing_once_every_named_target_exists(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        CollectionFactory(scheme=scheme, name="Core samples")
+        ConceptFactory(scheme=scheme, label="Granite")
+        ConceptFactory(scheme=scheme, label="Basalt")
+        ConceptFactory(scheme=scheme, label="Igneous")
+
+        warnings = check_concept_field_restriction_targets(None)
+
+        restricted_labels = {
+            "testapp.CoreSample",
+            "testapp.DrillCore",
+            "testapp.ChipSample",
+            "testapp.ChipTray",
+            "testapp.BranchSample",
+            "testapp.BranchTray",
+        }
+        assert [w for w in warnings if w.obj.model._meta.label in restricted_labels] == []
+
+    def test_resolves_on_the_vocabulary_and_target_pair_not_a_flat_set_of_slugs(self):
+        """The one thing most likely to be got wrong (plan.md A6, decisions.md
+        D7): a collection slug is unique only within its own scheme, so a
+        collection named "core-samples" that exists in a *different*
+        vocabulary ("mineral") must not be read as satisfying
+        ``CoreSample.rock_type``'s restriction, which names "core-samples"
+        within "rock-type". A flat set of existing collection slugs would
+        wrongly consider this one present."""
+        other_scheme = ConceptSchemeFactory(name="Mineral")
+        CollectionFactory(scheme=other_scheme, name="Core samples")
+
+        warnings = check_concept_field_restriction_targets(None)
+
+        matches = [w for w in warnings if w.obj.model._meta.label == "testapp.CoreSample" and w.obj.name == "rock_type"]
+        assert len(matches) == 1
+
+    def test_reported_objects_are_warnings_not_errors(self):
+        warnings = check_concept_field_restriction_targets(None)
+
+        assert warnings
+        for warning in warnings:
+            assert isinstance(warning, django_checks.Warning)
+            assert warning.id == CHECK_ID_MISSING_RESTRICTION_TARGET
+
+    def test_costs_three_queries_however_many_fields_are_declared(self):
+        # One batched query per target kind (collection, concepts, branch),
+        # never one per field — the same batching check_concept_field_vocabularies
+        # already uses, extended to the three restriction axes.
+        with CaptureQueriesContext(connection) as ctx:
+            check_concept_field_restriction_targets(None)
+
+        assert len(ctx.captured_queries) == 3
+
+
+@pytest.mark.django_db
+class TestCheckConceptFieldRestrictionTargetsStaysQuietWhenItShould:
+    """T020 (FS-016 US-5, FR-009) — the three silences, plus the one case W005
+    must not be quiet for."""
+
+    def test_a_collection_that_exists_and_holds_no_members_is_not_reported(self):
+        """Present and empty is not missing (plan.md A6): a curator's
+        legitimate, unpopulated collection is not a declaration error."""
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        CollectionFactory(scheme=scheme, name="Core samples")
+
+        warnings = check_concept_field_restriction_targets(None)
+
+        matches = [w for w in warnings if w.obj.model._meta.label == "testapp.CoreSample" and w.obj.name == "rock_type"]
+        assert matches == []
+
+    def test_silencing_the_check_id_suppresses_it(self):
+        stderr = io.StringIO()
+        call_command("check", stderr=stderr)
+        assert CHECK_ID_MISSING_RESTRICTION_TARGET in stderr.getvalue()
+
+        stderr = io.StringIO()
+        with override_settings(SILENCED_SYSTEM_CHECKS=[CHECK_ID_MISSING_RESTRICTION_TARGET]):
+            call_command("check", stderr=stderr)
+        assert CHECK_ID_MISSING_RESTRICTION_TARGET not in stderr.getvalue()
+
+    def test_still_reports_a_target_whose_slug_exists_in_a_different_vocabulary(self):
+        """The case this check exists to catch, on the concepts axis this
+        time: a concept slug that only exists in a different vocabulary is
+        still reported absent from the one the field names. "basalt" is made
+        genuinely present in "rock-type" so the one surviving warning can
+        only be about "granite"."""
+        rock_type = ConceptSchemeFactory(name="Rock Type")
+        ConceptFactory(scheme=rock_type, label="Basalt")
+        other_scheme = ConceptSchemeFactory(name="Mineral")
+        ConceptFactory(scheme=other_scheme, label="Granite")
+
+        warnings = check_concept_field_restriction_targets(None)
+
+        matches = [w for w in warnings if w.obj.model._meta.label == "testapp.ChipSample" and w.obj.name == "rock_type"]
+        assert len(matches) == 1
+        message = str(matches[0].msg)
+        assert "granite" in message
+
+
+class TestCheckRestrictionTargetsSurvivesUnmigratedDatabase:
+    """T020 — the check runs before ``migrate``, so it must survive a database
+    with no tables rather than raising. Exercised against a genuinely
+    unmigrated connection (a fresh subprocess, never-migrated ``:memory:``
+    database), not a mock of ``DatabaseError`` — reproducing
+    ``TestCheckSurvivesUnmigratedDatabase``'s own reasoning for this check's
+    guard."""
+
+    def test_check_reports_nothing_against_an_unmigrated_connection(self):
+        result = _run_django_admin("check")
+
+        assert result.returncode == 0, result.stderr
+        assert CHECK_ID_MISSING_RESTRICTION_TARGET not in result.stdout
+        assert "System check identified no issues" in result.stdout
+
+
+_MIGRATE_CHECK_MAKEMIGRATIONS_MIGRATE_WITH_ABSENT_TARGETS = """
+from django.core.management import call_command
+
+from controlled_vocabularies.checks import check_concept_field_restriction_targets
+
+call_command("migrate", verbosity=0)
+
+# Non-vacuous: the tables now exist and hold none of the restriction targets
+# CoreSample/ChipSample/BranchSample and friends name, so the check must
+# actually have something to report at this point.
+warnings = check_concept_field_restriction_targets(None)
+assert warnings, "expected W005 to report the absent restriction targets once the tables exist"
+
+call_command("check")
+call_command("makemigrations", check=True, dry_run=True)
+call_command("migrate", verbosity=0)
+print("ALL_SUCCEEDED")
+"""
+
+
+class TestNothingAboutAnAbsentRestrictionTargetStopsTheProject:
+    """T021 (FS-016 US-5) — FR-007 end to end for this feature: with every
+    named restriction target absent, importing the models, ``makemigrations``
+    and ``migrate`` all succeed. This is the assertion that would catch
+    someone "helpfully" turning W005 into an ``Error`` or resolving a
+    restriction target at declaration time."""
+
+    def test_check_makemigrations_and_migrate_all_succeed_with_every_target_absent(self):
+        result = _run_django_admin(
+            "shell",
+            "--no-startup",
+            "--no-imports",
+            "-c",
+            _MIGRATE_CHECK_MAKEMIGRATIONS_MIGRATE_WITH_ABSENT_TARGETS,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "ALL_SUCCEEDED" in result.stdout
 
 
 class TestCheckSurvivesUnmigratedDatabase:

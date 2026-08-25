@@ -25,6 +25,68 @@ from django.db.models.utils import make_model_tuple
 from django.utils.functional import Promise
 from django.utils.translation import gettext_lazy as _
 
+#: The refusal wording for a concept the field's declaration does not admit,
+#: one message per restriction axis plus the unrestricted case. Named here
+#: rather than written out where they are raised, because each is needed in two
+#: places that cannot share a class: :attr:`ConceptField.default_error_messages`
+#: for the single-valued path, and :func:`_refuse_concepts_the_restriction_does_not_admit`
+#: for the many-valued write guard, which runs as a signal receiver on
+#: :class:`ConceptsField`. Two copies of a msgid is two entries in the
+#: translation catalogue that a translator has to keep in step by hand, and one
+#: reworded copy is a refusal whose wording depends on how many values the field
+#: holds. Each is one static msgid with the restriction carried through a single
+#: named placeholder (Article XII), so the identifier stays the same whatever
+#: the declaration names.
+RESTRICTED_TO_COLLECTION_MESSAGE = _("%(value)s is not a valid concept in the '%(restriction)s' collection.")
+RESTRICTED_TO_CONCEPTS_MESSAGE = _("%(value)s is not one of the permitted concepts: '%(restriction)s'.")
+RESTRICTED_TO_BRANCH_MESSAGE = _("%(value)s is not a valid concept in the '%(restriction)s' branch.")
+UNRESTRICTED_VOCABULARY_MESSAGE = _("%(value)s is not a valid concept in the '%(vocabulary)s' vocabulary.")
+
+
+def _branch_closure(vocabulary, branch):
+    """The branch axis's downward closure (plan.md A3, research.md R5): the
+    concept named ``branch`` within ``vocabulary``, plus everything narrower
+    than it at any depth.
+
+    Iterative widening over the stored ``broader`` edges, never a single
+    recursive statement (Article II, research.md R5 — both backends support
+    a recursive CTE and neither is used anywhere in this package, and this
+    function is deliberately the only thing R7 would have to replace). The
+    direction is not obvious and is easy to invert: a ``BROADER`` row's
+    ``source`` is the *narrower* concept and its ``target`` the broader one
+    (``models.py:1161-1174``), and ``narrower`` is a reverse read rather
+    than a stored edge. Walking downward means matching each round's
+    frontier against ``target`` and collecting ``source`` as the next one.
+
+    Each round is subtracted against everything already seen before it is
+    added to the frontier — that subtraction, not a depth counter or a
+    separate guard, is what terminates the walk on a cyclic hierarchy
+    (FR-004, decisions.md D5): a two-edge cycle is storable through the
+    public API today, and a round that could re-add an already-seen concept
+    would loop forever without it.
+
+    A ``branch`` slug that does not resolve within ``vocabulary`` — absent
+    altogether, or belonging to a different one — starts with an empty
+    frontier and returns the empty set, the same unresolvable-target shape
+    the other two axes already give (plan.md A2).
+    """
+    from .models import Concept, ConceptRelation
+
+    seen = set(Concept.objects.filter(scheme__slug=vocabulary, slug=branch).values_list("pk", flat=True))
+    frontier = set(seen)
+    while frontier:
+        frontier = (
+            set(
+                ConceptRelation.objects.filter(
+                    kind=ConceptRelation.Kind.BROADER,
+                    target_id__in=frontier,
+                ).values_list("source_id", flat=True)
+            )
+            - seen
+        )
+        seen |= frontier
+    return seen
+
 
 class ConceptFieldMixin:
     """The ``vocabulary`` contract both concept fields keep, held in one place.
@@ -49,13 +111,36 @@ class ConceptFieldMixin:
     field's own.
     """
 
-    #: The ``help_text`` a declaration gets when it supplies none. A static
-    #: message, never one interpolating ``vocabulary``: ``%`` on a
-    #: gettext_lazy() proxy evaluates it immediately, which would defeat the
-    #: laziness this default exists to keep (translation happens at access
-    #: time, per request). Annotated rather than inferred: both subclasses
-    #: assign a ``gettext_lazy()`` proxy, which is not a ``str``.
+    #: The ``help_text`` a declaration gets when it supplies none, for a field
+    #: naming no restriction. A static message, never one interpolating
+    #: ``vocabulary``: ``%`` on a gettext_lazy() proxy evaluates it
+    #: immediately, which would defeat the laziness this default exists to
+    #: keep (translation happens at access time, per request). Annotated
+    #: rather than inferred: both subclasses assign a ``gettext_lazy()``
+    #: proxy, which is not a ``str``.
     default_help_text: str | Promise | None = None
+
+    #: The ``help_text`` a restricted declaration gets when it supplies none
+    #: (T023, US-7, FR-013). One static message per field, shared by all
+    #: three restriction axes — it names the fact of a restriction, never the
+    #: restriction itself, for the same reason ``default_help_text`` stays
+    #: static: interpolating ``self.collection``/``self.concepts``/
+    #: ``self.branch`` here would apply ``%`` to a ``gettext_lazy()`` proxy at
+    #: read time and evaluate it immediately, the exact laziness these
+    #: defaults exist to keep.
+    default_restricted_help_text: str | Promise | None = None
+
+    def _default_help_text(self):
+        """The ``help_text`` default for the restriction this declaration
+        does or does not carry (T023). ``self.collection``, ``self.concepts``
+        and ``self.branch`` are already normalised by the time
+        :meth:`_apply_vocabulary` calls this, so which one is set (if any) is
+        read, never which value it holds — the value itself never reaches
+        either default.
+        """
+        if self.collection is not None or self.concepts is not None or self.branch is not None:
+            return self.default_restricted_help_text
+        return self.default_help_text
 
     def _normalise_vocabulary(self, vocabulary):
         """Normalise a ``vocabulary`` argument to a tuple of slugs.
@@ -85,14 +170,137 @@ class ConceptFieldMixin:
                 raise TypeError(f"{type(self).__name__}() vocabulary elements must be non-empty strings; got {slug!r}.")
         return tuple(dict.fromkeys(slugs))
 
-    def _apply_vocabulary(self, vocabulary, kwargs):
-        """Store the normalised ``vocabulary`` and fill in the kwargs it decides.
+    def _normalise_restriction_slug(self, value, argument_name):
+        """Validate a single restriction target (``collection``, ``branch``) by
+        the same rule :meth:`_normalise_vocabulary` applies to a vocabulary
+        slug: a non-empty string, or a ``TypeError`` naming the class.
+        """
+        if not isinstance(value, str) or not value:
+            raise TypeError(f"{type(self).__name__}() {argument_name} must be a non-empty string; got {value!r}.")
+        return value
+
+    def _normalise_concepts(self, concepts):
+        """Validate and normalise the ``concepts`` restriction (FR-003).
+
+        Every element must be a non-empty string, duplicates are collapsed
+        with the same ``dict.fromkeys`` idiom :meth:`_normalise_vocabulary`
+        uses, and an empty list is refused — the same reasoning that already
+        refuses an empty vocabulary slug: it reads as a restriction and
+        offers nothing (``decisions.md`` D4).
+
+        A single slug is accepted as a one-element restriction, the shape
+        :meth:`_normalise_vocabulary` already accepts. Without that branch a
+        string is iterated character by character, so ``concepts="granite"``
+        would become seven one-letter slugs and pass every check here — a
+        declaration that is wrong in a way nothing downstream can name.
+        """
+        slugs = (concepts,) if isinstance(concepts, str) else tuple(concepts)
+        for slug in slugs:
+            if not isinstance(slug, str) or not slug:
+                raise TypeError(f"{type(self).__name__}() concepts elements must be non-empty strings; got {slug!r}.")
+        normalised = tuple(dict.fromkeys(slugs))
+        if not normalised:
+            raise TypeError(
+                f"{type(self).__name__}() concepts must not be an empty list; omit the argument for no restriction."
+            )
+        return normalised
+
+    def _apply_restriction(self, collection, concepts, branch):
+        """Normalise the three restriction arguments and enforce the two
+        declaration rules that keep them meaningful (FR-005, FR-006).
+
+        Stores the normalised values as ``self.collection``, ``self.concepts``
+        and ``self.branch`` — ``None`` when the declaration did not name that
+        restriction. Must run after ``self.vocabulary`` is set, since FR-005
+        reads it. Resolving a restriction into a queryset is a later story's
+        work; this only decides whether the declaration is one this package
+        accepts.
+        """
+        self.collection = None if collection is None else self._normalise_restriction_slug(collection, "collection")
+        self.concepts = None if concepts is None else self._normalise_concepts(concepts)
+        self.branch = None if branch is None else self._normalise_restriction_slug(branch, "branch")
+
+        restriction_names = [
+            name
+            for name, value in (
+                ("collection", self.collection),
+                ("concepts", self.concepts),
+                ("branch", self.branch),
+            )
+            if value is not None
+        ]
+
+        if restriction_names and len(self.vocabulary) != 1:
+            raise TypeError(
+                f"{type(self).__name__}() a restriction ({', '.join(restriction_names)}) requires the "
+                f"declaration to name exactly one vocabulary; got {len(self.vocabulary)}."
+            )
+        if len(restriction_names) > 1:
+            raise TypeError(
+                f"{type(self).__name__}() at most one of collection, concepts, branch may be given; "
+                f"got {', '.join(restriction_names)}."
+            )
+
+    def _resolve_restriction(self):
+        """The callable installed as ``limit_choices_to`` (research.md R2):
+        resolved at validation time, form-build time, widget-render time and
+        search time alike, never while the declaration is merely being read
+        (FR-007).
+
+        The vocabulary term is always present and never dropped (plan.md A2):
+        a collection slug that happens to exist in another vocabulary cannot
+        widen the field, because every restriction is joined to it with
+        ``&``. The collection axis (T006, research.md R3) narrows further
+        with a ``pk__in`` subquery over :class:`~controlled_vocabularies.models.CollectionMember`
+        — a subquery rather than a ``collection_memberships__…`` join, since
+        this package's own widget and search endpoint call
+        ``complex_filter()`` bare, where Django wraps a ``ModelChoiceField``'s
+        own ``Q`` in ``Exists()``: a join-shaped ``Q`` would duplicate rows in
+        exactly those two places. The concepts axis (T013) needs none of
+        that: ``slug__in`` is a plain column filter on ``Concept`` itself, so
+        it cannot duplicate a row and is joined to the vocabulary term
+        directly rather than through a subquery. The branch axis (T018)
+        also needs a subquery, for the same reason as the collection axis:
+        it narrows with ``pk__in`` over :func:`_branch_closure`'s
+        materialised id set.
+
+        The import is local, not top-level, for the same reason
+        :meth:`formfield` defers its own: this method runs only once every
+        app's models have loaded (validation time, form-build time,
+        widget-render time, search time), so a top-level import here would
+        tie the *consuming* project's app-loading order to something a
+        top-level import cannot assume.
+        """
+        vocabulary_term = Q(scheme__slug__in=self.vocabulary)
+        if self.collection is not None:
+            from .models import CollectionMember
+
+            (vocabulary,) = self.vocabulary
+            members = CollectionMember.objects.filter(
+                collection__slug=self.collection,
+                collection__scheme__slug=vocabulary,
+            ).values("concept")
+            return vocabulary_term & Q(pk__in=members)
+        if self.concepts is not None:
+            return vocabulary_term & Q(slug__in=self.concepts)
+        if self.branch is not None:
+            (vocabulary,) = self.vocabulary
+            return vocabulary_term & Q(pk__in=_branch_closure(vocabulary, self.branch))
+        return vocabulary_term
+
+    def _apply_vocabulary(self, vocabulary, collection, concepts, branch, kwargs):
+        """Store the normalised ``vocabulary`` and restriction, and fill in the
+        kwargs they decide.
 
         ``limit_choices_to`` is set only when the declaration named at least one
         vocabulary — an empty restriction is not set at all, rather than a
         restriction that matches everything by accident. It is also refused from
         a consumer, because the vocabulary constraint *is* ``limit_choices_to``,
         so accepting one would silently discard either theirs or the constraint.
+
+        Installed as a **callable** (research.md R2) rather than a bare ``Q``,
+        so it is re-resolved at every one of the four paths research.md R1
+        found, and never evaluated while the declaration is only being read.
         """
         if "limit_choices_to" in kwargs:
             raise TypeError(
@@ -100,10 +308,11 @@ class ConceptFieldMixin:
                 "to 'vocabulary'; a consumer may not override it."
             )
         self.vocabulary = self._normalise_vocabulary(vocabulary)
+        self._apply_restriction(collection, concepts, branch)
         kwargs["to"] = "controlled_vocabularies.Concept"
         if self.vocabulary:
-            kwargs["limit_choices_to"] = Q(scheme__slug__in=self.vocabulary)
-        kwargs.setdefault("help_text", self.default_help_text)
+            kwargs["limit_choices_to"] = self._resolve_restriction
+        kwargs.setdefault("help_text", self._default_help_text())
         return kwargs
 
     def _contribute_accessor(self, cls, attr_name, accessor):
@@ -167,6 +376,12 @@ class ConceptFieldMixin:
         kwargs.pop("on_delete", None)
         kwargs.pop("limit_choices_to", None)
         kwargs["vocabulary"] = self.vocabulary
+        if self.collection is not None:
+            kwargs["collection"] = self.collection
+        if self.concepts is not None:
+            kwargs["concepts"] = self.concepts
+        if self.branch is not None:
+            kwargs["branch"] = self.branch
         return name, path, args, kwargs
 
 
@@ -212,20 +427,35 @@ class ConceptField(ConceptFieldMixin, ForeignKey):
         # message identifier stays the same whether the declaration names one
         # vocabulary or several — the same shape the many-valued field's own
         # refusal uses.
-        "invalid": _("%(value)s is not a valid concept in the '%(vocabulary)s' vocabulary."),
+        "invalid": UNRESTRICTED_VOCABULARY_MESSAGE,
         # A declaration naming no vocabulary has none to name in a refusal, so
         # it needs its own message rather than the one above with an empty
         # interpolation. Both are overridable through `error_messages`.
         "invalid_unrestricted": _("%(value)s is not a valid concept."),
+        # T008 (US-1): a collection-restricted field names the collection,
+        # not the vocabulary — the restriction is what actually decided the
+        # refusal.
+        "invalid_restricted": RESTRICTED_TO_COLLECTION_MESSAGE,
+        # T013 (US-2): a concepts-restricted field names the permitted
+        # concepts themselves — a distinct msgid from `invalid_restricted`
+        # because that one's text names a *collection*, which would
+        # misdescribe this axis.
+        "invalid_restricted_concepts": RESTRICTED_TO_CONCEPTS_MESSAGE,
+        # T017 (US-3, decisions.md D11's invalid_restricted_<axis> pattern):
+        # a branch-restricted field names the branch root, not the
+        # collection or concept list `invalid_restricted`/
+        # `invalid_restricted_concepts` would misdescribe it as.
+        "invalid_restricted_branch": RESTRICTED_TO_BRANCH_MESSAGE,
     }
 
     default_help_text = _("A concept from this field's configured vocabulary or vocabularies.")
+    default_restricted_help_text = _("A concept from a restricted part of this field's configured vocabulary.")
 
-    def __init__(self, vocabulary=None, **kwargs):
+    def __init__(self, vocabulary=None, collection=None, concepts=None, branch=None, **kwargs):
         if "on_delete" in kwargs:
             raise TypeError("ConceptField() sets on_delete=PROTECT itself; a consumer may not override it.")
         kwargs["on_delete"] = PROTECT
-        super().__init__(**self._apply_vocabulary(vocabulary, kwargs))
+        super().__init__(**self._apply_vocabulary(vocabulary, collection, concepts, branch, kwargs))
 
     def validate(self, value, model_instance):
         """Refuse a concept outside the named vocabulary, with a message that
@@ -251,6 +481,14 @@ class ConceptField(ConceptFieldMixin, ForeignKey):
         concept carries. It has no vocabulary to name, so it re-raises with
         ``invalid_unrestricted`` — the same ``KeyError`` would otherwise fire
         on a placeholder nothing could fill.
+
+        A collection-restricted field (T008, US-1) names the collection
+        instead of the vocabulary — that is what actually decided the
+        refusal, and naming the wider vocabulary would tell a curator
+        nothing about why a same-vocabulary concept was rejected. A
+        concepts-restricted field (T013, US-2) names the permitted concepts,
+        and a branch-restricted field (T017, US-3) names the branch root,
+        on the same reasoning.
         """
         try:
             super().validate(value, model_instance)
@@ -258,11 +496,22 @@ class ConceptField(ConceptFieldMixin, ForeignKey):
             if exc.code != "invalid":
                 raise
             # Carry the ForeignKey's own params through. A consumer's
-            # error_messages["invalid"] is free to use `model`, `pk` or
-            # `field`, and dropping them would reproduce the same
-            # KeyError-on-read this override exists to prevent.
+            # error_messages["invalid"]/["invalid_restricted"]/
+            # ["invalid_restricted_concepts"]/["invalid_restricted_branch"]
+            # is free to use `model`, `pk` or `field`, and dropping them
+            # would reproduce the same KeyError-on-read this override
+            # exists to prevent.
             params = {**(exc.params or {}), "value": value}
-            if self.vocabulary:
+            if self.collection is not None:
+                message = self.error_messages["invalid_restricted"]
+                params["restriction"] = self.collection
+            elif self.concepts is not None:
+                message = self.error_messages["invalid_restricted_concepts"]
+                params["restriction"] = ", ".join(self.concepts)
+            elif self.branch is not None:
+                message = self.error_messages["invalid_restricted_branch"]
+                params["restriction"] = self.branch
+            elif self.vocabulary:
                 message = self.error_messages["invalid"]
                 params["vocabulary"] = ", ".join(self.vocabulary)
             else:
@@ -373,15 +622,23 @@ def _create_membership_model(field, cls):
     )
 
 
-def _refuse_concepts_outside_vocabulary(*, vocabulary, instance, action, reverse, model, pk_set, **kwargs):
+def _refuse_concepts_the_restriction_does_not_admit(*, field, instance, action, reverse, model, pk_set, **kwargs):
     """``m2m_changed`` receiver for a :class:`ConceptsField`'s generated
-    through model (FR-005, D2, R1, R3, R6): refuse the whole write when any
-    incoming concept falls outside the declared ``vocabulary``.
+    through model (FR-005, D2, R1, R3, R6, T012): refuse the whole write when
+    any incoming concept falls outside ``field``'s resolved restriction — of
+    which the vocabulary-only case (no ``collection``/``concepts``/``branch``
+    named) is one, not a separate check.
 
     Connected only against a field whose declaration named at least one
     vocabulary (:meth:`ConceptsField.contribute_to_class`) — a field naming
     none has nothing to enforce, and this receiver is never bound to its
     through model in that case.
+
+    Bound with the field itself (T012), not with ``vocabulary`` alone: both
+    branches below read ``field.get_limit_choices_to()``, so this and every
+    other enforcement path (research.md R1) resolve the same restriction and
+    cannot drift apart the way ``ConceptField`` and ``ConceptsField``
+    themselves once did (#111).
 
     Only ``pre_add`` is checked. ``post_add``, ``pre_remove``, ``post_remove``,
     ``pre_clear`` and ``post_clear`` all reach this same receiver and are
@@ -392,9 +649,11 @@ def _refuse_concepts_outside_vocabulary(*, vocabulary, instance, action, reverse
     it, so ``concept.deposit_set.add(a_deposit)`` reaches the same through
     model as ``deposit.rock_types.add(a_concept)`` and has to be refused on
     the same terms. What differs is where the concept is: on a forward write
-    ``pk_set`` holds the incoming concepts' primary keys, while on a reverse
-    write it holds the *owner* model's, and the single concept being attached
-    is ``instance`` (D16).
+    ``pk_set`` holds the incoming concepts' primary keys, so ``model``
+    (``Concept``) is queried directly; on a reverse write ``pk_set`` holds the
+    *owner* model's keys instead, and the single concept being attached is
+    ``instance`` (D16) — so its own admission is checked with ``type(instance)``,
+    never with ``model``, which is the *owner*'s class on that branch.
 
     Raising here aborts the whole write before any row is inserted (FR-005).
     ``QuerySet.set()`` is implemented as ``remove()`` then ``add()``, so the
@@ -403,22 +662,41 @@ def _refuse_concepts_outside_vocabulary(*, vocabulary, instance, action, reverse
     """
     if action != "pre_add":
         return
+    restriction = field.get_limit_choices_to()
     if reverse:
-        invalid = [] if instance.scheme.slug in vocabulary else [instance]
+        invalid = [] if type(instance).objects.filter(pk=instance.pk).filter(restriction).exists() else [instance]
     else:
-        invalid = list(model.objects.filter(pk__in=pk_set).exclude(scheme__slug__in=vocabulary))
+        invalid = list(model.objects.filter(pk__in=pk_set).exclude(restriction))
     if not invalid:
         return
+    value = ", ".join(str(concept) for concept in invalid)
+    # The same four messages the single-valued path raises, named once at the
+    # top of this module rather than written out twice: a refusal should not
+    # read differently depending on how many values the field holds, and one
+    # msgid in two places is two catalogue entries for a translator to keep in
+    # step by hand.
+    if field.collection is not None:
+        raise ValidationError(
+            RESTRICTED_TO_COLLECTION_MESSAGE,
+            code="invalid",
+            params={"value": value, "restriction": field.collection},
+        )
+    if field.concepts is not None:
+        raise ValidationError(
+            RESTRICTED_TO_CONCEPTS_MESSAGE,
+            code="invalid",
+            params={"value": value, "restriction": ", ".join(field.concepts)},
+        )
+    if field.branch is not None:
+        raise ValidationError(
+            RESTRICTED_TO_BRANCH_MESSAGE,
+            code="invalid",
+            params={"value": value, "restriction": field.branch},
+        )
     raise ValidationError(
-        # A static message, with the vocabulary slugs joined into ONE
-        # placeholder (Article XII) so the message identifier stays the same
-        # whether the declaration names one vocabulary or several.
-        _("%(value)s is not a valid concept in the '%(vocabulary)s' vocabulary."),
+        UNRESTRICTED_VOCABULARY_MESSAGE,
         code="invalid",
-        params={
-            "value": ", ".join(str(concept) for concept in invalid),
-            "vocabulary": ", ".join(vocabulary),
-        },
+        params={"value": value, "vocabulary": ", ".join(field.vocabulary)},
     )
 
 
@@ -533,14 +811,15 @@ class ConceptsField(ConceptFieldMixin, ManyToManyField):
     """
 
     default_help_text = _("Concepts from this field's configured vocabulary or vocabularies.")
+    default_restricted_help_text = _("Concepts from a restricted part of this field's configured vocabulary.")
 
-    def __init__(self, vocabulary=None, **kwargs):
+    def __init__(self, vocabulary=None, collection=None, concepts=None, branch=None, **kwargs):
         if "through" in kwargs:
             raise TypeError(
                 "ConceptsField() generates its own through model with PROTECT on the "
                 "foreign key to Concept; a consumer may not override it."
             )
-        super().__init__(**self._apply_vocabulary(vocabulary, kwargs))
+        super().__init__(**self._apply_vocabulary(vocabulary, collection, concepts, branch, kwargs))
 
     def contribute_to_class(self, cls, name, **kwargs):
         """Attach the field, then generate the ``PROTECT`` membership model in
@@ -606,7 +885,7 @@ class ConceptsField(ConceptFieldMixin, ManyToManyField):
             _install_required_set_check(cls)
             if self.vocabulary:
                 m2m_changed.connect(
-                    partial(_refuse_concepts_outside_vocabulary, vocabulary=self.vocabulary),
+                    partial(_refuse_concepts_the_restriction_does_not_admit, field=self),
                     sender=self.remote_field.through,
                     weak=False,
                 )

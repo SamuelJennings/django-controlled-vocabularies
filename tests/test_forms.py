@@ -30,8 +30,15 @@ from django.utils import translation
 from django_tomselect.middleware import TomSelectMiddleware
 
 from controlled_vocabularies.forms import ConceptChoiceField, ConceptsChoiceField
-from tests.factories import ConceptFactory, ConceptSchemeFactory, OutcropFactory, SampleFactory
-from tests.testapp.models import Deposit, Outcrop, Sample
+from tests.factories import (
+    CollectionFactory,
+    ConceptFactory,
+    ConceptSchemeFactory,
+    OutcropFactory,
+    SampleFactory,
+    collection_with_members,
+)
+from tests.testapp.models import BranchSample, ChipSample, CoreSample, Deposit, Outcrop, Sample
 
 
 def _rendered_under_an_ambient_request(build):
@@ -66,6 +73,24 @@ class OutcropForm(forms.ModelForm):
     class Meta:
         model = Outcrop
         fields = ["name", "minerals"]
+
+
+class CoreSampleForm(forms.ModelForm):
+    class Meta:
+        model = CoreSample
+        fields = ["name", "rock_type"]
+
+
+class ChipSampleForm(forms.ModelForm):
+    class Meta:
+        model = ChipSample
+        fields = ["name", "rock_type"]
+
+
+class BranchSampleForm(forms.ModelForm):
+    class Meta:
+        model = BranchSample
+        fields = ["name", "rock_type"]
 
 
 class TestConceptFieldRendersAsTheControl:
@@ -162,6 +187,139 @@ class TestConceptFieldSubmissionSurvives:
 
         assert not form.is_valid()
         assert "minerals" in form.errors
+
+
+@pytest.mark.django_db
+class TestConceptFieldCollectionRestrictionFormChoices:
+    """T009 (US-1, FR-008's choices half) — a collection restriction narrows
+    the offered choices on both paths a form can build them from:
+    :class:`~django.forms.ModelChoiceField`'s own ``queryset`` (Django's
+    ``Exists()`` wrapper around ``limit_choices_to``) and this package's own
+    widget ``get_queryset()`` (a bare ``complex_filter()``, unprotected —
+    research.md R3). No duplicate rows on either path for a concept that
+    belongs to a second collection too, asserted by count rather than only
+    by membership — the assertion that would fail if the restriction were
+    ever rewritten as a ``collection_memberships__…`` join."""
+
+    def test_the_modelforms_own_queryset_is_exactly_the_members(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        _collection, members = collection_with_members(scheme=scheme, name="Core Samples", labels=("Granite", "Basalt"))
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+
+        choices = list(CoreSampleForm().fields["rock_type"].queryset)
+
+        assert set(choices) == set(members)
+        assert len(choices) == len(members)
+        assert outsider not in choices
+
+    def test_the_widgets_own_queryset_is_exactly_the_members(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        _collection, members = collection_with_members(scheme=scheme, name="Core Samples", labels=("Granite", "Basalt"))
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+
+        widget = CoreSampleForm().fields["rock_type"].widget
+        choices = list(widget.get_queryset())
+
+        assert set(choices) == set(members)
+        assert len(choices) == len(members)
+        assert outsider not in choices
+
+    def test_a_member_of_a_second_collection_too_is_not_duplicated_on_either_path(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        _collection, members = collection_with_members(scheme=scheme, name="Core Samples", labels=("Granite",))
+        other_collection = CollectionFactory(scheme=scheme, name="Display Samples")
+        other_collection.add(members[0])
+
+        form = CoreSampleForm()
+        modelform_choices = list(form.fields["rock_type"].queryset)
+        widget_choices = list(form.fields["rock_type"].widget.get_queryset())
+
+        assert modelform_choices == [members[0]]
+        assert widget_choices == [members[0]]
+
+
+@pytest.mark.django_db
+class TestConceptFieldConceptsRestrictionFormChoices:
+    """T014 (US-2, FR-008's choices half, "as T009, for this axis") — a
+    ``concepts`` restriction narrows the offered choices on both paths a
+    form can build them from, asserted by count as well as by membership,
+    through :class:`~tests.testapp.models.ChipSample`, restricted to
+    "granite" and "basalt"."""
+
+    def test_the_modelforms_own_queryset_is_exactly_the_listed_concepts(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        granite = ConceptFactory(scheme=scheme, label="Granite")
+        basalt = ConceptFactory(scheme=scheme, label="Basalt")
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+
+        choices = list(ChipSampleForm().fields["rock_type"].queryset)
+
+        assert set(choices) == {granite, basalt}
+        assert len(choices) == 2
+        assert outsider not in choices
+
+    def test_the_widgets_own_queryset_is_exactly_the_listed_concepts(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        granite = ConceptFactory(scheme=scheme, label="Granite")
+        basalt = ConceptFactory(scheme=scheme, label="Basalt")
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+
+        widget = ChipSampleForm().fields["rock_type"].widget
+        choices = list(widget.get_queryset())
+
+        assert set(choices) == {granite, basalt}
+        assert len(choices) == 2
+        assert outsider not in choices
+
+
+@pytest.mark.django_db
+class TestConceptFieldBranchRestrictionFormChoices:
+    """T018 (US-3, FR-008's choices half, "as T009, for this axis") — a
+    ``branch`` restriction narrows the offered choices on both paths a form
+    can build them from, asserted by count as well as by membership,
+    through :class:`~tests.testapp.models.BranchSample`, restricted to the
+    "igneous" branch."""
+
+    def test_the_modelforms_own_queryset_is_exactly_the_closure(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        root = ConceptFactory(scheme=scheme, label="Igneous")
+        child = ConceptFactory(scheme=scheme, label="Granite")
+        child.add_broader(root)
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+
+        choices = list(BranchSampleForm().fields["rock_type"].queryset)
+
+        assert set(choices) == {root, child}
+        assert len(choices) == 2
+        assert outsider not in choices
+
+    def test_the_widgets_own_queryset_is_exactly_the_closure(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        root = ConceptFactory(scheme=scheme, label="Igneous")
+        child = ConceptFactory(scheme=scheme, label="Granite")
+        child.add_broader(root)
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+
+        widget = BranchSampleForm().fields["rock_type"].widget
+        choices = list(widget.get_queryset())
+
+        assert set(choices) == {root, child}
+        assert len(choices) == 2
+        assert outsider not in choices
+
+    def test_a_concept_added_below_the_root_appears_on_the_next_read(self):
+        # As T010 asserts for collection membership.
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        root = ConceptFactory(scheme=scheme, label="Igneous")
+
+        form = BranchSampleForm()
+        assert set(form.fields["rock_type"].queryset) == {root}
+
+        newcomer = ConceptFactory(scheme=scheme, label="Granite")
+        newcomer.add_broader(root)
+
+        form_again = BranchSampleForm()
+        assert set(form_again.fields["rock_type"].queryset) == {root, newcomer}
 
 
 class TestConceptFieldRenderingWithoutTheRouteIncluded:
@@ -278,7 +436,7 @@ class TestConceptFieldShowsWhatARecordAlreadyHolds:
         (see the single-valued case above for why the un-overridden widget
         drops it).
 
-        ``fields.py``'s ``_refuse_concepts_outside_vocabulary`` (an
+        ``fields.py``'s ``_refuse_concepts_the_restriction_does_not_admit`` (an
         ``m2m_changed`` receiver) refuses ``.add()``ing a concept outside the
         vocabulary outright, by design (D2) — so unlike the single-valued
         case above, a concept cannot be attached directly from a foreign
