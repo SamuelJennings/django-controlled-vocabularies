@@ -35,6 +35,8 @@ Three pieces of evidence were put to the maintainer and settled it:
 package stores and to how imports assign slugs, and it belongs with identity rather than with a
 read-only browsing feature.
 
+**ADR:** docs/adr/0017-a-collection-keeps-its-own-address-segment.md
+
 ## D2 — A short form's prefix comes from the vocabulary's slug
 
 **Decided:** the prefix of a record's CURIE is the slug of the vocabulary holding it.
@@ -49,6 +51,8 @@ full canonical identifier is disclosed behind every short form and the link lead
 the short form is not the one that community recognises. Recording a real prefix per vocabulary
 changes what the package stores and belongs with identity.
 
+**ADR:** docs/adr/0018-a-short-forms-prefix-comes-from-the-vocabularys-slug.md
+
 ## D3 — Hidden labels stay hidden, against "everything"
 
 **Decided:** every predicate except `skos:hiddenLabel`.
@@ -59,6 +63,9 @@ vocabulary page's search one feature ago. A hidden label is where a vocabulary k
 superseded wording, and terms deliberately retired — sometimes for being offensive. A complete raw
 view would put every one of them in front of any reader who opens the page. Raised explicitly at
 intake and confirmed.
+
+**ADR:** none — this restates `skos:hiddenLabel`'s own published semantics and is already carried
+as a requirement rather than a package decision; it chooses no architecture of its own.
 
 ## D4 — Collection membership sits outside the definition list
 
@@ -74,6 +81,8 @@ invented CURIE would misrepresent the data, and keying it on `skos:member` would
 **Rejected:** omitting membership entirely. The maintainer asked for where a record sits among the
 records around it, and the collections gathering it are part of that.
 
+**ADR:** none — this is the presentation of one page, with no consequence beyond it.
+
 ## D5 — The term-and-value component is this package's own
 
 **Decided:** build the reusable component here, and propose it upstream once its shape has proved
@@ -88,6 +97,8 @@ reserves a test path for them.
 change and version bump for a component whose shape has not yet been proved in use. Promotion later
 is cheap and better informed.
 
+**ADR:** docs/adr/0019-the-term-and-value-component-is-this-packages-own.md
+
 ## D6 — One language, not every language a value was recorded in
 
 **Decided:** the reading language, falling back to the vocabulary's default, exactly as the
@@ -99,6 +110,9 @@ with the alternative — a record's page being where the whole record is, so sho
 there is defensible — and he chose consistency. A language switcher, or an "in other languages"
 section, remains available later without contradicting anything specified here.
 
+**ADR:** none — this follows the rule the vocabulary page already set rather than establishing one
+of its own; that rule is recorded at `docs/adr/0016-a-concept-is-named-in-the-reading-language.md`.
+
 ## D7 — A machine-readable representation is not served here
 
 **Decided:** out of scope, and raised at the spec gate.
@@ -107,6 +121,8 @@ The address being served is the record's own identifier, and a published vocabul
 expected to return RDF when that address is asked for it. That is a real gap and the obvious thing
 R6 leaves behind, but it is a different feature: its own formats, its own round-trip fidelity rules
 under the constitution's article on them, and its natural home is export rather than browsing.
+
+**ADR:** none — a scope boundary, recorded on the roadmap rather than as an architectural decision.
 
 ## D8 — One step in each direction, and no path to the top
 
@@ -117,6 +133,8 @@ Walking up one step at a time reaches the top of any hierarchy, and computing an
 every page view is a cost that grows with depth — which is the subject of R7, not of the first
 read-only page. The tree navigation the maintainer removed from the vocabulary page is not
 reintroduced by showing one step in each direction.
+
+**ADR:** none — a scope boundary deferred to roadmap item R7 on cost grounds.
 
 ## Gaps recorded, not solved
 
