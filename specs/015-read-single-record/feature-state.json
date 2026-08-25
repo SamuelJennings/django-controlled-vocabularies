@@ -3,7 +3,7 @@
   "feature": "015-read-single-record",
   "branch": "015-read-single-record",
   "repo": "SamuelJennings/django-controlled-vocabularies",
-  "state": "PR_READY",
+  "state": "MERGED",
   "state_history": [
     {
       "state": "SPECIFY",
@@ -54,6 +54,11 @@
       "state": "PR_READY",
       "at": "2026-08-24T20:36:51Z",
       "note": "R1 closed in 81843c6; PR #162 out of draft, awaiting the merge gate"
+    },
+    {
+      "state": "MERGED",
+      "at": "2026-08-25T09:37:34Z",
+      "note": "PR #162 merged; approved by SamuelJennings"
     }
   ],
   "gates": {
@@ -74,8 +79,8 @@
       "at": null
     },
     "merge": {
-      "approved_by": null,
-      "at": null
+      "approved_by": "SamuelJennings",
+      "at": "2026-08-25T09:37:21Z"
     }
   },
   "stories": [
@@ -528,5 +533,9 @@
       "used": 0,
       "max": 120
     }
+  },
+  "pr": {
+    "number": 162,
+    "draft": false
   }
 }
