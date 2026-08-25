@@ -38,7 +38,7 @@ from tests.factories import (
     SampleFactory,
     collection_with_members,
 )
-from tests.testapp.models import CoreSample, Deposit, Outcrop, Sample
+from tests.testapp.models import ChipSample, CoreSample, Deposit, Outcrop, Sample
 
 
 def _rendered_under_an_ambient_request(build):
@@ -78,6 +78,12 @@ class OutcropForm(forms.ModelForm):
 class CoreSampleForm(forms.ModelForm):
     class Meta:
         model = CoreSample
+        fields = ["name", "rock_type"]
+
+
+class ChipSampleForm(forms.ModelForm):
+    class Meta:
+        model = ChipSample
         fields = ["name", "rock_type"]
 
 
@@ -224,6 +230,40 @@ class TestConceptFieldCollectionRestrictionFormChoices:
 
         assert modelform_choices == [members[0]]
         assert widget_choices == [members[0]]
+
+
+@pytest.mark.django_db
+class TestConceptFieldConceptsRestrictionFormChoices:
+    """T014 (US-2, FR-008's choices half, "as T009, for this axis") — a
+    ``concepts`` restriction narrows the offered choices on both paths a
+    form can build them from, asserted by count as well as by membership,
+    through :class:`~tests.testapp.models.ChipSample`, restricted to
+    "granite" and "basalt"."""
+
+    def test_the_modelforms_own_queryset_is_exactly_the_listed_concepts(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        granite = ConceptFactory(scheme=scheme, label="Granite")
+        basalt = ConceptFactory(scheme=scheme, label="Basalt")
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+
+        choices = list(ChipSampleForm().fields["rock_type"].queryset)
+
+        assert set(choices) == {granite, basalt}
+        assert len(choices) == 2
+        assert outsider not in choices
+
+    def test_the_widgets_own_queryset_is_exactly_the_listed_concepts(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        granite = ConceptFactory(scheme=scheme, label="Granite")
+        basalt = ConceptFactory(scheme=scheme, label="Basalt")
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+
+        widget = ChipSampleForm().fields["rock_type"].widget
+        choices = list(widget.get_queryset())
+
+        assert set(choices) == {granite, basalt}
+        assert len(choices) == 2
+        assert outsider not in choices
 
 
 class TestConceptFieldRenderingWithoutTheRouteIncluded:

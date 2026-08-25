@@ -129,6 +129,7 @@ from controlled_vocabularies.models import Concept, ConceptLabel, ConceptScheme
 from tests.factories import (
     ArtifactFactory,
     BoreholeFactory,
+    ChipTrayFactory,
     CollectionFactory,
     ConceptFactory,
     ConceptSchemeFactory,
@@ -147,6 +148,7 @@ from tests.factories import (
 from tests.testapp.models import (
     Artifact,
     Borehole,
+    ChipSample,
     CoreSample,
     Deposit,
     DrillCore,
@@ -563,6 +565,55 @@ class TestCollectionRestrictionResolvesLive:
 
         resolved_again = Concept.objects.complex_filter(field.get_limit_choices_to())
         assert set(resolved_again) == {*members, newcomer}
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("field_class", [ConceptField, ConceptsField])
+class TestConceptsRestrictionResolves:
+    """T013 (US-2, FR-003, plan.md A2) — the callable from T005 gains its
+    third and final term: ``Q(slug__in=self.concepts)`` when ``concepts`` is
+    set. The one axis needing no subquery — research.md R3's row-duplication
+    concern does not arise for a plain column filter, so this is checked
+    against real rows the same way the collection axis is, but for
+    consistency with the rest of this module rather than out of necessity:
+    a bare ``Q`` *is* ``==``-comparable, unlike the collection axis's
+    subquery-wrapped one."""
+
+    def test_resolves_to_exactly_the_listed_concepts(self, field_class):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        granite = ConceptFactory(scheme=scheme, label="Granite")
+        basalt = ConceptFactory(scheme=scheme, label="Basalt")
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+
+        field = field_class(vocabulary="rock-type", concepts=["granite", "basalt"])
+        resolved = Concept.objects.complex_filter(field.get_limit_choices_to())
+
+        assert set(resolved) == {granite, basalt}
+        assert outsider not in resolved
+
+    def test_a_same_slugged_concept_in_another_vocabulary_does_not_widen_the_field(self, field_class):
+        rock_scheme = ConceptSchemeFactory(name="Rock Type")
+        granite = ConceptFactory(scheme=rock_scheme, label="Granite")
+        ConceptFactory(scheme=rock_scheme, label="Marble")  # unlisted, same vocabulary
+        mineral_scheme = ConceptSchemeFactory(name="Mineral")
+        mineral_granite = ConceptFactory(scheme=mineral_scheme, label="Granite")
+        assert mineral_granite.slug == granite.slug
+
+        field = field_class(vocabulary="rock-type", concepts=["granite"])
+        resolved = Concept.objects.complex_filter(field.get_limit_choices_to())
+
+        assert list(resolved) == [granite]
+        assert mineral_granite not in resolved
+
+    def test_a_slug_listed_twice_offers_the_concept_once(self, field_class):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        granite = ConceptFactory(scheme=scheme, label="Granite")
+        ConceptFactory(scheme=scheme, label="Marble")  # unlisted, same vocabulary
+
+        field = field_class(vocabulary="rock-type", concepts=["granite", "granite"])
+        resolved = Concept.objects.complex_filter(field.get_limit_choices_to())
+
+        assert list(resolved) == [granite]
 
 
 class TestConceptFieldConstruction:
@@ -1231,6 +1282,92 @@ class TestConceptsFieldCollectionRestrictionWritePath:
         drill_core.rock_types.add(*members)
 
         assert set(drill_core.rock_types.all()) == set(members)
+
+
+class TestConceptsFieldConceptsRestrictionWritePath:
+    """T013 (US-2, plan.md A4) — the many-valued write guard needs no
+    further change of its own: it already reads ``field.get_limit_choices_to()``
+    (T012), and ``TestConceptsRestrictionResolves`` above proves that method
+    now resolves the concepts axis too, so this class is the end-to-end
+    proof rather than new enforcement code. Driven entirely through
+    :class:`~tests.testapp.models.ChipTray`'s real relation manager, the
+    concepts-axis counterpart of ``TestConceptsFieldCollectionRestrictionWritePath``."""
+
+    @pytest.mark.django_db
+    def test_forward_add_of_an_unlisted_concept_is_refused_and_the_set_is_unchanged(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        granite = ConceptFactory(scheme=scheme, label="Granite")
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+        chip_tray = ChipTrayFactory()
+        chip_tray.rock_types.add(granite)
+
+        with pytest.raises(ValidationError), transaction.atomic():
+            chip_tray.rock_types.add(outsider)
+
+        assert list(chip_tray.rock_types.all()) == [granite]
+
+    @pytest.mark.django_db
+    def test_the_refusal_names_the_permitted_concepts(self):
+        # The concepts-axis counterpart of
+        # ``TestConceptsFieldCollectionRestrictionWritePath.test_the_refusal_names_the_collection``:
+        # naming the wider vocabulary would say nothing about why a
+        # same-vocabulary concept was rejected.
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+        chip_tray = ChipTrayFactory()
+
+        with pytest.raises(ValidationError) as excinfo:
+            chip_tray.rock_types.add(outsider)
+
+        assert any("granite, basalt" in message for message in excinfo.value.messages)
+        assert not any("rock-type" in message for message in excinfo.value.messages)
+
+    @pytest.mark.django_db
+    def test_the_reverse_accessor_refuses_an_unlisted_concept(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+        chip_tray = ChipTrayFactory()
+
+        with pytest.raises(ValidationError), transaction.atomic():
+            outsider.chip_trays.add(chip_tray)
+
+        assert list(chip_tray.rock_types.all()) == []
+
+    @pytest.mark.django_db
+    def test_the_reverse_accessor_attaches_a_listed_concept(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        granite = ConceptFactory(scheme=scheme, label="Granite")
+        chip_tray = ChipTrayFactory()
+
+        granite.chip_trays.add(chip_tray)
+
+        assert list(chip_tray.rock_types.all()) == [granite]
+
+    @pytest.mark.django_db
+    def test_a_set_carrying_a_mix_is_refused_whole_and_the_set_is_unchanged_afterwards(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        granite = ConceptFactory(scheme=scheme, label="Granite")
+        basalt = ConceptFactory(scheme=scheme, label="Basalt")
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+        chip_tray = ChipTrayFactory()
+        chip_tray.rock_types.add(granite)
+
+        with pytest.raises(ValidationError), transaction.atomic():
+            chip_tray.rock_types.set([basalt, outsider])
+
+        # Asserted after the failed write, not merely that it raised (D2's whole-write refusal).
+        assert set(chip_tray.rock_types.all()) == {granite}
+
+    @pytest.mark.django_db
+    def test_both_listed_concepts_attach(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        granite = ConceptFactory(scheme=scheme, label="Granite")
+        basalt = ConceptFactory(scheme=scheme, label="Basalt")
+        chip_tray = ChipTrayFactory()
+
+        chip_tray.rock_types.add(granite, basalt)
+
+        assert set(chip_tray.rock_types.all()) == {granite, basalt}
 
 
 class TestConceptsFieldSeveralVocabulariesWritePath:
@@ -2071,6 +2208,73 @@ class TestConceptFieldCollectionRestrictionRefusalMessage:
             assert any("core-samples" in message for message in excinfo.value.messages)
         finally:
             field.error_messages["invalid_restricted"] = original
+
+
+class TestConceptFieldConceptsRestrictionValidation:
+    """T013 (US-2, FR-008 for the single-value field) — the concepts axis's
+    counterpart to T007: no new constraint code, since ``ForeignKey.validate()``
+    already applies ``limit_choices_to`` and this task taught the resolved
+    ``Q`` the concepts axis. Proves the behavioural chain end to end through
+    :class:`~tests.testapp.models.ChipSample`'s real ``rock_type`` field,
+    restricted to "granite" and "basalt": a listed concept validates, and a
+    concept from the same vocabulary but not on the list is refused. The
+    message naming the permitted concepts is the next class's, not this
+    task's — asserted there, not here."""
+
+    @pytest.mark.django_db
+    def test_a_listed_concept_validates(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        granite = ConceptFactory(scheme=scheme, label="Granite")
+        chip_sample = ChipSample(name="Sample A", rock_type=granite)
+
+        chip_sample.full_clean()
+
+    @pytest.mark.django_db
+    def test_an_unlisted_concept_of_the_same_vocabulary_is_refused(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+        chip_sample = ChipSample(name="Sample B", rock_type=outsider)
+
+        with pytest.raises(ValidationError):
+            chip_sample.full_clean()
+
+
+class TestConceptFieldConceptsRestrictionRefusalMessage:
+    """T013 — extends the same re-raise with a fourth message id: a field
+    restricted to an explicit concept list names the permitted concepts, as
+    one static msgid with a single named placeholder (Article XII), not one
+    that varies with the restriction's contents — the same shape T008
+    established for the collection axis. A consumer's own ``error_messages``
+    override still works and the ``ForeignKey``'s own ``params`` are still
+    carried through."""
+
+    @pytest.mark.django_db
+    def test_the_refusal_names_the_permitted_concepts(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+        chip_sample = ChipSample(name="Sample B", rock_type=outsider)
+
+        with pytest.raises(ValidationError) as excinfo:
+            chip_sample.full_clean()
+
+        assert any("granite" in message and "basalt" in message for message in excinfo.value.messages)
+
+    @pytest.mark.django_db
+    def test_a_consumers_own_error_messages_override_still_works(self):
+        field = ChipSample._meta.get_field("rock_type")
+        original = field.error_messages["invalid_restricted_concepts"]
+        field.error_messages["invalid_restricted_concepts"] = "%(model)s pk=%(pk)s field=%(field)s in %(restriction)s"
+        try:
+            scheme = ConceptSchemeFactory(name="Rock Type")
+            outsider = ConceptFactory(scheme=scheme, label="Marble")
+            chip_sample = ChipSample(name="Sample C", rock_type=outsider)
+
+            with pytest.raises(ValidationError) as excinfo:
+                chip_sample.full_clean()
+
+            assert any("granite" in message for message in excinfo.value.messages)
+        finally:
+            field.error_messages["invalid_restricted_concepts"] = original
 
 
 class SpecimenForm(forms.ModelForm):

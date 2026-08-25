@@ -170,3 +170,26 @@ Forge/Sam can veto if this reasoning does not hold.
 **Revisit if:** Sam or Forge judges that a test whose docstring predicts its own supersession should
 still route through "mark blocked" rather than "update and disclose" — in which case this specific
 carve-out should be written into the Implementer protocol rather than decided ad hoc per occurrence.
+
+## D11 — The concepts axis gets its own message id rather than reusing `invalid_restricted`
+
+**Ambiguous:** T013's brief instructs extending the existing `invalid_restricted` handling "in the
+same shape" as T008's collection message, without saying whether that means the same msgid or the
+same *pattern* (one static msgid, one named placeholder).
+
+**Chosen:** a new msgid, `invalid_restricted_concepts`, rather than routing the concepts axis
+through `invalid_restricted`.
+
+**Why defensible:** `invalid_restricted`'s fixed English text names a collection by word — "...in
+the '%(restriction)s' **collection**." Reusing it for the concepts axis would read as "'granite,
+basalt' collection", which is wrong on its face: a concept list is not a collection, and a curator
+reading the refusal would learn something false about why the write was rejected. Article XII's
+"one static msgid" rule is about not varying the msgid with the restriction's *contents* (so ten
+different collections do not need ten different msgids) — it does not require every restriction
+*kind* to share one msgid regardless of what the fixed text says. `invalid_restricted_concepts`
+keeps the same shape (one static msgid, the restriction interpolated through a single named
+placeholder) while keeping the sentence true.
+
+**Revisit if:** a future restriction kind (the branch axis) turns out to want a fourth message
+naming a root concept, at which point the naming pattern here (`invalid_restricted_<axis>`) is
+either continued or replaced with something that scales better than one msgid per axis.

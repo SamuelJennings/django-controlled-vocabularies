@@ -171,8 +171,11 @@ class ConceptFieldMixin:
         this package's own widget and search endpoint call
         ``complex_filter()`` bare, where Django wraps a ``ModelChoiceField``'s
         own ``Q`` in ``Exists()``: a join-shaped ``Q`` would duplicate rows in
-        exactly those two places. The concepts and branch axes each add their
-        own term in the stories that follow.
+        exactly those two places. The concepts axis (T013) needs none of
+        that: ``slug__in`` is a plain column filter on ``Concept`` itself, so
+        it cannot duplicate a row and is joined to the vocabulary term
+        directly rather than through a subquery. The branch axis adds its
+        own term in the story that follows.
 
         The import is local, not top-level, for the same reason
         :meth:`formfield` defers its own: this method runs only once every
@@ -191,6 +194,8 @@ class ConceptFieldMixin:
                 collection__scheme__slug=vocabulary,
             ).values("concept")
             return vocabulary_term & Q(pk__in=members)
+        if self.concepts is not None:
+            return vocabulary_term & Q(slug__in=self.concepts)
         return vocabulary_term
 
     def _apply_vocabulary(self, vocabulary, collection, concepts, branch, kwargs):
@@ -342,6 +347,11 @@ class ConceptField(ConceptFieldMixin, ForeignKey):
         # refusal. One static msgid with the restriction joined into a
         # single named placeholder, the same shape `invalid` already uses.
         "invalid_restricted": _("%(value)s is not a valid concept in the '%(restriction)s' collection."),
+        # T013 (US-2): a concepts-restricted field names the permitted
+        # concepts themselves, the same one-static-msgid shape — a distinct
+        # msgid from `invalid_restricted` because that one's text names a
+        # *collection*, which would misdescribe this axis.
+        "invalid_restricted_concepts": _("%(value)s is not one of the permitted concepts: '%(restriction)s'."),
     }
 
     default_help_text = _("A concept from this field's configured vocabulary or vocabularies.")
@@ -380,7 +390,9 @@ class ConceptField(ConceptFieldMixin, ForeignKey):
         A collection-restricted field (T008, US-1) names the collection
         instead of the vocabulary — that is what actually decided the
         refusal, and naming the wider vocabulary would tell a curator
-        nothing about why a same-vocabulary concept was rejected.
+        nothing about why a same-vocabulary concept was rejected. A
+        concepts-restricted field (T013, US-2) names the permitted concepts
+        on the same reasoning.
         """
         try:
             super().validate(value, model_instance)
@@ -388,13 +400,17 @@ class ConceptField(ConceptFieldMixin, ForeignKey):
             if exc.code != "invalid":
                 raise
             # Carry the ForeignKey's own params through. A consumer's
-            # error_messages["invalid"]/["invalid_restricted"] is free to use
-            # `model`, `pk` or `field`, and dropping them would reproduce the
-            # same KeyError-on-read this override exists to prevent.
+            # error_messages["invalid"]/["invalid_restricted"]/
+            # ["invalid_restricted_concepts"] is free to use `model`, `pk` or
+            # `field`, and dropping them would reproduce the same
+            # KeyError-on-read this override exists to prevent.
             params = {**(exc.params or {}), "value": value}
             if self.collection is not None:
                 message = self.error_messages["invalid_restricted"]
                 params["restriction"] = self.collection
+            elif self.concepts is not None:
+                message = self.error_messages["invalid_restricted_concepts"]
+                params["restriction"] = ", ".join(self.concepts)
             elif self.vocabulary:
                 message = self.error_messages["invalid"]
                 params["vocabulary"] = ", ".join(self.vocabulary)
@@ -562,6 +578,17 @@ def _refuse_concepts_the_restriction_does_not_admit(*, field, instance, action, 
             _("%(value)s is not a valid concept in the '%(restriction)s' collection."),
             code="invalid",
             params={"value": value, "restriction": field.collection},
+        )
+    if field.concepts is not None:
+        raise ValidationError(
+            # T013 (US-2), same reasoning as the collection branch above and
+            # as `ConceptField.validate`: the refusal names what actually
+            # decided it. Naming the wider vocabulary here would tell a
+            # curator nothing about why a same-vocabulary concept was
+            # rejected.
+            _("%(value)s is not one of the permitted concepts: '%(restriction)s'."),
+            code="invalid",
+            params={"value": value, "restriction": ", ".join(field.concepts)},
         )
     raise ValidationError(
         # A static message, with the vocabulary slugs joined into ONE

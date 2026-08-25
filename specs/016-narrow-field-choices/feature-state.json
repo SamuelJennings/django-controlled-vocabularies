@@ -161,38 +161,101 @@
       "tasks": [
         {
           "id": "T006",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_fields.py::TestCollectionRestrictionResolves"
+            ],
+            "commands": [
+              "poetry run pytest",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
         },
         {
           "id": "T007",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_fields.py::TestConceptFieldCollectionRestrictionValidation"
+            ],
+            "commands": [
+              "poetry run pytest",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
         },
         {
           "id": "T008",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_fields.py::TestConceptFieldCollectionRestrictionRefusalMessage"
+            ],
+            "commands": [
+              "poetry run pytest",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
         },
         {
           "id": "T009",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_forms.py::TestConceptFieldCollectionRestrictionFormChoices"
+            ],
+            "commands": [
+              "poetry run pytest",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
         },
         {
           "id": "T010",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_fields.py::TestCollectionRestrictionResolvesLive"
+            ],
+            "commands": [
+              "poetry run pytest",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
         },
         {
           "id": "T011",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_fields.py::TestConceptFieldCollectionRestrictionMigrations"
+            ],
+            "commands": [
+              "poetry run pytest",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
         },
         {
           "id": "T012",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_fields.py::TestConceptsFieldCollectionRestrictionWritePath"
+            ],
+            "commands": [
+              "poetry run pytest",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
         }
       ]
     },
@@ -205,13 +268,34 @@
       "tasks": [
         {
           "id": "T013",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_fields.py::TestConceptsRestrictionResolves",
+              "tests/test_fields.py::TestConceptFieldConceptsRestrictionValidation",
+              "tests/test_fields.py::TestConceptFieldConceptsRestrictionRefusalMessage",
+              "tests/test_fields.py::TestConceptsFieldConceptsRestrictionWritePath"
+            ],
+            "commands": [
+              "poetry run pytest",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
         },
         {
           "id": "T014",
-          "status": "todo",
-          "attempts": 0
+          "status": "done",
+          "attempts": 1,
+          "evidence": {
+            "tests": [
+              "tests/test_forms.py::TestConceptFieldConceptsRestrictionFormChoices"
+            ],
+            "commands": [
+              "poetry run pytest",
+              "poetry run pre-commit run --all-files"
+            ]
+          }
         }
       ]
     },

@@ -44,6 +44,14 @@ Two more carry a ``collection`` restriction (FS-016 US-1):
   T010, T011).
 - :class:`DrillCore` — an optional ``ConceptsField`` restricted the same
   way, for the many-valued write guard (T012).
+
+Two more carry a ``concepts`` restriction (FS-016 US-2):
+
+- :class:`ChipSample` — an optional ``ConceptField`` restricted to the
+  "granite" and "basalt" concepts of the "rock-type" vocabulary (T013,
+  T014).
+- :class:`ChipTray` — an optional ``ConceptsField`` restricted the same
+  way, for the many-valued write guard (T013).
 """
 
 from django.db import models
@@ -364,6 +372,53 @@ class DrillCore(models.Model):
         related_name="drill_cores",
         verbose_name=_("rock types"),
         help_text=_("The rock types logged for this drill core, drawn from the core-samples collection."),
+    )
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class ChipSample(models.Model):
+    """Carries an optional ``ConceptField`` restricted to the "granite" and
+    "basalt" concepts of the "rock-type" vocabulary (FS-016 US-2, T013)."""
+
+    name = models.CharField(
+        max_length=255,
+        verbose_name=_("name"),
+        help_text=_("The chip sample's catalogue name."),
+    )
+    rock_type = ConceptField(
+        vocabulary="rock-type",
+        concepts=["granite", "basalt"],
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name=_("rock type"),
+        help_text=_("The rock type this chip sample is classified as, restricted to granite and basalt."),
+    )
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class ChipTray(models.Model):
+    """Carries an optional ``ConceptsField`` restricted the same way, for the
+    many-valued write guard (FS-016 US-2, T013). ``related_name`` is a real
+    name, not ``"+"``, so the reverse-write branch of the guard has a live
+    accessor (``concept.chip_trays``) to drive it through."""
+
+    name = models.CharField(
+        max_length=255,
+        verbose_name=_("name"),
+        help_text=_("The chip tray's catalogue name."),
+    )
+    rock_types = ConceptsField(
+        vocabulary="rock-type",
+        concepts=["granite", "basalt"],
+        blank=True,
+        related_name="chip_trays",
+        verbose_name=_("rock types"),
+        help_text=_("The rock types logged for this chip tray, restricted to granite and basalt."),
     )
 
     def __str__(self) -> str:
