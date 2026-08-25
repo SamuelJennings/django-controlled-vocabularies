@@ -18,6 +18,8 @@ restriction at a time, and no requirement asks for more. Nothing is foreclosed �
 an intersection appears, it can be added later with an explicit spelling, whereas a guessed default
 shipped now would have to be broken to correct it.
 
+**ADR:** docs/adr/0017-a-field-carries-one-restriction-never-a-combination.md
+
 ## D2 — The failure lands at declaration time, not at validation time
 
 **Ambiguous:** where an invalid declaration is caught.
@@ -30,6 +32,8 @@ to whoever first submits a form built from it. It also matches the existing beha
 fields exactly, so a consumer learns one rule about when a bad declaration is reported rather than
 two. The cost — that a declaration cannot be checked against data this way — is not a cost here,
 because none of these rules is about data.
+
+**ADR:** none — durable and non-obvious, but not architectural: it follows the refusal pattern `on_delete`, `through` and `limit_choices_to` already use in this module, so it establishes no convention a reader does not already meet there.
 
 ## D3 — Absent targets are reported by the existing check, not by a new mechanism
 
@@ -46,6 +50,8 @@ of gap would be an inconsistency a consumer has to learn. Reporting the specific
 concept list rather than the list as a whole is the one addition: a list of ten with one typo is
 otherwise a warning that says nothing useful.
 
+**ADR:** none — applies FS-009's existing decision about a missing vocabulary to three more target kinds. The reasoning is already recorded; only the new check id is new.
+
 ## D4 — An empty concept list is refused
 
 **Ambiguous:** whether `concepts=[]` means "no restriction" or is a mistake.
@@ -56,6 +62,8 @@ otherwise a warning that says nothing useful.
 slug — a declaration that offers no choices at all while reading as restricted is the opposite of
 what anyone writing it is reaching for. A consumer who wants no restriction omits the argument, and
 that path already exists and is already tested.
+
+**ADR:** none — local to one argument, and it follows the empty-slug refusal `_normalise_vocabulary` already makes for the same reason.
 
 ## D5 — The branch read must terminate on a cyclic hierarchy
 
@@ -75,6 +83,8 @@ that data must not hang or exhaust memory: the field cannot assume an invariant 
 not enforce. Specifying termination costs nothing and removes a failure mode that would present as
 a hung request with no error.
 
+**ADR:** none — the guarantee is already normative as FR-004 and SC-006 in a merged spec and is covered by a test. An ADR would restate a requirement rather than record a decision behind one.
+
 ## D6 — Ordered-collection ordering is its own story, not folded into the collection restriction
 
 **Ambiguous:** how to spec a behaviour the maintainer approved conditionally ("honour it if it's
@@ -87,6 +97,8 @@ inside a P1 story is not. As its own story it can be cut at planning if it turns
 reworking the selection control, and the three restrictions remain correct and complete without it.
 If it is cheap — and the collection already resolves its members in order — it ships.
 
+**ADR:** none — a sequencing choice about how the work was split, not about the software. Nothing downstream inherits it.
+
 ## D7 — Targets are named by slug, including for the explicit concept list
 
 Settled with the maintainer at intake (`spec.md` §Clarifications), recorded here for the one
@@ -94,6 +106,8 @@ consequence the spec does not spell out: because a slug is unique only within it
 target resolves inside the single named vocabulary. That is what makes "exactly one vocabulary"
 (FR-005) a precondition rather than a preference — with two vocabularies named, a collection slug
 could resolve to two different collections, and there would be no way to say which was meant.
+
+**ADR:** docs/adr/0018-a-restriction-names-its-target-by-slug.md
 
 ## D8 — The ordered sequence is applied at the endpoint, and only while the search box is empty
 
@@ -103,13 +117,13 @@ fetches every browsable option over this package's autocomplete URL; the widget 
 validation and the render of a value the record already holds. Ordering it would have shipped a
 story whose tests pass and whose sequence no human ever sees.
 
-**Chosen:** override `apply_ordering()` on `ConceptAutocompleteView` (FR-010, plan A5). It applies
+**Chosen:** override the endpoint's own ordering hook on `ConceptAutocompleteView` (FR-010, plan A5) — `order_queryset()`, not the `apply_ordering()` this paragraph first named; see D12. It applies
 the collection's member order when the restriction is an ordered collection *and* the request
 carries no search term, and falls through to the inherited relevance order otherwise.
 
 **Why defensible:** the maintainer's approval was conditional — honour the sequence if it is not too
-complicated — so the cost is the whole question. The library exposes `apply_ordering()` as a single
-method reading one attribute, and the declaration is already resolved on that request, so the change
+complicated — so the cost is the whole question. The library exposes a single ordering
+hook reading one attribute, and the declaration is already resolved on that request, so the change
 is one override and one annotation. That is cheap enough to keep the story rather than drop it.
 
 The empty-query condition settles a tension the first reading did not see. Browsing a small ordered
@@ -120,6 +134,8 @@ search term serves both rather than trading one for the other, which is what mad
 The position is read through a `Subquery` annotation keyed on the declaration's own collection, not
 a membership join. A concept may belong to more than one collection, and this queryset reaches
 `complex_filter()` without Django's `Exists()` wrapper, so a join would duplicate rows silently.
+
+**ADR:** docs/adr/0019-a-curators-order-reaches-browsing-not-searching.md
 
 ## D9 — A branch restriction's closure is recomputed per request, on an endpoint open to anyone
 
@@ -144,6 +160,8 @@ set in `pk__in`, so a branch wide enough to exceed the backend's bound-parameter
 is 32,766) fails outright rather than slowly. No vocabulary this package has seen comes close, and
 the fix is the same single-query rewrite R7 already owns, so nothing is being added here — but the
 failure mode is a hard error, not the gradual slowdown the rest of this entry describes.
+
+**ADR:** none — a recorded cost and a deferral, not a decision to be abided by. It is carried forward to roadmap item R7, which owns the single-query rewrite, the per-request recomputation and the bound-parameter ceiling together.
 
 ## D10 — A T005-authored test's assertion was updated by the US-1 Implementer, not left to fail
 
@@ -177,6 +195,8 @@ Forge/Sam can veto if this reasoning does not hold.
 still route through "mark blocked" rather than "update and disclose" — in which case this specific
 carve-out should be written into the Implementer protocol rather than decided ad hoc per occurrence.
 
+**ADR:** none — a record that one pre-existing test's assertion was updated, required by Article I. Evidence about this run, not a standing rule.
+
 ## D11 — The concepts axis gets its own message id rather than reusing `invalid_restricted`
 
 **Ambiguous:** T013's brief instructs extending the existing `invalid_restricted` handling "in the
@@ -199,6 +219,8 @@ placeholder) while keeping the sentence true.
 **Revisit if:** a future restriction kind (the branch axis) turns out to want a fourth message
 naming a root concept, at which point the naming pattern here (`invalid_restricted_<axis>`) is
 either continued or replaced with something that scales better than one msgid per axis.
+
+**ADR:** none — a message-id naming convention local to this module (`invalid_restricted_<axis>`). Real, but sealed inside the two places that raise these refusals.
 
 ## D12 — T022 overrides `order_queryset()`, not `apply_ordering()`
 
@@ -230,6 +252,8 @@ library actually calls.
 **Revisit if:** a future `django-tomselect` release renames or restructures this hook again, in
 which case this override moves with it under the same reasoning.
 
+**ADR:** none — a correction of fact about the installed library, not a decision. Its lasting value is the proposal it produced, recorded in the run's metrics.
+
 ## D13 — The restricted `help_text` default is a second static attribute, not an interpolated one
 
 **Ambiguous:** T023's brief says a restricted field's default must describe "a field restricted
@@ -256,3 +280,5 @@ collection slug or a branch root into either default.
 **Revisit if:** a later story wants the restricted default to name the axis (collection vs. concepts
 vs. branch) without naming the axis's *target* — at that point three restricted defaults, one per
 axis, replace the one this decision adds.
+
+**ADR:** none — follows the existing reasoning for why a `help_text` default must stay static, already annotated in `fields.py`. One more attribute under a rule that already existed.
