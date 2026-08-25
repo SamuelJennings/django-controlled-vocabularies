@@ -541,6 +541,114 @@ browsing routes are not mounted at all.
 The page is served by `VocabularyDetailView`, in `controlled_vocabularies.ui.views`, and is
 subclassed the same way as the list above.
 
+### A concept's own page
+
+Every concept has its own address — the same one `Concept.uri` composes when the site is
+configured as this section describes. The page is a definition list of everything the database
+records about the concept, other than its hidden labels, each row labelled by the SKOS property it
+was recorded under: its type (`rdf:type`), its preferred label (`skos:prefLabel`), its alternative
+labels (`skos:altLabel`), each note it carries under the property of its own kind (`skos:definition`,
+`skos:scopeNote`, and the rest of the six documentary notes SKOS defines), its broader concept, its
+narrower concepts and its related concepts (`skos:broader` / `skos:narrower` / `skos:related`), and
+the vocabulary it belongs to (`skos:inScheme`). Every record-valued row links to that record's own
+page here. A property the concept carries no value for contributes no row at all — never an empty
+one — so a concept carrying nothing beyond its label shows only its label, its type, its identifier
+and its vocabulary.
+
+The concept's own canonical identifier leads the page, directly beneath its title, so a reader
+citing the record does not have to scroll past everything it says about itself to find it. The
+breadcrumb trail above names the site's home, the vocabulary holding the concept, and the concept
+itself.
+
+Each row's own term — `skos:definition`, `skos:broader`, and the rest named above — is a CURIE
+derived from the SKOS predicate the value was recorded under, by `skos_curie()` in
+`controlled_vocabularies.exchange.mapping`; it refuses a predicate outside the SKOS namespace
+rather than mangling one into a nonsensical short form. A record-valued row's own displayed text is
+a different short form — `{vocabulary slug}:{record slug}`, `geology:granite` for a concept
+"granite" in a vocabulary slugged "geology".
+
+A CURIE abbreviates a URI, and both kinds on the page disclose the URI they stand for on hover
+rather than printing it. A term's comes from `curie_uri()` in the same module, which expands a
+prefixed name against the namespaces the package declares and refuses one it does not. A
+record-valued row's is the record's own canonical identifier. Hovering is not the only way to reach
+either. A term is not interactive, so its URI sits beside it in a visually-hidden element a screen
+reader reads out in place. A record-valued row's short form is a link, so its URI lives in a
+visually-hidden element the link points at as its own description, which a screen reader reads out
+and which keyboard focus reveals along with the tooltip.
+
+Below the definition list and outside it, the page also names every collection that gathers the
+concept, under a heading reading "Member of". Membership is a statement other records make about
+this one — SKOS gives a collection's own membership property no inverse — so this section's heading
+is plain language rather than a CURIE, and it names the direction, since a heading of "Collections"
+would read as collections belonging to the concept. Each entry links to that collection's own page.
+A concept no collection gathers shows no such section at all, never an empty one.
+
+Every value is shown in the language the site is being read in, exactly as the vocabulary page
+above shows a concept's label: where the concept has none in that language, it falls back to the
+vocabulary's own default language, one language at a time, never every language a value was
+recorded in.
+
+The concept's own identifier is shown as a link, the same treatment its vocabulary's own page gives
+a vocabulary's: an imported concept shows its publisher's identifier, one authored here shows this
+site's own composed address for it. Either way the page itself is **read-only** — it carries no
+editing or deletion control of its own, and no permission rule beyond what the project mounting
+these routes chooses to add.
+
+An address naming no concept is reported not found, and so is one whose vocabulary segment names no
+vocabulary — the two are not distinguished. A concept slug held by more than one vocabulary resolves
+to the one the address actually names.
+
+Reverse the page by name, passing the vocabulary's slug and the concept's own:
+
+```python
+reverse(
+    "controlled_vocabularies_ui:concept-detail",
+    kwargs={"slug": vocabulary.slug, "concept_slug": concept.slug},
+)
+```
+
+The page is served by `ConceptDetailView`, in `controlled_vocabularies.ui.views`, and is subclassed
+the same way as the pages above. The rows themselves come from
+`concept_property_rows(concept, language, default_language=None)`, in the same module — the seam a
+project reaches for to build its own page, or its own rendering of a report, over the same ordered
+rows this one renders. Passing no `default_language` asks for exactly what the concept carries in
+`language`, with no fallback to the vocabulary's own default.
+
+### A collection's own page
+
+Every collection has its own address too, at a distinct segment from a concept's — the same one
+`Collection.uri` composes — so a concept and a collection in one vocabulary may share a slug and
+both stay reachable. The page is a definition list built the same way a concept's is: its name
+(`skos:prefLabel`), a type row distinguishing an ordered collection from an unordered one
+(`skos:Collection` or `skos:OrderedCollection`), and its members under the membership property
+matching its kind — `skos:member` for an unordered collection, `skos:memberList` for an ordered
+one, whose members appear in the sequence their positions record. Membership is one row however
+many members a collection holds — the property is stated once, with every member listed beside it,
+rather than repeated per member. A collection holding no members says so in plain language rather
+than showing an empty membership row.
+
+Every record-valued row links to that record's own page here and discloses its canonical identifier
+the same way a concept's page does. The collection's own identifier leads the page beneath its
+title, its breadcrumb trail names the vocabulary holding it, and the page is equally **read-only**,
+carrying no editing or deletion control of its own.
+
+An address naming no collection is reported not found, and so is one whose vocabulary segment names
+no vocabulary — the two are not distinguished, exactly as for a concept's page.
+
+Reverse the page by name, passing the vocabulary's slug and the collection's own:
+
+```python
+reverse(
+    "controlled_vocabularies_ui:collection-detail",
+    kwargs={"slug": vocabulary.slug, "collection_slug": collection.slug},
+)
+```
+
+The page is served by `CollectionDetailView`, in `controlled_vocabularies.ui.views`, and is
+subclassed the same way as the pages above. The rows themselves come from
+`collection_property_rows(collection)`, in the same module — the same seam
+`concept_property_rows` offers over a concept's own rows.
+
 ### Try it: the demo project
 
 The repository carries a runnable demo of the page above, wired the same way this section
@@ -567,6 +675,19 @@ short vocabulary authored here, with no publisher of its own. Data Collection Me
 also carries one of each kind of collection — "Primary data collection methods" (unordered) and
 "Typical project workflow" (ordered) — both loaded through the same SKOS file, so the collections
 section described above is never empty on a fresh checkout.
+
+Following "Fieldwork" from that page reaches a concept's own page: its definition, its narrower
+concept "Survey" (stored as "Survey" carrying `skos:broader` to "Fieldwork", shown here as the
+derived `skos:narrower`), and, below the definition list, the two collections that gather
+it — including "Typical project workflow", whose own page in turn shows every method it orders,
+"Fieldwork" among them. `seed_demo` seeds this pair, and a related pair besides
+("Remote sensing" / "Laboratory experiment"), so the concept and collection pages are never empty
+on a fresh checkout either.
+
+"Fieldwork" also carries a note only in German, alongside its English-only definition. Reading the
+page in German — `curl -H "Accept-Language: de" http://127.0.0.1:8000/browse/data-collection-methods/fieldwork/`,
+or a browser configured for German — shows the German note directly and falls back to the English
+definition, exactly as ["A concept's own page"](#a-concepts-own-page) above describes.
 
 `seed_demo` is destructive and idempotent: it clears every vocabulary before loading, so running
 it again returns the demo to the same seeded state whatever was added or removed before —

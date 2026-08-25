@@ -17,7 +17,7 @@
     {% endif %}
     {% comment %} The identifier is an outbound link (T003 reverses #140's D6): nothing is marked
        safe and nothing is interpolated into any attribute besides href {% endcomment %}
-    <c-text size="xs" muted><a href="{{ vocabulary.uri }}" rel="noopener">{{ vocabulary.uri }}</a></c-text>
+    <c-text size="xs" muted><c-link href="{{ vocabulary.uri }}" text="{{ vocabulary.uri }}" hover=True rel="noopener" /></c-text>
   </div>
   {% if collections %}
     {% comment %} T019, decisions.md D5/D7: named, separate from the concept list, an ordered
@@ -26,14 +26,22 @@
        renders whatever row template is already in the surrounding context, so
        pointing it at a collection row would silently render concept rows instead
        (plan.md item 5). A vocabulary holding none renders no section at all — this
-       whole block is absent, not present and empty. Nothing here links to a
-       collection: its address is issue #142. {% endcomment %}
+       whole block is absent, not present and empty. 015-read-single-record T020:
+       each entry now links to its own page — this page keeps `vocabulary` in
+       context throughout (unlike concept_list_item.html, this loop is not rendered
+       through render_list_item's isolated context), so the href is built from
+       `vocabulary.slug` and `collection.slug` alone, no query beyond the
+       already-loaded collections queryset. T027: composes django-mvp's own <c-link>
+       with hover=True, the same bare-anchor defect concept_detail.html's own
+       membership section had, fixed with the same component. {% endcomment %}
     <div class="vocabulary-collections">
       <c-text size="sm" bold>{% trans "Collections" %}</c-text>
       <ul>
         {% for collection in collections %}
           <li>
-            {{ collection.name }}
+            <c-link href="{% url 'controlled_vocabularies_ui:collection-detail' vocabulary.slug collection.slug %}"
+                    text="{{ collection.name }}"
+                    hover=True />
             {% if collection.ordered %}<c-badge>{% trans "Ordered" %}</c-badge>{% endif %}
           </li>
         {% endfor %}

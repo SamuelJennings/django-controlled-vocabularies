@@ -58,6 +58,39 @@ All notable changes to this project are documented in this file. The format foll
   page links to a collection: that address is a later feature's (#142). A vocabulary holding none
   shows no collections section at all. The demo project's Data Collection Methods vocabulary now
   seeds one of each kind, loaded through the same SKOS file as its concepts. See the README.
+- Every concept and every collection now has its own address and its own page: a definition list
+  of everything the database records about it, each row labelled by the SKOS property it was
+  recorded under and shown in the language the site is being read in, falling back to the
+  vocabulary's own default where the record carries no value in the reading language. A concept's
+  page shows its broader concept, its narrower concepts (derived — only the broader direction is
+  ever stored) and its related concepts; a collection's page shows the concepts it gathers, in
+  their curated order when it is an ordered collection, and says so in plain language when it
+  holds none. A collection states its membership property once, with every member listed beside
+  it. Every record-valued row is a short in-site form linking to that record's own page. Both a
+  row's term and a record-valued row's short form are abbreviations of a URI, and both disclose
+  the URI they abbreviate on hover, also carrying it where keyboard focus and a screen reader
+  reach it. Both pages show what kind of record it is, lead with its own identifier as a link
+  directly beneath the title, carry a breadcrumb trail naming the vocabulary that holds it, and
+  are **read-only**, with no permission rule of their own. An address naming no record, or naming
+  no vocabulary at all, is reported not found the same way. The number of queries either page
+  runs does not grow with how much it shows. See the README.
+- The vocabulary list, a vocabulary's own page, and a narrowed search of either now link every
+  concept and every collection they name to that record's own page, in place of the plain text
+  they showed before.
+- A concept's own page now also names, below its definition list, every collection that gathers
+  it — a statement other records make about it rather than one it makes about itself, so the
+  section carries a plain-language heading, "Member of", rather than a SKOS property. A concept no
+  collection gathers shows no such section.
+- A concept's own page carries no link to a concept in a vocabulary this site does not hold, even
+  where an imported file offered one: nothing in the package stores such a mapping yet, so nothing
+  is shown for it. Labels, notes and publisher-supplied identifiers all reach the page as escaped
+  text, never marked safe.
+- The demo project's Data Collection Methods vocabulary now seeds a broader/narrower pair, a
+  related pair, and a note carried only in German, and the unattended demo walk follows a concept
+  from that vocabulary to its own page — once in the demo's own default language and once in
+  German, to exercise the language fallback above — and then to one of its collections, failing
+  the build if either page stops showing what the seed puts there. See the README's "Try it"
+  section.
 
 ### Known limitations
 

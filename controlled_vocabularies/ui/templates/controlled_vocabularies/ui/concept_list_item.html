@@ -1,6 +1,15 @@
 {% comment %}
-  A concept's row carries its label and nothing else — no definition, no note, no
-  identifier, no relation, nothing to follow (T008, FR-006, FR-012). A concept's own
-  page is #142; until then this row is not a link to anywhere.
+  015-read-single-record T019, FR-015: the concept's own page now exists, so the row
+  leads to it. The row renders in an isolated context holding only the object
+  (`render_list_item` builds a fresh context per row, never the surrounding page's),
+  so the address is reversed from `object.scheme` and `object.slug` alone — the same
+  reason `VocabularyDetailView`'s queryset select_relates "scheme" (views.py), so this
+  read costs no query beyond the row's own. `title` is given as a slot, not the card's
+  `title` attribute, which renders as escaped text and so cannot carry an anchor
+  (conceptscheme_list_item.html's own T004 comment makes the same point).
 {% endcomment %}
-<c-card title="{{ object.resolved_label }}"></c-card>
+<c-card>
+  <c-slot name="title">
+    <a href="{% url 'controlled_vocabularies_ui:concept-detail' object.scheme.slug object.slug %}">{{ object.resolved_label }}</a>
+  </c-slot>
+</c-card>

@@ -1,20 +1,39 @@
 """Views for the opt-in vocabulary-browsing front end (013-find-a-vocabulary,
-014-look-inside-a-vocabulary).
+014-look-inside-a-vocabulary, 015-read-single-record).
 
-Two views: ``VocabularyListView`` over the vocabularies a site holds, and
-``VocabularyDetailView`` over the concepts inside one of them. Both are list views, and
-in each of them search narrows that same view rather than adding another, so every user
-story from both features lands in one of the two.
+``VocabularyListView`` over the vocabularies a site holds, ``VocabularyDetailView`` over
+the concepts inside one of them, and ``ConceptDetailView``/``CollectionDetailView`` over
+one record's own page. The first two are list views, with search narrowing each rather
+than adding another. The last two are detail views (plan.md Key design decision #1) that
+share one thing: resolving the record named by an address scoped to its vocabulary.
 """
+
+from itertools import count
 
 from django.db.models import Count, F, OuterRef, Subquery
 from django.db.models.functions import Coalesce, Lower
 from django.http import Http404
+from django.urls import reverse
 from django.utils.translation import get_language
 from django.utils.translation import gettext_lazy as _
-from mvp.views import MVPListView
+from mvp.views import MVPDetailView, MVPListView
 
-from controlled_vocabularies.models import Concept, ConceptLabel, ConceptScheme
+from controlled_vocabularies.exchange.mapping import (
+    BROADER_CURIE,
+    COLLECTION_TYPE_CURIE,
+    CONCEPT_TYPE_CURIE,
+    IN_SCHEME_CURIE,
+    LABEL_CURIES,
+    MEMBER_CURIE,
+    MEMBER_LIST_CURIE,
+    NARROWER_CURIE,
+    NOTE_CURIES,
+    ORDERED_COLLECTION_TYPE_CURIE,
+    RELATED_CURIE,
+    TYPE_CURIE,
+    curie_uri,
+)
+from controlled_vocabularies.models import Collection, Concept, ConceptLabel, ConceptNote, ConceptScheme
 
 
 class VocabularyListView(MVPListView):
@@ -140,6 +159,319 @@ class VocabularyListView(MVPListView):
         return None
 
 
+def concept_property_rows(concept: Concept, language: str, default_language: str | None = None) -> list[dict]:
+    """The fixed-order rows a concept's own page renders (015-read-single-record T003,
+    T006, FR-003, FR-004, FR-005, FR-006, FR-018).
+
+    One row per SKOS statement the concept makes about itself, in the order plan.md Key
+    design decision #4 fixes: type, preferred label, alternative labels, notes (in the
+    order :class:`~controlled_vocabularies.models.ConceptNote.Kind` declares them),
+    relations — broader, narrower, related — then the vocabulary holding it. Collection
+    membership is never a row here: it is a statement *other* records make about this
+    one, not one this concept makes about itself, and sits outside this list entirely
+    (decisions.md D4). A hidden label is never read at all (FR-004). A property with no
+    value in ``language``, and none in ``default_language`` either, contributes no row,
+    so a template built over this needs no emptiness logic of its own.
+
+    ``language`` is the language being read. Whether a value absent in ``language``
+    falls back to ``default_language`` (FR-005) is the caller's decision, not this
+    function's own (decisions.md D6): passing ``default_language=None``, the default,
+    requests no fallback at all — a property absent in ``language`` contributes no row,
+    full stop, which is what lets a caller ask what a concept holds in exactly one
+    language. Passing the vocabulary's own effective default language opts every
+    property into the same per-value fallback :meth:`Concept.display_label` already
+    applies to the preferred label alone.
+
+    Each row is a plain dict of ``term``/``value``/``short_form``/``uri``/``href`` — the
+    same five names the ``property_row`` cotton component takes (T002). A record-valued
+    row (a related concept, or the vocabulary) carries ``short_form``/``uri``/``href``
+    and leaves ``value`` empty; every other row carries ``value`` and leaves the other
+    three empty.
+    """
+
+    identifier_ids = count()
+
+    def row(term: str, *, value=None, short_form=None, uri=None, href=None) -> dict:
+        # term_uri (T031): the term is itself a CURIE, and a CURIE abbreviates a URI,
+        # so a reader hovering one is asking what it stands for — the same disclosure
+        # a record-valued row's short form carries (FR-007).
+        return {
+            "term": term,
+            "term_uri": curie_uri(term),
+            "value": value,
+            "short_form": short_form,
+            "uri": uri,
+            "href": href,
+            # identifier_id (T029, corrected): property_row.html's hover disclosure
+            # names a hidden span by id via aria-describedby, so it needs one unique
+            # on the page — only a record-valued row (one carrying a uri) has a
+            # hidden span to name at all.
+            "identifier_id": f"identifier-{next(identifier_ids)}" if uri else None,
+        }
+
+    def localized_text(getter):
+        value = getter(language)
+        if not value and default_language and default_language != language:
+            value = getter(default_language)
+        return value
+
+    def localized_list(getter):
+        values = getter(language)
+        if not values and default_language and default_language != language:
+            values = getter(default_language)
+        return values
+
+    def record_row(term: str, record: Concept) -> dict:
+        # The short form's prefix comes from the vocabulary holding the record
+        # (decisions.md D2), and the link is reversed through this app's own
+        # namespace — never `local_url`, which is an identifier, not a route
+        # (plan.md Key design decision #6).
+        return row(
+            term,
+            short_form=f"{record.scheme.slug}:{record.slug}",
+            uri=record.uri,
+            href=reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": record.scheme.slug, "concept_slug": record.slug},
+            ),
+        )
+
+    rows = [row(TYPE_CURIE, value=CONCEPT_TYPE_CURIE)]
+
+    preferred_label = localized_text(concept.preferred_label)
+    if preferred_label:
+        rows.append(row(LABEL_CURIES[ConceptLabel.Kind.PREFERRED], value=preferred_label))
+
+    rows.extend(
+        row(LABEL_CURIES[ConceptLabel.Kind.ALTERNATIVE], value=text) for text in localized_list(concept.alt_labels)
+    )
+
+    for kind in ConceptNote.Kind:
+        rows.extend(
+            row(NOTE_CURIES[kind], value=value)
+            for value in localized_list(lambda lang, kind=kind: concept.notes(lang, kind=kind))
+        )
+
+    # D-015-02: none of these three is prefetchable (each builds a fresh queryset), so
+    # each read chains its own select_related("scheme") rather than relying on a
+    # prefetch that would never be consulted.
+    rows.extend(record_row(BROADER_CURIE, related) for related in concept.broader().select_related("scheme"))
+    rows.extend(record_row(NARROWER_CURIE, related) for related in concept.narrower().select_related("scheme"))
+    rows.extend(record_row(RELATED_CURIE, related) for related in concept.related().select_related("scheme"))
+
+    scheme = concept.scheme
+    rows.append(
+        row(
+            IN_SCHEME_CURIE,
+            # A vocabulary records no short prefix of its own (decisions.md D2) — its
+            # row names it by its plain display name rather than the "{prefix}:{slug}"
+            # short form only a record it holds carries.
+            short_form=scheme.name,
+            uri=scheme.uri,
+            href=reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}),
+        )
+    )
+
+    return rows
+
+
+def collection_property_rows(collection: Collection) -> list[dict]:
+    """The fixed-order rows a collection's own page renders (015-read-single-record
+    T011, T012, T028, FR-008, FR-012, FR-013, FR-017).
+
+    Mirrors :func:`concept_property_rows`'s shape (plan.md Key design decision #4):
+    type, name, members, then the vocabulary holding it. Unlike a concept's, a
+    collection's ``name`` carries no per-language variants (a plain ``CharField``), so
+    there is no reading-language argument here. The type row and the membership
+    property both depend on :attr:`Collection.ordered` (decisions.md, "What
+    distinguishes an ordered collection..."): an ordered collection is
+    ``skos:OrderedCollection`` with members under ``skos:memberList``, an unordered one
+    is ``skos:Collection`` with members under ``skos:member``. A collection holding no
+    members contributes no membership row at all (FR-017) — the same "absent, not
+    empty" rule T003's ``concept_property_rows`` already follows (FR-018).
+
+    Membership is one row carrying every member, not one row per member (T028) — a
+    four-member collection states ``skos:member`` once, with all four beside it. That
+    row's ``entries`` key holds the list of ``{short_form, uri, href}`` dicts every
+    other record-valued row would otherwise carry singly.
+    """
+
+    identifier_ids = count()
+
+    def row(term: str, *, value=None, short_form=None, uri=None, href=None, entries=None) -> dict:
+        # term_uri (T031): see concept_property_rows.row() — same disclosure, same reason.
+        return {
+            "term": term,
+            "term_uri": curie_uri(term),
+            "value": value,
+            "short_form": short_form,
+            "uri": uri,
+            "href": href,
+            "entries": entries,
+            # identifier_id (T029, corrected): see concept_property_rows.row() — same
+            # disclosure, same reason. The membership row itself carries entries, not
+            # its own uri, so it never claims one.
+            "identifier_id": f"identifier-{next(identifier_ids)}" if uri else None,
+        }
+
+    def member_entry(member: Concept) -> dict:
+        # D-015-02: Collection.members() (models.py, out of this feature's scope)
+        # only select_relates "concept", not "concept__scheme", and every membership
+        # is intra-vocabulary by construction (CollectionMember._reject_cross_scheme).
+        # The collection's own already-loaded scheme is therefore assigned onto the
+        # member before its uri is read, populating Django's FK cache without a
+        # query — the same trick D-015-02 describes for collections()/members().
+        member.scheme = collection.scheme
+        return {
+            "short_form": f"{collection.scheme.slug}:{member.slug}",
+            "uri": member.uri,
+            "href": reverse(
+                "controlled_vocabularies_ui:concept-detail",
+                kwargs={"slug": collection.scheme.slug, "concept_slug": member.slug},
+            ),
+            # identifier_id: shares identifier_ids with row() above, so a member's
+            # hidden span id never collides with the vocabulary row's own.
+            "identifier_id": f"identifier-{next(identifier_ids)}",
+        }
+
+    type_curie = ORDERED_COLLECTION_TYPE_CURIE if collection.ordered else COLLECTION_TYPE_CURIE
+    member_curie = MEMBER_LIST_CURIE if collection.ordered else MEMBER_CURIE
+
+    rows = [row(TYPE_CURIE, value=type_curie), row(LABEL_CURIES[ConceptLabel.Kind.PREFERRED], value=collection.name)]
+    entries = [member_entry(member) for member in collection.members()]
+    if entries:
+        rows.append(row(member_curie, entries=entries))
+
+    scheme = collection.scheme
+    rows.append(
+        row(
+            IN_SCHEME_CURIE,
+            short_form=scheme.name,
+            uri=scheme.uri,
+            href=reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": scheme.slug}),
+        )
+    )
+
+    return rows
+
+
+class ConceptDetailView(MVPDetailView):
+    """A single concept's own page (015-read-single-record T000).
+
+    Only the record resolution :class:`CollectionDetailView` also needs lands here: the
+    vocabulary segment is resolved once, in ``setup()``, exactly as
+    ``VocabularyDetailView.setup()`` already does for a vocabulary itself, then the slug
+    lookup is retargeted to the *concept's* segment and scoped to that vocabulary — an
+    unscoped lookup would 200 at an address whose vocabulary segment names nothing and
+    raise ``MultipleObjectsReturned`` the moment two vocabularies share a concept slug
+    (plan.md Key design decision #1).
+    """
+
+    model = Concept
+    slug_url_kwarg = "concept_slug"
+    template_name = "controlled_vocabularies/ui/concept_detail.html"
+
+    def setup(self, request, *args, **kwargs):
+        super().setup(request, *args, **kwargs)
+        try:
+            self.vocabulary = ConceptScheme.objects.get(slug=kwargs["slug"])
+        except ConceptScheme.DoesNotExist as exc:
+            raise Http404(_("No vocabulary matches this address.")) from exc
+
+    def get_queryset(self):
+        # select_related("scheme") joins the vocabulary row's own scheme lookup into
+        # the object fetch; prefetch_related collapses what would otherwise be one
+        # query per distinct .all() call site inside concept_property_rows()
+        # (alt_labels, one per ConceptNote.Kind) into a single query each — the two
+        # helpers that read a cached related set (plan.md Key design decision #7).
+        # broader()/narrower()/related() build fresh querysets and are not
+        # prefetchable (decisions.md D-015-02), so they are unaffected here.
+        return (
+            Concept.objects.filter(scheme=self.vocabulary)
+            .select_related("scheme")
+            .prefetch_related("labels", "concept_notes")
+        )
+
+    def get_breadcrumbs(self):
+        # T025: PageObjectMixin's own default names the model's plural and links
+        # nowhere ("Concepts", href ""), which reads as a trail to every concept
+        # rather than the one vocabulary this page's concept belongs to. self.vocabulary
+        # is already resolved in setup(), so this costs no extra query.
+        return [
+            {"text": _("Home"), "href": "/"},
+            {
+                "text": self.vocabulary.name,
+                "href": reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": self.vocabulary.slug}),
+            },
+            {"text": self.get_page_title()},
+        ]
+
+    def get_context_data(self, **kwargs):
+        # The reading language, falling back to the vocabulary's own default (FR-005,
+        # decisions.md D6) — concept_property_rows applies the fallback per property
+        # only because this view opts in by passing default_language explicitly.
+        context = super().get_context_data(**kwargs)
+        context["rows"] = concept_property_rows(
+            self.object, get_language(), default_language=self.object.scheme.effective_default_language
+        )
+        # T021, FR-014: the collections that gather this concept, never a row in
+        # `rows` above — membership is a statement other records make about this
+        # one, not a SKOS property this concept carries itself (decisions.md,
+        # "Which collections a concept belongs to..."). `collections()` builds a
+        # fresh queryset (plan.md Key design decision #7, decisions.md D-015-02),
+        # so this is a genuine extra query, not one the existing prefetch collapses.
+        context["concept_collections"] = self.object.collections()
+        return context
+
+
+class CollectionDetailView(MVPDetailView):
+    """A single collection's own page (015-read-single-record T000). Same treatment as
+    :class:`ConceptDetailView`, over :class:`Collection` instead.
+    """
+
+    model = Collection
+    slug_url_kwarg = "collection_slug"
+    template_name = "controlled_vocabularies/ui/collection_detail.html"
+
+    def setup(self, request, *args, **kwargs):
+        super().setup(request, *args, **kwargs)
+        try:
+            self.vocabulary = ConceptScheme.objects.get(slug=kwargs["slug"])
+        except ConceptScheme.DoesNotExist as exc:
+            raise Http404(_("No vocabulary matches this address.")) from exc
+
+    def get_queryset(self):
+        # select_related("scheme") joins the vocabulary row's own scheme lookup
+        # into the object fetch (015-read-single-record T014, SC-006) — the same
+        # collection.scheme collection_property_rows() reads for the vocabulary
+        # row and for every member row's short-form prefix (D-015-02).
+        return Collection.objects.filter(scheme=self.vocabulary).select_related("scheme")
+
+    def get_breadcrumbs(self):
+        # T025: same treatment as ConceptDetailView.get_breadcrumbs() — the upstream
+        # default names the model's plural ("Collections") and links nowhere.
+        return [
+            {"text": _("Home"), "href": "/"},
+            {
+                "text": self.vocabulary.name,
+                "href": reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": self.vocabulary.slug}),
+            },
+            {"text": self.get_page_title()},
+        ]
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["rows"] = collection_property_rows(self.object)
+        # T013, FR-017: no member row appears for an empty collection (its rows
+        # loop simply has nothing to append), so "says it holds nothing" needs its
+        # own flag rather than a template check for an absent row — computed from
+        # the already-built rows, not a second .members() call.
+        context["collection_has_members"] = any(
+            row["term"] in (MEMBER_CURIE, MEMBER_LIST_CURIE) for row in context["rows"]
+        )
+        return context
+
+
 class VocabularyDetailView(MVPListView):
     """A single vocabulary's own page: its description, provenance and the concepts it
     holds (014-look-inside-a-vocabulary, US-1).
@@ -205,8 +537,16 @@ class VocabularyDetailView(MVPListView):
         # is consulted, so the list is flat by construction — a concept three levels
         # down a broader/narrower chain is a plain sibling of one at the top, never
         # rendered nested beneath it (T008, FR-006, FR-012).
-        self.queryset = Concept.objects.filter(scheme=self.vocabulary).annotate(
-            resolved_label=Coalesce(Subquery(preferred_in_active_language), F("label"))
+        # select_related("scheme") (015-read-single-record T019): the row partial
+        # reverses its own link from `object.scheme.slug`, since it renders in an
+        # isolated context holding only the object (`render_list_item` builds a fresh
+        # context per row) and cannot reach this view's own `vocabulary` context
+        # variable. Without the join, that read would cost one query per row, moving
+        # the count the flat-query-count guarantee below asserts stays still.
+        self.queryset = (
+            Concept.objects.filter(scheme=self.vocabulary)
+            .select_related("scheme")
+            .annotate(resolved_label=Coalesce(Subquery(preferred_in_active_language), F("label")))
         )
 
     def get_page_title(self):

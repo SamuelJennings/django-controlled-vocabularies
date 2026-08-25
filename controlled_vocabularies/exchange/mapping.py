@@ -21,6 +21,17 @@ built-in namespace object, so nothing new is declared here beyond importing it.
 User Story 3 (tasks.md T018/T019/T021) adds the label, note, and mapping
 predicate tables below, exactly the growth this module's docstring already
 anticipated.
+
+015-read-single-record T001 adds the opposite direction: given a *stored*
+kind, the CURIE to key a page's row on. :func:`skos_curie` moves here from
+``exchange/skos.py`` — it is a namespace concern, not a graph one, and this
+module is exactly where the namespace it depends on already lives.
+:data:`LABEL_CURIES` and :data:`NOTE_CURIES` are derived by inverting
+:data:`LABEL_PREDICATES` and :data:`NOTE_PREDICATES` and applying
+:func:`skos_curie`, never hand-written, so a predicate added to either
+forward table appears in its inverse with no second edit. The relation,
+scheme-membership, collection-membership and type terms invert nothing that
+exists, so they are written out directly instead.
 """
 
 from __future__ import annotations
@@ -32,6 +43,48 @@ from controlled_vocabularies.models import ConceptLabel, ConceptNote
 
 #: The SKOS namespace every predicate and class this package reads belongs to.
 SKOS = rdflib.Namespace("http://www.w3.org/2004/02/skos/core#")
+
+
+def skos_curie(predicate: rdflib.URIRef) -> str:
+    """The ``skos:xxx`` CURIE for a predicate in the SKOS namespace.
+
+    Used for report display (FIX 15, decisions.md D48) and, from T001 on, to key a
+    record's page rows on (plan.md Key design decision #3). Refuses a predicate outside
+    the SKOS namespace rather than mangling one — slicing the namespace off by length
+    with no check would turn ``skos_curie(rdflib.RDF.type)`` into the nonsensical
+    ``"skos:tax-ns#type"``. Its original scope (report display only) is why that never
+    mattered before; keying a page's rows on it makes it matter.
+    """
+    predicate_str = str(predicate)
+    namespace = str(SKOS)
+    if not predicate_str.startswith(namespace):
+        raise ValueError(f"'{predicate_str}' is not a predicate in the SKOS namespace.")
+    return f"skos:{predicate_str[len(namespace) :]}"
+
+
+#: Prefix -> namespace for every CURIE a record's page renders as a term
+#: (015-read-single-record T031). :func:`skos_curie` goes one way, from a URI to its
+#: short form; a page needs the other way too, because a reader hovering ``skos:member``
+#: is asking what it abbreviates.
+CURIE_NAMESPACES: dict[str, str] = {
+    "skos": str(SKOS),
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+}
+
+
+def curie_uri(curie: str) -> str:
+    """The full URI a ``prefix:local`` CURIE abbreviates.
+
+    Refuses a prefix this package does not declare rather than concatenating whatever
+    it was given — the same reason :func:`skos_curie` refuses a predicate outside SKOS,
+    and the reason a term added to a namespace nobody declared fails at render rather
+    than putting a fabricated identifier in front of a reader.
+    """
+    prefix, separator, local = curie.partition(":")
+    if not separator or not local or prefix not in CURIE_NAMESPACES:
+        raise ValueError(f"'{curie}' is not a CURIE in a namespace this package declares.")
+    return f"{CURIE_NAMESPACES[prefix]}{local}"
+
 
 #: SKOS label predicate -> :class:`~controlled_vocabularies.models.ConceptLabel.Kind`
 #: (T018, FR-008). ``skos:prefLabel`` in the vocabulary's effective default
@@ -76,5 +129,54 @@ MAPPING_PREDICATES: dict[rdflib.URIRef, str] = {
     SKOS.mappingRelation: "skos:mappingRelation",
 }
 
+#: Stored :class:`~controlled_vocabularies.models.ConceptLabel.Kind` -> ``skos:xxx`` CURIE
+#: (015-read-single-record T001, FR-003). The inverse of :data:`LABEL_PREDICATES`, derived
+#: rather than hand-written, so a predicate added there appears here with no second edit.
+LABEL_CURIES: dict[str, str] = {kind: skos_curie(predicate) for predicate, kind in LABEL_PREDICATES.items()}
+
+#: Stored :class:`~controlled_vocabularies.models.ConceptNote.Kind` -> ``skos:xxx`` CURIE
+#: (015-read-single-record T001, FR-003). The inverse of :data:`NOTE_PREDICATES`, same
+#: no-second-edit guarantee as :data:`LABEL_CURIES`.
+NOTE_CURIES: dict[str, str] = {kind: skos_curie(predicate) for predicate, kind in NOTE_PREDICATES.items()}
+
+#: The relation, scheme-membership, collection-membership and type CURIEs a record's page
+#: keys its remaining rows on (015-read-single-record T001, FR-010 to FR-013). None of
+#: these invert a forward table this module already has — ``broader``/``narrower``/
+#: ``related`` have no ``predicate -> stored kind`` table the way labels and notes do,
+#: ``inScheme`` and the membership terms are never imported at all, and ``rdf:type`` is
+#: not in the SKOS namespace in the first place, so :func:`skos_curie` would refuse it —
+#: so each is written out directly rather than derived.
+BROADER_CURIE = "skos:broader"
+NARROWER_CURIE = "skos:narrower"
+RELATED_CURIE = "skos:related"
+IN_SCHEME_CURIE = "skos:inScheme"
+MEMBER_CURIE = "skos:member"
+MEMBER_LIST_CURIE = "skos:memberList"
+TYPE_CURIE = "rdf:type"
+CONCEPT_TYPE_CURIE = "skos:Concept"
+COLLECTION_TYPE_CURIE = "skos:Collection"
+ORDERED_COLLECTION_TYPE_CURIE = "skos:OrderedCollection"
+
 #: Dublin Core Terms — currently used only for ``DCTERMS.description`` (D21).
-__all__ = ["DCTERMS", "LABEL_PREDICATES", "MAPPING_PREDICATES", "NOTE_PREDICATES", "SKOS"]
+__all__ = [
+    "BROADER_CURIE",
+    "COLLECTION_TYPE_CURIE",
+    "CONCEPT_TYPE_CURIE",
+    "CURIE_NAMESPACES",
+    "DCTERMS",
+    "IN_SCHEME_CURIE",
+    "LABEL_CURIES",
+    "LABEL_PREDICATES",
+    "MAPPING_PREDICATES",
+    "MEMBER_CURIE",
+    "MEMBER_LIST_CURIE",
+    "NARROWER_CURIE",
+    "NOTE_CURIES",
+    "NOTE_PREDICATES",
+    "ORDERED_COLLECTION_TYPE_CURIE",
+    "RELATED_CURIE",
+    "SKOS",
+    "TYPE_CURIE",
+    "curie_uri",
+    "skos_curie",
+]

@@ -83,6 +83,11 @@ CRISPY_ALLOWED_TEMPLATE_PACKS = ["tailwind"]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    # Between SessionMiddleware and CommonMiddleware, Django's own required order —
+    # without it every request reads in LANGUAGE_CODE regardless of what it asks for, and
+    # a concept's own page could never show a value falling back from a reading language
+    # to the vocabulary's default (015-read-single-record T024, FR-005, README's "Try it").
+    "django.middleware.locale.LocaleMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
