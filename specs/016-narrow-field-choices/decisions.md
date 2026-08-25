@@ -139,6 +139,12 @@ the repetition, which is the part that decides whether a cache or a bounded dept
 answer. The README says what a branch restriction costs, so a consumer choosing it for a public form
 is choosing it knowingly.
 
+**One more thing R7 inherits, found at review:** the closure reaches the query as a materialised id
+set in `pk__in`, so a branch wide enough to exceed the backend's bound-parameter ceiling (SQLite's
+is 32,766) fails outright rather than slowly. No vocabulary this package has seen comes close, and
+the fix is the same single-query rewrite R7 already owns, so nothing is being added here — but the
+failure mode is a hard error, not the gradual slowdown the rest of this entry describes.
+
 ## D10 — A T005-authored test's assertion was updated by the US-1 Implementer, not left to fail
 
 **Ambiguous:** nothing about the feature; recorded because the Implementer protocol's default is

@@ -25,6 +25,23 @@ from django.db.models.utils import make_model_tuple
 from django.utils.functional import Promise
 from django.utils.translation import gettext_lazy as _
 
+#: The refusal wording for a concept the field's declaration does not admit,
+#: one message per restriction axis plus the unrestricted case. Named here
+#: rather than written out where they are raised, because each is needed in two
+#: places that cannot share a class: :attr:`ConceptField.default_error_messages`
+#: for the single-valued path, and :func:`_refuse_concepts_the_restriction_does_not_admit`
+#: for the many-valued write guard, which runs as a signal receiver on
+#: :class:`ConceptsField`. Two copies of a msgid is two entries in the
+#: translation catalogue that a translator has to keep in step by hand, and one
+#: reworded copy is a refusal whose wording depends on how many values the field
+#: holds. Each is one static msgid with the restriction carried through a single
+#: named placeholder (Article XII), so the identifier stays the same whatever
+#: the declaration names.
+RESTRICTED_TO_COLLECTION_MESSAGE = _("%(value)s is not a valid concept in the '%(restriction)s' collection.")
+RESTRICTED_TO_CONCEPTS_MESSAGE = _("%(value)s is not one of the permitted concepts: '%(restriction)s'.")
+RESTRICTED_TO_BRANCH_MESSAGE = _("%(value)s is not a valid concept in the '%(restriction)s' branch.")
+UNRESTRICTED_VOCABULARY_MESSAGE = _("%(value)s is not a valid concept in the '%(vocabulary)s' vocabulary.")
+
 
 def _branch_closure(vocabulary, branch):
     """The branch axis's downward closure (plan.md A3, research.md R5): the
@@ -410,26 +427,25 @@ class ConceptField(ConceptFieldMixin, ForeignKey):
         # message identifier stays the same whether the declaration names one
         # vocabulary or several — the same shape the many-valued field's own
         # refusal uses.
-        "invalid": _("%(value)s is not a valid concept in the '%(vocabulary)s' vocabulary."),
+        "invalid": UNRESTRICTED_VOCABULARY_MESSAGE,
         # A declaration naming no vocabulary has none to name in a refusal, so
         # it needs its own message rather than the one above with an empty
         # interpolation. Both are overridable through `error_messages`.
         "invalid_unrestricted": _("%(value)s is not a valid concept."),
         # T008 (US-1): a collection-restricted field names the collection,
         # not the vocabulary — the restriction is what actually decided the
-        # refusal. One static msgid with the restriction joined into a
-        # single named placeholder, the same shape `invalid` already uses.
-        "invalid_restricted": _("%(value)s is not a valid concept in the '%(restriction)s' collection."),
+        # refusal.
+        "invalid_restricted": RESTRICTED_TO_COLLECTION_MESSAGE,
         # T013 (US-2): a concepts-restricted field names the permitted
-        # concepts themselves, the same one-static-msgid shape — a distinct
-        # msgid from `invalid_restricted` because that one's text names a
-        # *collection*, which would misdescribe this axis.
-        "invalid_restricted_concepts": _("%(value)s is not one of the permitted concepts: '%(restriction)s'."),
+        # concepts themselves — a distinct msgid from `invalid_restricted`
+        # because that one's text names a *collection*, which would
+        # misdescribe this axis.
+        "invalid_restricted_concepts": RESTRICTED_TO_CONCEPTS_MESSAGE,
         # T017 (US-3, decisions.md D11's invalid_restricted_<axis> pattern):
         # a branch-restricted field names the branch root, not the
         # collection or concept list `invalid_restricted`/
         # `invalid_restricted_concepts` would misdescribe it as.
-        "invalid_restricted_branch": _("%(value)s is not a valid concept in the '%(restriction)s' branch."),
+        "invalid_restricted_branch": RESTRICTED_TO_BRANCH_MESSAGE,
     }
 
     default_help_text = _("A concept from this field's configured vocabulary or vocabularies.")
@@ -654,39 +670,31 @@ def _refuse_concepts_the_restriction_does_not_admit(*, field, instance, action, 
     if not invalid:
         return
     value = ", ".join(str(concept) for concept in invalid)
+    # The same four messages the single-valued path raises, named once at the
+    # top of this module rather than written out twice: a refusal should not
+    # read differently depending on how many values the field holds, and one
+    # msgid in two places is two catalogue entries for a translator to keep in
+    # step by hand.
     if field.collection is not None:
         raise ValidationError(
-            # T008's placeholder rule applied to the write guard: one static
-            # msgid, the restriction interpolated through a single named
-            # placeholder.
-            _("%(value)s is not a valid concept in the '%(restriction)s' collection."),
+            RESTRICTED_TO_COLLECTION_MESSAGE,
             code="invalid",
             params={"value": value, "restriction": field.collection},
         )
     if field.concepts is not None:
         raise ValidationError(
-            # T013 (US-2), same reasoning as the collection branch above and
-            # as `ConceptField.validate`: the refusal names what actually
-            # decided it. Naming the wider vocabulary here would tell a
-            # curator nothing about why a same-vocabulary concept was
-            # rejected.
-            _("%(value)s is not one of the permitted concepts: '%(restriction)s'."),
+            RESTRICTED_TO_CONCEPTS_MESSAGE,
             code="invalid",
             params={"value": value, "restriction": ", ".join(field.concepts)},
         )
     if field.branch is not None:
         raise ValidationError(
-            # T017 (US-3), same reasoning: the refusal names the branch
-            # root, which is what actually decided it.
-            _("%(value)s is not a valid concept in the '%(restriction)s' branch."),
+            RESTRICTED_TO_BRANCH_MESSAGE,
             code="invalid",
             params={"value": value, "restriction": field.branch},
         )
     raise ValidationError(
-        # A static message, with the vocabulary slugs joined into ONE
-        # placeholder (Article XII) so the message identifier stays the same
-        # whether the declaration names one vocabulary or several.
-        _("%(value)s is not a valid concept in the '%(vocabulary)s' vocabulary."),
+        UNRESTRICTED_VOCABULARY_MESSAGE,
         code="invalid",
         params={"value": value, "vocabulary": ", ".join(field.vocabulary)},
     )
