@@ -223,3 +223,30 @@ library actually calls.
 
 **Revisit if:** a future `django-tomselect` release renames or restructures this hook again, in
 which case this override moves with it under the same reasoning.
+
+## D13 — The restricted `help_text` default is a second static attribute, not an interpolated one
+
+**Ambiguous:** T023's brief says a restricted field's default must describe "a field restricted
+within its vocabulary" without naming which axis or which target, and must stay static — the same
+constraint `default_help_text` is already under (`fields.py:97-103`'s annotation: `%` on a
+`gettext_lazy()` proxy evaluates it immediately, defeating the laziness the default exists to
+keep). That leaves open how a field picks between two defaults without computing one from the
+other.
+
+**Chosen:** a second class attribute per field, `default_restricted_help_text`, set once per field
+class as a plain `gettext_lazy()` string, and a mixin method, `_default_help_text()`, that returns
+one or the other by checking whether `self.collection`/`self.concepts`/`self.branch` is set — never
+by reading which value any of them holds. `_apply_vocabulary` calls it in place of the bare
+`self.default_help_text` it read before.
+
+**Why defensible:** the alternative — one `default_help_text` whose wording branches internally on
+the restriction's presence — would still end up as two static strings selected by a condition; naming
+them as two attributes makes both independently overridable by a subclass (the same shape
+`default_help_text` already offers) and keeps `_apply_vocabulary` reading one intention-revealing
+call rather than an inline three-way `if`. The method reads only *whether* a restriction exists,
+never its value, which is what keeps the guarantee: nothing here can accidentally interpolate a
+collection slug or a branch root into either default.
+
+**Revisit if:** a later story wants the restricted default to name the axis (collection vs. concepts
+vs. branch) without naming the axis's *target* — at that point three restricted defaults, one per
+axis, replace the one this decision adds.

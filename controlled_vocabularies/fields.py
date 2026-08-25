@@ -94,13 +94,36 @@ class ConceptFieldMixin:
     field's own.
     """
 
-    #: The ``help_text`` a declaration gets when it supplies none. A static
-    #: message, never one interpolating ``vocabulary``: ``%`` on a
-    #: gettext_lazy() proxy evaluates it immediately, which would defeat the
-    #: laziness this default exists to keep (translation happens at access
-    #: time, per request). Annotated rather than inferred: both subclasses
-    #: assign a ``gettext_lazy()`` proxy, which is not a ``str``.
+    #: The ``help_text`` a declaration gets when it supplies none, for a field
+    #: naming no restriction. A static message, never one interpolating
+    #: ``vocabulary``: ``%`` on a gettext_lazy() proxy evaluates it
+    #: immediately, which would defeat the laziness this default exists to
+    #: keep (translation happens at access time, per request). Annotated
+    #: rather than inferred: both subclasses assign a ``gettext_lazy()``
+    #: proxy, which is not a ``str``.
     default_help_text: str | Promise | None = None
+
+    #: The ``help_text`` a restricted declaration gets when it supplies none
+    #: (T023, US-7, FR-013). One static message per field, shared by all
+    #: three restriction axes — it names the fact of a restriction, never the
+    #: restriction itself, for the same reason ``default_help_text`` stays
+    #: static: interpolating ``self.collection``/``self.concepts``/
+    #: ``self.branch`` here would apply ``%`` to a ``gettext_lazy()`` proxy at
+    #: read time and evaluate it immediately, the exact laziness these
+    #: defaults exist to keep.
+    default_restricted_help_text: str | Promise | None = None
+
+    def _default_help_text(self):
+        """The ``help_text`` default for the restriction this declaration
+        does or does not carry (T023). ``self.collection``, ``self.concepts``
+        and ``self.branch`` are already normalised by the time
+        :meth:`_apply_vocabulary` calls this, so which one is set (if any) is
+        read, never which value it holds — the value itself never reaches
+        either default.
+        """
+        if self.collection is not None or self.concepts is not None or self.branch is not None:
+            return self.default_restricted_help_text
+        return self.default_help_text
 
     def _normalise_vocabulary(self, vocabulary):
         """Normalise a ``vocabulary`` argument to a tuple of slugs.
@@ -272,7 +295,7 @@ class ConceptFieldMixin:
         kwargs["to"] = "controlled_vocabularies.Concept"
         if self.vocabulary:
             kwargs["limit_choices_to"] = self._resolve_restriction
-        kwargs.setdefault("help_text", self.default_help_text)
+        kwargs.setdefault("help_text", self._default_help_text())
         return kwargs
 
     def _contribute_accessor(self, cls, attr_name, accessor):
@@ -410,6 +433,7 @@ class ConceptField(ConceptFieldMixin, ForeignKey):
     }
 
     default_help_text = _("A concept from this field's configured vocabulary or vocabularies.")
+    default_restricted_help_text = _("A concept from a restricted part of this field's configured vocabulary.")
 
     def __init__(self, vocabulary=None, collection=None, concepts=None, branch=None, **kwargs):
         if "on_delete" in kwargs:
@@ -779,6 +803,7 @@ class ConceptsField(ConceptFieldMixin, ManyToManyField):
     """
 
     default_help_text = _("Concepts from this field's configured vocabulary or vocabularies.")
+    default_restricted_help_text = _("Concepts from a restricted part of this field's configured vocabulary.")
 
     def __init__(self, vocabulary=None, collection=None, concepts=None, branch=None, **kwargs):
         if "through" in kwargs:

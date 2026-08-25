@@ -108,8 +108,26 @@ cannot run ``validate()`` at all.
   vocabulary system-check coverage already lives on
   ``TestCheckConceptsFieldVocabularies`` (T010, ``test_checks.py``) — neither
   is duplicated here.
+- ``TestSharedRestrictedHelpText`` — T023 (US-7, FR-013): a restricted field
+  with no ``help_text`` of its own describes itself as restricted within its
+  vocabulary, one static default per field shared by all three axes, never
+  one interpolating the restriction; an unrestricted field and a consumer's
+  own ``help_text`` are both unaffected.
+- ``TestRestrictionErrorMessagesAreTranslatable``,
+  ``TestWriteGuardRefusalsAreTranslatable``,
+  ``TestW005MessagesAreStaticWithNamedPlaceholders`` and
+  ``TestDeclarationRuleTypeErrorsStayUntranslated`` — T024 (US-7, Article
+  XII): every curator-facing string this feature added — the three
+  ``invalid_restricted*`` messages, the many-valued write guard's three
+  refusals, and W005's three messages and hints — is a static msgid with
+  named placeholders, checked as lazy proxies rather than by content alone.
+  The last class asserts the opposite direction: T002's and T003's
+  declaration-rule ``TypeError``s stay plain, untranslated strings, on
+  purpose (research.md R7).
 """
 
+import ast
+import inspect
 import signal
 import warnings
 
@@ -125,6 +143,7 @@ from django.utils import translation
 from django.utils.functional import Promise
 from django.utils.module_loading import import_string
 
+from controlled_vocabularies import checks as checks_module
 from controlled_vocabularies.fields import ConceptField, ConceptFieldMixin, ConceptsField, _branch_closure
 from controlled_vocabularies.models import Concept, ConceptLabel, ConceptScheme
 from tests.factories import (
@@ -314,6 +333,64 @@ class TestSharedRestrictionArguments:
         would pass."""
         field = field_class(vocabulary="rock-type", concepts="granite")
         assert field.concepts == ("granite",)
+
+
+@pytest.mark.parametrize("field_class", [ConceptField, ConceptsField])
+class TestSharedRestrictedHelpText:
+    """T023 (US-7, FR-013) — a restricted field with no ``help_text`` of its
+    own describes itself as restricted within its vocabulary, distinct from
+    the unrestricted default both fields already carried. One axis at a
+    time, since ``TestSharedRestrictionArguments`` already proves the three
+    normalise the same way; what's new here is what each does to the
+    default ``help_text``.
+
+    Both defaults stay static ``gettext_lazy`` strings, asserted by identity
+    against the class attribute rather than by content: ``%`` applied to a
+    ``gettext_lazy()`` proxy evaluates it immediately, which would defeat the
+    laziness the default exists to keep, exactly as ``ConceptFieldMixin``'s
+    own annotation on ``default_help_text`` explains. The
+    ``test_help_text_does_not_vary_with_the_restrictions_target`` case is the
+    regression guard for that: it fails the moment someone later
+    interpolates ``self.collection``/``self.concepts``/``self.branch`` into
+    either default, because two different targets on the same axis would
+    then stop reading identically.
+    """
+
+    def test_an_unrestricted_field_keeps_the_unrestricted_default(self, field_class):
+        field = field_class(vocabulary="rock-type")
+        assert field.help_text == field_class.default_help_text
+
+    def test_a_collection_restricted_field_gets_the_restricted_default(self, field_class):
+        field = field_class(vocabulary="rock-type", collection="core-samples")
+        assert field.help_text == field_class.default_restricted_help_text
+        assert field.help_text != field_class.default_help_text
+
+    def test_a_concepts_restricted_field_gets_the_restricted_default(self, field_class):
+        field = field_class(vocabulary="rock-type", concepts=["granite", "basalt"])
+        assert field.help_text == field_class.default_restricted_help_text
+        assert field.help_text != field_class.default_help_text
+
+    def test_a_branch_restricted_field_gets_the_restricted_default(self, field_class):
+        field = field_class(vocabulary="rock-type", branch="igneous")
+        assert field.help_text == field_class.default_restricted_help_text
+        assert field.help_text != field_class.default_help_text
+
+    def test_restricted_help_text_is_a_lazy_translatable_string(self, field_class):
+        field = field_class(vocabulary="rock-type", branch="igneous")
+        assert isinstance(field.help_text, Promise)
+
+    def test_help_text_does_not_vary_with_the_restrictions_target(self, field_class):
+        """A test that fails if someone later interpolates the restriction
+        into the default: the default names no target at all, so two
+        declarations restricted to different collections must read
+        byte-identical ``help_text``."""
+        first = field_class(vocabulary="rock-type", collection="core-samples")
+        second = field_class(vocabulary="rock-type", collection="all-samples")
+        assert str(first.help_text) == str(second.help_text)
+
+    def test_a_consumers_own_help_text_wins_over_the_restricted_default(self, field_class):
+        field = field_class(vocabulary="rock-type", collection="core-samples", help_text="Pick a sample rock.")
+        assert field.help_text == "Pick a sample rock."
 
 
 @pytest.mark.parametrize("field_class", [ConceptField, ConceptsField])
@@ -2902,3 +2979,226 @@ class TestConceptFieldNoVocabulary:
 
         assert sketch.get_subject_label() == concept.display_label()
         assert sketch.get_subject_uri() == concept.uri
+
+
+# --- T024 (US-7, Article XII) — every curator-facing string this feature added is translatable ---
+#
+# Four classes below split the two directions T024 asserts. The first three cover the strings a
+# curator actually reads: the three ``invalid_restricted*`` error messages (``TestConceptField*
+# RefusalMessage`` above already prove their *content*; these prove they are lazy proxies with
+# named placeholders, not incidentally-correct plain strings), the many-valued write guard's three
+# refusals, and W005's three messages and hints. The fourth proves the opposite: T002's and T003's
+# declaration-rule ``TypeError``s stay plain, untranslated strings, on purpose (research.md R7) —
+# they are developer-facing diagnostics raised while a declaration is only being read, matching
+# every existing refusal ``ConceptFieldMixin`` already raises the same way, and nothing renders
+# them for an end user. That last point is exactly why the direction needs its own test: wrapping
+# one in ``_()`` would not visibly break anything, so a later "consistency" pass could do it by
+# accident and nothing here would tell it not to without this class.
+
+
+class TestRestrictionErrorMessagesAreTranslatable:
+    """T024 — the three restriction-axis entries in ``ConceptField``'s
+    ``default_error_messages`` (T008, T013, T017) are ``gettext_lazy``
+    proxies carrying a single named placeholder, the same shape ``invalid``
+    already uses. Read directly off ``field.error_messages`` rather than off
+    a raised exception: a ``ValidationError``'s own ``__iter__`` does
+    ``message %= params`` on a *local* variable and never touches
+    ``error.message`` itself (``django/core/exceptions.py``), so the dict
+    entry is the one place this is checked before anything has interpolated
+    it. ``ConceptsField`` carries no ``error_messages`` dict of its own —
+    its refusals are the write guard's, covered by the next class.
+    """
+
+    @pytest.mark.parametrize(
+        "message_id",
+        ["invalid_restricted", "invalid_restricted_concepts", "invalid_restricted_branch"],
+    )
+    def test_the_message_is_a_lazy_proxy_with_a_named_restriction_placeholder(self, message_id):
+        field = ConceptField(vocabulary="rock-type")
+        message = field.error_messages[message_id]
+        assert isinstance(message, Promise)
+        assert "%(restriction)s" in str(message)
+        assert "%(value)s" in str(message)
+
+
+class TestWriteGuardRefusalsAreTranslatable:
+    """T024 — the many-valued write guard's three refusals
+    (``_refuse_concepts_the_restriction_does_not_admit``) are each a
+    ``gettext_lazy`` call, not an f-string built per raise. Unlike the class
+    above, these are never stored on the field, only raised, so each is
+    triggered for real through :class:`~tests.testapp.models.DrillCore`,
+    :class:`~tests.testapp.models.ChipTray` and
+    :class:`~tests.testapp.models.BranchTray`'s own write paths (the same
+    fixtures ``TestConceptsField*RestrictionWritePath`` already drive), and
+    the caught ``ValidationError``'s own ``.message`` — untouched by
+    ``.messages``, for the reason given above — is asserted directly.
+    """
+
+    @pytest.mark.django_db
+    def test_the_collection_axis_refusal_is_a_lazy_proxy_with_named_placeholders(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        collection_with_members(scheme=scheme, name="Core Samples", labels=("Granite",))
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+        drill_core = DrillCoreFactory()
+
+        with pytest.raises(ValidationError) as excinfo:
+            drill_core.rock_types.add(outsider)
+
+        assert isinstance(excinfo.value.message, Promise)
+        assert "%(restriction)s" in str(excinfo.value.message)
+        assert "%(value)s" in str(excinfo.value.message)
+
+    @pytest.mark.django_db
+    def test_the_concepts_axis_refusal_is_a_lazy_proxy_with_named_placeholders(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+        chip_tray = ChipTrayFactory()
+
+        with pytest.raises(ValidationError) as excinfo:
+            chip_tray.rock_types.add(outsider)
+
+        assert isinstance(excinfo.value.message, Promise)
+        assert "%(restriction)s" in str(excinfo.value.message)
+        assert "%(value)s" in str(excinfo.value.message)
+
+    @pytest.mark.django_db
+    def test_the_branch_axis_refusal_is_a_lazy_proxy_with_named_placeholders(self):
+        scheme = ConceptSchemeFactory(name="Rock Type")
+        ConceptFactory(scheme=scheme, label="Igneous")
+        outsider = ConceptFactory(scheme=scheme, label="Marble")
+        branch_tray = BranchTrayFactory()
+
+        with pytest.raises(ValidationError) as excinfo:
+            branch_tray.rock_types.add(outsider)
+
+        assert isinstance(excinfo.value.message, Promise)
+        assert "%(restriction)s" in str(excinfo.value.message)
+        assert "%(value)s" in str(excinfo.value.message)
+
+
+def _translation_call_string_literals(func) -> list[str]:
+    """Every string this ``func`` passes straight to ``_()``/``gettext_lazy()``.
+
+    Reads the function's own source rather than calling it: ``checks.py``'s
+    ``message % {...}`` interpolates a ``gettext_lazy()`` proxy immediately
+    (the same ``%`` behaviour ``fields.py:97-114``'s annotation warns
+    ``default_help_text`` against), so by the time a warning is produced the
+    lazy proxy is already gone, replaced by an ordinary ``str`` that carries
+    no trace of having started translatable. Reading the source is the one
+    place that distinction still exists (``TestFieldsChecksI18nSweep`` in
+    ``test_standards.py`` takes the same approach for the whole module, for
+    the same reason).
+    """
+    tree = ast.parse(inspect.getsource(func))
+    literals = []
+
+    class _Visitor(ast.NodeVisitor):
+        def visit_Call(self, node: ast.Call) -> None:
+            if isinstance(node.func, ast.Name) and node.func.id in {"_", "gettext_lazy"}:
+                for arg in node.args:
+                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                        literals.append(arg.value)
+            self.generic_visit(node)
+
+    _Visitor().visit(tree)
+    return literals
+
+
+class TestW005MessagesAreStaticWithNamedPlaceholders:
+    """T024 — W005's three messages (one per restriction axis) and their
+    hints are each a single ``_()`` call with only named placeholders, never
+    one assembled per call. Checked against the function's own source
+    (:func:`_translation_call_string_literals`) rather than a rendered
+    warning, for the reason given there.
+    """
+
+    def test_every_message_and_hint_is_a_translation_call(self):
+        literals = _translation_call_string_literals(checks_module.check_concept_field_restriction_targets)
+
+        expected_messages = {
+            "%(model)s.%(field)s names collection '%(target)s', which does not exist in the "
+            "'%(vocabulary)s' vocabulary.",
+            "%(model)s.%(field)s names concept '%(target)s', which does not exist in the '%(vocabulary)s' vocabulary.",
+            "%(model)s.%(field)s names branch root '%(target)s', which does not exist in the "
+            "'%(vocabulary)s' vocabulary.",
+        }
+        expected_hints = {
+            "Create this collection, or correct the name.",
+            "Create this concept, or correct the name.",
+        }
+
+        assert expected_messages <= set(literals)
+        assert expected_hints <= set(literals)
+
+    def test_none_of_them_carries_a_positional_placeholder(self):
+        literals = _translation_call_string_literals(checks_module.check_concept_field_restriction_targets)
+        assert literals, "expected the W005 messages dict to be found at all"
+        for literal in literals:
+            assert "%s" not in literal
+            assert "%d" not in literal
+
+    def test_each_message_carries_the_four_named_placeholders(self):
+        literals = _translation_call_string_literals(checks_module.check_concept_field_restriction_targets)
+        messages = [literal for literal in literals if "%(target)s" in literal]
+        assert len(messages) == 3
+        for message in messages:
+            assert "%(model)s" in message
+            assert "%(field)s" in message
+            assert "%(vocabulary)s" in message
+
+
+class TestDeclarationRuleTypeErrorsStayUntranslated:
+    """T024's other direction (research.md R7) — the declaration-rule
+    ``TypeError``s from T002 (FR-005, FR-006) and T003
+    (``_normalise_vocabulary``/``_normalise_restriction_slug``/
+    ``_normalise_concepts``) stay plain, untranslated ``str`` objects. They
+    are developer-facing diagnostics raised while a declaration is read, the
+    same class of message every pre-existing refusal in ``fields.py``
+    (``on_delete``, ``through``, ``limit_choices_to``) already raises
+    untranslated, and Article XII's translation requirement is explicit that
+    a developer-facing diagnostic is exempt. Asserted here, deliberately, so
+    a later pass making "every message translatable" its whole brief does
+    not wrap these too: nothing renders a ``TypeError`` for a curator or a
+    form-filler to read, so doing so would not visibly break anything and
+    would go unnoticed without a test naming the exact reverse expectation.
+    """
+
+    @pytest.mark.parametrize("field_class", [ConceptField, ConceptsField])
+    def test_a_restriction_naming_no_vocabulary_raises_a_plain_string(self, field_class):
+        with pytest.raises(TypeError) as excinfo:
+            field_class(branch="igneous")
+        assert not isinstance(excinfo.value.args[0], Promise)
+        assert type(excinfo.value.args[0]) is str
+
+    @pytest.mark.parametrize("field_class", [ConceptField, ConceptsField])
+    def test_two_restrictions_together_raises_a_plain_string(self, field_class):
+        with pytest.raises(TypeError) as excinfo:
+            field_class(vocabulary="rock-type", collection="core-samples", branch="igneous")
+        assert not isinstance(excinfo.value.args[0], Promise)
+        assert type(excinfo.value.args[0]) is str
+
+    @pytest.mark.parametrize("field_class", [ConceptField, ConceptsField])
+    def test_a_non_string_collection_raises_a_plain_string(self, field_class):
+        with pytest.raises(TypeError) as excinfo:
+            field_class(vocabulary="rock-type", collection=42)
+        assert not isinstance(excinfo.value.args[0], Promise)
+        assert type(excinfo.value.args[0]) is str
+
+    @pytest.mark.parametrize("field_class", [ConceptField, ConceptsField])
+    def test_an_empty_concepts_list_raises_a_plain_string(self, field_class):
+        with pytest.raises(TypeError) as excinfo:
+            field_class(vocabulary="rock-type", concepts=[])
+        assert not isinstance(excinfo.value.args[0], Promise)
+        assert type(excinfo.value.args[0]) is str
+
+    def test_concept_fields_own_delete_setting_raises_a_plain_string(self):
+        with pytest.raises(TypeError) as excinfo:
+            ConceptField(vocabulary="rock-type", on_delete=PROTECT)
+        assert not isinstance(excinfo.value.args[0], Promise)
+        assert type(excinfo.value.args[0]) is str
+
+    def test_concepts_fields_own_through_setting_raises_a_plain_string(self):
+        with pytest.raises(TypeError) as excinfo:
+            ConceptsField(vocabulary="rock-type", through="whatever")
+        assert not isinstance(excinfo.value.args[0], Promise)
+        assert type(excinfo.value.args[0]) is str
