@@ -60,10 +60,19 @@ def visible_text(element) -> str:
     behind a tooltip and an accessible description".
     """
     return "".join(
-        node
-        for node in element.find_all(string=True)
-        if node.find_parent(attrs={"class": "sr-only"}) is None
+        node for node in element.find_all(string=True) if node.find_parent(attrs={"class": "sr-only"}) is None
     )
+
+
+def term_text(dt) -> str:
+    """A ``<dt>``'s own visible term, its hidden URI disclosure span left out.
+
+    015-read-single-record second round: a term's URI now lives in a ``.sr-only`` span
+    inside the ``<dt>`` itself, so ``dt.get_text()`` glues the CURIE straight to the URI
+    it abbreviates (``"rdf:typehttp://...#type"``). ``get_text(strip=True)`` cannot tell
+    the two apart; this can, the same way :func:`visible_text` already does for a ``<dd>``.
+    """
+    return visible_text(dt).strip()
 
 
 class TestVocabularyList:
@@ -1945,9 +1954,7 @@ class TestConceptDetailShowsWhatIsRecorded:
             )
         )
         soup = BeautifulSoup(response.content, "html.parser")
-        pairs = [
-            (dt.get_text(strip=True), dt.find_next_sibling("dd").get_text(strip=True)) for dt in soup.find_all("dt")
-        ]
+        pairs = [(term_text(dt), dt.find_next_sibling("dd").get_text(strip=True)) for dt in soup.find_all("dt")]
 
         assert (LABEL_CURIES[ConceptLabel.Kind.PREFERRED], "Granite") in pairs
         assert (NOTE_CURIES[ConceptNote.Kind.DEFINITION], "A coarse-grained igneous rock.") in pairs
@@ -1967,9 +1974,7 @@ class TestConceptDetailShowsWhatIsRecorded:
         )
         content = response.content.decode()
         soup = BeautifulSoup(response.content, "html.parser")
-        pairs = [
-            (dt.get_text(strip=True), dt.find_next_sibling("dd").get_text(strip=True)) for dt in soup.find_all("dt")
-        ]
+        pairs = [(term_text(dt), dt.find_next_sibling("dd").get_text(strip=True)) for dt in soup.find_all("dt")]
 
         assert (LABEL_CURIES[ConceptLabel.Kind.ALTERNATIVE], "granitic rock") in pairs
         assert "granate" not in content
@@ -2050,9 +2055,7 @@ class TestConceptDetailTypeAndIdentifier:
             )
         )
         soup = BeautifulSoup(response.content, "html.parser")
-        pairs = [
-            (dt.get_text(strip=True), dt.find_next_sibling("dd").get_text(strip=True)) for dt in soup.find_all("dt")
-        ]
+        pairs = [(term_text(dt), dt.find_next_sibling("dd").get_text(strip=True)) for dt in soup.find_all("dt")]
 
         assert TYPE_CURIE == "rdf:type"
         assert (TYPE_CURIE, CONCEPT_TYPE_CURIE) in pairs
@@ -2132,7 +2135,7 @@ class TestConceptDetailUnfilledPropertiesProduceNoRow:
             )
         )
         soup = BeautifulSoup(response.content, "html.parser")
-        terms = [dt.get_text(strip=True) for dt in soup.find_all("dt")]
+        terms = [term_text(dt) for dt in soup.find_all("dt")]
 
         assert terms == [TYPE_CURIE, LABEL_CURIES[ConceptLabel.Kind.PREFERRED], IN_SCHEME_CURIE]
         assert soup.find("a", href=concept.uri) is not None
@@ -2425,9 +2428,7 @@ class TestCollectionDetailNameTypeAndMembers:
     @staticmethod
     def _dt_dd_pairs(response):
         soup = BeautifulSoup(response.content, "html.parser")
-        return [
-            (dt.get_text(strip=True), dt.find_next_sibling("dd").get_text(strip=True)) for dt in soup.find_all("dt")
-        ]
+        return [(term_text(dt), dt.find_next_sibling("dd").get_text(strip=True)) for dt in soup.find_all("dt")]
 
     @pytest.mark.django_db
     def test_an_unordered_collection_shows_its_name_type_and_one_row_carrying_every_member(self, client):
@@ -2446,7 +2447,7 @@ class TestCollectionDetailNameTypeAndMembers:
 
         assert (LABEL_CURIES[ConceptLabel.Kind.PREFERRED], collection.name) in pairs
         assert (TYPE_CURIE, COLLECTION_TYPE_CURIE) in pairs
-        member_dts = [dt for dt in soup.find_all("dt") if dt.get_text(strip=True) == MEMBER_CURIE]
+        member_dts = [dt for dt in soup.find_all("dt") if term_text(dt) == MEMBER_CURIE]
         assert len(member_dts) == 1
         assert not any(term == MEMBER_LIST_CURIE for term, _value in pairs)
         member_short_forms = {a.get_text(strip=True) for a in member_dts[0].find_next_sibling("dd").find_all("a")}
@@ -2465,10 +2466,8 @@ class TestCollectionDetailNameTypeAndMembers:
             )
         )
         soup = BeautifulSoup(response.content, "html.parser")
-        pairs = [
-            (dt.get_text(strip=True), dt.find_next_sibling("dd").get_text(strip=True)) for dt in soup.find_all("dt")
-        ]
-        member_dts = [dt for dt in soup.find_all("dt") if dt.get_text(strip=True) == MEMBER_LIST_CURIE]
+        pairs = [(term_text(dt), dt.find_next_sibling("dd").get_text(strip=True)) for dt in soup.find_all("dt")]
+        member_dts = [dt for dt in soup.find_all("dt") if term_text(dt) == MEMBER_LIST_CURIE]
         assert len(member_dts) == 1
         # T028: one row carrying every member — the anchors inside its one <dd>, not
         # one <dt>/<dd> pair per member, isolate each member's own short form.
@@ -2537,7 +2536,7 @@ class TestCollectionDetailMemberIdentifierDisclosedOnHover:
             )
         )
         soup = BeautifulSoup(response.content, "html.parser")
-        member_dt = next(dt for dt in soup.find_all("dt") if dt.get_text(strip=True) == MEMBER_CURIE)
+        member_dt = next(dt for dt in soup.find_all("dt") if term_text(dt) == MEMBER_CURIE)
         dd = member_dt.find_next_sibling("dd")
         anchors = dd.find_all("a")
 
@@ -2581,7 +2580,7 @@ class TestCollectionDetailEmptyState:
             )
         )
         soup = BeautifulSoup(response.content, "html.parser")
-        terms = [dt.get_text(strip=True) for dt in soup.find_all("dt")]
+        terms = [term_text(dt) for dt in soup.find_all("dt")]
 
         assert MEMBER_CURIE not in terms
         assert MEMBER_LIST_CURIE not in terms
@@ -2598,7 +2597,7 @@ class TestCollectionDetailEmptyState:
             )
         )
         soup = BeautifulSoup(response.content, "html.parser")
-        terms = [dt.get_text(strip=True) for dt in soup.find_all("dt")]
+        terms = [term_text(dt) for dt in soup.find_all("dt")]
 
         assert MEMBER_CURIE not in terms
         assert MEMBER_LIST_CURIE not in terms
@@ -2662,7 +2661,7 @@ class TestConceptDetailRelatedRecordIdentifiers:
 
     @staticmethod
     def _dd_for(soup, term):
-        dt = next(dt for dt in soup.find_all("dt") if dt.get_text(strip=True) == term)
+        dt = next(dt for dt in soup.find_all("dt") if term_text(dt) == term)
         return dt.find_next_sibling("dd")
 
     @pytest.mark.django_db
@@ -2770,7 +2769,7 @@ class TestConceptDetailBroaderNarrowerAndRelated:
 
     @staticmethod
     def _links_for(soup, term):
-        return [dt.find_next_sibling("dd").find("a") for dt in soup.find_all("dt") if dt.get_text(strip=True) == term]
+        return [dt.find_next_sibling("dd").find("a") for dt in soup.find_all("dt") if term_text(dt) == term]
 
     @pytest.mark.django_db
     def test_a_broader_concept_appears_and_following_it_opens_its_page(self, client):
@@ -2865,7 +2864,7 @@ class TestConceptDetailVocabularyRowAndNoAncestorChain:
             )
         )
         soup = BeautifulSoup(response.content, "html.parser")
-        scheme_dt = next(dt for dt in soup.find_all("dt") if dt.get_text(strip=True) == IN_SCHEME_CURIE)
+        scheme_dt = next(dt for dt in soup.find_all("dt") if term_text(dt) == IN_SCHEME_CURIE)
         link = scheme_dt.find_next_sibling("dd").find("a")
 
         assert link.get_text(strip=True) == concept.scheme.name
@@ -2898,9 +2897,9 @@ class TestConceptDetailVocabularyRowAndNoAncestorChain:
         )
         soup = BeautifulSoup(response.content, "html.parser")
         relation_pairs = [
-            (dt.get_text(strip=True), dt.find_next_sibling("dd").find("a").get_text(strip=True))
+            (term_text(dt), dt.find_next_sibling("dd").find("a").get_text(strip=True))
             for dt in soup.find_all("dt")
-            if dt.get_text(strip=True) in (BROADER_CURIE, NARROWER_CURIE)
+            if term_text(dt) in (BROADER_CURIE, NARROWER_CURIE)
         ]
 
         # Exactly one immediate neighbour in each direction: the great-grandparent
@@ -3137,15 +3136,22 @@ class TestConceptDetailShowsNoCrossVocabularyLink:
         content = response.content.decode()
 
         assert "external.example.org" not in content
-        terms = [dt.get_text(strip=True) for dt in soup.find_all("dt")]
+        terms = [term_text(dt) for dt in soup.find_all("dt")]
         assert terms == [TYPE_CURIE, LABEL_CURIES[ConceptLabel.Kind.PREFERRED], IN_SCHEME_CURIE]
 
 
 class TestPropertyTermDisclosesItsOwnURI:
     """A row's term is a CURIE too, and a CURIE is an abbreviation of a URI — hovering
     one discloses what it abbreviates, the same disclosure a record-valued row's short
-    form carries (015-read-single-record T031, FR-007).
+    form carries (015-read-single-record T031, corrected: a ``.tooltip`` span wrapping
+    the term, not an ``<abbr title=...>`` — see :class:`TestPropertyTermsCarryNoTitle`
+    and :class:`TestEveryTooltipOpensToTheRight` for the two failure modes the
+    correction itself exists to prevent, FR-007).
     """
+
+    @staticmethod
+    def _term_disclosures(soup):
+        return {term_text(dt): dt.find("span", class_="tooltip") for dt in soup.find_all("dt")}
 
     @pytest.mark.django_db
     def test_a_concept_pages_terms_each_disclose_the_uri_they_abbreviate(self, client):
@@ -3158,16 +3164,17 @@ class TestPropertyTermDisclosesItsOwnURI:
             )
         )
         soup = BeautifulSoup(response.content, "html.parser")
-        terms = {dt.get_text(strip=True): dt.find("abbr") for dt in soup.find_all("dt")}
+        terms = self._term_disclosures(soup)
 
         assert terms, "the page rendered no terms at all"
-        assert terms["rdf:type"].get("title") == "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
-        assert terms["skos:prefLabel"].get("title") == "http://www.w3.org/2004/02/skos/core#prefLabel"
-        for curie, abbr in terms.items():
-            assert abbr is not None, f"{curie} discloses nothing"
-            assert "tooltip" in abbr.get("class", []), f"{curie} carries no hover disclosure"
-            assert abbr.get("data-tip") == abbr.get("title"), f"{curie}'s two disclosures disagree"
-            assert abbr["title"] not in soup.find("dl").get_text(), f"{curie}'s URI is printed, not hovered"
+        assert terms["rdf:type"].get("data-tip") == "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
+        assert terms["skos:prefLabel"].get("data-tip") == "http://www.w3.org/2004/02/skos/core#prefLabel"
+        for curie, wrapper in terms.items():
+            assert wrapper is not None, f"{curie} discloses nothing"
+            hidden_span = wrapper.find_next_sibling("span", class_="sr-only")
+            assert hidden_span is not None, f"{curie}'s URI is not reachable as text"
+            assert hidden_span.get_text() == wrapper.get("data-tip"), f"{curie}'s two disclosures disagree"
+            assert wrapper["data-tip"] not in visible_text(soup.find("dl")), f"{curie}'s URI is printed, not hovered"
 
     @pytest.mark.django_db
     def test_a_collection_pages_terms_do_too(self, client):
@@ -3180,9 +3187,8 @@ class TestPropertyTermDisclosesItsOwnURI:
             )
         )
         soup = BeautifulSoup(response.content, "html.parser")
-        terms = {dt.get_text(strip=True): dt.find("abbr") for dt in soup.find_all("dt")}
+        terms = self._term_disclosures(soup)
 
-        assert terms[MEMBER_CURIE].get("title") == "http://www.w3.org/2004/02/skos/core#member"
-        for curie, abbr in terms.items():
-            assert abbr is not None, f"{curie} discloses nothing"
-            assert "tooltip" in abbr.get("class", []), f"{curie} carries no hover disclosure"
+        assert terms[MEMBER_CURIE].get("data-tip") == "http://www.w3.org/2004/02/skos/core#member"
+        for curie, wrapper in terms.items():
+            assert wrapper is not None, f"{curie} discloses nothing"
