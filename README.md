@@ -48,11 +48,14 @@ concepts and evolve as data rather than as code.
 - Both a **manager** (author, edit, version, publish) and a **consumer** (attach concepts to your
   models via a field, and serve RDF at stable URIs).
 - Multilingual — a concept holds labels and definitions in any number of languages, with one
-  preferred label per language.
-- A graph, not a flat list — concepts link to one another through a broader/narrower hierarchy and
-  a symmetric related association, within one vocabulary.
+  preferred label per language. Each vocabulary picks the language that anchors its concept
+  addresses, and a curator can override any concept's slug.
+- A graph, not a flat list — concepts link to one another through a broader/narrower hierarchy
+  (navigable both ways, and a concept may sit under several broader concepts) and a symmetric
+  related association, all within one vocabulary.
 - Organisable into collections — a curator can gather a vocabulary's concepts into named
-  collections, optionally in a deliberate order.
+  collections, optionally in a deliberate order, separate from the hierarchy and from any other
+  collection a concept belongs to.
 
 **It deliberately is not:**
 
@@ -62,8 +65,9 @@ concepts and evolve as data rather than as code.
 - A reasoner — no OWL inference.
 - An editor for external vocabularies — imported vocabularies are read-only references, and
   extending one with your own terms is out of scope.
-- A faithful mirror of an imported vocabulary — imports are normalised to what the app supports,
-  and everything it cannot store is named in the import report rather than dropped in silence.
+- A faithful mirror of an imported vocabulary — imports are normalised to what the app supports
+  (its configured languages, for one), and unsupported languages and constructs are not stored.
+  Nothing is dropped in silence: everything set aside is named in the import report.
 
 **Tie-breaks, when principles collide:** the database is the source of truth over RDF fidelity in
 memory, lossless round-tripping over schema neatness, stable concept URIs over convenient
