@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+## [v0.1.0] - 2026-08-26
+
 ## [v0.0.3] - 2026-08-25
 
 ### Added
