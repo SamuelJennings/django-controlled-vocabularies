@@ -949,76 +949,76 @@ class TestFormsMissingRouteMessageIsTranslatable:
         )
 
 
-# --- FS-011 US-7 (T011): the README documents the concept search control's wiring ---
+# --- FS-011 US-7 (T011): the documentation covers the concept search control's wiring ---
 #
 # decisions.md D10 amended the "one route" promise to two steps, and D15 amended it again,
 # during implementation, to three — the third is the supporting package's middleware, and it is
 # the one that fails silently rather than raising (spec.md FR-002, FR-010, FR-014). This asserts
-# the shipped README documents all three, by name and in the order a developer does them, rather
+# the shipped page documents all three, by name and in the order a developer does them, rather
 # than trusting a docs-writing pass to remember an amendment made after the plan was written.
 
-_README_TEXT = (Path(__file__).resolve().parents[1] / "README.md").read_text()
+_SEARCH_DOC_TEXT = (Path(__file__).resolve().parents[1] / "docs" / "search.md").read_text()
 
 
-class TestReadmeDocumentsTheConceptSearchControlsWiring:
+class TestDocumentationCoversTheConceptSearchControlsWiring:
     """T011 — the three wiring steps (decisions.md D10, D15), in the order a developer does
     them, plus what the endpoint exposes, its default permission stance, and the browser
     requirement (FR-013, FR-014)."""
 
     def test_documents_the_route_include_step(self):
-        assert 'include("controlled_vocabularies.urls")' in _README_TEXT
+        assert 'include("controlled_vocabularies.urls")' in _SEARCH_DOC_TEXT
 
     def test_documents_the_installed_apps_step(self):
-        assert '"django_tomselect"' in _README_TEXT and "INSTALLED_APPS" in _README_TEXT
+        assert '"django_tomselect"' in _SEARCH_DOC_TEXT and "INSTALLED_APPS" in _SEARCH_DOC_TEXT
 
     def test_documents_the_middleware_step(self):
-        assert "django_tomselect.middleware.TomSelectMiddleware" in _README_TEXT and "MIDDLEWARE" in _README_TEXT
+        assert "django_tomselect.middleware.TomSelectMiddleware" in _SEARCH_DOC_TEXT and "MIDDLEWARE" in _SEARCH_DOC_TEXT
 
     def test_documents_the_three_steps_in_wiring_order(self):
         # A project does these in the order the render-time failure modes surface them: no route
         # means every request 404s, a missing INSTALLED_APPS entry means no template/static asset
         # to render with, and a missing middleware — the one that raises nothing at all — is the
         # one a developer notices last, so it is documented last (decisions.md D15).
-        route_at = _README_TEXT.index('include("controlled_vocabularies.urls")')
-        installed_apps_at = _README_TEXT.index('"django_tomselect"')
-        middleware_at = _README_TEXT.index("django_tomselect.middleware.TomSelectMiddleware")
+        route_at = _SEARCH_DOC_TEXT.index('include("controlled_vocabularies.urls")')
+        installed_apps_at = _SEARCH_DOC_TEXT.index('"django_tomselect"')
+        middleware_at = _SEARCH_DOC_TEXT.index("django_tomselect.middleware.TomSelectMiddleware")
         assert route_at < installed_apps_at < middleware_at
 
     def test_documents_what_the_endpoint_exposes(self):
-        assert "preferred label" in _README_TEXT and "identifier" in _README_TEXT and "vocabulary" in _README_TEXT
+        assert "preferred label" in _SEARCH_DOC_TEXT and "identifier" in _SEARCH_DOC_TEXT and "vocabulary" in _SEARCH_DOC_TEXT
 
     def test_documents_no_default_permission_rule_and_the_include_as_the_restriction_lever(self):
-        assert "no permission rule" in _README_TEXT
-        assert "restrict" in _README_TEXT
+        assert "no permission rule" in _SEARCH_DOC_TEXT
+        assert "restrict" in _SEARCH_DOC_TEXT
 
     def test_documents_the_javascript_requirement(self):
-        assert "JavaScript" in _README_TEXT
+        assert "JavaScript" in _SEARCH_DOC_TEXT
 
 
-# --- 012 US-6 (T017): the README documents the concept fields' admin representation ---
+# --- 012 US-6 (T017): the documentation covers the concept fields' admin representation ---
 #
 # spec.md US-6 Acceptance Scenario 1: registering a consuming model in the admin is
 # sufficient, the wiring is the same three entries already documented above and nothing
 # more, concepts are chosen on these pages and never created or edited there, and the
 # ways a project can ask for a different control are documented. Same technique as
-# TestReadmeDocumentsTheConceptSearchControlsWiring above, for the admin section.
+# TestDocumentationCoversTheConceptSearchControlsWiring above, for the admin section.
 
 
-class TestReadmeDocumentsTheAdminSection:
+class TestDocumentationCoversTheAdminSection:
     """T017 — spec.md US-6 scenario 1, FR-012."""
 
     def test_documents_that_registering_is_the_whole_requirement(self):
-        assert "nothing further to configure" in _README_TEXT
+        assert "nothing further to configure" in _SEARCH_DOC_TEXT
 
     def test_documents_concepts_are_chosen_not_created_or_edited(self):
-        assert "never created or edited" in _README_TEXT
+        assert "never created or edited" in _SEARCH_DOC_TEXT
 
     def test_documents_no_related_object_affordance(self):
-        assert "add, change, delete or view" in _README_TEXT
+        assert "add, change, delete or view" in _SEARCH_DOC_TEXT
 
     def test_documents_read_only_presentation(self):
-        assert "read-only" in _README_TEXT and "preferred label" in _README_TEXT
+        assert "read-only" in _SEARCH_DOC_TEXT and "preferred label" in _SEARCH_DOC_TEXT
 
     def test_documents_the_override_mechanisms(self):
         for override in ("autocomplete_fields", "raw_id_fields", "readonly_fields", "Meta.widgets"):
-            assert override in _README_TEXT, f"README does not document {override}"
+            assert override in _SEARCH_DOC_TEXT, f"docs/search.md does not document {override}"

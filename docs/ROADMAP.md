@@ -25,8 +25,11 @@ minors, and one minor can move two goals. And once `1.0` ships, a breaking chang
 `1.x`; it waits for the next major, because a consumer pinned to `>=1,<2` is trusting that it will
 not break.
 
-The repo is at `0.0.x` today. R1 and R2 are done; R3 through R5 are not, so the first published
-release is still some way off.
+`v0.1.0` was published on 2026-08-26. The per-item marks below have not been reconciled against
+what that release actually contains: R3's consumption field and R6's browsing pages have both
+shipped without being marked, while R4's RDF publishing and R5's management interface have not
+shipped at all — so the release went out ahead of the gate this table sets for it. Reconciling the
+two is its own piece of work.
 
 ## Essential goals: v0.1.0
 

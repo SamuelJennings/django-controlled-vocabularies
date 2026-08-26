@@ -9,41 +9,50 @@
 [![Django Versions](https://img.shields.io/pypi/djversions/django-controlled-vocabularies.svg)](https://pypi.org/project/django-controlled-vocabularies/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A Django app for **managing, publishing, and consuming SKOS controlled vocabularies** — built for
-research organisations. Curators create and edit vocabularies through a web interface; developers
-attach concepts to their own models and serve standards-compliant RDF at stable URIs. No hand-edited
-RDF, no code releases to add a term, no triplestore to operate.
-
-> **Status:** early development (pre-`0.1`). The data model and design are sketched out (see
-> [`docs/brainstorm.md`](docs/brainstorm.md)); the first release targets **consumption** (import,
-> models, a concept relationship field, and RDF export) ahead of the editing interface. See
-> [`GOALS.md`](GOALS.md).
-
-## Scope & philosophy
+Manage, publish, and consume SKOS controlled vocabularies in Django.
 
 Research data infrastructure runs on controlled vocabularies, but Django has no native way to manage
 or consume them, and the existing editors are foreign stacks, unmaintained, or deployment-heavy.
-This app closes that gap by treating a vocabulary as **relational data, not a document**: concepts
-are Django models, the database is the source of truth, and RDF is a projection produced only at the
-import/export boundary. That turns everything Django already does well (forms, permissions, indexed
-search, referential integrity) onto vocabulary management, and lets vocabularies scale to tens of
-thousands of concepts and evolve as data rather than code.
+This app closes that gap for research organisations by treating a vocabulary as ordinary relational
+data: no hand-edited RDF, no code release to add a term, and no triplestore to operate. It
+supersedes and retires `skos-builder` and `django-research-vocabs`.
+
+**v0.1.0 covers the consuming half.** You can import a published SKOS vocabulary from a file or a
+URL, attach its concepts to your own models through a single field, pick one through a
+search-as-you-type control in your forms and in the Django admin, and browse what the site holds
+through an opt-in set of read-only pages. Authoring vocabularies through a web interface and
+serving RDF back out at those addresses are the next releases — see
+[the roadmap](https://github.com/FAIR-DM/django-controlled-vocabularies/blob/main/docs/ROADMAP.md).
+
+- [Scope and philosophy](#scope-and-philosophy)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Documentation](#documentation)
+- [Contributing](#contributing)
+- [Changelog](#changelog)
+- [License](#license)
+
+## Scope and philosophy
+
+A vocabulary here is **relational data, not a document**. Concepts are Django models, the database
+is the source of truth, and RDF is a projection produced only at the import and export boundary.
+That puts everything Django already does well — forms, permissions, indexed search, referential
+integrity — to work on vocabulary management, and lets a vocabulary scale to tens of thousands of
+concepts and evolve as data rather than as code.
 
 **It deliberately is:**
 
 - SKOS-focused.
 - A Django app — installable into any Django project (notably FairDM) and runnable standalone.
 - Both a **manager** (author, edit, version, publish) and a **consumer** (attach concepts to your
-  models via a field; serve RDF at stable URIs).
+  models via a field, and serve RDF at stable URIs).
 - Multilingual — a concept holds labels and definitions in any number of languages, with one
-  preferred label per language. Each vocabulary picks the language that anchors its concept URIs,
-  and a curator can override any concept's slug.
-- A graph, not a flat list — concepts link to one another through a broader/narrower hierarchy
-  (navigable both ways, and a concept may sit under several broader concepts) and a symmetric
-  related association, all within one vocabulary.
+  preferred label per language.
+- A graph, not a flat list — concepts link to one another through a broader/narrower hierarchy and
+  a symmetric related association, within one vocabulary.
 - Organisable into collections — a curator can gather a vocabulary's concepts into named
-  collections, optionally in a deliberate order, separate from the hierarchy and from any other
-  collection a concept belongs to.
+  collections, optionally in a deliberate order.
 
 **It deliberately is not:**
 
@@ -51,62 +60,70 @@ thousands of concepts and evolve as data rather than code.
 - A triplestore or SPARQL endpoint — the relational database is the store.
 - A replacement for rdflib — rdflib is used only to parse and serialize at the boundary.
 - A reasoner — no OWL inference.
-- An editor for external vocabularies — imported external vocabularies are read-only references.
-- A way to extend a published vocabulary with your own terms — that is out of scope.
-- A faithful mirror of imported external vocabularies — imports are normalised to what the app
-  supports (e.g. its configured languages); unsupported languages and constructs are not stored.
+- An editor for external vocabularies — imported vocabularies are read-only references, and
+  extending one with your own terms is out of scope.
+- A faithful mirror of an imported vocabulary — imports are normalised to what the app supports,
+  and everything it cannot store is named in the import report rather than dropped in silence.
 
 **Tie-breaks, when principles collide:** the database is the source of truth over RDF fidelity in
-memory · lossless round-tripping over schema neatness · stable concept URIs over convenient
-identifiers · vocabulary-as-data over vocabulary-as-code · SKOS fidelity over generality.
+memory, lossless round-tripping over schema neatness, stable concept URIs over convenient
+identifiers, vocabulary-as-data over vocabulary-as-code, and SKOS fidelity over generality.
 
-## Configuration
+## Requirements
 
-Every vocabulary, concept, and collection has a URI — its identity, always present. It is static,
-held exactly as given and never recomputed by the app, once it is fixed: a record imported from an
-external vocabulary keeps the identifier its publisher assigned it. A record authored here instead
-has a dynamic URI, composed from a base address, until it is published, at which point that becomes
-static too. Set the base address in your Django settings:
+- Python 3.11 or later. The optional `ui` extra needs 3.12 or later.
+- Django 5.2 or later.
+
+## Installation
+
+```bash
+pip install django-controlled-vocabularies
+```
+
+Add the app, include its routes, and run the migrations:
 
 ```python
+# settings.py
+INSTALLED_APPS = [
+    ...
+    "controlled_vocabularies",
+    "django_tomselect",
+]
+
+MIDDLEWARE = [
+    ...
+    "django_tomselect.middleware.TomSelectMiddleware",
+]
+
 CONTROLLED_VOCABULARIES_BASE_URI = "https://vocab.example.org/vocabularies"
 ```
 
-If you leave it unset, the app falls back to `http://localhost:8000/vocabularies` so it still
-runs out of the box — set a real address before you rely on it anywhere it is seen. This site's own
-address for viewing a record is always composed from this base and the record's slugs — a concept's
-is `{base}/{scheme-slug}/{concept-slug}` — even when that record's static URI points elsewhere, and
-the slugs follow the labels while a vocabulary is unpublished.
-
-A record's place in its vocabulary is what keeps its URI distinct, and the database enforces that:
-a vocabulary's slug is unique across the site, and a concept's or collection's slug is unique
-within its vocabulary. A composed URI therefore cannot collide, because the parts it is built from
-cannot. A stored `static_uri` carries its own unique index per model on top of that.
-
-Nothing stops you changing a `static_uri` once it is set. That is deliberate. A published
-identifier is not supposed to move, but keeping it still is a matter of not editing it, rather than
-of the model refusing every write path. Make the field non-editable wherever you expose it once a
-record is published, and treat a value that differs between two imports of the same vocabulary as a
-problem with the source file.
-
-An externally assigned static URI must use one of a small set of accepted schemes — `http`,
-`https`, `urn`, `doi`, `info`, `ark`, `tag`, `hdl`, and `oai` by default, since those are what real
-SKOS vocabularies actually use. If your vocabularies carry identifiers in another scheme, add it
-explicitly:
-
 ```python
-CONTROLLED_VOCABULARIES_ALLOWED_URI_SCHEMES = [
-    "http", "https", "urn", "doi", "info", "ark", "tag", "hdl", "oai", "my-custom-scheme",
+# urls.py
+from django.urls import include, path
+
+urlpatterns = [
+    ...
+    path("vocab/", include("controlled_vocabularies.urls")),
 ]
 ```
 
-A stored identifier is later rendered as a link, so schemes that can carry executable content
-(`javascript`, `data`, `vbscript`) are refused even if you add them to this setting.
+```bash
+python manage.py migrate
+```
 
-## Attaching a concept to your model
+`django_tomselect` and its middleware carry the search-as-you-type control the concept fields
+render by default. `manage.py check` names anything still missing, and the reader-facing browsing
+pages are an opt-in extra — both are covered in the
+[documentation](https://github.com/FAIR-DM/django-controlled-vocabularies/blob/main/docs/index.md).
 
-`ConceptField` is a `ForeignKey` to `Concept`, optionally restricted to the vocabularies you name.
-`vocabulary` takes three shapes:
+## Quick start
+
+Import a published vocabulary, then attach one of its concepts to your own model:
+
+```bash
+python manage.py import_skos https://example.org/vocabularies/rock-type.ttl
+```
 
 ```python
 from django.db import models
@@ -116,805 +133,49 @@ from controlled_vocabularies.fields import ConceptField
 
 class Specimen(models.Model):
     name = models.CharField(max_length=200)
-    rock_type = ConceptField(vocabulary="rock-type")                     # one vocabulary
-    dominant_material = ConceptField(vocabulary=["igneous", "mineral"])  # several
-    keyword = ConceptField(null=True, blank=True)                        # no vocabulary named
+    rock_type = ConceptField(vocabulary="rock-type")
 ```
 
-`vocabulary` names the owning `ConceptScheme` by its slug rather than by a database relation. A
-field declaration is read when Python imports the module, and a vocabulary is rows in a table that
-may not exist yet, so the slug is all the field can carry.
-
-`vocabulary="rock-type"` restricts to one vocabulary. A list restricts to the union of the named
-vocabularies, and the refusal names every vocabulary the field accepts. Leaving `vocabulary` out
-entirely restricts nothing: any concept in the database is a valid choice. That last shape is for a
-field drawing on whatever a project has imported rather than one fixed list.
-
-When the field names at least one vocabulary, only a concept whose `scheme.slug` matches is offered
-as a form choice or accepted by `full_clean()`. A concept from any other vocabulary is refused.
-Deleting a concept a record still references is refused whichever shape you declare
-(`on_delete=PROTECT`), whether the delete reaches it directly or cascades down from its scheme.
-
-Reading a concept back:
+The field is a `ForeignKey` to a concept, restricted to the vocabulary you name. A form built from
+the model offers that vocabulary's concepts through a search box, a concept from anywhere else is
+refused, and a concept a record still points at cannot be deleted. Read it back by label or by
+address:
 
 ```python
 specimen.rock_type              # the attached Concept, or None
-specimen.get_rock_type_label()  # its preferred label in the active language, falling
-                                # back to the vocabulary's default language
+specimen.get_rock_type_label()  # its preferred label in the active language
 specimen.get_rock_type_uri()    # its URI
 ```
 
-If `"rock-type"` has not been imported yet, which is the state of a fresh install before the
-vocabulary's own import step has run, nothing about the field declaration fails. `manage.py check`
-reports a warning (`controlled_vocabularies.W001`) naming the model, the field, and the missing
-slug. If the vocabulary genuinely arrives in a later deployment step, silence the warning with
-`SILENCED_SYSTEM_CHECKS`.
-
-Reading `get_<field>_label()` on every row of a list costs a query for the concept and one for its
-scheme, plus one for its labels when the active language is not the vocabulary's default, per row.
-`select_related("rock_type__scheme")` and `prefetch_related("rock_type__labels")` collapse that
-back to a fixed number of queries for the whole list.
-
-## Attaching several concepts to your model
-
-`ConceptsField` is the many-to-many counterpart: several concepts on one record instead of one.
-`vocabulary` takes the same three shapes it takes on `ConceptField`, and means the same thing by
-each:
-
-```python
-from django.db import models
-
-from controlled_vocabularies.fields import ConceptsField
-
-
-class Sample(models.Model):
-    name = models.CharField(max_length=200)
-    rock_types = ConceptsField(vocabulary=["igneous", "sedimentary"])  # several vocabularies
-    keywords = ConceptsField(blank=True)  # no vocabulary named
-```
-
-One slug restricts to that vocabulary, a list restricts to the union of the named vocabularies, and
-leaving `vocabulary` out — as `keywords` does above — restricts nothing. A concept outside the
-named vocabularies is refused, and the refusal names every vocabulary the field accepts.
-
-Reading concepts back:
-
-```python
-sample.rock_types                    # the many-to-many manager
-sample.get_rock_types_labels()       # a list of preferred labels, active language with fallback
-sample.get_rock_types_uris()         # a list of URIs, same order
-```
-
-Both accessors return an empty list for a record holding nothing, including one that has not been
-saved yet, rather than raising.
-
-**Required and optional.** `blank=True`, as on `keywords` above, makes the field optional: a record
-can hold zero concepts. Without it, as on `rock_types`, the field is required, and required means at
-least one concept attached. Django gives a many-to-many field no hook into ordinary field
-validation, so this is enforced when `full_clean()` runs rather than by the database — a
-`ModelForm` or an explicit `full_clean()` call catches an empty required field, a plain `.save()`
-does not. A record cannot hold any concepts before it has a primary key, so the check is skipped on
-an unsaved instance. If your own model overrides `full_clean()` after declaring the field, your
-override shadows this check, and you'll need to call it yourself or reproduce it.
-
-**Query cost.** `get_<field>_labels()` and `get_<field>_uris()` issue a query for the field's
-concepts, and a further query per concept for its scheme and its labels — the same per-concept cost
-`ConceptField`'s singular accessors carry, multiplied by however many concepts a record holds. Over
-a list of records that's at least one query per record. `prefetch_related("rock_types__scheme",
-"rock_types__labels")` collapses that back to a fixed number of queries for the whole list.
-
-**What every shape guarantees, and what the unrestricted one gives up.** Naming one vocabulary,
-several, or none all give a record the same three things: a concept it already holds cannot be
-deleted out from under it, its attached concepts read back by label and by URI, and required still
-means at least one. Naming one or several vocabularies adds a fourth guarantee on top — a concept
-outside those vocabularies is refused, both by a form built from the model and by the relation
-itself, in either direction, at the moment the membership is written.
-
-A field naming no vocabulary gives up only that fourth guarantee, and nothing else. Said plainly, so
-it needn't be inferred:
-
-- It places **no restriction** on which concepts a record can hold — any concept in the database is
-  accepted.
-- A form built from the model offers **every concept in the database** as a choice, not a filtered
-  subset. On an installation with several vocabularies imported, that can be a genuinely long list
-  of choices in an ordinary select widget — sooner than a restricted field would ever reach.
-- `manage.py check` has no named vocabulary that could be missing, so it reports **nothing** for
-  this field.
-
-It still deletes-protects, reads back, and enforces "required" exactly as a restricted field does.
-
-**The delete guarantee's real boundary.** "Cannot be deleted out from under it" holds for anything
-that goes through the Django ORM — a single instance, and a bulk queryset `.delete()` alike, since
-Django applies `on_delete=PROTECT` to both the same way. It does not hold for a `DELETE` issued
-directly against the database outside Django — raw SQL, a database console, a migration that drops
-rows without going through the ORM — because Django never writes an `ON DELETE` clause into the
-schema for any relation. The protection lives in application code, not in a database constraint.
-
-## Restricting a field to part of a vocabulary
-
-Naming a vocabulary offers every concept it holds. Large vocabularies are often too much to put in
-front of someone filling in one field. `ConceptField` and `ConceptsField` both take one more
-argument on top of `vocabulary` for this: `collection`, `concepts` or `branch`. Both fields accept
-the same shapes with the same effect.
-
-```python
-from django.db import models
-
-from controlled_vocabularies.fields import ConceptField
-
-
-class CoreSample(models.Model):
-    name = models.CharField(max_length=200)
-
-    # Only concepts in the "core-samples" collection of "rock-type".
-    rock_type = ConceptField(vocabulary="rock-type", collection="core-samples")
-
-    # Only "granite" and "basalt" themselves, named directly.
-    # rock_type = ConceptField(vocabulary="rock-type", concepts=["granite", "basalt"])
-
-    # "igneous" itself and everything narrower than it, at any depth.
-    # rock_type = ConceptField(vocabulary="rock-type", branch="igneous")
-```
-
-Use `collection` where a curator has already grouped the concepts the field should offer. The group
-is then maintained in the vocabulary editor rather than in your code, which is usually what you
-want if it changes at all. `concepts` suits a short list that will not change often and does not
-earn a collection of its own. `branch` suits a field whose subject is a whole part of the
-hierarchy, such as everything under "igneous", where naming each member by hand would go stale the
-moment the publisher adds a term.
-
-A restriction narrows one vocabulary and never several, so declaring one alongside more than one
-`vocabulary` slug is refused when the module is imported, before the app starts. The three
-arguments also exclude each other, and for the same reason: a field naming two of them has no
-single meaning a reader could recover from the code. A field carries at most one restriction.
-
-The target a restriction names does not have to exist when the field is declared, any more than an
-unrestricted field's own `vocabulary` does. If it never arrives, or arrives misspelled, the field
-offers nothing at all rather than raising. Every choice and every search comes back empty, which
-looks the same from outside as a vocabulary that has not been imported. `manage.py check` catches
-it: `controlled_vocabularies.W005` names the model, the field and the missing target, the way
-`controlled_vocabularies.W001` already does for an absent vocabulary.
-
-A branch restriction reads the hierarchy fresh on each request rather than caching it, so every
-search against a deeply nested branch walks it again from the root down. On a form the public can
-reach, a deep branch is worth choosing deliberately.
-
-Marking a collection `ordered` in the vocabulary editor buys a field restricted to it one more
-thing. The concept search offers the collection in the curator's own sequence while the search box
-is still empty, then falls back to relevance order as soon as someone types. No order is promised
-anywhere else, including a `ModelForm`'s rendered choices and any unordered collection.
-
-## Choosing a concept by typing
-
-`ConceptField` and `ConceptsField` render as a search-as-you-type control by default. A project
-declaring either gets it without naming a widget, writing an endpoint, or configuring anything
-per field — an ordinary `ModelForm` built from the model already renders it.
-
-Getting it working outside the admin takes three steps, done once per project rather than once
-per field. In the order a developer does them:
-
-1. **Include the route.** The package carries its own search endpoint in
-   `controlled_vocabularies.urls`; include it once, at an address of your choosing:
-
-   ```python
-   from django.urls import include, path
-
-   urlpatterns = [
-       ...
-       path("vocab/", include("controlled_vocabularies.urls")),
-   ]
-   ```
-
-2. **Add `"django_tomselect"` to `INSTALLED_APPS`.** The control's templates and static assets
-   live inside that package, and Django only finds another package's templates and static files
-   through an installed app — no amount of work in this package moves that.
-
-3. **Add `"django_tomselect.middleware.TomSelectMiddleware"` to `MIDDLEWARE`.** Without it, the
-   control still renders, but as a plain `<select>` carrying no search box and no JavaScript at
-   all — nothing errors, nothing warns at render time, and the control simply doesn't work.
-
-Skip any of the three and `manage.py check` reports it: a missing route
-(`controlled_vocabularies.W002`), a missing `INSTALLED_APPS` entry (`controlled_vocabularies.W003`),
-or a missing middleware entry (`controlled_vocabularies.W004`), each naming exactly what to add.
-A render that reaches the missing-route case despite the warning raises `ImproperlyConfigured`
-naming both the route and the `INSTALLED_APPS` entry, rather than the underlying library's own
-`NoReverseMatch` against a URL pattern you never wrote.
-
-A search returns, per concept, its identifier, its preferred label in the active language, and the
-name of the vocabulary it belongs to — nothing else, no editorial notes or alternative labels. The
-results are restricted to whatever vocabularies the field declares, the same restriction that
-already governs which concepts a form accepts; a field naming no vocabulary searches every concept
-in the database. The endpoint carries **no permission rule by default** — it serves the same
-concept data the rest of this package publishes at stable URIs. A project holding vocabularies it
-does not want searched restricts the include instead, at whatever access level fits.
-
-The control needs a browser running JavaScript. Without it, both fields still work as an ordinary
-required-relation form field; only the search-as-you-type behaviour is unavailable.
-
-## Choosing a concept in the admin
-
-A model that declares `ConceptField` or `ConceptsField` gets the same search-as-you-type control on
-its Django admin pages once it's registered — nothing further to configure. `ModelAdmin` builds the
-field the same way it builds any other, and the wiring is the three steps above: the route,
-`django_tomselect` in `INSTALLED_APPS`, and its middleware. The admin adds nothing to that list.
-
-A concept is chosen on these pages, never created or edited there. Django ordinarily puts an
-add, change, delete or view link beside a related field so a person filling in a form can manage
-the related record without leaving it. None of the four appears beside a concept field, whether or
-not this package's own models are registered in the admin, and whatever permissions the signed-in
-person holds. Authoring stays wherever concepts themselves are curated — a controlled vocabulary
-stops being controlled the moment a data-entry form can invent or edit one.
-
-Where the admin presents the field read-only — listed in `readonly_fields`, or because the
-signed-in person may view the page but not change it — the concept is shown by its preferred label
-and no control renders. This is Django's own read-only presentation, not this package's: with
-`Concept` registered, a single concept links to its own change page. Several concepts, on a
-`ConceptsField`, always render as plain text. The package neither adds to this nor suppresses it.
-
-A project can still ask for a different control the way it would for any other related field:
-
-- `autocomplete_fields` renders Django's own autocomplete widget instead — Django requires the
-  related model to be registered and searchable, as it does for any field named this way.
-- `raw_id_fields` renders Django's plain identifier input, with the magnifying-glass lookup link
-  Django gives every field named this way. That link opens a list to pick from — it selects a
-  concept, it does not create one.
-- A `ModelForm` declaring its own widget for the field via `Meta.widgets`, passed to
-  `ModelAdmin.form`, renders that widget.
-- `readonly_fields` renders the read-only presentation described above.
-
-The first three still refuse the add, change, delete and view affordances, the same as the default
-control, and saving and validation carry on unchanged: a concept outside the field's named
-vocabularies is refused, and a legitimate one still saves.
-
-One piece of text on these pages is Django's rather than this package's. Under a multi-value field
-the admin adds *Hold down "Control", or "Command" on a Mac, to select more than one.* It is the
-same sentence the admin puts under any multiple-select field, and it does not describe this
-control: concepts are added by typing and picking, and removed one at a time.
-
-## Finding a vocabulary
-
-The `ui` extra adds one reader-facing page: every vocabulary the site holds, in alphabetical
-order, each entry showing its description, how many concepts it holds, and whether it was
-authored here or imported from a publisher — with the publisher's own identifier shown for an
-imported one. A site holding no vocabularies says so rather than showing an empty list.
-
-A search box narrows that list by a vocabulary's name and description — not by the concepts it
-holds; finding a concept without already knowing which vocabulary holds it is not something this
-page does. The term travels in the page's address (`?q=`), so a narrowed list can be linked to or
-bookmarked and returned to. A second word **widens** the results rather than narrowing them:
-matching is OR across every word and both fields, not AND, which is the opposite of what a search
-box usually implies. A search matching nothing says so and repeats what was searched for.
-
-A sort control offers the list by name, A-Z or Z-A. That choice travels in the address as `?o=`,
-next to any search term, so a searched and sorted list is still one link you can share. Only the
-orderings the view declares are honoured. Anything else in `?o=` is ignored rather than passed to
-the database, and the page comes back in its default order.
-
-There is no way to filter the list. Filtering needs an axis, and a vocabulary has none that would
-suit every site.
-
-Case is ignored, with one limit that belongs to the database rather than to this package. SQLite
-folds case for ASCII letters only, so a vocabulary named *Ökologie* is found by *ÖKOLOGIE* and not
-by *ökologie*. PostgreSQL folds the whole of Unicode and matches either way. Django
-[documents this](https://docs.djangoproject.com/en/stable/ref/databases/#substring-matching-and-case-sensitivity)
-and does not work around it, and neither does this package, because nothing above the database can.
-It matters for any site whose vocabularies are named in German, French, Greek or Russian.
-
-The page carries **no permission rule of its own**. Every vocabulary in the database is listed to
-anyone who reaches the URL, exactly as the concept search endpoint above serves anyone who reaches
-it, and for the same reason: a package cannot guess a project's access policy. A vocabulary has no
-draft state, so one still being authored is listed from the moment it exists. A site that needs the
-page restricted wraps the include where it mounts these routes.
-
-```bash
-pip install django-controlled-vocabularies[ui]
-```
-
-This section adds to the package's base configuration rather than replacing it: `django_tomselect`
-and its middleware are still required, as ["Choosing a concept by typing"](#choosing-a-concept-by-typing)
-describes, and `manage.py check` says so on startup if they are missing.
-
-Add the ui app and django-mvp's own stack to `INSTALLED_APPS` — quoted from this package's own
-test project, so the list below is one that demonstrably works:
-
-```python
-INSTALLED_APPS = [
-    ...
-    "controlled_vocabularies",
-    "django_cotton",
-    "easy_icons",
-    "flex_menu",
-    # "mvp" before "crispy_tailwind": django-mvp ships an override of crispy-tailwind's
-    # help-text template, and the first app to declare a template path wins.
-    "mvp",
-    "crispy_forms",
-    "crispy_tailwind",
-    "controlled_vocabularies.ui",
-]
-
-# crispy-forms 2.7's get_template_pack() has no default, and the {% crispy %} tag validates
-# the pack against CRISPY_ALLOWED_TEMPLATE_PACKS at template-compile time — django-mvp's own
-# templates carry the tag, so both settings are required even though this page renders no
-# form of its own.
-CRISPY_TEMPLATE_PACK = "tailwind"
-CRISPY_ALLOWED_TEMPLATE_PACKS = ["tailwind"]
-
-TEMPLATES[0]["OPTIONS"]["context_processors"] += ["mvp.context_processors.mvp_config"]
-
-# django-mvp's base template renders icons through django-easy-icons and its own sidebar and
-# mobile-dock chrome through django-flex-menus; both raise at render time without these.
-EASY_ICONS = {
-    "default": {
-        "renderer": "easy_icons.renderers.ProviderRenderer",
-        "config": {"tag": "i"},
-        "packs": ["mvp.utils.BS5_ICONS"],
-    },
-}
-FLEX_MENUS = {
-    "renderers": {
-        "sidebar": "mvp.renderers.SidebarRenderer",
-        "dock": "mvp.renderers.MobileFooterNavRenderer",
-    },
-}
-```
-
-Mount the routes at an address of your choosing:
-
-```python
-from django.urls import include, path
-
-urlpatterns = [
-    ...
-    path("browse/", include("controlled_vocabularies.ui.urls")),
-]
-```
-
-Reverse the page by name, under its own namespace — `controlled_vocabularies_ui`, distinct from
-the core package's own `controlled_vocabularies` namespace, so both can be mounted in one
-project without either shadowing the other's reverses:
-
-```python
-reverse("controlled_vocabularies_ui:vocabulary-list")
-```
-
-`manage.py check` reports `controlled_vocabularies.ui.E001`, naming the extra to install, if
-`django-mvp` is not importable.
-
-Each entry's name is a link to that vocabulary's own page, described below. The link is reversed
-from the route's name rather than composed from the identifier base address, so it stays an
-in-site address whatever that setting says.
-
-**One thing is still missing.** When a search on this page matches nothing, it names the term but
-offers no link back to the unsearched list. Clearing the box and pressing the button does the same
-job, so the page is not a dead end, but the link belongs there. It has to go in the page's actions
-area, and django-mvp offers no way to add anything there without replacing the whole page template
-([django-mvp#291](https://github.com/django-mvp/django-mvp/issues/291)).
-
-Until django-mvp 0.19.2 the search box on this page could not be submitted at all: its input was
-tied to a form only the filter control created
-([django-mvp#282](https://github.com/django-mvp/django-mvp/issues/282), tracked here as
-[#147](https://github.com/FAIR-DM/django-controlled-vocabularies/issues/147)). This package
-waited for the upstream fix rather than shipping a patched copy of django-mvp's page, and the
-version floor moved once the fix was released. An override in a package like this one outlives the
-release that makes it unnecessary, and nothing ever reports that it has
-(`docs/adr/0015-upstream-defects-are-waited-on-not-worked-around.md`).
-
-The page is served by `VocabularyListView`, in `controlled_vocabularies.ui.views`. A project that
-wants a different presentation subclasses it and routes its own path at the same view — the
-queryset, its ordering and its concept count come with the class, so an override that only changes
-`list_item_template` keeps every guarantee above:
-
-```python
-from controlled_vocabularies.ui.views import VocabularyListView
-
-
-class BrandedVocabularyListView(VocabularyListView):
-    list_item_template = "myproject/vocabulary_card.html"
-```
-
-### A vocabulary's own page
-
-Every vocabulary the site holds has its own address — the same one its identifier composes
-(`ConceptScheme.uri`) when the site is configured as this section describes. The page's title is
-the vocabulary's name. Above the list of concepts it holds it shows the vocabulary's description,
-truncated the same way and for the same reason as the list entry above, and how the vocabulary was
-obtained: an imported vocabulary's page shows the publisher's own identifier; one authored here
-shows its own address instead. Either way the identifier is a link — to the publisher's site for
-an imported vocabulary, or back to the page itself for one authored here.
-
-Below that, every concept the vocabulary holds — and only that vocabulary's — in one flat,
-alphabetical list: nothing several levels down a broader/narrower chain is nested under one above
-it. Alphabetical order follows the label actually shown, not necessarily the one stored: a concept
-carrying a preferred label in the reader's own language shows that one; a concept with none in that
-language falls back to its label in the vocabulary's own default language. A row names a concept and
-nothing more — no definition, no note, no identifier, and no relation to another concept.
-
-**How concepts relate to one another is not shown here.** Broader, narrower and related links, and
-a concept's own page, are a later feature's (#142); until then a concept on this list is not
-something a reader can follow to anywhere else. A vocabulary holding no concepts says so, in
-wording distinct from the page's other empty state, and the rest of the page — its description and
-provenance — still renders.
-
-Above the list of concepts, the page also names the vocabulary's **collections** — curator-made
-groupings of its concepts (`skos:Collection` / `skos:OrderedCollection`) that the broader/narrower
-relations do not express. Each is named, and one whose members carry a deliberate order is shown
-distinguishably from one that does not. **A collection cannot be opened from here**: neither its
-own page nor its members' names are reached by following anything on this page — that address
-belongs to #142, the same feature that gives a concept its own page, so a collection is named and
-nothing more until it lands. A vocabulary holding no collections shows no such section at all —
-most vocabularies have none, and a section that is only ever present-but-empty would be noise on
-every page but one.
-
-A search box narrows the list of concepts by every name a term goes by: a concept's preferred
-label in any language it carries, its alternative labels, and its hidden labels — never its
-definition or any other note. A hidden label is matched and never shown: searching for one finds
-the concept it names without ever displaying the label itself, which is the whole point of
-keeping it hidden. As with the list of vocabularies above, the term travels in the page's own
-address (`?q=`), so a narrowed list can be linked to, bookmarked and returned to, and it reaches
-every concept in the vocabulary before paging divides the results — not only the page being
-viewed. A search matching nothing says so, repeats what was searched for, and offers a link back
-to the whole vocabulary.
-
-Case is ignored, with the same database-dependent limit disclosed above: SQLite folds ASCII
-letters only, so a concept labelled *Ökologie* is found by *ÖKOLOGIE* and not by *ökologie*;
-PostgreSQL folds the whole of Unicode and matches either way
-(`docs/adr/0014-database-collation-differences-are-disclosed-not-repaired.md`).
-
-Searching by address works the same as searching in the box: the demo project's own DCMI Type
-Vocabulary carries a concept named *Dataset* with a hidden label of `Datset`, a plausible
-misspelling — `?q=Datset` narrows the page to *Dataset* without the misspelling itself ever
-appearing in the response, and the narrowed address can be shared and bookmarked the same as any
-other. Unlike the list of vocabularies, a search here that matches nothing offers a link back to
-the unsearched vocabulary: this page has a template of its own to put that link in, where the list
-of vocabularies has none.
-
-A sort control offers the concepts by label, A-Z or Z-A. The choice travels in the address as
-`?o=`, next to any search term, exactly as it does on the list of vocabularies. It sorts by the
-label a reader actually sees rather than the stored one, so a German reader gets the concepts in
-German alphabetical order and not in the vocabulary's own default language.
-
-Reverse the page by name, passing the vocabulary's slug:
-
-```python
-reverse("controlled_vocabularies_ui:vocabulary-detail", kwargs={"slug": vocabulary.slug})
-```
-
-**The browsing routes must be mounted at the same path `CONTROLLED_VOCABULARIES_BASE_URI`
-composes against**, or a vocabulary's identifier does not lead back to its own page. Mounting the
-routes at `browse/` means the setting's path has to be `/browse`, not the package's own default:
-
-```python
-CONTROLLED_VOCABULARIES_BASE_URI = "https://example.org/browse"
-```
-
-`manage.py check` reports `controlled_vocabularies.ui.W001` — a warning, not an error, since a
-project may serve identifiers through a reverse proxy this package cannot see — when the two
-disagree, naming the mismatched paths. It is silent once they agree, and silent too if the
-browsing routes are not mounted at all.
-
-The page is served by `VocabularyDetailView`, in `controlled_vocabularies.ui.views`, and is
-subclassed the same way as the list above.
-
-### A concept's own page
-
-Every concept has its own address — the same one `Concept.uri` composes when the site is
-configured as this section describes. The page is a definition list of everything the database
-records about the concept, other than its hidden labels, each row labelled by the SKOS property it
-was recorded under: its type (`rdf:type`), its preferred label (`skos:prefLabel`), its alternative
-labels (`skos:altLabel`), each note it carries under the property of its own kind (`skos:definition`,
-`skos:scopeNote`, and the rest of the six documentary notes SKOS defines), its broader concept, its
-narrower concepts and its related concepts (`skos:broader` / `skos:narrower` / `skos:related`), and
-the vocabulary it belongs to (`skos:inScheme`). Every record-valued row links to that record's own
-page here. A property the concept carries no value for contributes no row at all — never an empty
-one — so a concept carrying nothing beyond its label shows only its label, its type, its identifier
-and its vocabulary.
-
-The concept's own canonical identifier leads the page, directly beneath its title, so a reader
-citing the record does not have to scroll past everything it says about itself to find it. The
-breadcrumb trail above names the site's home, the vocabulary holding the concept, and the concept
-itself.
-
-Each row's own term — `skos:definition`, `skos:broader`, and the rest named above — is a CURIE
-derived from the SKOS predicate the value was recorded under, by `skos_curie()` in
-`controlled_vocabularies.exchange.mapping`; it refuses a predicate outside the SKOS namespace
-rather than mangling one into a nonsensical short form. A record-valued row's own displayed text is
-a different short form — `{vocabulary slug}:{record slug}`, `geology:granite` for a concept
-"granite" in a vocabulary slugged "geology".
-
-A CURIE abbreviates a URI, and both kinds on the page disclose the URI they stand for on hover
-rather than printing it. A term's comes from `curie_uri()` in the same module, which expands a
-prefixed name against the namespaces the package declares and refuses one it does not. A
-record-valued row's is the record's own canonical identifier. Hovering is not the only way to reach
-either. A term is not interactive, so its URI sits beside it in a visually-hidden element a screen
-reader reads out in place. A record-valued row's short form is a link, so its URI lives in a
-visually-hidden element the link points at as its own description, which a screen reader reads out
-and which keyboard focus reveals along with the tooltip.
-
-Below the definition list and outside it, the page also names every collection that gathers the
-concept, under a heading reading "Member of". Membership is a statement other records make about
-this one — SKOS gives a collection's own membership property no inverse — so this section's heading
-is plain language rather than a CURIE, and it names the direction, since a heading of "Collections"
-would read as collections belonging to the concept. Each entry links to that collection's own page.
-A concept no collection gathers shows no such section at all, never an empty one.
-
-Every value is shown in the language the site is being read in, exactly as the vocabulary page
-above shows a concept's label: where the concept has none in that language, it falls back to the
-vocabulary's own default language, one language at a time, never every language a value was
-recorded in.
-
-The concept's own identifier is shown as a link, the same treatment its vocabulary's own page gives
-a vocabulary's: an imported concept shows its publisher's identifier, one authored here shows this
-site's own composed address for it. Either way the page itself is **read-only** — it carries no
-editing or deletion control of its own, and no permission rule beyond what the project mounting
-these routes chooses to add.
-
-An address naming no concept is reported not found, and so is one whose vocabulary segment names no
-vocabulary — the two are not distinguished. A concept slug held by more than one vocabulary resolves
-to the one the address actually names.
-
-Reverse the page by name, passing the vocabulary's slug and the concept's own:
-
-```python
-reverse(
-    "controlled_vocabularies_ui:concept-detail",
-    kwargs={"slug": vocabulary.slug, "concept_slug": concept.slug},
-)
-```
-
-The page is served by `ConceptDetailView`, in `controlled_vocabularies.ui.views`, and is subclassed
-the same way as the pages above. The rows themselves come from
-`concept_property_rows(concept, language, default_language=None)`, in the same module — the seam a
-project reaches for to build its own page, or its own rendering of a report, over the same ordered
-rows this one renders. Passing no `default_language` asks for exactly what the concept carries in
-`language`, with no fallback to the vocabulary's own default.
-
-### A collection's own page
-
-Every collection has its own address too, at a distinct segment from a concept's — the same one
-`Collection.uri` composes — so a concept and a collection in one vocabulary may share a slug and
-both stay reachable. The page is a definition list built the same way a concept's is: its name
-(`skos:prefLabel`), a type row distinguishing an ordered collection from an unordered one
-(`skos:Collection` or `skos:OrderedCollection`), and its members under the membership property
-matching its kind — `skos:member` for an unordered collection, `skos:memberList` for an ordered
-one, whose members appear in the sequence their positions record. Membership is one row however
-many members a collection holds — the property is stated once, with every member listed beside it,
-rather than repeated per member. A collection holding no members says so in plain language rather
-than showing an empty membership row.
-
-Every record-valued row links to that record's own page here and discloses its canonical identifier
-the same way a concept's page does. The collection's own identifier leads the page beneath its
-title, its breadcrumb trail names the vocabulary holding it, and the page is equally **read-only**,
-carrying no editing or deletion control of its own.
-
-An address naming no collection is reported not found, and so is one whose vocabulary segment names
-no vocabulary — the two are not distinguished, exactly as for a concept's page.
-
-Reverse the page by name, passing the vocabulary's slug and the collection's own:
-
-```python
-reverse(
-    "controlled_vocabularies_ui:collection-detail",
-    kwargs={"slug": vocabulary.slug, "collection_slug": collection.slug},
-)
-```
-
-The page is served by `CollectionDetailView`, in `controlled_vocabularies.ui.views`, and is
-subclassed the same way as the pages above. The rows themselves come from
-`collection_property_rows(collection)`, in the same module — the same seam
-`concept_property_rows` offers over a concept's own rows.
-
-### Try it: the demo project
-
-The repository carries a runnable demo of the page above, wired the same way this section
-documents. From a fresh clone, with dependencies installed:
-
-```bash
-poetry install --extras ui
-
-poetry run python manage.py migrate
-poetry run python manage.py seed_demo
-poetry run python manage.py runserver
-```
-
-The three commands run through `poetry run` so they use the environment the install just built,
-whatever `python` on the shell's path happens to be — on many systems there is no `python` there
-at all.
-
-`migrate` builds the database, `seed_demo` loads two small vocabularies into it, and `runserver`
-serves the site at `http://127.0.0.1:8000/`, which redirects straight to the populated,
-searchable vocabulary list at `http://127.0.0.1:8000/browse/`. The seeded content shows both
-kinds of entry the list distinguishes: the DCMI Type Vocabulary, a real vocabulary published by
-the Dublin Core Metadata Initiative, imported from a SKOS file; and Data Collection Methods, a
-short vocabulary authored here, with no publisher of its own. Data Collection Methods' own page
-also carries one of each kind of collection — "Primary data collection methods" (unordered) and
-"Typical project workflow" (ordered) — both loaded through the same SKOS file, so the collections
-section described above is never empty on a fresh checkout.
-
-Following "Fieldwork" from that page reaches a concept's own page: its definition, its narrower
-concept "Survey" (stored as "Survey" carrying `skos:broader` to "Fieldwork", shown here as the
-derived `skos:narrower`), and, below the definition list, the two collections that gather
-it — including "Typical project workflow", whose own page in turn shows every method it orders,
-"Fieldwork" among them. `seed_demo` seeds this pair, and a related pair besides
-("Remote sensing" / "Laboratory experiment"), so the concept and collection pages are never empty
-on a fresh checkout either.
-
-"Fieldwork" also carries a note only in German, alongside its English-only definition. Reading the
-page in German — `curl -H "Accept-Language: de" http://127.0.0.1:8000/browse/data-collection-methods/fieldwork/`,
-or a browser configured for German — shows the German note directly and falls back to the English
-definition, exactly as ["A concept's own page"](#a-concepts-own-page) above describes.
-
-`seed_demo` is destructive and idempotent: it clears every vocabulary before loading, so running
-it again returns the demo to the same seeded state whatever was added or removed before —
-including anything entered through the admin.
-
-To add a vocabulary by hand and watch it appear on the list, give yourself an account first and
-sign in at `http://127.0.0.1:8000/admin/`:
-
-```bash
-poetry run python manage.py createsuperuser
-```
-
-The admin form there belongs to the demo project, not to the package: `demo/admin.py` registers
-the vocabulary model with its own admin site. The package registers nothing, so installing it
-adds no admin of its own — a project decides for itself which of its models it curates that way.
-
-The demo is not a production configuration: `DEBUG` is on, the database is a local SQLite file,
-and the secret key is a throwaway value committed in `demo/settings.py`. Do not deploy it as-is.
-
-## Importing a published vocabulary
-
-`import_skos()` reads a SKOS file — Turtle, RDF/XML, or JSON-LD — and creates or updates the
-vocabulary it declares, along with every concept it contains: identity, labels, documentary notes,
-broader/narrower and related relationships, and collection membership. Every record is matched by
-its static URI, never by name, so importing the same file twice updates the same rows rather than
-duplicating them.
-
-```python
-from controlled_vocabularies.exchange import import_skos
-
-report = import_skos("rocks.ttl")
-```
-
-The caller may name a target `ConceptScheme` for a file that declares no vocabulary of its own, or
-have it checked against one the file does declare:
-
-```python
-report = import_skos("rocks.ttl", scheme=my_scheme)
-```
-
-Re-running an import upserts rather than deleting and recreating. For a record the file still
-contains, the file is authoritative for that record's own content — labels, notes, relationships,
-and collection membership end up matching the file exactly, including the removal of a value the
-file no longer carries. A record the file does not mention at all is left completely untouched and
-named in the report instead, never deleted.
-
-Labels and notes are matched by language, not only by predicate. A file's `en` value fills a site
-configured for `en-gb`, and a file's `en-gb` value fills a site configured for `en`. Matching runs
-on the base language, the first subtag of the tag, case-insensitively and in both directions, and
-an exact tag match always wins over a variant.
-
-Where a file offers several variants of one configured language, what happens next depends on how
-many values that kind of label or note can hold:
-
-- A preferred label holds one per language, so the variant the vocabulary predominantly publishes
-  in is the one kept, with ties broken by language code. Each variant that lost is named in the
-  report under its own published language.
-- Alternative labels, hidden labels, and notes have no such limit, so every variant the file offers
-  is stored.
-
-A value stored under a variant match is named in the report as a substitution rather than applied
-silently. That matters most where two variants differ by script. A site configured for `zh-Hans`
-importing a vocabulary published only as `zh-Hant` receives that content, in a script its readers
-may not be able to read. The report is what makes that visible, so a curator can decide what to do
-about it.
-
-The package stores content for every language code in `settings.LANGUAGES`. A project that declares
-none inherits Django's own default list of 99 languages, so a vocabulary published in sixty
-languages imports into all sixty. Narrowing `LANGUAGES` is how a site limits what an import stores.
-
-A vocabulary's slug and a concept's slug are both derived from their own published identifier —
-its fragment where it has one, otherwise the last segment of its path — assigned once, on first
-import, and never recomputed by a later one. Renaming a record, or a vocabulary's name arriving in
-a different language on a later import, never moves that record's local address; only the
-publisher reassigning the identifier itself does. A record authored on this site rather than
-imported has no published identifier to derive from, and keeps deriving its slug from its label,
-as it always has.
-
-That permanence has a cost worth naming: a vocabulary published under opaque codes gets an opaque
-local address — `/v-113/00123` rather than `/soil-types/clay`. It is accepted because the address
-is correct and stays correct, which is what every consumer of a URL needs from it, and because a
-readable address that can move under data already pointing at it is worse than a stable one that
-cannot.
-
-The call returns an `ImportReport`, a plain dataclass rather than rendered text, so a caller can
-inspect what happened without parsing anything:
-
-- `created` / `updated` — the URIs of every vocabulary, concept, and collection the run wrote.
-- `set_aside` — a `SetAsideEntry` per value the run could not store, each carrying a closed,
-  translatable reason (an unconfigured language, a notation, a mapping to another vocabulary, a
-  predicate the models have no place for, a missing relationship or collection member, and so on)
-  and the data needed to render a message about it. Nothing a file contains is ever dropped in
-  silence — a value the app cannot store is always named here.
-
-  Published files are often not well-behaved, and the reasons cover that too. Where a pair of
-  concepts is stated as both broader and related, the hierarchical statement wins, because SKOS
-  declares the two disjoint, and the related one is set aside. A second preferred label in one
-  language is set aside rather than refused at the database. An identifier whose own segment
-  yields no usable slug is set aside naming the slug as the problem, not the identifier. None of
-  these stops the rest of the vocabulary from importing.
-- `absent_from_source` — the URIs of records that exist here but that the file no longer mentions.
-- `normalized` — a `NormalizedEntry` per value the run stored, but under a different predicate than
-  the one the file asserted (a foreign `dcterms:description` read as a concept's definition, for
-  example).
-- `fatal` — populated only on a failed run: a `FatalFinding` per reason the whole import was
-  refused (a missing or blank-node identity, or a vocabulary that could not be resolved). A failed
-  run raises `SkosImportFailed`, carrying this same report, and leaves the database exactly as it
-  was before the run started.
-
-A run either succeeds in full or changes nothing: every problem in a file is collected before any
-of it is written, and a fatal one rolls the whole run back. The `import_skos` management command
-wraps this for use from a terminal (see below). There is no web-facing entry point yet.
-
-Reading a file never reassigns identity. A concept or collection whose URI is already held by a
-different vocabulary stays where it is. So does one whose URI is held by a record of another kind,
-such as a collection in one file and a concept in another. Both are set aside and reported. Moving
-a record between vocabularies is a curatorial decision, not a side effect of reading a file.
-
-An imported file is treated as untrusted input. RDF/XML is scanned for entity expansion and
-external references before a parser sees it. A JSON-LD document is refused rather than fetched if
-its `@context` names a remote location, whether that is a plain string reference or an `@import`
-reference tucked inside an inline object context. `import_skos()` itself never makes a network
-request when reading a file — the command's own URL fetch (see below) happens first, and only the
-fetched or local bytes ever reach this scan. An ordinary inline JSON-LD context, carrying no such
-reference, imports normally.
-
-`import_skos()` raises one of two exceptions, both `ValidationError` subclasses carrying a
-translatable message. `SkosImportError` covers every reason a file cannot be turned into usable SKOS
-at all: not found, not in a supported serialization, unparseable, or refused by the safety scan
-above. `SkosImportFailed` covers the case where the file parses but the run collects one or more
-fatal problems (a missing or blank-node identity, or a vocabulary that cannot be resolved), and
-carries the same `ImportReport` its `fatal` bucket names them in. `UnsafeRdfXmlError` and
-`UnsafeJsonLdError`, the two exceptions the safety scan itself raises, are exported
-`SkosImportError` subclasses, so code that only catches `(SkosImportError, SkosImportFailed)`
-already catches a file the safety scan refuses too.
-
-## Importing from the command line
-
-The `import_skos` management command wraps `import_skos()` for use from a terminal or a
-deployment script:
-
-```bash
-python manage.py import_skos rocks.ttl
-```
-
-The source can be a local filesystem path or an `http://`/`https://` URL, told apart by the value
-itself rather than by a flag. A URL is fetched under a fixed 30-second read timeout, a fixed 50 MiB
-response ceiling and a fixed ten-minute deadline for the whole transfer, over a connection that
-only ever speaks http and https. The fetched document's identifiers resolve against the address it
-was served from, following any redirect — so a vocabulary published behind a PURL or a `/latest`
-alias is stored under the URIs its publisher assigned, and a re-import updates the same concepts
-the first import created rather than making a second copy.
-
-- `--format` names the source's serialization (`turtle`, `xml`, or `json-ld`), for a source whose
-  extension or `Content-Type` does not.
-- `--dry-run` performs the entire import and reports the outcome exactly as a live run would,
-  then leaves the database exactly as it was beforehand — useful for seeing what a file would set
-  aside before deciding whether to configure a language for it.
-- `--verbosity`, Django's own option, prints bucket counts by default — how many records were
-  created, updated, set aside, normalized, or absent from the source, plus the set-aside account
-  grouped by reason and by language. At `2` or above, every individual set-aside entry prints too.
-  At `0` nothing prints at all, as with any Django command.
-
-A refusal exits non-zero and prints every reason the run was refused. A run that sets values aside
-still exits zero: importing a vocabulary published in more languages than a site is configured for
-always sets some aside, so that outcome is treated as normal rather than as a failure a deployment
-script should stop on.
-
-## Relationship to other packages
-
-Supersedes and retires `skos-builder` and `django-research-vocabs`, consolidating vocabulary
-authoring, management, and Django consumption into one app.
+## Documentation
+
+The full manual lives in
+[`docs/`](https://github.com/FAIR-DM/django-controlled-vocabularies/blob/main/docs/index.md):
+[configuration](https://github.com/FAIR-DM/django-controlled-vocabularies/blob/main/docs/configuration.md),
+[attaching concepts to your models](https://github.com/FAIR-DM/django-controlled-vocabularies/blob/main/docs/fields.md),
+[choosing a concept](https://github.com/FAIR-DM/django-controlled-vocabularies/blob/main/docs/search.md),
+[browsing vocabularies](https://github.com/FAIR-DM/django-controlled-vocabularies/blob/main/docs/browsing.md),
+and [importing a published vocabulary](https://github.com/FAIR-DM/django-controlled-vocabularies/blob/main/docs/importing.md).
+
+## Contributing
+
+Bug reports and feature requests are welcome on the
+[issue tracker](https://github.com/FAIR-DM/django-controlled-vocabularies/issues). The repository
+carries a runnable demo project, and
+[getting it running](https://github.com/FAIR-DM/django-controlled-vocabularies/blob/main/docs/browsing.md#try-it-the-demo-project)
+is the shortest route to a working development checkout.
+
+## Changelog
+
+Every release is recorded in
+[CHANGELOG.md](https://github.com/FAIR-DM/django-controlled-vocabularies/blob/main/CHANGELOG.md).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](https://github.com/FAIR-DM/django-controlled-vocabularies/blob/main/LICENSE).
+
+---
+
+Where the project is going:
+[GOALS.md](https://github.com/FAIR-DM/django-controlled-vocabularies/blob/main/GOALS.md) and the
+[roadmap](https://github.com/FAIR-DM/django-controlled-vocabularies/blob/main/docs/ROADMAP.md).
