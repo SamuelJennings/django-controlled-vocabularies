@@ -39,3 +39,10 @@ jobs:
 
       - name: Publish package to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Both triggers above fire for a single release, because creating a
+          # release also pushes its tag. Two jobs then build identical artifacts
+          # and race to upload; the loser would otherwise fail with "400 File
+          # already exists". PyPI rejects a same-version re-upload regardless of
+          # this setting, so nothing is masked by making that case a no-op.
+          skip-existing: true
