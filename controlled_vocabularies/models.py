@@ -1162,7 +1162,7 @@ class ConceptRelation(models.Model):
     symmetric ``related`` association. Only one direction of the hierarchy is stored — a
     ``BROADER`` row where :attr:`source` is the narrower/child and :attr:`target` the
     broader/parent — and ``narrower`` is read back from the target side, so the data can
-    never assert one direction without the other (``docs/brainstorm.md``; research R1). A
+    never assert one direction without the other (research R1). A
     ``related`` row is symmetric and stored once, its endpoints ordered by primary key so
     an assertion in either order resolves to the same row (research R2). Cross-vocabulary
     links are mappings, a separate mechanism, and are refused here (FR-009).
