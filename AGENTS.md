@@ -56,4 +56,4 @@ CI is repo-native, on the django-mvp family standard (callers pinned to a family
 
 Feature work follows a spec-driven process: spec → plan → tasks → implement → review → PR, with
 `specs/NNN-slug/` directories generated per feature (there is no Spec Kit install in the repo).
-Project standards and the quality bar live in `memory/constitution.md`.
+Project standards and the quality bar live in `CONSTITUTION.md`.
